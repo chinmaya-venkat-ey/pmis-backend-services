@@ -1,37 +1,39 @@
-# pmis-user-service/docker-compose.yml
+# ================================================================
+# PMIS User Management Service – docker-compose.yml
+# ================================================================
+# This compose file runs ONLY the user-management service.
+# PostgreSQL is already running as 'pmis-postgres' on the host.
 #
-# Local Docker Compose for THIS service only. Builds the image from the
-# current folder and runs it on port 8001.
-#
-# Multi-service orchestration in production is owned by the DevOps
-# engineer — they'll wire this service together with the monolith and
-# any other services in their own deployment configuration.
-#
-# Prerequisites:
-#   - Docker Engine (in WSL Ubuntu on Windows, or native on Linux/Mac).
-#   - Postgres reachable on localhost:5432 (we use network_mode: host so
-#     the container shares the host's network stack).
-#   - .env file in this folder, populated with real SECRET_KEY etc.
+# network_mode: host  →  container shares host's network stack,
+# so DATABASE_URL points to localhost:5432 (the exposed postgres).
 #
 # Usage:
-#   docker compose up --build              # foreground
-#   docker compose up -d --build           # background
-#   docker compose logs -f user-service    # follow logs
-#   docker compose down                    # stop
-#
-# Conflict with host uvicorn:
-#   network_mode: host means the container binds host port 8001 directly.
-#   Stop any `uvicorn app.main:app --port 8001` process before starting.
+#   docker compose up -d          # start
+#   docker compose logs -f        # follow logs
+#   docker compose down           # stop
+#   docker compose up -d --build  # rebuild + restart
+# ================================================================
 
-name: pmis-user-service
+name: pmis-usermanagement
 
 services:
-  user-service:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: pmis-user-service
+  pmis-usermanagement:
+    image: ritamhudait/pmis-usermanagement:${IMAGE_TAG:-latest}
+    container_name: pmis-usermanagement
+    restart: unless-stopped
+
+    # Shares host network — lets the container reach
+    # pmis-postgres at localhost:5432 without extra network config.
+    network_mode: host
+
     env_file:
       - .env
-    network_mode: host
-    restart: unless-stopped
+
+    # Healthcheck hits the /health endpoint
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s

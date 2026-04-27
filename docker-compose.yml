@@ -1,0 +1,37 @@
+# pmis-user-service/docker-compose.yml
+#
+# Local Docker Compose for THIS service only. Builds the image from the
+# current folder and runs it on port 8001.
+#
+# Multi-service orchestration in production is owned by the DevOps
+# engineer — they'll wire this service together with the monolith and
+# any other services in their own deployment configuration.
+#
+# Prerequisites:
+#   - Docker Engine (in WSL Ubuntu on Windows, or native on Linux/Mac).
+#   - Postgres reachable on localhost:5432 (we use network_mode: host so
+#     the container shares the host's network stack).
+#   - .env file in this folder, populated with real SECRET_KEY etc.
+#
+# Usage:
+#   docker compose up --build              # foreground
+#   docker compose up -d --build           # background
+#   docker compose logs -f user-service    # follow logs
+#   docker compose down                    # stop
+#
+# Conflict with host uvicorn:
+#   network_mode: host means the container binds host port 8001 directly.
+#   Stop any `uvicorn app.main:app --port 8001` process before starting.
+
+name: pmis-user-service
+
+services:
+  user-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pmis-user-service
+    env_file:
+      - .env
+    network_mode: host
+    restart: unless-stopped

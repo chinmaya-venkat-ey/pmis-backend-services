@@ -27,7 +27,7 @@ services:
     network_mode: host
 
     env_file:
-      - .env
+      - /home/uidaiadmin/pmis-usermanagement/.env
 
     # Healthcheck hits the /health endpoint
     healthcheck:

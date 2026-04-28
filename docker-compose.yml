@@ -1,0 +1,18 @@
+version: "3.9"
+
+services:
+  pims-notification:
+    build: .
+    image: pims-notification:latest
+    container_name: pims-notification
+    env_file:
+      - .env
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

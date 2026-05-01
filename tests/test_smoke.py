@@ -390,3 +390,168 @@ class TestAuth:
     def test_health_no_auth_required(self, client):
         r = client.get("/health")
         assert r.status_code == 200
+
+
+# ===========================================================================
+# Post-demo client feedback regressions
+# ===========================================================================
+#
+# Locks in the four behaviour changes from the consolidated demo
+# feedback (May 2026). Any regression here must be intentional and
+# coordinated with product before being merged.
+
+
+class TestPostDemoFeedback:
+    """Regression coverage for the post-demo client feedback fixes."""
+
+    # ---- Magic-byte / file-type validation (C2 + C3 + C4) ------------
+
+    def test_upload_rejects_disallowed_extension(
+        self, client, admin_headers, milestone_id, temp_storage,
+    ):
+        """`.exe` is not in the post-demo extension whitelist."""
+        files = {
+            "file": ("evil.exe", BytesIO(b"MZ\x90\x00"), "application/octet-stream"),
+        }
+        r = client.post(
+            f"/api/v3/milestones/{milestone_id}/attachments",
+            headers=admin_headers,
+            files=files,
+        )
+        assert r.status_code == 422, r.text
+
+    def test_upload_rejects_executable_renamed_to_pdf(
+        self, client, admin_headers, milestone_id, temp_storage,
+    ):
+        """Windows PE bytes (`MZ` header) renamed to .pdf must be rejected.
+
+        This is the core C3 requirement: extension says PDF, content says
+        executable, the BE catches it via magic-byte sniffing.
+        """
+        # Realistic-ish PE header: MZ + DOS stub padding.
+        pe_bytes = b"MZ\x90\x00\x03\x00\x00\x00\x04\x00\x00\x00\xff\xff\x00\x00"
+        files = {
+            "file": ("report.pdf", BytesIO(pe_bytes), "application/pdf"),
+        }
+        r = client.post(
+            f"/api/v3/milestones/{milestone_id}/attachments",
+            headers=admin_headers,
+            files=files,
+        )
+        assert r.status_code == 422, r.text
+        msg = r.json()["error"]["message"].lower()
+        assert "executable" in msg, (
+            f"Expected an 'executable' rejection message, got: {msg}"
+        )
+
+    def test_upload_rejects_jpeg_renamed_to_png(
+        self, client, admin_headers, milestone_id, temp_storage,
+    ):
+        """Even non-malicious mismatches (jpeg bytes named .png) get caught.
+
+        Proves the magic-byte check fires for all sniffable formats, not
+        just executables.
+        """
+        jpeg_bytes = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01"
+        files = {
+            "file": ("photo.png", BytesIO(jpeg_bytes), "image/png"),
+        }
+        r = client.post(
+            f"/api/v3/milestones/{milestone_id}/attachments",
+            headers=admin_headers,
+            files=files,
+        )
+        assert r.status_code == 422, r.text
+        msg = r.json()["error"]["message"].lower()
+        assert "does not match" in msg
+
+    # ---- Past start_date acceptance on project (B1) ------------------
+
+    def test_create_project_accepts_past_start_date(self, client, admin_headers):
+        """Project start_date may be in the past (back-dated entry).
+
+        Today is 2026-05-01 (per the project clock); 2026-04-15 is past.
+        """
+        body = {
+            "name": f"Backdated-{uuid4().hex[:6]}",
+            "owner": "tmd1",
+            "startDate": "2026-04-15T00:00:00Z",
+            "endDate": "2026-12-31T00:00:00Z",
+        }
+        r = client.post("/api/v3/projects/create", headers=admin_headers, json=body)
+        assert r.status_code == 201, r.text
+
+    def test_create_project_rejects_past_end_date(self, client, admin_headers):
+        """Project end_date must still be in the future (cannot be created
+        already finished)."""
+        body = {
+            "name": f"AlreadyDone-{uuid4().hex[:6]}",
+            "owner": "tmd1",
+            "startDate": "2026-04-01T00:00:00Z",
+            "endDate": "2026-04-15T00:00:00Z",  # past, per 2026-05-01 today
+        }
+        r = client.post("/api/v3/projects/create", headers=admin_headers, json=body)
+        assert r.status_code == 422, r.text
+
+    def test_milestone_still_capped_within_project_window(
+        self, client, admin_headers,
+    ):
+        """The M/A/T/S parent-floor (date_rules.py) is unaffected by the
+        project's past-date relaxation — milestones below the project's
+        start_date are still rejected."""
+        # Project starts 2026-06-01, ends 2026-12-31.
+        proj_body = {
+            "name": f"FutureStart-{uuid4().hex[:6]}",
+            "owner": "tmd1",
+            "startDate": "2026-06-01T00:00:00Z",
+            "endDate": "2026-12-31T00:00:00Z",
+        }
+        p = client.post(
+            "/api/v3/projects/create", headers=admin_headers, json=proj_body,
+        )
+        assert p.status_code == 201, p.text
+        project_uuid = p.json()["data"]["id"]
+
+        # Milestone starts 2026-05-15 — BEFORE the project's 2026-06-01.
+        m_body = {
+            "name": "TooEarly",
+            "startDate": "2026-05-15T00:00:00Z",
+            "endDate": "2026-06-15T00:00:00Z",
+        }
+        r = client.post(
+            f"/api/v3/projects/{project_uuid}/milestones/create",
+            headers=admin_headers,
+            json=m_body,
+        )
+        assert r.status_code == 422, r.text
+
+    # ---- Category / isPublic optionality (A3 + A4) -------------------
+
+    def test_create_project_omits_category(self, client, admin_headers):
+        """FE may omit `category` entirely; project create still succeeds."""
+        body = {
+            "name": f"NoCat-{uuid4().hex[:6]}",
+            "owner": "tmd1",
+            "startDate": "2026-06-01T00:00:00Z",
+            "endDate": "2026-12-31T00:00:00Z",
+            # category, categoryOther, categoryOtherReason all omitted
+        }
+        r = client.post("/api/v3/projects/create", headers=admin_headers, json=body)
+        assert r.status_code == 201, r.text
+        data = r.json()["data"]
+        assert data["category"] is None
+        assert data["categoryOther"] is None
+        assert data["categoryOtherReason"] is None
+
+    def test_create_project_omits_isPublic(self, client, admin_headers):
+        """FE may omit `isPublic` entirely; defaults to False."""
+        body = {
+            "name": f"NoPub-{uuid4().hex[:6]}",
+            "owner": "tmd1",
+            "startDate": "2026-06-01T00:00:00Z",
+            "endDate": "2026-12-31T00:00:00Z",
+            # isPublic omitted
+        }
+        r = client.post("/api/v3/projects/create", headers=admin_headers, json=body)
+        assert r.status_code == 201, r.text
+        assert r.json()["data"]["isPublic"] is False

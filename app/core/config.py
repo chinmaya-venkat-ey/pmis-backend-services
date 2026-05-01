@@ -63,8 +63,16 @@ class Settings(BaseSettings):
         description="Informational only. Surfaced via /health for ops visibility.",
     )
     ATTACHMENTS_MAX_BYTES: int = 26214400  # 25 MiB
+    # Client-approved (post-demo) whitelist:
+    #   Documents: pdf, docx, xlsx, txt, csv
+    #   Images:    jpg, jpeg, png, heic
+    #   Videos:    mp4, webm, mov
+    # Legacy doc/xls/ppt/pptx + gif/webp were dropped at the client's
+    # request. Re-enable here is a one-line config change; production
+    # validation is enforced by both extension AND magic-byte content
+    # sniffing in app/api/v3/attachments/services/upload.py.
     ATTACHMENTS_ALLOWED_EXTENSIONS: str = (
-        "pdf,doc,docx,xls,xlsx,ppt,pptx,txt,csv,png,jpg,jpeg,gif,webp"
+        "pdf,docx,xlsx,txt,csv,jpg,jpeg,png,heic,mp4,webm,mov"
     )
     ATTACHMENTS_SUBDIR_STRATEGY: str = "year_month"
     ATTACHMENTS_RETENTION_DAYS: int = 90

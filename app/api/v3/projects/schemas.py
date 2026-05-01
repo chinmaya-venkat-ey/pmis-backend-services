@@ -97,14 +97,18 @@ class ProjectCreateRequest(BaseModel):
             )
         return v
 
-    @field_validator("start_date", "end_date")
+    # Per post-demo client requirement: project start_date may be in the
+    # past (a project being entered into the system after work has
+    # already begun is a normal case). end_date stays future-only — a
+    # project cannot be created already finished.
+    @field_validator("end_date")
     @classmethod
-    def validate_dates_in_future(cls, v):
+    def validate_end_date_in_future(cls, v):
         if v is not None:
             now = datetime.now(timezone.utc)
             check_v = v if v.tzinfo is not None else v.replace(tzinfo=timezone.utc)
             if check_v <= now:
-                raise ValueError("Date must be in the future")
+                raise ValueError("End date must be in the future")
         return v
 
     @field_validator("end_date")
@@ -173,14 +177,16 @@ class ProjectUpdateRequest(BaseModel):
             )
         return v
 
-    @field_validator("start_date", "end_date")
+    # Same rule as ProjectCreateRequest: start_date may be in the past
+    # (back-dated entry); end_date must be in the future.
+    @field_validator("end_date")
     @classmethod
-    def validate_dates_in_future(cls, v):
+    def validate_end_date_in_future(cls, v):
         if v is not None:
             now = datetime.now(timezone.utc)
             check_v = v if v.tzinfo is not None else v.replace(tzinfo=timezone.utc)
             if check_v <= now:
-                raise ValueError("Date must be in the future")
+                raise ValueError("End date must be in the future")
         return v
 
     @field_validator("end_date")
@@ -259,14 +265,16 @@ class ProjectUpsertRequest(BaseModel):
             )
         return v
 
-    @field_validator("start_date", "end_date")
+    # Same rule as ProjectCreateRequest: start_date may be in the past
+    # (back-dated entry); end_date must be in the future.
+    @field_validator("end_date")
     @classmethod
-    def validate_dates_in_future(cls, v):
+    def validate_end_date_in_future(cls, v):
         if v is not None:
             now = datetime.now(timezone.utc)
             check_v = v if v.tzinfo is not None else v.replace(tzinfo=timezone.utc)
             if check_v <= now:
-                raise ValueError("Date must be in the future")
+                raise ValueError("End date must be in the future")
         return v
 
     @field_validator("end_date")

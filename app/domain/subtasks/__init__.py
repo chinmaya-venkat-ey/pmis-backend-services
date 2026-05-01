@@ -1,0 +1,1 @@
+"""Subtasks domain entities."""

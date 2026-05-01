@@ -1,0 +1,17 @@
+"""
+Project permissions.
+"""
+from ....core.rbac import Permission
+
+# Project CRUD permissions
+PROJECTS_CREATE = Permission.PROJECTS_CREATE
+PROJECTS_READ = Permission.PROJECTS_READ
+PROJECTS_READ_ALL = Permission.PROJECTS_READ_ALL
+PROJECTS_UPDATE = Permission.PROJECTS_UPDATE
+PROJECTS_UPDATE_ALL = Permission.PROJECTS_UPDATE_ALL
+PROJECTS_DELETE = Permission.PROJECTS_DELETE
+PROJECTS_DELETE_ALL = Permission.PROJECTS_DELETE_ALL
+
+# Admin-only state transitions
+PROJECTS_PUBLISH = Permission.PROJECTS_PUBLISH
+PROJECTS_CLOSE = Permission.PROJECTS_CLOSE

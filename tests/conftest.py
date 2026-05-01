@@ -14,9 +14,12 @@ import app.main as main_module
 from app.core.security import create_access_token, hash_password
 from app.infrastructure.db import session as db_session_module
 from app.infrastructure.db.models import (  # noqa: F401 — register on Base
+    ProjectMemberModel,
+    ProjectModel,
     RevokedTokenModel,
     RoleModel,
     UserModel,
+    VendorModel,
 )
 from app.infrastructure.db.session import Base, get_db
 from app.main import app
@@ -133,6 +136,39 @@ def member_user(db_session: Session):
     db_session.commit()
     db_session.refresh(user)
     return user
+
+
+@pytest.fixture(scope="function")
+def vendor_row(db_session: Session):
+    """A live (non-deleted) vendor for create-user / update-user tests."""
+    from uuid import uuid4
+    v = VendorModel(
+        id=str(uuid4()),
+        name=f"Vendor-{uuid4().hex[:6]}",
+        active=True,
+    )
+    db_session.add(v)
+    db_session.commit()
+    db_session.refresh(v)
+    return v
+
+
+@pytest.fixture(scope="function")
+def project_row(db_session: Session):
+    """A live (non-deleted) project for create-user tests."""
+    from uuid import uuid4
+    p = ProjectModel(
+        id=str(uuid4()),
+        project_code=f"UIDAI-PR{uuid4().hex[:14].upper()}",
+        name=f"Proj-{uuid4().hex[:6]}",
+        active=True,
+        public=False,
+        status="new",
+    )
+    db_session.add(p)
+    db_session.commit()
+    db_session.refresh(p)
+    return p
 
 
 @pytest.fixture(scope="function")

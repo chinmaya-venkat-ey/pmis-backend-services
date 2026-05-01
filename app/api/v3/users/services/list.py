@@ -1,4 +1,4 @@
-"""User listing service — ported from the monolith."""
+"""User listing service."""
 from typing import Optional
 
 from sqlalchemy.orm import Session
@@ -14,10 +14,17 @@ def list_users(
     page_size: int = 20,
     status: Optional[str] = None,
     is_admin: bool = False,
+    include_deleted: bool = False,
 ) -> ServiceResult[PaginatedResult]:
+    """List users with pagination, newest first.
+
+    Soft-deleted rows are hidden by default. Admin can request them via
+    ``include_deleted=True`` (e.g. for an audit view).
+    """
     if page < 1:
         return ServiceResult.fail(
-            error="Page number must be >= 1", error_type="validation_error",
+            error="Page number must be >= 1",
+            error_type="validation_error",
         )
     if page_size < 1 or page_size > 100:
         return ServiceResult.fail(
@@ -33,15 +40,27 @@ def list_users(
             error_type="authorization_error",
         )
 
+    if include_deleted and not is_admin:
+        return ServiceResult.fail(
+            error="Only admin users can view soft-deleted users.",
+            error_type="authorization_error",
+        )
+
     offset = calculate_offset(page, page_size)
     repo = UserRepository(db)
 
     try:
-        users, total = repo.list(offset=offset, limit=page_size, status=status)
-        return ServiceResult.ok(
-            PaginatedResult(items=users, total=total, page=page, page_size=page_size),
+        users, total = repo.list(
+            offset=offset,
+            limit=page_size,
+            status=status,
+            include_deleted=include_deleted,
         )
-    except Exception as e:
+        return ServiceResult.ok(PaginatedResult(
+            items=users, total=total, page=page, page_size=page_size,
+        ))
+    except Exception as e:  # noqa: BLE001
         return ServiceResult.fail(
-            error=f"Failed to list users: {e}", error_type="internal_error",
+            error=f"Failed to list users: {e}",
+            error_type="internal_error",
         )

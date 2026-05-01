@@ -5,6 +5,8 @@ from .delete import delete_user
 from .get import get_user_by_id, get_user_by_login
 from .list import list_users
 from .logout import logout_user
+from .refresh import refresh_tokens
+from .restore import restore_user
 from .update import update_password, update_user
 
 __all__ = [
@@ -15,6 +17,8 @@ __all__ = [
     "get_user_by_login",
     "list_users",
     "logout_user",
+    "refresh_tokens",
+    "restore_user",
     "update_password",
     "update_user",
 ]

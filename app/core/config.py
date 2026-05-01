@@ -33,6 +33,14 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    # Grace window for refresh-token rotation. After /refresh fires, the
+    # outgoing jti is held in `previous_refresh_token_jti` for this many
+    # seconds so concurrent refresh races, multi-tab login, and stale
+    # 401-interceptor retries don't get locked out by the atomic swap.
+    # Kept short on purpose — a 30-60s window is enough for normal
+    # in-flight requests; longer windows expand the replay surface for
+    # leaked tokens. Set to 0 to disable the grace path entirely.
+    REFRESH_TOKEN_GRACE_SECONDS: int = 30
 
     # ---- Database (same DB as monolith in phase 1) ----
     DATABASE_URL: str = Field(

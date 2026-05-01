@@ -1,5 +1,5 @@
 """User controller — orchestrates requests into service calls and maps
-service results to HAL+JSON envelopes. Ported from the monolith.
+service results to HAL+JSON envelopes.
 """
 from fastapi import Request
 from fastapi.responses import JSONResponse
@@ -27,16 +27,20 @@ from .services import (
     get_user_by_id,
     list_users,
     logout_user,
+    restore_user,
     update_password,
     update_user,
 )
 
 
 class UserController:
+    """Controller for user operations."""
 
     # ----- Create --------------------------------------------------------
     @staticmethod
-    def create(request: Request, data: UserCreateRequest, db: Session) -> JSONResponse:
+    def create(
+        request: Request, data: UserCreateRequest, db: Session,
+    ) -> JSONResponse:
         result = create_user(
             db=db,
             login=data.login,
@@ -45,6 +49,10 @@ class UserController:
             first_name=data.firstName,
             last_name=data.lastName,
             admin=data.admin,
+            vendor_id=data.vendorId,
+            division=data.division,
+            division_other=data.divisionOther,
+            project_ids=data.projectIds,
         )
         if result.is_success():
             return BaseController.created(format_user_response(result.data.to_dict()))
@@ -105,6 +113,7 @@ class UserController:
         result = list_users(
             db=db, page=query.offset, page_size=query.pageSize,
             status=query.status, is_admin=is_admin,
+            include_deleted=getattr(query, "includeDeleted", False),
         )
         if result.is_success():
             p = result.data
@@ -116,7 +125,11 @@ class UserController:
         error_payload = format_error_response(
             error_type=result.error_type, message=result.error, details=result.details,
         )
-        status_code = 422 if result.error_type == "validation_error" else 500
+        status_code = (
+            422 if result.error_type == "validation_error"
+            else 403 if result.error_type == "authorization_error"
+            else 500
+        )
         return BaseController.error(error_payload, status=status_code)
 
     # ----- Update --------------------------------------------------------
@@ -130,6 +143,9 @@ class UserController:
             db=db, user_id=user_id, email=data.email,
             first_name=data.firstName, last_name=data.lastName,
             admin=data.admin, status=data.status,
+            vendor_id=data.vendorId,
+            division=data.division,
+            division_other=data.divisionOther,
             requesting_user_id=requesting_user_id, is_admin=is_admin,
         )
         if result.is_success():
@@ -141,6 +157,7 @@ class UserController:
             "not_found": 404,
             "authorization_error": 403,
             "validation_error": 422,
+            "already_exists": 409,
         }.get(result.error_type, 500)
         return BaseController.error(error_payload, status=status_code)
 
@@ -170,10 +187,11 @@ class UserController:
         }.get(result.error_type, 500)
         return BaseController.error(error_payload, status=status_code)
 
-    # ----- Delete --------------------------------------------------------
+    # ----- Delete (soft) -------------------------------------------------
     @staticmethod
     def delete(request: Request, user_id: int, db: Session) -> JSONResponse:
-        result = delete_user(db=db, user_id=user_id)
+        actor_id = get_current_user_id(request)
+        result = delete_user(db=db, user_id=user_id, actor_id=actor_id)
         if result.is_success():
             return BaseController.ok(format_success_response(
                 f"User {user_id} deleted successfully",
@@ -181,7 +199,38 @@ class UserController:
         error_payload = format_error_response(
             error_type=result.error_type, message=result.error, details=result.details,
         )
-        status_code = 404 if result.error_type == "not_found" else 500
+        status_code = {
+            "not_found": 404,
+            "authorization_error": 403,
+            "validation_error": 422,
+        }.get(result.error_type, 500)
+        return BaseController.error(error_payload, status=status_code)
+
+    # ----- Restore -------------------------------------------------------
+    @staticmethod
+    def restore(request: Request, user_id: int, db: Session) -> JSONResponse:
+        """Restore a soft-deleted user. Idempotent on already-active users."""
+        requesting_user_id = get_current_user_id(request)
+        is_admin = getattr(request.state, "is_admin", False)
+
+        result = restore_user(
+            db=db,
+            user_id=user_id,
+            requesting_user_id=requesting_user_id,
+            is_admin=is_admin,
+        )
+
+        if result.is_success():
+            return BaseController.ok(format_user_response(result.data.to_dict()))
+        error_payload = format_error_response(
+            error_type=result.error_type,
+            message=result.error,
+            details=result.details,
+        )
+        status_code = {
+            "not_found": 404,
+            "authorization_error": 403,
+        }.get(result.error_type, 500)
         return BaseController.error(error_payload, status=status_code)
 
     # ----- Login ---------------------------------------------------------
@@ -190,11 +239,28 @@ class UserController:
         result = authenticate_user(db=db, login=data.login, password=data.password)
         if result.is_success():
             td = result.data
+            # Decode the freshly-minted tokens to surface their expiry /
+            # issued-at timestamps to the FE. Lets the client schedule a
+            # preemptive refresh without having to decode the JWT itself.
+            from .services.refresh import _exp_metadata
+            access_meta = _exp_metadata(td["access_token"])
+            refresh_meta = (
+                _exp_metadata(td["refresh_token"])
+                if td.get("refresh_token") else {}
+            )
             return BaseController.ok({
                 "_type": "Login",
                 "access_token": td["access_token"],
                 "refresh_token": td.get("refresh_token"),
                 "token_type": td["token_type"],
+                "accessTokenExpiresAt": access_meta.get("expiresAt"),
+                "accessTokenIssuedAt": access_meta.get("issuedAt"),
+                "refreshTokenExpiresAt": refresh_meta.get("expiresAt"),
+                "refreshTokenIssuedAt": refresh_meta.get("issuedAt"),
+                "expiresInSeconds": (
+                    int(access_meta["exp"] - access_meta["iat"])
+                    if access_meta.get("exp") and access_meta.get("iat") else None
+                ),
                 "user": format_user_response(td["user"].to_dict()),
             })
         return BaseController.error(
@@ -231,7 +297,7 @@ class UserController:
             status=500,
         )
 
-    # ----- Introspect ----------------------------------------------------
+    # ----- Introspect (RFC 7662 read-only) -------------------------------
     @staticmethod
     def introspect(data, db: Session) -> JSONResponse:
         from .services.introspect import introspect_tokens
@@ -239,24 +305,49 @@ class UserController:
         result = introspect_tokens(
             db=db, access_token=data.access_token, refresh_token=data.refresh_token,
         )
-        if result.is_success():
-            payload = result.data
-            if payload.get("active"):
-                return BaseController.ok({
-                    "_type": "Introspect",
-                    "active": True,
-                    "user": format_user_response(payload["user"].to_dict()),
-                })
-            return BaseController.ok({
-                "_type": "Introspect",
-                "access_token": payload.get("access_token"),
-                "refresh_token": payload.get("refresh_token"),
-                "token_type": payload.get("token_type"),
-                "user": format_user_response(payload["user"].to_dict()),
-            })
-        return BaseController.error(
-            format_error_response(
-                error_type=result.error_type, message=result.error,
-            ),
-            status=401,
-        )
+
+        if not result.is_success():
+            error_payload = format_error_response(
+                error_type=result.error_type,
+                message=result.error,
+            )
+            status = 422 if result.error_type == "validation_error" else 401
+            return BaseController.error(error_payload, status=status)
+
+        payload = result.data
+        # Tag the envelope so the FE can disambiguate from other responses.
+        if isinstance(payload, dict):
+            payload = {**payload, "_type": "Introspect"}
+        return BaseController.ok(payload)
+
+    # ----- Refresh (rotates access + refresh) ----------------------------
+    @staticmethod
+    def refresh(data, db: Session) -> JSONResponse:
+        """Public refresh endpoint. Validates a refresh token and returns
+        a freshly-rotated access + refresh pair plus expiry metadata.
+        """
+        from .services.refresh import refresh_tokens
+
+        result = refresh_tokens(db=db, refresh_token=data.refresh_token)
+
+        if not result.is_success():
+            error_payload = format_error_response(
+                error_type=result.error_type,
+                message=result.error,
+            )
+            status = 422 if result.error_type == "validation_error" else 401
+            return BaseController.error(error_payload, status=status)
+
+        payload = result.data
+        return BaseController.ok({
+            "_type": "Refresh",
+            "access_token": payload["access_token"],
+            "refresh_token": payload["refresh_token"],
+            "token_type": payload["token_type"],
+            "accessTokenExpiresAt": payload.get("accessTokenExpiresAt"),
+            "accessTokenIssuedAt": payload.get("accessTokenIssuedAt"),
+            "refreshTokenExpiresAt": payload.get("refreshTokenExpiresAt"),
+            "refreshTokenIssuedAt": payload.get("refreshTokenIssuedAt"),
+            "expiresInSeconds": payload.get("expiresInSeconds"),
+            "user": format_user_response(payload["user"].to_dict()),
+        })

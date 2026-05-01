@@ -1,8 +1,10 @@
-"""HAL+JSON response helpers — slimmed to user-service needs.
+"""HAL+JSON response helpers for pmis-user-service.
 
-Monolith has formatters for many entities (projects, meetings, etc.);
-this service only deals with users, so only user-related helpers are
-included. Keeps the same wire format as the monolith.
+Same wire shape as the monolith. The user response embeds:
+  - the slim vendor object (when the user is mapped to one)
+  - division enum + its free-text override (when 'others')
+  - the user's mapped projects (filtered for live + non-closed by repo)
+  - soft-delete metadata (NULL on live rows)
 """
 from typing import Any, Dict, List, Optional
 
@@ -15,6 +17,27 @@ def format_user_response(
 ) -> Dict[str, Any]:
     """HAL+JSON shape for a single user — identical to monolith."""
     user_id = user_data.get("id")
+
+    # Vendor: embed { id, name } when the user is mapped, else None.
+    vendor_id = user_data.get("vendor_id")
+    vendor_block = None
+    if vendor_id:
+        vendor_block = {
+            "id": vendor_id,
+            "name": user_data.get("vendor_name"),
+        }
+
+    # Mapped projects (slim).
+    projects_block = [
+        {
+            "id": p.get("id"),
+            "projectCode": p.get("project_code"),
+            "name": p.get("name"),
+            "status": p.get("status"),
+        }
+        for p in (user_data.get("projects") or [])
+    ]
+
     return {
         "_type": "User",
         "_links": {
@@ -30,8 +53,38 @@ def format_user_response(
         "email": user_data.get("email"),
         "admin": user_data.get("admin", False),
         "status": user_data.get("status", "active"),
+        "vendor": vendor_block,
+        "vendorId": vendor_id,
+        "division": user_data.get("division"),
+        "divisionOther": user_data.get("division_other"),
+        "projects": projects_block,
+        "deletedAt": user_data.get("deleted_at"),
+        "deletedBy": user_data.get("deleted_by"),
         "createdAt": user_data.get("created_at"),
         "updatedAt": user_data.get("updated_at"),
+    }
+
+
+def format_role_response(
+    role_data: Dict[str, Any],
+    base_url: str = "/api/v3",
+) -> Dict[str, Any]:
+    """HAL+JSON shape for a single role."""
+    role_id = role_data.get("id")
+    return {
+        "_type": "Role",
+        "_links": {
+            "self": {
+                "href": f"{base_url}/roles/{role_id}",
+                "title": role_data.get("name"),
+            }
+        },
+        "id": role_id,
+        "name": role_data.get("name"),
+        "permissions": role_data.get("permissions", []),
+        "builtin": role_data.get("builtin", False),
+        "createdAt": role_data.get("created_at"),
+        "updatedAt": role_data.get("updated_at"),
     }
 
 
@@ -73,6 +126,8 @@ def format_collection_response(
 
     if collection_type == "users":
         formatted_items = [format_user_response(item, base_url) for item in items]
+    elif collection_type == "roles":
+        formatted_items = [format_role_response(item, base_url) for item in items]
     else:
         formatted_items = items
 

@@ -1,6 +1,7 @@
 """Authentication service — login flow. Ported from the monolith."""
 from sqlalchemy.orm import Session
 
+from .....core.config import settings
 from .....core.rbac import Role
 from .....core.security import (
     create_access_token,
@@ -47,7 +48,14 @@ def authenticate_user(db: Session, login: str, password: str) -> ServiceResult[d
     access_token = create_access_token(token_data)
     refresh_token, refresh_jti, refresh_expires = create_refresh_token(token_data)
 
-    repo.update_refresh_token_metadata(user.id, refresh_jti, refresh_expires)
+    # Rotate the user's refresh-token jti. ``grace_seconds`` keeps the
+    # previously-issued refresh token valid for a short window so a
+    # parallel tab / login replay / in-flight refresh from before this
+    # login still resolves successfully.
+    repo.rotate_refresh_token(
+        user.id, refresh_jti, refresh_expires,
+        grace_seconds=settings.REFRESH_TOKEN_GRACE_SECONDS,
+    )
 
     return ServiceResult.ok({
         "access_token": access_token,

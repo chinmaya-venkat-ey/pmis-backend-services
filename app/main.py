@@ -118,7 +118,10 @@ def custom_openapi():
         }
     }
     public_paths = {
-        "/health", "/", "/api/v3/users/login", "/api/v3/users/introspect",
+        "/health", "/",
+        "/api/v3/users/login",
+        "/api/v3/users/introspect",
+        "/api/v3/users/refresh",
     }
     for path, path_item in schema.get("paths", {}).items():
         for method, operation in path_item.items():
@@ -157,7 +160,9 @@ def root() -> JSONResponse:
         "_links": {
             "self": {"href": "/"},
             "users": {"href": "/api/v3/users"},
+            "roles": {"href": "/api/v3/roles"},
             "login": {"href": "/api/v3/users/login"},
+            "refresh": {"href": "/api/v3/users/refresh"},
             "introspect": {"href": "/api/v3/users/introspect"},
             "health": {"href": "/health"},
         },

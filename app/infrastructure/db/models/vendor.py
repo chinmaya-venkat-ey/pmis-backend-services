@@ -1,22 +1,26 @@
-"""Vendor SQLAlchemy mapping — owned by project-service / monolith.
+"""Vendor SQLAlchemy model.
 
-This service does NOT manage vendors (no CRUD endpoints), but it needs
-a mapping for two reasons:
+Catalog table that backs the project + milestone vendor-picker. Carries
+the contact details the FE shows on Vendor Management screens — name,
+description, email, contact-person, phone — plus soft-delete metadata.
 
-  1. ``users.vendor_id`` FK references this table; create_all in tests
-     needs the referenced table present in metadata.
-  2. The user-create / user-update flows query this table to validate
-     that the supplied ``vendorId`` exists and is not soft-deleted.
+Soft-delete columns (`deleted_at`, `deleted_by`) were added in doc 17 so
+``DELETE /vendors/{id}`` can hide a vendor from the catalog without
+losing the historical project/milestone mappings. Restore by clearing
+``deleted_at`` and flipping ``active`` back on.
 
-Schema mirrors the monolith / project-service definition exactly so a
-shared-Postgres setup keeps both services in sync. Don't add columns
-here without coordinating with the project-service.
+Contact columns (`email`, `contact_person`, `phone_number`) were added
+in doc 18. All three are nullable — vendors created before this batch
+keep their NULLs and the FE renders an empty cell for missing values.
+Email is loosely validated (via the schema layer) but not strictly
+unique — multiple vendors at the same parent org may share an
+@example.com inbox.
 """
 from datetime import datetime, timezone
 from uuid import uuid4
 
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, String, Text
-
+from ..utc_datetime import UtcDateTime
 from ..session import Base
 
 
@@ -33,22 +37,32 @@ class VendorModel(Base):
         index=True,
         default=lambda: str(uuid4()),
     )
+    # Doc 25: human-readable identifier separate from the UUID. Format
+    # ``VN-{4-char-name-slug}-{YYMMDDHHMMSS-IST}`` (see
+    # ``app/shared/code_generators.py``). Snapshot at create time;
+    # immutable on rename. Nullable in DB so the alembic migration can
+    # backfill existing rows in two phases (add column → backfill rows
+    # → DB-level UNIQUE index covers it).
+    vendor_code = Column(String(50), nullable=True, unique=True, index=True)
     name = Column(String(255), nullable=False, unique=True, index=True)
     description = Column(Text, nullable=True)
     active = Column(Boolean, default=True, nullable=False, index=True)
 
-    # Contact details (added in monolith doc 18). All nullable.
+    # Contact details (added in doc 18). All three nullable — pre-existing
+    # vendors stay NULL until edited.
     email = Column(String(255), nullable=True, index=True)
     contact_person = Column(String(255), nullable=True)
     phone_number = Column(String(50), nullable=True)
 
-    created_at = Column(DateTime, default=_utcnow, nullable=False, index=True)
-    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow, nullable=False)
+    created_at = Column(UtcDateTime, default=_utcnow, nullable=False, index=True)
+    updated_at = Column(UtcDateTime, default=_utcnow, onupdate=_utcnow, nullable=False)
 
-    # Soft-delete. Mirrors monolith semantics — non-NULL deleted_at hides
-    # the vendor from picker validation. Mapping rows untouched.
-    deleted_at = Column(DateTime, nullable=True, index=True)
-    deleted_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    # Soft-delete. A non-NULL deleted_at hides the vendor from the catalog
+    # endpoint and from picker validation, but the project_vendors /
+    # milestone_vendors mapping rows are intentionally NOT touched.
+    deleted_at = Column(UtcDateTime, nullable=True, index=True)
+    # Doc 26: UUID FK to users.id (was Integer pre-doc-26).
+    deleted_by = Column(String(36), ForeignKey("users.id"), nullable=True)
 
     __table_args__ = (
         Index("idx_vendors_active_name", "active", "name"),

@@ -1,17 +1,21 @@
-"""Revoked-token registry — access-token blacklist for hard logout.
+"""
+Revoked-token registry — backs the access-token blacklist for hard logout.
 
-When a user logs out, the access token's ``jti`` is inserted here with
-its natural ``expires_at``. Any service verifying tokens (user-service
-itself, or the backend) checks this table and rejects tokens whose
-``jti`` is present AND ``expires_at`` is still in the future.
+When a user logs out (or any other revocation flow runs), the access token's
+``jti`` claim is inserted here with the token's natural ``expires_at``. The
+auth middleware checks this table on every authenticated request and rejects
+any token whose ``jti`` is present AND whose ``expires_at`` is still in the
+future.
 
-Rows past ``expires_at`` are harmless — the JWT verifier rejects them
-on signature/exp grounds anyway. A periodic cleanup job is optional.
+Rows past ``expires_at`` are harmless (the token has expired naturally and
+will be rejected by the JWT verifier on its own); a periodic cleanup can
+delete them but isn't required for correctness.
 """
 from datetime import datetime, timezone
 
 from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, String
 
+from ..utc_datetime import UtcDateTime
 from ..session import Base
 
 
@@ -22,12 +26,16 @@ def _utcnow():
 class RevokedTokenModel(Base):
     __tablename__ = "revoked_tokens"
 
-    # JWT jti is uuid4().hex (32 chars). Used as the natural PK so
-    # re-revoking the same token is a silent no-op.
+    # The JWT's ``jti`` claim is a 32-char hex (uuid4().hex). We use it as
+    # the natural primary key so duplicate revocations are a no-op.
     jti = Column(String(64), primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
-    revoked_at = Column(DateTime, default=_utcnow, nullable=False)
-    expires_at = Column(DateTime, nullable=False, index=True)
+    # Doc 26: users.id flipped to UUID String(36).
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=True, index=True)
+    revoked_at = Column(UtcDateTime, default=_utcnow, nullable=False)
+    # The token's natural exp claim, in UTC. Once now > expires_at, this row
+    # no longer has any effect on auth (the JWT verifier rejects expired
+    # tokens unconditionally), so it can safely be cleaned up by a cron.
+    expires_at = Column(UtcDateTime, nullable=False, index=True)
 
     __table_args__ = (
         Index("idx_revoked_tokens_user", "user_id"),

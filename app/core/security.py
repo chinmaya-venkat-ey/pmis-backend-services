@@ -1,66 +1,41 @@
-"""Security utilities — JWT signing/verification + argon2id password hashing.
-
-Self-contained for this service. No external shared package — the entire
-auth surface (this module + ``app/core/middleware/auth.py`` +
-``app/core/middleware/rbac.py`` + ``app/core/rbac.py``) lives inside
-pmis-user-service.
-
-Cross-service token verification (monolith verifying tokens minted here)
-works because both services use HS256 and the same ``SECRET_KEY`` from
-their environment. They do NOT need to share Python code — the JWT spec
-itself is the contract.
-
-Public API used by services / controllers / middleware / tests:
-
-    hash_password(plain) -> str
-    verify_password(plain, hashed) -> bool
-    create_access_token(data, expires_delta=None) -> str
-    decode_access_token(token) -> dict | None
-    verify_access_token(token) -> (is_valid, is_expired, payload | None)
-    create_refresh_token(data, expires_delta=None) -> (token, jti, expires_at)
-    verify_refresh_token(token) -> dict | None
+"""
+Security utilities for JWT and password handling.
 """
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional, Tuple
+from typing import Optional, Dict, Any, Tuple
 from uuid import uuid4
-
 from argon2 import PasswordHasher
-from argon2.exceptions import (
-    InvalidHashError,
-    VerificationError,
-    VerifyMismatchError,
-)
-from jose import ExpiredSignatureError, JWTError, jwt
-
+from argon2.exceptions import VerifyMismatchError, VerificationError, InvalidHashError
+from jose import JWTError, jwt, ExpiredSignatureError
 from .config import settings
 
-
-# ---- Startup guardrail --------------------------------------------------
-# Refuse obviously-weak signing keys at module load. Forging tokens is
-# trivial against a short key, so failing loud is better than silently
-# accepting one.
-if not settings.SECRET_KEY or len(settings.SECRET_KEY) < 16:
-    raise ValueError(
-        "SECRET_KEY must be a non-empty string of at least 16 characters. "
-        "Set it in .env or via environment variable."
-    )
-
-
-# ---- Password hashing (argon2id) ----------------------------------------
-
+# argon2-cffi hasher (argon2id by default)
 _ph = PasswordHasher()
 
 
 def hash_password(password: str) -> str:
-    """Hash a plain password using argon2id."""
+    """
+    Hash a password using argon2id.
+
+    Args:
+        password: Plain text password
+
+    Returns:
+        Hashed password
+    """
     return _ph.hash(password)
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify a plain password against an argon2 hash.
+    """
+    Verify a password against its hash.
 
-    Returns False on any verification or hash-format error rather than
-    raising, so callers can use the result as a simple bool.
+    Args:
+        plain_password: Plain text password to verify
+        hashed_password: Hashed password to verify against
+
+    Returns:
+        True if password matches, False otherwise
     """
     try:
         return _ph.verify(hashed_password, plain_password)
@@ -68,69 +43,91 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
         return False
 
 
-# ---- JWT — access tokens -----------------------------------------------
-
-
 def create_access_token(
     data: Dict[str, Any],
-    expires_delta: Optional[timedelta] = None,
+    expires_delta: Optional[timedelta] = None
 ) -> str:
-    """Mint a short-lived access token.
+    """
+    Create a JWT access token.
 
     Each token gets a unique ``jti`` (uuid4 hex) so it can be revoked via
-    the access-token blacklist (``RevokedTokenRepository``). The auth
+    the access-token blacklist (see ``RevokedTokenRepository``). The auth
     middleware checks every authenticated request's jti against the
     blacklist before letting the request through.
+
+    Args:
+        data: Payload data to encode in the token
+        expires_delta: Optional token expiration time
+
+    Returns:
+        Encoded JWT token
     """
     to_encode = data.copy()
-    now = datetime.now(timezone.utc)
 
     if expires_delta:
-        expire = now + expires_delta
+        expire = datetime.now(timezone.utc) + expires_delta
     else:
-        expire = now + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        expire = datetime.now(timezone.utc) + timedelta(
+            minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
+        )
 
     to_encode.update({
         "exp": expire,
-        "iat": now,
+        "iat": datetime.now(timezone.utc),
         "jti": uuid4().hex,
     })
 
-    return jwt.encode(
-        to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM,
+    encoded_jwt = jwt.encode(
+        to_encode,
+        settings.SECRET_KEY,
+        algorithm=settings.ALGORITHM
     )
+
+    return encoded_jwt
 
 
 def decode_access_token(token: str) -> Optional[Dict[str, Any]]:
-    """Decode and verify a JWT access token. Returns payload or None."""
+    """
+    Decode and verify a JWT access token.
+
+    Args:
+        token: JWT token to decode
+
+    Returns:
+        Decoded payload if valid, None otherwise
+    """
     try:
-        return jwt.decode(
-            token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM],
+        payload = jwt.decode(
+            token,
+            settings.SECRET_KEY,
+            algorithms=[settings.ALGORITHM]
         )
+        return payload
     except JWTError:
         return None
 
 
-def verify_access_token(
-    token: str,
-) -> Tuple[bool, bool, Optional[Dict[str, Any]]]:
-    """Returns ``(is_valid, is_expired, payload_or_none)``.
+def verify_access_token(token: str) -> Tuple[bool, bool, Optional[Dict[str, Any]]]:
+    """
+    Verify access token and indicate whether it's valid or expired.
 
-    Expired-but-otherwise-valid tokens are still parsed so callers can
-    extract the payload (useful for refresh flows).
+    Returns a tuple: (is_valid, is_expired, payload_or_none)
     """
     try:
         payload = jwt.decode(
-            token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM],
+            token,
+            settings.SECRET_KEY,
+            algorithms=[settings.ALGORITHM]
         )
         return True, False, payload
     except ExpiredSignatureError:
+        # Token is expired but otherwise valid
         try:
             payload = jwt.decode(
                 token,
                 settings.SECRET_KEY,
                 algorithms=[settings.ALGORITHM],
-                options={"verify_exp": False},
+                options={"verify_exp": False}
             )
             return False, True, payload
         except JWTError:
@@ -139,45 +136,43 @@ def verify_access_token(
         return False, False, None
 
 
-# ---- JWT — refresh tokens ----------------------------------------------
-
-
 def create_refresh_token(
     data: Dict[str, Any],
-    expires_delta: Optional[timedelta] = None,
+    expires_delta: Optional[timedelta] = None
 ) -> Tuple[str, str, datetime]:
-    """Mint a long-lived refresh token.
+    """
+    Create a JWT refresh token with a `jti` claim.
 
-    Returns ``(token, jti, expires_at)`` so the caller can persist the
-    jti + expiry on the user row for single-active-refresh-token
-    enforcement.
+    Returns: (token, jti, expires_at)
     """
     to_encode = data.copy()
     jti = uuid4().hex
-    now = datetime.now(timezone.utc)
 
     if expires_delta:
-        expires_at = now + expires_delta
+        expire = datetime.now(timezone.utc) + expires_delta
     else:
-        expires_at = now + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+        expire = datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
 
     to_encode.update({
-        "exp": expires_at,
-        "iat": now,
-        "jti": jti,
+        "exp": expire,
+        "iat": datetime.now(timezone.utc),
+        "jti": jti
     })
 
-    encoded = jwt.encode(
-        to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM,
-    )
-    return encoded, jti, expires_at
+    encoded = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+    return encoded, jti, expire
 
 
 def verify_refresh_token(token: str) -> Optional[Dict[str, Any]]:
-    """Decode and verify a refresh token. None on any failure."""
+    """
+    Decode and verify a refresh token. Returns payload if valid, None otherwise.
+    """
     try:
-        return jwt.decode(
-            token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM],
+        payload = jwt.decode(
+            token,
+            settings.SECRET_KEY,
+            algorithms=[settings.ALGORITHM]
         )
+        return payload
     except JWTError:
         return None

@@ -1,36 +1,26 @@
-"""Master-data router — user-mgmt slim slice (doc 37 part 2).
+"""Master-data router — user-mgmt slim slice.
 
 Routes hosted here:
-  - /api/v3/master/roles                    (delegates to ../roles handlers)
-  - /api/v3/master/permissions              (delegates to ../permissions handlers)
-  - /api/v3/master/permissions/by-module    (doc 33 change 2)
-  - /api/v3/master/notification_templates   (doc 36)
+  - /api/v3/master/roles                  (delegates to ../roles handlers)
+  - /api/v3/master/permissions            (delegates to ../permissions handlers)
+  - /api/v3/master/permissions/by-module
 
-Roles and permissions delegate to the existing legacy route handlers
-in ``app/api/v3/roles/`` and ``app/api/v3/permissions/`` — same
-pattern as the monolith — so we don't duplicate the
-RBAC-management plumbing. Notification templates are implemented
-directly here against the ``notification_templates`` table.
+Roles and permissions delegate to the existing legacy route handlers in
+``app/api/v3/roles/`` and ``app/api/v3/permissions/`` — same pattern as
+the monolith — so we don't duplicate the RBAC-management plumbing.
 
-The other monolith master-data slices (divisions, vendors, etc.) live
-on the monolith side. When user-mgmt is fronted by the monolith proxy
-(USER_SERVICE_PROXY_ENABLED in the monolith), the monolith routes
-these specific master paths here; everything else stays on the
-monolith.
+``/api/v3/master/notification_templates`` is owned by
+PMIS-notification-service (doc 38). Other master-data slices (divisions,
+vendors, etc.) stay on the monolith.
 """
 from collections import defaultdict
-from typing import Any, Dict, List
+from typing import Dict
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from ....core.base_controller import BaseController
-from ....core.errors import (
-    AlreadyExistsError,
-    NotFoundError,
-    ValidationError,
-)
 from ....core.middleware.rbac import require_permission
 from ....core.permissions import MASTER_DATA_MANAGE, MASTER_DATA_VIEW
 from ....infrastructure.db.repositories.rbac_repository import RbacRepository
@@ -65,13 +55,6 @@ from ..permissions.schemas import (
     PermissionUpdateRequest,
 )
 
-from .schemas import (
-    NotificationTemplateCreateRequest,
-    NotificationTemplateUpdateRequest,
-    _validate_placeholder_set,
-)
-
-
 router = APIRouter(prefix="/master", tags=["master_data"])
 
 
@@ -85,16 +68,6 @@ def _without_deprecation(response: JSONResponse) -> JSONResponse:
         if h in response.headers:
             del response.headers[h]
     return response
-
-
-def _collection(items: List[Dict[str, Any]], self_href: str) -> Dict[str, Any]:
-    return {
-        "_type": "Collection",
-        "_links": {"self": {"href": self_href}},
-        "total": len(items),
-        "count": len(items),
-        "_embedded": {"elements": items},
-    }
 
 
 # ---------------------------------------------------------------------------
@@ -362,233 +335,3 @@ def delete_master_permission(
         _perm_delete(request=request, code=code, db=db),
     )
 
-
-# ---------------------------------------------------------------------------
-# Notification templates (doc 36)
-# ---------------------------------------------------------------------------
-
-def _notification_template_to_response(row) -> Dict[str, Any]:
-    return {
-        "_type": "NotificationTemplate",
-        "id": row.id,
-        "templateKind": row.template_kind,
-        "channel": row.channel,
-        "subject": row.subject,
-        "body": row.body,
-        "isHtml": bool(row.is_html),
-        "isBuiltin": bool(row.is_builtin),
-        "active": bool(row.active),
-        "description": row.description,
-        "createdAt": row.created_at.isoformat() if row.created_at else None,
-        "updatedAt": row.updated_at.isoformat() if row.updated_at else None,
-    }
-
-
-def _find_active_template(db: Session, *, template_kind: str, channel: str):
-    from ....infrastructure.db.models.notification_template import (
-        NotificationTemplateModel,
-    )
-    return (
-        db.query(NotificationTemplateModel)
-        .filter(NotificationTemplateModel.template_kind == template_kind)
-        .filter(NotificationTemplateModel.channel == channel)
-        .filter(NotificationTemplateModel.active.is_(True))
-        .first()
-    )
-
-
-@router.get(
-    "/notification_templates",
-    dependencies=[require_permission(MASTER_DATA_VIEW)],
-    summary="List notification templates (admin view shows soft-disabled too)",
-)
-def list_master_notification_templates(
-    request: Request,
-    include_inactive: bool = False,
-    db: Session = Depends(get_db),
-) -> JSONResponse:
-    from ....infrastructure.db.models.notification_template import (
-        NotificationTemplateModel,
-    )
-    q = db.query(NotificationTemplateModel)
-    if not include_inactive:
-        q = q.filter(NotificationTemplateModel.active.is_(True))
-    rows = q.order_by(
-        NotificationTemplateModel.template_kind.asc(),
-        NotificationTemplateModel.channel.asc(),
-        NotificationTemplateModel.id.asc(),
-    ).all()
-    items = [_notification_template_to_response(r) for r in rows]
-    return BaseController.ok(
-        data=_collection(items, "/api/v3/master/notification_templates"),
-    )
-
-
-@router.get(
-    "/notification_templates/{template_id}",
-    dependencies=[require_permission(MASTER_DATA_VIEW)],
-    summary="Get a notification template",
-)
-def get_master_notification_template(
-    request: Request,
-    template_id: int,
-    db: Session = Depends(get_db),
-) -> JSONResponse:
-    from ....infrastructure.db.models.notification_template import (
-        NotificationTemplateModel,
-    )
-    row = db.get(NotificationTemplateModel, template_id)
-    if row is None:
-        raise NotFoundError(f"No notification_template with id {template_id}.")
-    return BaseController.ok(data=_notification_template_to_response(row))
-
-
-@router.post(
-    "/notification_templates/create",
-    dependencies=[require_permission(MASTER_DATA_MANAGE)],
-    summary="Create a notification template",
-    status_code=201,
-)
-def create_master_notification_template(
-    request: Request,
-    data: NotificationTemplateCreateRequest,
-    db: Session = Depends(get_db),
-) -> JSONResponse:
-    from ....infrastructure.db.models.notification_template import (
-        NotificationTemplateModel,
-    )
-    existing = _find_active_template(
-        db, template_kind=data.templateKind, channel=data.channel,
-    )
-    if existing is not None:
-        raise AlreadyExistsError(
-            f"An active notification_template already exists for "
-            f"(kind='{data.templateKind}', channel='{data.channel}') "
-            f"— id={existing.id}."
-        )
-    is_html_default = data.channel == "email"
-    row = NotificationTemplateModel(
-        template_kind=data.templateKind,
-        channel=data.channel,
-        subject=(data.subject or None),
-        body=data.body,
-        is_html=is_html_default if data.isHtml is None else bool(data.isHtml),
-        is_builtin=False,
-        active=bool(data.active),
-        description=data.description,
-    )
-    db.add(row)
-    db.flush()
-    db.commit()
-    return BaseController.created(data=_notification_template_to_response(row))
-
-
-@router.patch(
-    "/notification_templates/{template_id}",
-    dependencies=[require_permission(MASTER_DATA_MANAGE)],
-    summary="Update a notification template",
-)
-def update_master_notification_template(
-    request: Request,
-    template_id: int,
-    data: NotificationTemplateUpdateRequest,
-    db: Session = Depends(get_db),
-) -> JSONResponse:
-    from ....infrastructure.db.models.notification_template import (
-        NotificationTemplateModel,
-    )
-    row = db.get(NotificationTemplateModel, template_id)
-    if row is None:
-        raise NotFoundError(f"No notification_template with id {template_id}.")
-    new_subject = row.subject if data.subject is None else (
-        (data.subject or "").strip() or None
-    )
-    new_body = row.body if data.body is None else data.body
-    if row.channel == "email" and not (new_subject or "").strip():
-        raise ValidationError("subject is required for email templates")
-    if row.channel == "sms" and (new_subject or "").strip():
-        raise ValidationError("subject must be omitted for sms templates")
-    try:
-        _validate_placeholder_set(
-            template_kind=row.template_kind,
-            channel=row.channel,
-            subject=new_subject,
-            body=new_body,
-        )
-    except ValueError as e:
-        raise ValidationError(str(e))
-    will_be_active = row.active if data.active is None else bool(data.active)
-    if will_be_active and not row.active:
-        clash = _find_active_template(
-            db, template_kind=row.template_kind, channel=row.channel,
-        )
-        if clash is not None and clash.id != row.id:
-            raise AlreadyExistsError(
-                f"Another active notification_template (id={clash.id}) "
-                f"already covers (kind='{row.template_kind}', "
-                f"channel='{row.channel}'). Deactivate it first."
-            )
-    row.subject = new_subject
-    row.body = new_body
-    if data.isHtml is not None:
-        row.is_html = bool(data.isHtml)
-    if data.description is not None:
-        row.description = data.description
-    if data.active is not None:
-        row.active = bool(data.active)
-    db.flush()
-    db.commit()
-    return BaseController.ok(data=_notification_template_to_response(row))
-
-
-@router.delete(
-    "/notification_templates/{template_id}",
-    dependencies=[require_permission(MASTER_DATA_MANAGE)],
-    summary="Soft-deactivate a notification template",
-)
-def delete_master_notification_template(
-    request: Request,
-    template_id: int,
-    db: Session = Depends(get_db),
-) -> JSONResponse:
-    from ....infrastructure.db.models.notification_template import (
-        NotificationTemplateModel,
-    )
-    row = db.get(NotificationTemplateModel, template_id)
-    if row is None:
-        raise NotFoundError(f"No notification_template with id {template_id}.")
-    row.active = False
-    db.flush()
-    db.commit()
-    return BaseController.ok(data=_notification_template_to_response(row))
-
-
-@router.post(
-    "/notification_templates/{template_id}/restore",
-    dependencies=[require_permission(MASTER_DATA_MANAGE)],
-    summary="Re-activate a soft-disabled notification template",
-)
-def restore_master_notification_template(
-    request: Request,
-    template_id: int,
-    db: Session = Depends(get_db),
-) -> JSONResponse:
-    from ....infrastructure.db.models.notification_template import (
-        NotificationTemplateModel,
-    )
-    row = db.get(NotificationTemplateModel, template_id)
-    if row is None:
-        raise NotFoundError(f"No notification_template with id {template_id}.")
-    clash = _find_active_template(
-        db, template_kind=row.template_kind, channel=row.channel,
-    )
-    if clash is not None and clash.id != row.id:
-        raise AlreadyExistsError(
-            f"Another active notification_template (id={clash.id}) "
-            f"already covers (kind='{row.template_kind}', "
-            f"channel='{row.channel}'). Deactivate it first."
-        )
-    row.active = True
-    db.flush()
-    db.commit()
-    return BaseController.ok(data=_notification_template_to_response(row))

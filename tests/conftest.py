@@ -31,7 +31,6 @@ from app.infrastructure.db.models import (  # noqa: F401
     NotificationLogModel,
     OtpCodeModel,
     PasswordResetTokenModel,
-    NotificationTemplateModel,
     VendorModel,
     RevokedTokenModel,
 )
@@ -132,86 +131,6 @@ def _ensure_rbac_seed(db: Session):
     )
     RbacRepository(db).sync_builtin_permissions()
     db.commit()
-
-
-def _ensure_notification_template_seed(db: Session):
-    """Idempotent test-side bootstrap of the notification_templates table (doc 36).
-
-    Mirrors the init_db seed loop. The HttpNotificationClient renderer
-    now looks up templates from this table; without seeded rows it
-    falls back to a generic body, which breaks the renderer-output
-    assertions in test_doc33_2fa_and_password_reset.py.
-    """
-    from app.infrastructure.db.models.notification_template import (
-        NotificationTemplateModel,
-    )
-    seeds = (
-        ("otp_login", "email", "Your PMIS login verification code", (
-            "<p>Your PMIS login verification code is:</p>"
-            "<p style='font-size:22px;font-weight:600;letter-spacing:3px'>{code}</p>"
-            "<p>This code expires in {ttl_minutes} minutes. If you didn't try "
-            "to log in, you can ignore this email.</p>"
-        ), True),
-        ("otp_login", "sms", None,
-         "PMIS login code: {code}. Expires in {ttl_minutes} min. Don't share this code.",
-         False),
-        ("password_reset_link", "email", "PMIS password reset", (
-            "<p>You (or someone) requested a password reset for your "
-            "PMIS account. Click the link below to set a new "
-            "password:</p>"
-            "<p><a href='{reset_url}'>Reset your PMIS password</a></p>"
-            "<p>If the link doesn't work, paste this URL into your "
-            "browser:</p>"
-            "<p style='font-family:monospace;word-break:break-all'>{reset_url}</p>"
-            "<p>Or use this single-use token directly:</p>"
-            "<p style='font-family:monospace;word-break:break-all'>{token}</p>"
-            "<p>The link expires in {ttl_minutes} minutes. If you "
-            "didn't request a reset, you can ignore this email.</p>"
-        ), True),
-        ("password_reset_link", "sms", None,
-         "PMIS password reset token: {token}. Expires in {ttl_minutes} min.",
-         False),
-        ("password_reset_otp", "email", "PMIS password reset code", (
-            "<p>Your PMIS password reset code is:</p>"
-            "<p style='font-size:22px;font-weight:600;letter-spacing:3px'>{code}</p>"
-            "<p>This code expires in {ttl_minutes} minutes. If you didn't "
-            "request a reset, you can ignore this email.</p>"
-        ), True),
-        ("password_reset_otp", "sms", None,
-         "PMIS password reset code: {code}. Expires in {ttl_minutes} min. Don't share this code.",
-         False),
-    )
-    for kind, channel, subject, body, is_html in seeds:
-        existing = (
-            db.query(NotificationTemplateModel)
-            .filter(NotificationTemplateModel.template_kind == kind)
-            .filter(NotificationTemplateModel.channel == channel)
-            .first()
-        )
-        if existing is None:
-            db.add(NotificationTemplateModel(
-                template_kind=kind,
-                channel=channel,
-                subject=subject,
-                body=body,
-                is_html=is_html,
-                is_builtin=True,
-                active=True,
-            ))
-    db.commit()
-
-
-@pytest.fixture(scope="function", autouse=True)
-def _seed_notification_templates(db_session):
-    """Autouse fixture (doc 36): seed the notification_templates table
-    so the HttpNotificationClient renderer can look up active rows.
-
-    Without this, every test that exercises the email/SMS renderer
-    falls back to the generic body and renderer-output assertions fail.
-    Idempotent — re-runs as a no-op if the rows already exist.
-    """
-    _ensure_notification_template_seed(db_session)
-    yield
 
 
 def _assign_role(db: Session, user_id: int, role_name: str):

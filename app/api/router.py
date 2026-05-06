@@ -1,10 +1,10 @@
 """Central v3 router — owns /api/v3/users/*, /api/v3/roles/*,
 /api/v3/permissions/*, and /api/v3/master/* (user-mgmt slim slice).
 
-Doc 37 part 2: brought to monolith parity. The master/* surface here
-is the user-management slim slice (roles, permissions,
-notification_templates). Other master-data slices (divisions, vendors,
-project_categories, etc.) stay on the monolith.
+The master/* surface here is the user-management slim slice (roles,
+permissions). ``/api/v3/master/notification_templates`` is owned by
+PMIS-notification-service (doc 38). Other master-data slices
+(divisions, vendors, project_categories, etc.) stay on the monolith.
 """
 from fastapi import APIRouter
 

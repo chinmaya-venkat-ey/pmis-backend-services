@@ -508,7 +508,16 @@ class TestNotificationClient:
 
 
 class TestHttpNotificationClient:
-    """The live-service backend: end-to-end behaviour with httpx mocked."""
+    """The live-service backend: end-to-end behaviour with httpx mocked.
+
+    user-mgmt no longer renders templates locally. ``HttpNotificationClient``
+    forwards ``{channel, recipient, template_kind, payload, user_id}`` to
+    notification-service's ``POST /api/v1/notifications/dispatch``. Render
+    correctness (subject/body content, ttl conversion, fallback text)
+    is covered by notification-service's ``test_dispatch.py`` against
+    the actual renderer. Here we only assert the dispatch intent and
+    response handling.
+    """
 
     def _patch_settings(self, monkeypatch, *, url="http://notif.test"):
         from app.core.config import settings as _settings
@@ -517,8 +526,7 @@ class TestHttpNotificationClient:
 
     def _stub_httpx(self, monkeypatch, *, status_code=200, response_json=None):
         """Replace httpx.Client with a stub that records the last call and
-        returns the configured response. Returns the recorder dict so the
-        test can assert on what was sent."""
+        returns the configured response."""
         import httpx
 
         recorder = {}
@@ -554,6 +562,10 @@ class TestHttpNotificationClient:
 
         monkeypatch.setattr(httpx, "Client", _StubClient)
         return recorder
+
+    # ------------------------------------------------------------------
+    # Factory selection
+    # ------------------------------------------------------------------
 
     def test_factory_returns_http_when_configured(
         self, db_session, monkeypatch
@@ -603,8 +615,11 @@ class TestHttpNotificationClient:
         c = get_notification_client(db_session)
         assert isinstance(c, MockNotificationClient)
 
+    # ------------------------------------------------------------------
+    # Dispatch wire shape
+    # ------------------------------------------------------------------
 
-    def test_email_otp_login_renders_subject_and_body(
+    def test_email_send_posts_to_dispatch_with_template_intent(
         self, db_session, monkeypatch
     ):
         from app.shared.notifications import (
@@ -620,25 +635,27 @@ class TestHttpNotificationClient:
                 "message": "ok",
                 "provider": "smtp",
                 "message_id": "msg-1",
+                "channel": "email",
+                "template_kind": "otp_login",
             },
         )
 
         client = HttpNotificationClient(db_session)
         row = client.send(
-            user_id=None,
+            user_id="user-42",
             channel=CHANNEL_EMAIL,
             recipient="alice@example.com",
             template_kind=TEMPLATE_OTP_LOGIN,
             payload={"code": "234567", "ttl_seconds": 300},
         )
 
-        assert recorder["url"] == "http://notif.test/api/v1/notifications/email/send"
+        assert recorder["url"] == "http://notif.test/api/v1/notifications/dispatch"
         body = recorder["body"]
-        assert body["to"] == ["alice@example.com"]
-        assert body["is_html"] is True
-        assert "234567" in body["body"]
-        assert "5 minutes" in body["body"]
-        assert "PMIS login" in body["subject"]
+        assert body["channel"] == "email"
+        assert body["recipient"] == "alice@example.com"
+        assert body["template_kind"] == "otp_login"
+        assert body["payload"] == {"code": "234567", "ttl_seconds": 300}
+        assert body["user_id"] == "user-42"
 
         assert row.status == "sent"
         assert row.error is None
@@ -646,124 +663,9 @@ class TestHttpNotificationClient:
         assert row.payload["_dispatch"]["provider"] == "smtp"
         assert row.payload["_dispatch"]["message_id"] == "msg-1"
 
-    def test_email_password_reset_link(
+    def test_sms_send_posts_to_dispatch_with_template_intent(
         self, db_session, monkeypatch
     ):
-        """The canonical key the password_reset service writes is
-        ``reset_token``. The body must embed it — was missing for one
-        release, producing emails with an empty token paragraph."""
-        from app.shared.notifications import (
-            CHANNEL_EMAIL,
-            TEMPLATE_PASSWORD_RESET_LINK,
-            HttpNotificationClient,
-        )
-        self._patch_settings(monkeypatch)
-        recorder = self._stub_httpx(
-            monkeypatch,
-            response_json={"success": True, "message": "ok", "provider": "smtp"},
-        )
-
-        client = HttpNotificationClient(db_session)
-        client.send(
-            user_id=None,
-            channel=CHANNEL_EMAIL,
-            recipient="alice@example.com",
-            template_kind=TEMPLATE_PASSWORD_RESET_LINK,
-            payload={"reset_token": "abc-token", "ttl_seconds": 3600},
-        )
-        body = recorder["body"]
-        assert "abc-token" in body["body"]
-        assert "60 minutes" in body["body"]
-
-    def test_email_password_reset_link_legacy_token_key(
-        self, db_session, monkeypatch
-    ):
-        """Older callers pass the value under ``token`` instead of
-        ``reset_token``. Both must work — the renderer accepts both
-        for backwards compat."""
-        from app.shared.notifications import (
-            CHANNEL_EMAIL,
-            TEMPLATE_PASSWORD_RESET_LINK,
-            HttpNotificationClient,
-        )
-        self._patch_settings(monkeypatch)
-        recorder = self._stub_httpx(
-            monkeypatch,
-            response_json={"success": True, "message": "ok", "provider": "smtp"},
-        )
-        client = HttpNotificationClient(db_session)
-        client.send(
-            user_id=None,
-            channel=CHANNEL_EMAIL,
-            recipient="bob@example.com",
-            template_kind=TEMPLATE_PASSWORD_RESET_LINK,
-            payload={"token": "legacy-token", "ttl_seconds": 1800},
-        )
-        body = recorder["body"]
-        assert "legacy-token" in body["body"]
-        assert "30 minutes" in body["body"]
-
-    def test_email_password_reset_link_with_frontend_url(
-        self, db_session, monkeypatch
-    ):
-        """When FRONTEND_BASE_URL is set, the email body embeds a
-        clickable reset URL the user can hit directly from their inbox."""
-        from app.core.config import settings as _settings
-        from app.shared.notifications import (
-            CHANNEL_EMAIL,
-            TEMPLATE_PASSWORD_RESET_LINK,
-            HttpNotificationClient,
-        )
-        self._patch_settings(monkeypatch)
-        monkeypatch.setattr(_settings, "FRONTEND_BASE_URL", "http://fe.test:3000")
-        recorder = self._stub_httpx(
-            monkeypatch,
-            response_json={"success": True, "message": "ok", "provider": "smtp"},
-        )
-        client = HttpNotificationClient(db_session)
-        client.send(
-            user_id=None,
-            channel=CHANNEL_EMAIL,
-            recipient="alice@example.com",
-            template_kind=TEMPLATE_PASSWORD_RESET_LINK,
-            payload={"reset_token": "tok-xyz", "ttl_seconds": 3600},
-        )
-        body = recorder["body"]["body"]
-        # Full clickable URL is present.
-        assert "http://fe.test:3000/reset-password?token=tok-xyz" in body
-        # An <a> tag wraps it.
-        assert "<a href='http://fe.test:3000/reset-password?token=tok-xyz'>" in body
-
-    def test_email_password_reset_link_strips_trailing_slash(
-        self, db_session, monkeypatch
-    ):
-        """A FRONTEND_BASE_URL with a trailing slash shouldn't produce
-        a double-slash in the rendered link."""
-        from app.core.config import settings as _settings
-        from app.shared.notifications import (
-            CHANNEL_EMAIL,
-            TEMPLATE_PASSWORD_RESET_LINK,
-            HttpNotificationClient,
-        )
-        self._patch_settings(monkeypatch)
-        monkeypatch.setattr(_settings, "FRONTEND_BASE_URL", "http://fe.test:3000/")
-        recorder = self._stub_httpx(
-            monkeypatch,
-            response_json={"success": True, "message": "ok", "provider": "smtp"},
-        )
-        client = HttpNotificationClient(db_session)
-        client.send(
-            user_id=None,
-            channel=CHANNEL_EMAIL,
-            recipient="alice@example.com",
-            template_kind=TEMPLATE_PASSWORD_RESET_LINK,
-            payload={"reset_token": "tok-1", "ttl_seconds": 3600},
-        )
-        body = recorder["body"]["body"]
-        assert "http://fe.test:3000/reset-password?token=tok-1" in body
-        assert "fe.test:3000//reset-password" not in body
-
-    def test_sms_otp_login(self, db_session, monkeypatch):
         from app.shared.notifications import (
             CHANNEL_SMS,
             TEMPLATE_OTP_LOGIN,
@@ -772,7 +674,11 @@ class TestHttpNotificationClient:
         self._patch_settings(monkeypatch)
         recorder = self._stub_httpx(
             monkeypatch,
-            response_json={"success": True, "message": "ok", "provider": "twilio"},
+            response_json={
+                "success": True, "message": "ok", "provider": "twilio",
+                "message_id": "sms-1", "channel": "sms",
+                "template_kind": "otp_login",
+            },
         )
 
         client = HttpNotificationClient(db_session)
@@ -783,11 +689,17 @@ class TestHttpNotificationClient:
             template_kind=TEMPLATE_OTP_LOGIN,
             payload={"code": "234567", "ttl_seconds": 300},
         )
-        assert recorder["url"] == "http://notif.test/api/v1/notifications/sms/send"
+        assert recorder["url"] == "http://notif.test/api/v1/notifications/dispatch"
         body = recorder["body"]
-        assert body["to"] == "+919876543210"
-        assert "234567" in body["message"]
-        assert "5 min" in body["message"]
+        assert body["channel"] == "sms"
+        assert body["recipient"] == "+919876543210"
+        assert body["template_kind"] == "otp_login"
+        assert body["payload"]["code"] == "234567"
+        assert body["user_id"] is None
+
+    # ------------------------------------------------------------------
+    # Error paths
+    # ------------------------------------------------------------------
 
     def test_non_2xx_response_marks_failed(
         self, db_session, monkeypatch
@@ -884,29 +796,35 @@ class TestHttpNotificationClient:
         assert "NOTIFICATION_SERVICE_URL" in row.error
         assert sentinel["called"] is False
 
-    def test_unknown_template_kind_falls_back(
+    def test_unsupported_channel_marks_failed_without_call(
         self, db_session, monkeypatch
     ):
-        from app.shared.notifications import (
-            CHANNEL_EMAIL,
-            HttpNotificationClient,
-        )
+        """Defensive: callers passing a typo'd channel get a failed
+        audit row, never an HTTP call to notification-service."""
+        import httpx
+        from app.shared.notifications import HttpNotificationClient
         self._patch_settings(monkeypatch)
-        recorder = self._stub_httpx(
-            monkeypatch,
-            response_json={"success": True, "message": "ok", "provider": "smtp"},
-        )
+
+        sentinel = {"called": False}
+
+        class _ShouldNotBeUsed:
+            def __init__(self, *a, **kw):
+                sentinel["called"] = True
+
+        monkeypatch.setattr(httpx, "Client", _ShouldNotBeUsed)
+
         client = HttpNotificationClient(db_session)
         row = client.send(
             user_id=None,
-            channel=CHANNEL_EMAIL,
-            recipient="e@example.com",
-            template_kind="something_brand_new",
-            payload={"foo": "bar"},
+            channel="carrier-pigeon",
+            recipient="x@example.com",
+            template_kind="otp_login",
+            payload={},
         )
-        # Generic fallback subject + body — defensive, doesn't crash.
-        assert row.status == "sent"
-        assert "PMIS notification" in recorder["body"]["subject"]
+        assert row.status == "failed"
+        assert "carrier-pigeon" in row.error
+        assert sentinel["called"] is False
+
 
 class TestUniversalOtp:
     """Doc 35: universal OTP escape hatch.

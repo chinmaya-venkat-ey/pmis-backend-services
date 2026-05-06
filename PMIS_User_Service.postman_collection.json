@@ -1,0 +1,2364 @@
+{
+  "info": {
+    "_postman_id": "pmis-user-service-2026",
+    "name": "PMIS User Service (port 8001)",
+    "description": "Postman collection for PMIS-user-management — the authentication + RBAC + notification-templates microservice running on port 8001.\n\n**Endpoints covered** (user-mgmt slice only):\n- `POST /api/v3/users/login` (single-stage + 2FA branch)\n- `POST /api/v3/users/login/send-otp`, `/login/verify-otp`\n- `POST /api/v3/users/forgot-password`, `/reset-password`\n- `POST /api/v3/users/refresh`, `/introspect`, `/logout`\n- User CRUD: `/users/create`, `/users/{id}`, etc.\n- RBAC user-side: `/users/{id}/roles/{role_id}`, `/users/{id}/permissions/{code}`\n- Legacy /api/v3/roles, /api/v3/permissions (deprecated; use master/*)\n- `/api/v3/master/roles`, `/api/v3/master/permissions`, `/api/v3/master/notification_templates`\n- `/health`\n\n**Project-management endpoints (projects, M/A/T/S, vendors, divisions, etc.) are NOT in this collection.** Call them at the monolith on port 8000 — see `PMIS_API_Collection.postman_collection.json` in the monolith repo.\n\n**Two ways to use this collection:**\n1. **Direct (port 8001)** — set `baseUrl` to `http://10.1.131.199:8001`. Hits user-mgmt directly.\n2. **Through monolith proxy** — set `baseUrl` to `http://10.1.131.199:8000` AND ensure the monolith has `USER_SERVICE_PROXY_ENABLED=true`. Same URLs work — the monolith's `UserServiceProxyMiddleware` forwards them to user-mgmt transparently.\n\nBoth paths give the same result; option 1 is one fewer hop and useful for direct user-mgmt debugging.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Authentication & Users",
+      "item": [
+        {
+          "name": "Assign a role to a user",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/users/{user_id}/roles/{role_id}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "users",
+                ":user_id",
+                "roles",
+                ":role_id"
+              ],
+              "variable": [
+                {
+                  "key": "user_id",
+                  "value": "",
+                  "description": ""
+                },
+                {
+                  "key": "role_id",
+                  "value": "0",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Assign a role to a user"
+          },
+          "response": []
+        },
+        {
+          "name": "Authenticate user",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/users/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "users",
+                "login"
+              ]
+            },
+            "description": "Authenticate user and receive a JWT token. Doc 33 change 3: when 2FA is required for the user (per-user flag + global ``REQUIRE_2FA``), this endpoint returns ``{requires_otp: true, ephemeral_token, channels_available}`` instead of an access_token. The client then calls ``/login/send-otp`` and ``/login/verify-otp``.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"login\": \"\",\n  \"password\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Complete a password reset (doc 33 change 3)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/users/reset-password",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "users",
+                "reset-password"
+              ]
+            },
+            "description": "Verify the reset token (URL token from email or 6-digit OTP from SMS) and set the new password. Tokens are single-use and expire after ``PASSWORD_RESET_TTL_SECONDS`` (default 1h).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token_or_code\": \"\",\n  \"new_password\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create user",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/users/create",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "users",
+                "create"
+              ]
+            },
+            "description": "Create a new user",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"login\": \"\",\n  \"email\": \"user@example.com\",\n  \"password\": \"\",\n  \"firstName\": \"\",\n  \"lastName\": \"\",\n  \"admin\": false,\n  \"vendor_id\": \"\",\n  \"division\": \"\",\n  \"division_other\": \"\",\n  \"project_ids\": [\n    \"\"\n  ],\n  \"phone_number\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete user",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/users/{user_id}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "users",
+                ":user_id"
+              ],
+              "variable": [
+                {
+                  "key": "user_id",
+                  "value": "",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Delete user by ID. Path param accepts integer ``id`` or ``US-...`` code (doc 25)."
+          },
+          "response": []
+        },
+        {
+          "name": "Effective permissions for a user (role-derived ∪ direct)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/users/{user_id}/permissions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "users",
+                ":user_id",
+                "permissions"
+              ],
+              "variable": [
+                {
+                  "key": "user_id",
+                  "value": "",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Effective permissions for a user (role-derived ∪ direct)"
+          },
+          "response": []
+        },
+        {
+          "name": "Effective permissions for the current user",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/users/me/permissions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "users",
+                "me",
+                "permissions"
+              ]
+            },
+            "description": "Returns the caller's effective permission set + admin flag.\n\nUsed by the FE to decide which UI actions to show. Requires only\nauthentication — no separate permission to read your own grants."
+          },
+          "response": []
+        },
+        {
+          "name": "Get current user",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/users/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "users",
+                "me"
+              ]
+            },
+            "description": "Get currently authenticated user"
+          },
+          "response": []
+        },
+        {
+          "name": "Get user",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/users/{user_id}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "users",
+                ":user_id"
+              ],
+              "variable": [
+                {
+                  "key": "user_id",
+                  "value": "",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Get user by ID. The path param accepts EITHER the integer ``id`` OR the human-readable ``userCode`` (``US-XXXX-YYMMDDHHMMSS`` — see doc 25). The dispatcher auto-detects via the ``US-`` prefix."
+          },
+          "response": []
+        },
+        {
+          "name": "Grant a direct permission to a user",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/users/{user_id}/permissions/{code}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "users",
+                ":user_id",
+                "permissions",
+                ":code"
+              ],
+              "variable": [
+                {
+                  "key": "user_id",
+                  "value": "",
+                  "description": ""
+                },
+                {
+                  "key": "code",
+                  "value": "",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Grant a direct permission to a user"
+          },
+          "response": []
+        },
+        {
+          "name": "Introspect tokens (RFC 7662 read-only metadata)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/users/introspect",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "users",
+                "introspect"
+              ]
+            },
+            "description": "Public token introspection. Returns metadata (active, exp, iat, jti, sub, userId, role, isAdmin) for the supplied access_token and/or refresh_token. NEVER rotates — use POST /users/refresh to mint a fresh access + refresh pair from a valid refresh token. When both tokens are supplied, the response shape becomes {access: {...}, refresh: {...}}.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"access_token\": \"\",\n  \"refresh_token\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List a user's roles",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/users/{user_id}/roles",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "users",
+                ":user_id",
+                "roles"
+              ],
+              "variable": [
+                {
+                  "key": "user_id",
+                  "value": "",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "List a user's roles"
+          },
+          "response": []
+        },
+        {
+          "name": "List users",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "users"
+              ],
+              "query": [
+                {
+                  "key": "offset",
+                  "value": "1",
+                  "description": "Page number (1-indexed)",
+                  "disabled": true
+                },
+                {
+                  "key": "pageSize",
+                  "value": "20",
+                  "description": "Items per page",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": "",
+                  "description": "Filter by status",
+                  "disabled": true
+                },
+                {
+                  "key": "include_deleted",
+                  "value": "False",
+                  "description": "Admin only. When true, soft-deleted users are also returned. Default false hides them.",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "List all users with pagination"
+          },
+          "response": []
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/users/logout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "users",
+                "logout"
+              ]
+            },
+            "description": "Hard logout. Revokes the access token (adds its jti to the blacklist) AND clears the user's refresh-token jti. After this call, the just-used access token will be rejected by the auth middleware on every subsequent request, and the refresh token can no longer mint new access tokens. Idempotent."
+          },
+          "response": []
+        },
+        {
+          "name": "Refresh access token (rotates the refresh token too)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/users/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "users",
+                "refresh"
+              ]
+            },
+            "description": "Validates the supplied refresh token and issues a fresh access + refresh pair. The user row's stored refresh_token_jti is rotated atomically — concurrent refreshes with the same token can only succeed once. Response includes accessTokenExpiresAt + refreshTokenExpiresAt so the client can schedule the next preemptive refresh.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh_token\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Request a password-reset link or code (doc 33 change 3)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/users/forgot-password",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "users",
+                "forgot-password"
+              ]
+            },
+            "description": "Self-service password reset. Body: ``{login_or_email, channel}``. ``email`` channel sends a clickable reset link; ``sms`` sends a numeric code. ALWAYS returns 200 with a generic message regardless of whether the account exists (anti-enumeration).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"login_or_email\": \"\",\n  \"channel\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Restore a soft-deleted user (admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/users/{user_id}/restore",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "users",
+                ":user_id",
+                "restore"
+              ],
+              "variable": [
+                {
+                  "key": "user_id",
+                  "value": "",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Clears deletedAt/deletedBy and sets status='active' on a soft-deleted user. Idempotent on already-active users — returns the current snapshot rather than 409. All project mappings, vendor association, and division values are preserved on disk during soft-delete and re-surface automatically. Mirrors POST /api/v3/vendors/{id}/restore. Path param accepts integer ``id`` or ``US-...`` code (doc 25)."
+          },
+          "response": []
+        },
+        {
+          "name": "Revoke a direct permission from a user",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/users/{user_id}/permissions/{code}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "users",
+                ":user_id",
+                "permissions",
+                ":code"
+              ],
+              "variable": [
+                {
+                  "key": "user_id",
+                  "value": "",
+                  "description": ""
+                },
+                {
+                  "key": "code",
+                  "value": "",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Revoke a direct permission from a user"
+          },
+          "response": []
+        },
+        {
+          "name": "Send OTP for 2FA login (doc 33 change 3)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/users/login/send-otp",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "users",
+                "login",
+                "send-otp"
+              ]
+            },
+            "description": "Generate + dispatch a 6-digit OTP for an in-progress 2FA login session. Pass the ``ephemeral_token`` returned from ``/login`` plus a chosen channel (``email`` or ``sms``). Resends are rate-limited per ``OTP_RESEND_COOLDOWN_SECONDS`` (default 60s).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ephemeral_token\": \"\",\n  \"channel\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Unassign a role from a user (lockout-protected for 'admin')",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/users/{user_id}/roles/{role_id}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "users",
+                ":user_id",
+                "roles",
+                ":role_id"
+              ],
+              "variable": [
+                {
+                  "key": "user_id",
+                  "value": "",
+                  "description": ""
+                },
+                {
+                  "key": "role_id",
+                  "value": "0",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Unassign a role from a user (lockout-protected for 'admin')"
+          },
+          "response": []
+        },
+        {
+          "name": "Update user",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/users/{user_id}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "users",
+                ":user_id"
+              ],
+              "variable": [
+                {
+                  "key": "user_id",
+                  "value": "",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Update user details. Path param accepts integer ``id`` or ``US-...`` code (doc 25).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\",\n  \"firstName\": \"\",\n  \"lastName\": \"\",\n  \"admin\": false,\n  \"status\": \"\",\n  \"vendor_id\": \"\",\n  \"division\": \"\",\n  \"division_other\": \"\",\n  \"phone_number\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update user password",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/users/{user_id}/password",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "users",
+                ":user_id",
+                "password"
+              ],
+              "variable": [
+                {
+                  "key": "user_id",
+                  "value": "",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Update user password. Path param accepts integer ``id`` or ``US-...`` code (doc 25).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"password\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Verify OTP and complete login (doc 33 change 3)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/users/login/verify-otp",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "users",
+                "login",
+                "verify-otp"
+              ]
+            },
+            "description": "Verify the OTP sent via ``/login/send-otp`` and mint the real access + refresh JWT pair. Same response shape as a non-2FA ``/login`` success. Wrong codes increment a counter; after ``OTP_MAX_ATTEMPTS`` (default 5) the OTP row is invalidated and the user must request a new one.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ephemeral_token\": \"\",\n  \"code\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Health & Root",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            },
+            "description": "Health check endpoint.\n\nReports the status of subsystems the app depends on. Currently:\n  - the API process itself (\"status\")\n  - file-storage backend reachability (NFS mount in prod, local\n    folder in dev) — surfaced separately so ops can distinguish a\n    fully-healthy app from one that's serving but can't accept\n    attachment uploads.\n  - notification client config + reachability — diagnostic for the\n    2FA / forgot-password flow. Exposes which backend is selected\n    (``mock`` or ``http``), the configured service URL, and a quick\n    reachability probe so ops can tell at a glance whether the BE\n    will actually dispatch OTP emails or silently sink them in\n    the audit table.\n\nThe NFS server / export are reported back from settings (informational\n— the app doesn't connect to them directly; the OS mount does). They\nlet ops verify which file store this instance is wired to."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Master Data (user-mgmt slice)",
+      "item": [
+        {
+          "name": "Create a custom permission (delegates)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/master/permissions/create",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "master",
+                "permissions",
+                "create"
+              ]
+            },
+            "description": "Create a custom permission (delegates)",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"\",\n  \"name\": \"\",\n  \"description\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create a notification template (doc 36)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/master/notification_templates/create",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "master",
+                "notification_templates",
+                "create"
+              ]
+            },
+            "description": "409 when an active row already covers the (templateKind, channel) pair. Built-in placeholder validation runs for the well-known kinds (otp_login / password_reset_link / password_reset_otp).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"templateKind\": \"custom_event\",\n  \"channel\": \"email\",\n  \"subject\": \"Hello {name}\",\n  \"body\": \"<p>Hi {name}, this is a test.</p>\",\n  \"isHtml\": true,\n  \"description\": \"Custom test template\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create a role (delegates to POST /api/v3/roles/create)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/master/roles/create",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "master",
+                "roles",
+                "create"
+              ]
+            },
+            "description": "Create a role (delegates to POST /api/v3/roles/create)",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"\",\n  \"description\": \"\",\n  \"permissions\": [\n    \"\"\n  ],\n  \"builtin\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete a permission (built-ins protected)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/master/permissions/{code}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "master",
+                "permissions",
+                ":code"
+              ],
+              "variable": [
+                {
+                  "key": "code",
+                  "value": "",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Delete a permission (built-ins protected)"
+          },
+          "response": []
+        },
+        {
+          "name": "Delete a role (delegates; built-in 'admin' role protected)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/master/roles/{role_id}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "master",
+                "roles",
+                ":role_id"
+              ],
+              "variable": [
+                {
+                  "key": "role_id",
+                  "value": "0",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Delete a role (delegates; built-in 'admin' role protected)"
+          },
+          "response": []
+        },
+        {
+          "name": "Edit a permission's name/description (delegates)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/master/permissions/{code}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "master",
+                "permissions",
+                ":code"
+              ],
+              "variable": [
+                {
+                  "key": "code",
+                  "value": "",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Edit a permission's name/description (delegates)",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"\",\n  \"description\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get a notification template by id (doc 36)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/master/notification_templates/1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "master",
+                "notification_templates",
+                "1"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Get a permission row (delegates)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/master/permissions/{code}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "master",
+                "permissions",
+                ":code"
+              ],
+              "variable": [
+                {
+                  "key": "code",
+                  "value": "",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Get a permission row (delegates)"
+          },
+          "response": []
+        },
+        {
+          "name": "Get a role (delegates to GET /api/v3/roles/{id})",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/master/roles/{role_id}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "master",
+                "roles",
+                ":role_id"
+              ],
+              "variable": [
+                {
+                  "key": "role_id",
+                  "value": "0",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Get a role (delegates to GET /api/v3/roles/{id})"
+          },
+          "response": []
+        },
+        {
+          "name": "Grant a permission to a role (delegates)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/master/roles/{role_id}/permissions/{code}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "master",
+                "roles",
+                ":role_id",
+                "permissions",
+                ":code"
+              ],
+              "variable": [
+                {
+                  "key": "role_id",
+                  "value": "0",
+                  "description": ""
+                },
+                {
+                  "key": "code",
+                  "value": "",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Grant a permission to a role (delegates)"
+          },
+          "response": []
+        },
+        {
+          "name": "List a role's permissions (delegates)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/master/roles/{role_id}/permissions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "master",
+                "roles",
+                ":role_id",
+                "permissions"
+              ],
+              "variable": [
+                {
+                  "key": "role_id",
+                  "value": "0",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "List a role's permissions (delegates)"
+          },
+          "response": []
+        },
+        {
+          "name": "List notification templates (doc 36)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/master/notification_templates",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "master",
+                "notification_templates"
+              ],
+              "query": [
+                {
+                  "key": "include_inactive",
+                  "value": "false"
+                }
+              ]
+            },
+            "description": "List active notification templates. ?include_inactive=true also returns soft-deactivated rows."
+          },
+          "response": []
+        },
+        {
+          "name": "List roles (delegates to GET /api/v3/roles)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/master/roles",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "master",
+                "roles"
+              ],
+              "query": [
+                {
+                  "key": "offset",
+                  "value": "1",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "pageSize",
+                  "value": "20",
+                  "description": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "List roles (delegates to GET /api/v3/roles)"
+          },
+          "response": []
+        },
+        {
+          "name": "List the permission catalog (delegates)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/master/permissions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "master",
+                "permissions"
+              ],
+              "query": [
+                {
+                  "key": "offset",
+                  "value": "1",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "pageSize",
+                  "value": "100",
+                  "description": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "List the permission catalog (delegates)"
+          },
+          "response": []
+        },
+        {
+          "name": "List the permission catalog grouped by module (doc 33 change 2)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/master/permissions/by-module",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "master",
+                "permissions",
+                "by-module"
+              ]
+            },
+            "description": "Returns the full permission catalog bucketed by module — the leading segment of each ``module:action`` code. The FE uses this to render a permission picker tree without parsing codes client-side. Admin-defined modules (created via ``POST /master/permissions/create`` with codes like ``custom_module:my_action``) appear in the same response."
+          },
+          "response": []
+        },
+        {
+          "name": "Replace a role's permission set (delegates)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/master/roles/{role_id}/permissions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "master",
+                "roles",
+                ":role_id",
+                "permissions"
+              ],
+              "variable": [
+                {
+                  "key": "role_id",
+                  "value": "0",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Replace a role's permission set (delegates)",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"permissions\": [\n    \"\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Restore a soft-disabled notification template (doc 36)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/master/notification_templates/1/restore",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "master",
+                "notification_templates",
+                "1",
+                "restore"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Revoke a permission from a role (delegates)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/master/roles/{role_id}/permissions/{code}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "master",
+                "roles",
+                ":role_id",
+                "permissions",
+                ":code"
+              ],
+              "variable": [
+                {
+                  "key": "role_id",
+                  "value": "0",
+                  "description": ""
+                },
+                {
+                  "key": "code",
+                  "value": "",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Revoke a permission from a role (delegates)"
+          },
+          "response": []
+        },
+        {
+          "name": "Soft-deactivate a notification template (doc 36)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/master/notification_templates/1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "master",
+                "notification_templates",
+                "1"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Update a notification template (doc 36)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/master/notification_templates/1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "master",
+                "notification_templates",
+                "1"
+              ]
+            },
+            "description": "templateKind and channel are immutable. Built-ins editable on subject/body. Placeholder validation against the row's pinned (kind, channel).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subject\": \"Updated subject\",\n  \"body\": \"<p>Updated body with {code} and {ttl_minutes} placeholders.</p>\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update a role (delegates to PATCH /api/v3/roles/{id})",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/master/roles/{role_id}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "master",
+                "roles",
+                ":role_id"
+              ],
+              "variable": [
+                {
+                  "key": "role_id",
+                  "value": "0",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Update a role (delegates to PATCH /api/v3/roles/{id})",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"\",\n  \"description\": \"\",\n  \"permissions\": [\n    \"\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "User-management owns three slices of /api/v3/master/*: roles, permissions, notification_templates. Other master-data slices (divisions, vendors, project_categories, activity_types, milestone_statuses, activity_statuses, project_status_transitions, resource_types) live on the monolith — call them at the monolith's port (8000), not 8001."
+    },
+    {
+      "name": "Permissions",
+      "item": [
+        {
+          "name": "Create a custom permission (DEPRECATED — use POST /api/v3/master/permissions/create)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/permissions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "permissions"
+              ]
+            },
+            "description": "Create a custom permission (DEPRECATED — use POST /api/v3/master/permissions/create)",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"\",\n  \"name\": \"\",\n  \"description\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete a permission (DEPRECATED — use DELETE /api/v3/master/permissions/{code})",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/permissions/{code}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "permissions",
+                ":code"
+              ],
+              "variable": [
+                {
+                  "key": "code",
+                  "value": "",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Delete a permission (DEPRECATED — use DELETE /api/v3/master/permissions/{code})"
+          },
+          "response": []
+        },
+        {
+          "name": "Edit name/description of a permission (DEPRECATED — use PATCH /api/v3/master/permissions/{code})",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/permissions/{code}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "permissions",
+                ":code"
+              ],
+              "variable": [
+                {
+                  "key": "code",
+                  "value": "",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Edit name/description of a permission (DEPRECATED — use PATCH /api/v3/master/permissions/{code})",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"\",\n  \"description\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get a permission row (DEPRECATED — use GET /api/v3/master/permissions/{code})",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/permissions/{code}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "permissions",
+                ":code"
+              ],
+              "variable": [
+                {
+                  "key": "code",
+                  "value": "",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Get a permission row (DEPRECATED — use GET /api/v3/master/permissions/{code})"
+          },
+          "response": []
+        },
+        {
+          "name": "List permission catalog (DEPRECATED — use GET /api/v3/master/permissions)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/permissions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "permissions"
+              ],
+              "query": [
+                {
+                  "key": "offset",
+                  "value": "1",
+                  "description": "",
+                  "disabled": true
+                },
+                {
+                  "key": "pageSize",
+                  "value": "100",
+                  "description": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "List permission catalog (DEPRECATED — use GET /api/v3/master/permissions)"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Roles",
+      "item": [
+        {
+          "name": "Create role (DEPRECATED — use POST /api/v3/master/roles/create)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/roles/create",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "roles",
+                "create"
+              ]
+            },
+            "description": "Create role (DEPRECATED — use POST /api/v3/master/roles/create)",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"\",\n  \"description\": \"\",\n  \"permissions\": [\n    \"\"\n  ],\n  \"builtin\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete role (DEPRECATED — use DELETE /api/v3/master/roles/{id})",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/roles/{role_id}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "roles",
+                ":role_id"
+              ],
+              "variable": [
+                {
+                  "key": "role_id",
+                  "value": "0",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Delete role (DEPRECATED — use DELETE /api/v3/master/roles/{id})"
+          },
+          "response": []
+        },
+        {
+          "name": "Get role (DEPRECATED — use GET /api/v3/master/roles/{id})",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/roles/{role_id}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "roles",
+                ":role_id"
+              ],
+              "variable": [
+                {
+                  "key": "role_id",
+                  "value": "0",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Get role (DEPRECATED — use GET /api/v3/master/roles/{id})"
+          },
+          "response": []
+        },
+        {
+          "name": "Grant a single permission to a role (DEPRECATED — use POST /api/v3/master/roles/{id}/permissions/{code})",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/roles/{role_id}/permissions/{code}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "roles",
+                ":role_id",
+                "permissions",
+                ":code"
+              ],
+              "variable": [
+                {
+                  "key": "role_id",
+                  "value": "0",
+                  "description": ""
+                },
+                {
+                  "key": "code",
+                  "value": "",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Grant a single permission to a role (DEPRECATED — use POST /api/v3/master/roles/{id}/permissions/{code})"
+          },
+          "response": []
+        },
+        {
+          "name": "List a role's permissions (DEPRECATED — use GET /api/v3/master/roles/{id}/permissions)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/roles/{role_id}/permissions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "roles",
+                ":role_id",
+                "permissions"
+              ],
+              "variable": [
+                {
+                  "key": "role_id",
+                  "value": "0",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "List a role's permissions (DEPRECATED — use GET /api/v3/master/roles/{id}/permissions)"
+          },
+          "response": []
+        },
+        {
+          "name": "List roles (DEPRECATED — use GET /api/v3/master/roles)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/roles",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "roles"
+              ],
+              "query": [
+                {
+                  "key": "offset",
+                  "value": "1",
+                  "description": "Page number (1-indexed)",
+                  "disabled": true
+                },
+                {
+                  "key": "pageSize",
+                  "value": "20",
+                  "description": "Items per page",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "List roles (DEPRECATED — use GET /api/v3/master/roles)"
+          },
+          "response": []
+        },
+        {
+          "name": "Replace a role's permission set (DEPRECATED — use PUT /api/v3/master/roles/{id}/permissions)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/roles/{role_id}/permissions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "roles",
+                ":role_id",
+                "permissions"
+              ],
+              "variable": [
+                {
+                  "key": "role_id",
+                  "value": "0",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Replace a role's permission set (DEPRECATED — use PUT /api/v3/master/roles/{id}/permissions)",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"permissions\": [\n    \"\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Revoke a single permission from a role (DEPRECATED — use DELETE /api/v3/master/roles/{id}/permissions/{code})",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/roles/{role_id}/permissions/{code}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "roles",
+                ":role_id",
+                "permissions",
+                ":code"
+              ],
+              "variable": [
+                {
+                  "key": "role_id",
+                  "value": "0",
+                  "description": ""
+                },
+                {
+                  "key": "code",
+                  "value": "",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Revoke a single permission from a role (DEPRECATED — use DELETE /api/v3/master/roles/{id}/permissions/{code})"
+          },
+          "response": []
+        },
+        {
+          "name": "Update role (DEPRECATED — use PATCH /api/v3/master/roles/{id})",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/roles/{role_id}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "roles",
+                ":role_id"
+              ],
+              "variable": [
+                {
+                  "key": "role_id",
+                  "value": "0",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Update role (DEPRECATED — use PATCH /api/v3/master/roles/{id})",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"\",\n  \"description\": \"\",\n  \"permissions\": [\n    \"\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Root",
+      "item": [
+        {
+          "name": "Root",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": []
+            },
+            "description": "Root endpoint.\n\nReturns:\n    API information"
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://127.0.0.1:8001",
+      "type": "string",
+      "description": "Base URL of the user-management service. Defaults to localhost for dev. Set to http://10.1.131.199:8001 for the live deploy, OR to http://10.1.131.199:8000 to go through the monolith proxy (requires USER_SERVICE_PROXY_ENABLED=true on the monolith)."
+    },
+    {
+      "key": "accessToken",
+      "value": "",
+      "type": "string",
+      "description": "Access token from POST /api/v3/users/login. Auto-set by the test script on the login request, used as Bearer {{accessToken}} on protected requests."
+    },
+    {
+      "key": "refreshToken",
+      "value": "",
+      "type": "string",
+      "description": "Refresh token from /login or /refresh."
+    },
+    {
+      "key": "ephemeralToken",
+      "value": "",
+      "type": "string",
+      "description": "Ephemeral token from /login when 2FA is required. Used in /login/send-otp + /login/verify-otp bodies."
+    },
+    {
+      "key": "userId",
+      "value": "",
+      "type": "string",
+      "description": "UUID of a user — set after creating one for follow-up calls."
+    },
+    {
+      "key": "roleId",
+      "value": "",
+      "type": "string",
+      "description": "Integer id of a role."
+    }
+  ]
+}

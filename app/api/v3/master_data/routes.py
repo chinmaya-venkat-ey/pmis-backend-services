@@ -266,7 +266,7 @@ def list_master_permissions(
 @router.get(
     "/permissions/by-module",
     dependencies=[require_permission(MASTER_DATA_VIEW)],
-    summary="List the permission catalog grouped by module (doc 33 change 2)",
+    summary="List the permission catalog grouped by module",
 )
 def list_master_permissions_by_module(
     request: Request,

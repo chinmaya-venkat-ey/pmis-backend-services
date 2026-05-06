@@ -99,7 +99,7 @@ def login(
 
 @router.post(
     "/login/send-otp",
-    summary="Send OTP for 2FA login (doc 33 change 3)",
+    summary="Send OTP for 2FA login",
     description=(
         "Generate + dispatch a 6-digit OTP for an in-progress 2FA "
         "login session. Pass the ``ephemeral_token`` returned from "
@@ -116,7 +116,7 @@ def send_otp(
 
 @router.post(
     "/login/verify-otp",
-    summary="Verify OTP and complete login (doc 33 change 3)",
+    summary="Verify OTP and complete login",
     description=(
         "Verify the OTP sent via ``/login/send-otp`` and mint the real "
         "access + refresh JWT pair. Same response shape as a "
@@ -133,7 +133,7 @@ def verify_otp(
 
 @router.post(
     "/forgot-password",
-    summary="Request a password-reset link or code (doc 33 change 3)",
+    summary="Request a password-reset link or code",
     description=(
         "Self-service password reset. Body: ``{login_or_email, channel}``. "
         "``email`` channel sends a clickable reset link; ``sms`` sends "
@@ -149,7 +149,7 @@ def forgot_password(
 
 @router.post(
     "/reset-password",
-    summary="Complete a password reset (doc 33 change 3)",
+    summary="Complete a password reset",
     description=(
         "Verify the reset token (URL token from email or 6-digit OTP "
         "from SMS) and set the new password. Tokens are single-use "

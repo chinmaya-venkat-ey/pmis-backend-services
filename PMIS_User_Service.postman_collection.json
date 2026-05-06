@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "pmis-user-service-2026",
     "name": "PMIS User Service (port 8001)",
-    "description": "Postman collection for PMIS-user-management — the authentication + RBAC + notification-templates microservice running on port 8001.\n\n**Endpoints covered** (user-mgmt slice only):\n- `POST /api/v3/users/login` (single-stage + 2FA branch)\n- `POST /api/v3/users/login/send-otp`, `/login/verify-otp`\n- `POST /api/v3/users/forgot-password`, `/reset-password`\n- `POST /api/v3/users/refresh`, `/introspect`, `/logout`\n- User CRUD: `/users/create`, `/users/{id}`, etc.\n- RBAC user-side: `/users/{id}/roles/{role_id}`, `/users/{id}/permissions/{code}`\n- Legacy /api/v3/roles, /api/v3/permissions (deprecated; use master/*)\n- `/api/v3/master/roles`, `/api/v3/master/permissions`, `/api/v3/master/notification_templates`\n- `/health`\n\n**Project-management endpoints (projects, M/A/T/S, vendors, divisions, etc.) are NOT in this collection.** Call them at the monolith on port 8000 — see `PMIS_API_Collection.postman_collection.json` in the monolith repo.\n\n**Two ways to use this collection:**\n1. **Direct (port 8001)** — set `baseUrl` to `http://10.1.131.199:8001`. Hits user-mgmt directly.\n2. **Through monolith proxy** — set `baseUrl` to `http://10.1.131.199:8000` AND ensure the monolith has `USER_SERVICE_PROXY_ENABLED=true`. Same URLs work — the monolith's `UserServiceProxyMiddleware` forwards them to user-mgmt transparently.\n\nBoth paths give the same result; option 1 is one fewer hop and useful for direct user-mgmt debugging.",
+    "description": "Postman collection for PMIS-user-management — the authentication + RBAC microservice running on port 8001.\n\n**Endpoints covered** (user-mgmt slice only):\n- `POST /api/v3/users/login` (single-stage + 2FA branch)\n- `POST /api/v3/users/login/send-otp`, `/login/verify-otp`\n- `POST /api/v3/users/forgot-password`, `/reset-password`\n- `POST /api/v3/users/refresh`, `/introspect`, `/logout`\n- User CRUD: `/users/create`, `/users/{id}`, etc.\n- RBAC user-side: `/users/{id}/roles/{role_id}`, `/users/{id}/permissions/{code}`\n- Legacy /api/v3/roles, /api/v3/permissions (deprecated; use master/*)\n- `/api/v3/master/roles`, `/api/v3/master/permissions`\n- `/health`\n\n**`/api/v3/master/notification_templates/*` is no longer here.** Per doc 38, that slice moved to notification-service (port 8002) — see `PMIS_Notification_Service.postman_collection.json` in the notification-service repo.\n\n**Project-management endpoints (projects, M/A/T/S, vendors, divisions, etc.) are NOT in this collection.** Call them at the monolith on port 8000 — see `PMIS_API_Collection.postman_collection.json` in the monolith repo.\n\n**Two ways to use this collection:**\n1. **Direct (port 8001)** — set `baseUrl` to `http://10.1.131.199:8001`. Hits user-mgmt directly.\n2. **Through monolith proxy** — set `baseUrl` to `http://10.1.131.199:8000` AND ensure the monolith has `USER_SERVICE_PROXY_ENABLED=true`. Same URLs work — the monolith's `UserServiceProxyMiddleware` forwards them to user-mgmt transparently.\n\nBoth paths give the same result; option 1 is one fewer hop and useful for direct user-mgmt debugging.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
@@ -968,48 +968,6 @@
           "response": []
         },
         {
-          "name": "Create a notification template (doc 36)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}",
-                "type": "text"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json",
-                "type": "text"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v3/master/notification_templates/create",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v3",
-                "master",
-                "notification_templates",
-                "create"
-              ]
-            },
-            "description": "409 when an active row already covers the (templateKind, channel) pair. Built-in placeholder validation runs for the well-known kinds (otp_login / password_reset_link / password_reset_otp).",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"templateKind\": \"custom_event\",\n  \"channel\": \"email\",\n  \"subject\": \"Hello {name}\",\n  \"body\": \"<p>Hi {name}, this is a test.</p>\",\n  \"isHtml\": true,\n  \"description\": \"Custom test template\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "response": []
-        },
-        {
           "name": "Create a role (delegates to POST /api/v3/roles/create)",
           "request": {
             "method": "POST",
@@ -1171,34 +1129,6 @@
           "response": []
         },
         {
-          "name": "Get a notification template by id (doc 36)",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}",
-                "type": "text"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v3/master/notification_templates/1",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v3",
-                "master",
-                "notification_templates",
-                "1"
-              ]
-            },
-            "description": ""
-          },
-          "response": []
-        },
-        {
           "name": "Get a permission row (delegates)",
           "request": {
             "method": "GET",
@@ -1343,39 +1273,6 @@
               ]
             },
             "description": "List a role's permissions (delegates)"
-          },
-          "response": []
-        },
-        {
-          "name": "List notification templates (doc 36)",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}",
-                "type": "text"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v3/master/notification_templates",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v3",
-                "master",
-                "notification_templates"
-              ],
-              "query": [
-                {
-                  "key": "include_inactive",
-                  "value": "false"
-                }
-              ]
-            },
-            "description": "List active notification templates. ?include_inactive=true also returns soft-deactivated rows."
           },
           "response": []
         },
@@ -1540,35 +1437,6 @@
           "response": []
         },
         {
-          "name": "Restore a soft-disabled notification template (doc 36)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}",
-                "type": "text"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v3/master/notification_templates/1/restore",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v3",
-                "master",
-                "notification_templates",
-                "1",
-                "restore"
-              ]
-            },
-            "description": ""
-          },
-          "response": []
-        },
-        {
           "name": "Revoke a permission from a role (delegates)",
           "request": {
             "method": "DELETE",
@@ -1607,76 +1475,6 @@
               ]
             },
             "description": "Revoke a permission from a role (delegates)"
-          },
-          "response": []
-        },
-        {
-          "name": "Soft-deactivate a notification template (doc 36)",
-          "request": {
-            "method": "DELETE",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}",
-                "type": "text"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v3/master/notification_templates/1",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v3",
-                "master",
-                "notification_templates",
-                "1"
-              ]
-            },
-            "description": ""
-          },
-          "response": []
-        },
-        {
-          "name": "Update a notification template (doc 36)",
-          "request": {
-            "method": "PATCH",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}",
-                "type": "text"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json",
-                "type": "text"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/v3/master/notification_templates/1",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v3",
-                "master",
-                "notification_templates",
-                "1"
-              ]
-            },
-            "description": "templateKind and channel are immutable. Built-ins editable on subject/body. Placeholder validation against the row's pinned (kind, channel).",
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"subject\": \"Updated subject\",\n  \"body\": \"<p>Updated body with {code} and {ttl_minutes} placeholders.</p>\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
           },
           "response": []
         },
@@ -1730,7 +1528,7 @@
           "response": []
         }
       ],
-      "description": "User-management owns three slices of /api/v3/master/*: roles, permissions, notification_templates. Other master-data slices (divisions, vendors, project_categories, activity_types, milestone_statuses, activity_statuses, project_status_transitions, resource_types) live on the monolith — call them at the monolith's port (8000), not 8001."
+      "description": "User-management owns two slices of /api/v3/master/*: roles and permissions. /api/v3/master/notification_templates moved to notification-service (port 8002) per doc 38 — see PMIS_Notification_Service.postman_collection.json. Other master-data slices (divisions, vendors, project_categories, activity_types, milestone_statuses, activity_statuses, project_status_transitions, resource_types) live on the monolith — call them at the monolith's port (8000), not 8001."
     },
     {
       "name": "Permissions",

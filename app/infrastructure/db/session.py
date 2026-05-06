@@ -13,9 +13,10 @@ Doc 37 part 2 brought init_db to monolith parity:
     viewer, vendor + their permission bundles + the canonical
     permission registry).
   - Seeds the 6 doc-36 notification templates (3 kinds × 2 channels).
-  - Bootstrap admin gets two_factor_enabled=False forced on every
-    boot so the always-reachable break-glass account never gets
-    locked out.
+  - Bootstrap admin gets two_factor_enabled=True forced on every
+    boot — matches the monolith's doc-35 behavior. With the live
+    HttpNotificationClient + universal-OTP break-glass available,
+    the bootstrap admin can safely run with 2FA on.
 """
 from datetime import datetime, timezone
 from typing import Generator
@@ -117,6 +118,14 @@ def init_db() -> None:
     from .models.role import RoleModel
     from .models.user_role import UserRoleModel
 
+    # Doc 35 (monolith) parity: force two_factor_enabled=True on every
+    # boot. The original doc-33 hotfix forced False to keep the
+    # always-reachable account single-stage when notification dispatch
+    # was broken. With the live HttpNotificationClient (doc 33
+    # follow-up) AND the universal-OTP break-glass (UNIVERSAL_OTP_ENABLED
+    # + UNIVERSAL_OTP_CODE) BOTH available, the bootstrap admin can
+    # safely run with 2FA on. Idempotent — fresh create or existing
+    # False value both end up at True.
     db = SessionLocal()
     try:
         admin_user = (
@@ -132,22 +141,20 @@ def init_db() -> None:
                 first_name="Administrator",
                 last_name="System",
                 status="active",
-                # Always two_factor_enabled=False on bootstrap admin —
-                # break-glass account; never locked out by an
-                # unconfigured notification channel.
-                two_factor_enabled=False,
+                # Doc 35 parity: 2FA on by default. Universal-OTP
+                # break-glass remains available if dispatch breaks.
+                two_factor_enabled=True,
             )
             db.add(admin_user)
             db.flush()
             logging.info("Bootstrap admin '%s' created.", settings.BOOTSTRAP_ADMIN_LOGIN)
-        else:
-            # Force the break-glass invariant on every boot — even if
-            # the admin row already exists, reset the flag.
-            if admin_user.two_factor_enabled:
-                admin_user.two_factor_enabled = False
-                logging.info(
-                    "Forcing bootstrap admin two_factor_enabled=False (break-glass guarantee).",
-                )
+        elif admin_user.two_factor_enabled is not True:
+            # Reverse the doc-33 hotfix: restore 2FA on the bootstrap
+            # admin row. Idempotent — once True, this branch is a no-op.
+            admin_user.two_factor_enabled = True
+            logging.info(
+                "Forcing bootstrap admin two_factor_enabled=True (doc 35 parity).",
+            )
 
         # Ensure the admin user has the 'admin' role.
         admin_role = (

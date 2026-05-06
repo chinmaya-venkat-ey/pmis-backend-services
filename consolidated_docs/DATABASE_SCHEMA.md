@@ -65,7 +65,7 @@ The canonical user table. UUID PK as of doc 26. Soft-delete with `deleted_at` + 
 | `division` | `VARCHAR(32) NULL` | `tmd1` / `tmd2` / `others` |
 | `division_other` | `VARCHAR(255) NULL` | Required when `division='others'` |
 | `phone_number` | `VARCHAR(50) NULL` | Required at the wire on create (doc 23) |
-| `two_factor_enabled` | `BOOLEAN NOT NULL DEFAULT TRUE` | Doc 33 change 3 — bootstrap admin forced false on every boot |
+| `two_factor_enabled` | `BOOLEAN NOT NULL DEFAULT TRUE` | Doc 33 change 3. Doc 35 parity: bootstrap admin forced `True` on every boot (universal-OTP break-glass covers misconfigured dispatch) |
 | `created_at`, `updated_at` | `UtcDateTime NOT NULL` | |
 | `deleted_at`, `deleted_by` | nullable; `deleted_by` is `VARCHAR(36) FK → users(id)` self-FK | Soft-delete |
 

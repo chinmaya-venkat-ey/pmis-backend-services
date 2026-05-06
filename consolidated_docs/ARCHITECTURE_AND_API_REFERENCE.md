@@ -240,7 +240,7 @@ Runs every boot. Idempotent. Order:
 
 1. **Alembic** — `alembic upgrade head` if `MIGRATIONS_AUTORUN=true`. In shared-DB deploys this is `false` and the monolith owns migrations.
 2. **RBAC seed** — `RbacRepository.sync_builtin_permissions()` upserts the canonical permission registry from `app/core/permissions.py` and creates the four built-in roles (admin, member, viewer, vendor) with their permission bundles.
-3. **Bootstrap admin** — creates `admin/admin123` if missing. **Always** forces `two_factor_enabled=False` on every boot so the break-glass account can't be locked out by a misconfigured notification channel. Assigns to the `admin` role.
+3. **Bootstrap admin** — creates `admin/admin123` if missing. **Always** forces `two_factor_enabled=True` on every boot (doc 35 monolith parity). The universal-OTP break-glass (`UNIVERSAL_OTP_ENABLED=true` + `UNIVERSAL_OTP_CODE`) covers the case where notification dispatch is broken, so the admin can safely run with 2FA on. Assigns to the `admin` role.
 4. **Notification templates** — seeds 6 built-in rows (`otp_login` / `password_reset_link` / `password_reset_otp` × email + sms) if missing. Subsequent edits via the master endpoint are preserved on re-seed.
 
 ### Health check

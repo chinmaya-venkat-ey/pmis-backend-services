@@ -99,8 +99,9 @@ class Settings(BaseSettings):
         default=True,
         description=(
             "Global 2FA toggle. Per-user override via "
-            "users.two_factor_enabled. Bootstrap admin is forced "
-            "two_factor_enabled=False on every boot."
+            "users.two_factor_enabled. Doc 35 parity: bootstrap admin "
+            "is forced two_factor_enabled=True on every boot — the "
+            "universal-OTP break-glass covers misconfigured dispatch."
         ),
     )
     OTP_TTL_SECONDS: int = 300

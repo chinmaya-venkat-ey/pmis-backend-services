@@ -158,7 +158,7 @@ MIGRATIONS_AUTORUN=false  # in user-mgmt; monolith runs alembic
 On boot, `init_db` in this service:
 1. Skips alembic (`MIGRATIONS_AUTORUN=false`).
 2. Runs `RbacRepository.sync_builtin_permissions()` to upsert the permission registry + 4 built-in roles.
-3. Creates the bootstrap admin if missing; forces `two_factor_enabled=False` on it every boot (break-glass).
+3. Creates the bootstrap admin if missing; forces `two_factor_enabled=True` on it every boot (doc 35 monolith parity — universal-OTP break-glass covers misconfigured notification channels).
 4. Seeds 6 built-in notification templates if missing.
 
 All steps are idempotent.

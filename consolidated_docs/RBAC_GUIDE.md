@@ -118,7 +118,7 @@ Baked into the service layer (not into route decorators) so they fire regardless
 
 Goal: `admin` is always reachable. Even an admin with `rbac:assign` can't paint themselves into a corner.
 
-The bootstrap admin is also forced `two_factor_enabled=False` on every boot — break-glass guarantee — so a misconfigured notification channel can never lock it out.
+The bootstrap admin is forced `two_factor_enabled=True` on every boot (doc 35 monolith parity). If notification dispatch is misconfigured, the universal-OTP break-glass (`UNIVERSAL_OTP_ENABLED=true` + `UNIVERSAL_OTP_CODE`) provides reachability without disabling 2FA.
 
 ---
 

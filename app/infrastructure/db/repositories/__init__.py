@@ -13,6 +13,7 @@ from .project_repository import ProjectRepository  # noqa: F401
 from .project_status_transition_repository import (  # noqa: F401
     ProjectStatusTransitionRepository,
 )
+from .rbac_repository import RbacRepository  # noqa: F401
 from .resource_type_repository import ResourceTypeRepository  # noqa: F401
 from .revoked_token_repository import RevokedTokenRepository  # noqa: F401
 from .subtask_repository import SubtaskRepository  # noqa: F401
@@ -28,6 +29,7 @@ __all__ = [
     "ProjectAuditLogRepository",
     "ProjectRepository",
     "ProjectStatusTransitionRepository",
+    "RbacRepository",
     "ResourceTypeRepository",
     "RevokedTokenRepository",
     "SubtaskRepository",

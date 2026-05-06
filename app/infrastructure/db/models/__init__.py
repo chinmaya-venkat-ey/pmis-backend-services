@@ -19,6 +19,14 @@ from .activity_resource import ActivityResourceModel  # noqa: F401
 from .activity_status import ActivityStatusModel  # noqa: F401
 from .activity_type import ActivityTypeModel  # noqa: F401
 from .comment import CommentModel  # noqa: F401
+# Doc-21B RBAC tables — owned by user-service. project-service registers
+# these as read-only models so the auth middleware can query effective
+# permissions on each authenticated request.
+from .permission import PermissionModel  # noqa: F401
+from .role import RoleModel  # noqa: F401
+from .role_permission import RolePermissionModel  # noqa: F401
+from .user_role import UserRoleModel  # noqa: F401
+from .user_permission import UserPermissionModel  # noqa: F401
 from .division import DivisionModel  # noqa: F401
 from .milestone import MilestoneModel  # noqa: F401
 from .milestone_dependency import MilestoneDependencyModel  # noqa: F401
@@ -53,6 +61,7 @@ __all__ = [
     "MilestoneModel",
     "MilestoneStatusModel",
     "MilestoneVendorModel",
+    "PermissionModel",
     "ProjectAuditLogModel",
     "ProjectCategoryModel",
     "ProjectMemberModel",
@@ -61,6 +70,8 @@ __all__ = [
     "ProjectVendorModel",
     "ResourceTypeModel",
     "RevokedTokenModel",
+    "RoleModel",
+    "RolePermissionModel",
     "SubtaskDependencyModel",
     "SubtaskModel",
     "SubtaskResourceModel",
@@ -68,5 +79,7 @@ __all__ = [
     "TaskModel",
     "TaskResourceModel",
     "UserModel",
+    "UserPermissionModel",
+    "UserRoleModel",
     "VendorModel",
 ]

@@ -256,10 +256,24 @@ def update_activity(
     # for any non-None input; we keep the service-layer guard so direct
     # callers (CLI, internal scripts) can't bypass the choices.
     status_supplied = status is not None
-    if status_supplied and status not in ACTIVITY_STATUS_CHOICES:
-        raise ValidationError(
-            f"Activity status must be one of: {', '.join(ACTIVITY_STATUS_CHOICES)}."
+    if status_supplied:
+        # Doc 37 part 1: catalog-first; fallback to in-code tuple.
+        from .....infrastructure.db.models.activity_status import (
+            ActivityStatusModel,
         )
+        from .....shared.static_catalog import active_codes, is_known_code
+        if not is_known_code(
+            db, status,
+            model=ActivityStatusModel,
+            fallback=ACTIVITY_STATUS_CHOICES,
+        ):
+            valid = sorted(active_codes(
+                db, model=ActivityStatusModel,
+                fallback=ACTIVITY_STATUS_CHOICES,
+            ))
+            raise ValidationError(
+                f"Activity status must be one of: {', '.join(valid)}."
+            )
 
     # Status-completion gate. Only run when the caller is explicitly trying
     # to set status to 'completed'.

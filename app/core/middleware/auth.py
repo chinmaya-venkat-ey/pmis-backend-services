@@ -81,6 +81,10 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
                         request.state.token_exp = None
 
                 # Hydrate permissions from JWT role claim via static map.
+                # Tokens are minted by user-service (post doc 37 part 2),
+                # which always includes `role` + `is_admin` in claims.
+                # Monolith forwards user/auth requests to user-service via
+                # the proxy when USER_SERVICE_PROXY_ENABLED=true.
                 role_value = payload.get("role")
                 is_admin = bool(payload.get("is_admin"))
                 request.state.user_role = role_value

@@ -121,10 +121,24 @@ def update_milestone(
         parent_label="project",
     )
 
-    if status is not None and status not in MILESTONE_STATUS_CHOICES:
-        raise ValidationError(
-            f"Milestone status must be one of: {', '.join(MILESTONE_STATUS_CHOICES)}."
+    if status is not None:
+        # Doc 37 part 1: catalog-first; fallback to in-code tuple.
+        from .....infrastructure.db.models.milestone_status import (
+            MilestoneStatusModel,
         )
+        from .....shared.static_catalog import active_codes, is_known_code
+        if not is_known_code(
+            db, status,
+            model=MilestoneStatusModel,
+            fallback=MILESTONE_STATUS_CHOICES,
+        ):
+            valid = sorted(active_codes(
+                db, model=MilestoneStatusModel,
+                fallback=MILESTONE_STATUS_CHOICES,
+            ))
+            raise ValidationError(
+                f"Milestone status must be one of: {', '.join(valid)}."
+            )
 
     # Doc 31 (rule 2c): status-completion gate. Run before any dep-date
     # work below — if the caller is trying to mark this completed but a

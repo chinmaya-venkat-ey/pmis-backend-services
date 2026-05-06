@@ -169,3 +169,89 @@ class ResourceTypeUpdateRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
     name: Optional[str] = Field(None, min_length=1, max_length=255)
 
+
+# ---------------------------------------------------------------------------
+# Doc 37 part 1 — static-data master schemas
+# ---------------------------------------------------------------------------
+#
+# Four catalogs (project_categories, activity_types, milestone_statuses,
+# activity_statuses). Same CRUD shape, minor field-set differences:
+# project_categories carries a ``requiresOther`` flag (mirrors
+# divisions); milestone/activity statuses carry an ``isTerminal`` flag.
+# Activity types have neither.
+
+class _CatalogCreateBase(BaseModel):
+    """Shared shape for the four doc-37-part-1 catalog create requests."""
+    model_config = ConfigDict(populate_by_name=True)
+
+    code: str = Field(
+        ..., min_length=1, max_length=50,
+        description=(
+            "Wire identifier; lowercase recommended for status/type "
+            "rows, mixed case allowed for project_categories where "
+            "MSAP/MSIP/BSP follow upstream conventions. Unique."
+        ),
+    )
+    label: str = Field(..., min_length=1, max_length=255)
+    description: Optional[str] = Field(None, max_length=500)
+    active: bool = Field(True)
+
+
+class _CatalogUpdateBase(BaseModel):
+    """Shared PATCH shape — only label / description / active editable.
+
+    ``code`` is NEVER updatable: it's the wire identifier referenced by
+    every record using this category / type / status. Renames go
+    through soft-deactivate + create-new.
+    """
+    model_config = ConfigDict(populate_by_name=True)
+
+    label: Optional[str] = Field(None, min_length=1, max_length=255)
+    description: Optional[str] = Field(None, max_length=500)
+    active: Optional[bool] = None
+
+
+class ProjectCategoryCreateRequest(_CatalogCreateBase):
+    requires_other: bool = Field(
+        False, alias="requiresOther",
+        description=(
+            "True only on rows that prompt the FE to show "
+            "categoryOther + categoryOtherReason follow-up inputs. "
+            "Mirrors the divisions pattern."
+        ),
+    )
+
+
+class ProjectCategoryUpdateRequest(_CatalogUpdateBase):
+    requires_other: Optional[bool] = Field(None, alias="requiresOther")
+
+
+class ActivityTypeCreateRequest(_CatalogCreateBase):
+    pass
+
+
+class ActivityTypeUpdateRequest(_CatalogUpdateBase):
+    pass
+
+
+class MilestoneStatusCreateRequest(_CatalogCreateBase):
+    is_terminal: bool = Field(
+        False, alias="isTerminal",
+        description=(
+            "Terminal status — rows that satisfy the dependency-"
+            "completion gate. Today only 'completed' is terminal."
+        ),
+    )
+
+
+class MilestoneStatusUpdateRequest(_CatalogUpdateBase):
+    is_terminal: Optional[bool] = Field(None, alias="isTerminal")
+
+
+class ActivityStatusCreateRequest(_CatalogCreateBase):
+    is_terminal: bool = Field(False, alias="isTerminal")
+
+
+class ActivityStatusUpdateRequest(_CatalogUpdateBase):
+    is_terminal: Optional[bool] = Field(None, alias="isTerminal")
+

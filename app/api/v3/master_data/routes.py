@@ -60,8 +60,16 @@ from ..vendors.schemas import VendorCreateRequest, VendorUpdateRequest
 # not duplicate it.
 
 from .schemas import (
+    ActivityStatusCreateRequest,
+    ActivityStatusUpdateRequest,
+    ActivityTypeCreateRequest,
+    ActivityTypeUpdateRequest,
     DivisionCreateRequest,
     DivisionUpdateRequest,
+    MilestoneStatusCreateRequest,
+    MilestoneStatusUpdateRequest,
+    ProjectCategoryCreateRequest,
+    ProjectCategoryUpdateRequest,
     ProjectStatusTransitionCreateRequest,
     ProjectStatusTransitionUpdateRequest,
     ResourceTypeCreateRequest,
@@ -618,3 +626,656 @@ def list_master_vendor_projects(
         _vendor_list_projects(request=request, vendor_id=vendor_id, db=db),
     )
 
+
+# ---------------------------------------------------------------------------
+# Doc 37 part 1 — static-data master endpoints.
+#
+# Four small catalogs (project_categories, activity_types,
+# milestone_statuses, activity_statuses). Each has the same 6-endpoint
+# shape: list / get / create / patch / delete (soft) / restore. We
+# build them via the helpers below to avoid 24 near-duplicate
+# functions. ``code`` is the public identifier (matches the divisions
+# precedent — referenced from the main domain tables).
+# ---------------------------------------------------------------------------
+
+from ....infrastructure.db.models.activity_status import ActivityStatusModel
+from ....infrastructure.db.models.activity_type import ActivityTypeModel
+from ....infrastructure.db.models.milestone_status import MilestoneStatusModel
+from ....infrastructure.db.models.project_category import ProjectCategoryModel
+
+
+def _project_category_to_response(row) -> Dict[str, Any]:
+    return {
+        "_type": "ProjectCategory",
+        "id": row.id,
+        "code": row.code,
+        "label": row.label,
+        "isBuiltin": bool(row.is_builtin),
+        "requiresOther": bool(row.requires_other),
+        "active": bool(row.active),
+        "description": row.description,
+    }
+
+
+def _activity_type_to_response(row) -> Dict[str, Any]:
+    return {
+        "_type": "ActivityType",
+        "id": row.id,
+        "code": row.code,
+        "label": row.label,
+        "isBuiltin": bool(row.is_builtin),
+        "active": bool(row.active),
+        "description": row.description,
+    }
+
+
+def _milestone_status_to_response(row) -> Dict[str, Any]:
+    return {
+        "_type": "MilestoneStatus",
+        "id": row.id,
+        "code": row.code,
+        "label": row.label,
+        "isBuiltin": bool(row.is_builtin),
+        "isTerminal": bool(row.is_terminal),
+        "active": bool(row.active),
+        "description": row.description,
+    }
+
+
+def _activity_status_to_response(row) -> Dict[str, Any]:
+    return {
+        "_type": "ActivityStatus",
+        "id": row.id,
+        "code": row.code,
+        "label": row.label,
+        "isBuiltin": bool(row.is_builtin),
+        "isTerminal": bool(row.is_terminal),
+        "active": bool(row.active),
+        "description": row.description,
+    }
+
+
+def _list_catalog(
+    request: Request,
+    db: Session,
+    *,
+    model,
+    projector,
+    self_href: str,
+    include_inactive: bool,
+) -> JSONResponse:
+    q = db.query(model)
+    if not include_inactive:
+        q = q.filter(model.active.is_(True))
+    rows = q.order_by(
+        model.is_builtin.desc(),
+        model.id.asc(),
+    ).all()
+    items = [projector(r) for r in rows]
+    return BaseController.ok(data=_collection(items, self_href))
+
+
+def _get_catalog_by_code(
+    db: Session, *, model, projector, code: str, kind: str,
+) -> JSONResponse:
+    row = db.query(model).filter(model.code == code).first()
+    if row is None:
+        raise NotFoundError(f"No {kind} with code '{code}'.")
+    return BaseController.ok(data=projector(row))
+
+
+def _create_catalog_row(
+    db: Session, *, model, projector, kind: str, payload: Dict[str, Any],
+) -> JSONResponse:
+    code = (payload.get("code") or "").strip()
+    if not code:
+        raise ValidationError("'code' is required.")
+    existing = db.query(model).filter(model.code == code).first()
+    if existing is not None:
+        raise AlreadyExistsError(
+            f"A {kind} with code '{code}' already exists "
+            f"(active={existing.active}).",
+        )
+    row = model(
+        code=code,
+        label=(payload.get("label") or "").strip(),
+        is_builtin=False,
+        active=bool(payload.get("active", True)),
+        description=payload.get("description"),
+    )
+    if hasattr(model, "requires_other"):
+        row.requires_other = bool(payload.get("requires_other", False))
+    if hasattr(model, "is_terminal"):
+        row.is_terminal = bool(payload.get("is_terminal", False))
+    db.add(row)
+    db.flush()
+    db.commit()
+    return BaseController.created(data=projector(row))
+
+
+def _update_catalog_row(
+    db: Session,
+    *,
+    model,
+    projector,
+    kind: str,
+    code: str,
+    payload: Dict[str, Any],
+) -> JSONResponse:
+    row = db.query(model).filter(model.code == code).first()
+    if row is None:
+        raise NotFoundError(f"No {kind} with code '{code}'.")
+    if row.is_builtin:
+        if (
+            hasattr(model, "requires_other")
+            and payload.get("requires_other") is not None
+        ):
+            raise AuthorizationError(
+                f"Built-in {kind} '{row.code}' cannot have its "
+                f"requiresOther flag changed.",
+            )
+        if (
+            hasattr(model, "is_terminal")
+            and payload.get("is_terminal") is not None
+        ):
+            raise AuthorizationError(
+                f"Built-in {kind} '{row.code}' cannot have its "
+                f"isTerminal flag changed.",
+            )
+    if payload.get("label") is not None:
+        row.label = payload["label"].strip()
+    if payload.get("description") is not None:
+        row.description = payload["description"]
+    if payload.get("active") is not None:
+        row.active = bool(payload["active"])
+    if (
+        hasattr(model, "requires_other")
+        and payload.get("requires_other") is not None
+    ):
+        row.requires_other = bool(payload["requires_other"])
+    if hasattr(model, "is_terminal") and payload.get("is_terminal") is not None:
+        row.is_terminal = bool(payload["is_terminal"])
+    db.flush()
+    db.commit()
+    return BaseController.ok(data=projector(row))
+
+
+def _set_active_catalog_row(
+    db: Session,
+    *,
+    model,
+    projector,
+    kind: str,
+    code: str,
+    active: bool,
+    refuse_builtin_delete: bool = True,
+) -> JSONResponse:
+    row = db.query(model).filter(model.code == code).first()
+    if row is None:
+        raise NotFoundError(f"No {kind} with code '{code}'.")
+    if row.is_builtin and refuse_builtin_delete and not active:
+        raise AuthorizationError(
+            f"Built-in {kind} '{row.code}' cannot be deactivated.",
+        )
+    row.active = bool(active)
+    db.flush()
+    db.commit()
+    return BaseController.ok(data=projector(row))
+
+
+# ---------- project_categories ----------
+
+@router.get(
+    "/project_categories",
+    dependencies=[require_permission(Permission.MASTER_DATA_VIEW)],
+    summary="List project categories (admin view shows soft-disabled rows too)",
+)
+def list_master_project_categories(
+    request: Request,
+    include_inactive: bool = False,
+    db: Session = Depends(get_db),
+) -> JSONResponse:
+    return _list_catalog(
+        request, db,
+        model=ProjectCategoryModel,
+        projector=_project_category_to_response,
+        self_href="/api/v3/master/project_categories",
+        include_inactive=include_inactive,
+    )
+
+
+@router.get(
+    "/project_categories/{code}",
+    dependencies=[require_permission(Permission.MASTER_DATA_VIEW)],
+    summary="Get a project category by code",
+)
+def get_master_project_category(
+    request: Request, code: str, db: Session = Depends(get_db),
+) -> JSONResponse:
+    return _get_catalog_by_code(
+        db, model=ProjectCategoryModel,
+        projector=_project_category_to_response,
+        code=code, kind="project_category",
+    )
+
+
+@router.post(
+    "/project_categories/create",
+    dependencies=[require_permission(Permission.MASTER_DATA_MANAGE)],
+    summary="Create a project category (admin)",
+    status_code=201,
+)
+def create_master_project_category(
+    request: Request,
+    data: ProjectCategoryCreateRequest,
+    db: Session = Depends(get_db),
+) -> JSONResponse:
+    return _create_catalog_row(
+        db, model=ProjectCategoryModel,
+        projector=_project_category_to_response,
+        kind="project_category",
+        payload={
+            "code": data.code,
+            "label": data.label,
+            "description": data.description,
+            "active": data.active,
+            "requires_other": data.requires_other,
+        },
+    )
+
+
+@router.patch(
+    "/project_categories/{code}",
+    dependencies=[require_permission(Permission.MASTER_DATA_MANAGE)],
+    summary="Update a project category (admin)",
+)
+def update_master_project_category(
+    request: Request,
+    code: str,
+    data: ProjectCategoryUpdateRequest,
+    db: Session = Depends(get_db),
+) -> JSONResponse:
+    return _update_catalog_row(
+        db, model=ProjectCategoryModel,
+        projector=_project_category_to_response,
+        kind="project_category", code=code,
+        payload={
+            "label": data.label,
+            "description": data.description,
+            "active": data.active,
+            "requires_other": data.requires_other,
+        },
+    )
+
+
+@router.delete(
+    "/project_categories/{code}",
+    dependencies=[require_permission(Permission.MASTER_DATA_MANAGE)],
+    summary="Soft-deactivate a project category (admin)",
+)
+def delete_master_project_category(
+    request: Request, code: str, db: Session = Depends(get_db),
+) -> JSONResponse:
+    return _set_active_catalog_row(
+        db, model=ProjectCategoryModel,
+        projector=_project_category_to_response,
+        kind="project_category", code=code, active=False,
+    )
+
+
+@router.post(
+    "/project_categories/{code}/restore",
+    dependencies=[require_permission(Permission.MASTER_DATA_MANAGE)],
+    summary="Restore a soft-disabled project category (admin)",
+)
+def restore_master_project_category(
+    request: Request, code: str, db: Session = Depends(get_db),
+) -> JSONResponse:
+    return _set_active_catalog_row(
+        db, model=ProjectCategoryModel,
+        projector=_project_category_to_response,
+        kind="project_category", code=code, active=True,
+    )
+
+
+# ---------- activity_types ----------
+
+@router.get(
+    "/activity_types",
+    dependencies=[require_permission(Permission.MASTER_DATA_VIEW)],
+    summary="List activity types",
+)
+def list_master_activity_types(
+    request: Request,
+    include_inactive: bool = False,
+    db: Session = Depends(get_db),
+) -> JSONResponse:
+    return _list_catalog(
+        request, db,
+        model=ActivityTypeModel,
+        projector=_activity_type_to_response,
+        self_href="/api/v3/master/activity_types",
+        include_inactive=include_inactive,
+    )
+
+
+@router.get(
+    "/activity_types/{code}",
+    dependencies=[require_permission(Permission.MASTER_DATA_VIEW)],
+    summary="Get an activity type by code",
+)
+def get_master_activity_type(
+    request: Request, code: str, db: Session = Depends(get_db),
+) -> JSONResponse:
+    return _get_catalog_by_code(
+        db, model=ActivityTypeModel,
+        projector=_activity_type_to_response,
+        code=code, kind="activity_type",
+    )
+
+
+@router.post(
+    "/activity_types/create",
+    dependencies=[require_permission(Permission.MASTER_DATA_MANAGE)],
+    summary="Create an activity type (admin)",
+    status_code=201,
+)
+def create_master_activity_type(
+    request: Request,
+    data: ActivityTypeCreateRequest,
+    db: Session = Depends(get_db),
+) -> JSONResponse:
+    return _create_catalog_row(
+        db, model=ActivityTypeModel,
+        projector=_activity_type_to_response,
+        kind="activity_type",
+        payload={
+            "code": data.code,
+            "label": data.label,
+            "description": data.description,
+            "active": data.active,
+        },
+    )
+
+
+@router.patch(
+    "/activity_types/{code}",
+    dependencies=[require_permission(Permission.MASTER_DATA_MANAGE)],
+    summary="Update an activity type (admin)",
+)
+def update_master_activity_type(
+    request: Request,
+    code: str,
+    data: ActivityTypeUpdateRequest,
+    db: Session = Depends(get_db),
+) -> JSONResponse:
+    return _update_catalog_row(
+        db, model=ActivityTypeModel,
+        projector=_activity_type_to_response,
+        kind="activity_type", code=code,
+        payload={
+            "label": data.label,
+            "description": data.description,
+            "active": data.active,
+        },
+    )
+
+
+@router.delete(
+    "/activity_types/{code}",
+    dependencies=[require_permission(Permission.MASTER_DATA_MANAGE)],
+    summary="Soft-deactivate an activity type (admin)",
+)
+def delete_master_activity_type(
+    request: Request, code: str, db: Session = Depends(get_db),
+) -> JSONResponse:
+    return _set_active_catalog_row(
+        db, model=ActivityTypeModel,
+        projector=_activity_type_to_response,
+        kind="activity_type", code=code, active=False,
+    )
+
+
+@router.post(
+    "/activity_types/{code}/restore",
+    dependencies=[require_permission(Permission.MASTER_DATA_MANAGE)],
+    summary="Restore a soft-disabled activity type (admin)",
+)
+def restore_master_activity_type(
+    request: Request, code: str, db: Session = Depends(get_db),
+) -> JSONResponse:
+    return _set_active_catalog_row(
+        db, model=ActivityTypeModel,
+        projector=_activity_type_to_response,
+        kind="activity_type", code=code, active=True,
+    )
+
+
+# ---------- milestone_statuses ----------
+
+@router.get(
+    "/milestone_statuses",
+    dependencies=[require_permission(Permission.MASTER_DATA_VIEW)],
+    summary="List milestone statuses",
+)
+def list_master_milestone_statuses(
+    request: Request,
+    include_inactive: bool = False,
+    db: Session = Depends(get_db),
+) -> JSONResponse:
+    return _list_catalog(
+        request, db,
+        model=MilestoneStatusModel,
+        projector=_milestone_status_to_response,
+        self_href="/api/v3/master/milestone_statuses",
+        include_inactive=include_inactive,
+    )
+
+
+@router.get(
+    "/milestone_statuses/{code}",
+    dependencies=[require_permission(Permission.MASTER_DATA_VIEW)],
+    summary="Get a milestone status by code",
+)
+def get_master_milestone_status(
+    request: Request, code: str, db: Session = Depends(get_db),
+) -> JSONResponse:
+    return _get_catalog_by_code(
+        db, model=MilestoneStatusModel,
+        projector=_milestone_status_to_response,
+        code=code, kind="milestone_status",
+    )
+
+
+@router.post(
+    "/milestone_statuses/create",
+    dependencies=[require_permission(Permission.MASTER_DATA_MANAGE)],
+    summary="Create a milestone status (admin)",
+    status_code=201,
+)
+def create_master_milestone_status(
+    request: Request,
+    data: MilestoneStatusCreateRequest,
+    db: Session = Depends(get_db),
+) -> JSONResponse:
+    return _create_catalog_row(
+        db, model=MilestoneStatusModel,
+        projector=_milestone_status_to_response,
+        kind="milestone_status",
+        payload={
+            "code": data.code,
+            "label": data.label,
+            "description": data.description,
+            "active": data.active,
+            "is_terminal": data.is_terminal,
+        },
+    )
+
+
+@router.patch(
+    "/milestone_statuses/{code}",
+    dependencies=[require_permission(Permission.MASTER_DATA_MANAGE)],
+    summary="Update a milestone status (admin)",
+)
+def update_master_milestone_status(
+    request: Request,
+    code: str,
+    data: MilestoneStatusUpdateRequest,
+    db: Session = Depends(get_db),
+) -> JSONResponse:
+    return _update_catalog_row(
+        db, model=MilestoneStatusModel,
+        projector=_milestone_status_to_response,
+        kind="milestone_status", code=code,
+        payload={
+            "label": data.label,
+            "description": data.description,
+            "active": data.active,
+            "is_terminal": data.is_terminal,
+        },
+    )
+
+
+@router.delete(
+    "/milestone_statuses/{code}",
+    dependencies=[require_permission(Permission.MASTER_DATA_MANAGE)],
+    summary="Soft-deactivate a milestone status (admin)",
+)
+def delete_master_milestone_status(
+    request: Request, code: str, db: Session = Depends(get_db),
+) -> JSONResponse:
+    return _set_active_catalog_row(
+        db, model=MilestoneStatusModel,
+        projector=_milestone_status_to_response,
+        kind="milestone_status", code=code, active=False,
+    )
+
+
+@router.post(
+    "/milestone_statuses/{code}/restore",
+    dependencies=[require_permission(Permission.MASTER_DATA_MANAGE)],
+    summary="Restore a soft-disabled milestone status (admin)",
+)
+def restore_master_milestone_status(
+    request: Request, code: str, db: Session = Depends(get_db),
+) -> JSONResponse:
+    return _set_active_catalog_row(
+        db, model=MilestoneStatusModel,
+        projector=_milestone_status_to_response,
+        kind="milestone_status", code=code, active=True,
+    )
+
+
+# ---------- activity_statuses ----------
+
+@router.get(
+    "/activity_statuses",
+    dependencies=[require_permission(Permission.MASTER_DATA_VIEW)],
+    summary="List activity statuses",
+)
+def list_master_activity_statuses(
+    request: Request,
+    include_inactive: bool = False,
+    db: Session = Depends(get_db),
+) -> JSONResponse:
+    return _list_catalog(
+        request, db,
+        model=ActivityStatusModel,
+        projector=_activity_status_to_response,
+        self_href="/api/v3/master/activity_statuses",
+        include_inactive=include_inactive,
+    )
+
+
+@router.get(
+    "/activity_statuses/{code}",
+    dependencies=[require_permission(Permission.MASTER_DATA_VIEW)],
+    summary="Get an activity status by code",
+)
+def get_master_activity_status(
+    request: Request, code: str, db: Session = Depends(get_db),
+) -> JSONResponse:
+    return _get_catalog_by_code(
+        db, model=ActivityStatusModel,
+        projector=_activity_status_to_response,
+        code=code, kind="activity_status",
+    )
+
+
+@router.post(
+    "/activity_statuses/create",
+    dependencies=[require_permission(Permission.MASTER_DATA_MANAGE)],
+    summary="Create an activity status (admin)",
+    status_code=201,
+)
+def create_master_activity_status(
+    request: Request,
+    data: ActivityStatusCreateRequest,
+    db: Session = Depends(get_db),
+) -> JSONResponse:
+    return _create_catalog_row(
+        db, model=ActivityStatusModel,
+        projector=_activity_status_to_response,
+        kind="activity_status",
+        payload={
+            "code": data.code,
+            "label": data.label,
+            "description": data.description,
+            "active": data.active,
+            "is_terminal": data.is_terminal,
+        },
+    )
+
+
+@router.patch(
+    "/activity_statuses/{code}",
+    dependencies=[require_permission(Permission.MASTER_DATA_MANAGE)],
+    summary="Update an activity status (admin)",
+)
+def update_master_activity_status(
+    request: Request,
+    code: str,
+    data: ActivityStatusUpdateRequest,
+    db: Session = Depends(get_db),
+) -> JSONResponse:
+    return _update_catalog_row(
+        db, model=ActivityStatusModel,
+        projector=_activity_status_to_response,
+        kind="activity_status", code=code,
+        payload={
+            "label": data.label,
+            "description": data.description,
+            "active": data.active,
+            "is_terminal": data.is_terminal,
+        },
+    )
+
+
+@router.delete(
+    "/activity_statuses/{code}",
+    dependencies=[require_permission(Permission.MASTER_DATA_MANAGE)],
+    summary="Soft-deactivate an activity status (admin)",
+)
+def delete_master_activity_status(
+    request: Request, code: str, db: Session = Depends(get_db),
+) -> JSONResponse:
+    return _set_active_catalog_row(
+        db, model=ActivityStatusModel,
+        projector=_activity_status_to_response,
+        kind="activity_status", code=code, active=False,
+    )
+
+
+@router.post(
+    "/activity_statuses/{code}/restore",
+    dependencies=[require_permission(Permission.MASTER_DATA_MANAGE)],
+    summary="Restore a soft-disabled activity status (admin)",
+)
+def restore_master_activity_status(
+    request: Request, code: str, db: Session = Depends(get_db),
+) -> JSONResponse:
+    return _set_active_catalog_row(
+        db, model=ActivityStatusModel,
+        projector=_activity_status_to_response,
+        kind="activity_status", code=code, active=True,
+    )

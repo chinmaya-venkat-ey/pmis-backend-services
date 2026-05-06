@@ -116,9 +116,19 @@ def create_activity(
     # re-validate here so a future direct-service caller (CLI, internal
     # script) can't bypass the choices.
     resolved_status: str = status or ACTIVITY_STATUS_DEFAULT
-    if resolved_status not in ACTIVITY_STATUS_CHOICES:
+    # Doc 37 part 1: catalog-first; fallback to in-code tuple.
+    from .....infrastructure.db.models.activity_status import ActivityStatusModel
+    from .....shared.static_catalog import active_codes, is_known_code
+    if not is_known_code(
+        db, resolved_status,
+        model=ActivityStatusModel,
+        fallback=ACTIVITY_STATUS_CHOICES,
+    ):
+        valid = sorted(active_codes(
+            db, model=ActivityStatusModel, fallback=ACTIVITY_STATUS_CHOICES,
+        ))
         raise ValidationError(
-            f"Activity status must be one of: {', '.join(ACTIVITY_STATUS_CHOICES)}."
+            f"Activity status must be one of: {', '.join(valid)}."
         )
 
     # Validate dependsOn targets BEFORE creating the row, so we don't leave

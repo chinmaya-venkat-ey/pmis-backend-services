@@ -189,11 +189,21 @@ def update_project(
         eff_other = supplied.get("category_other", project.category_other)
         eff_reason = supplied.get("category_other_reason", project.category_other_reason)
 
-        if eff_category is not None and eff_category not in PROJECT_CATEGORY_CHOICES:
-            return ServiceResult.fail(
-                error=f"Invalid category '{eff_category}'.",
-                error_type="validation_error",
+        # Doc 37 part 1: catalog-first; fallback to in-code tuple.
+        if eff_category is not None:
+            from .....infrastructure.db.models.project_category import (
+                ProjectCategoryModel,
             )
+            from .....shared.static_catalog import is_known_code
+            if not is_known_code(
+                db, eff_category,
+                model=ProjectCategoryModel,
+                fallback=PROJECT_CATEGORY_CHOICES,
+            ):
+                return ServiceResult.fail(
+                    error=f"Invalid category '{eff_category}'.",
+                    error_type="validation_error",
+                )
 
         if eff_category == CATEGORY_OTHERS:
             normalised_other = normalize_string(eff_other) if eff_other else ""

@@ -16,13 +16,17 @@ are FK targets used by queries here. project-service never writes them.
 from .activity import ActivityModel  # noqa: F401
 from .activity_dependency import ActivityDependencyModel  # noqa: F401
 from .activity_resource import ActivityResourceModel  # noqa: F401
+from .activity_status import ActivityStatusModel  # noqa: F401
+from .activity_type import ActivityTypeModel  # noqa: F401
 from .comment import CommentModel  # noqa: F401
 from .division import DivisionModel  # noqa: F401
 from .milestone import MilestoneModel  # noqa: F401
 from .milestone_dependency import MilestoneDependencyModel  # noqa: F401
+from .milestone_status import MilestoneStatusModel  # noqa: F401
 from .milestone_vendor import MilestoneVendorModel  # noqa: F401
 from .project import ProjectModel  # noqa: F401
 from .project_audit_log import ProjectAuditLogModel  # noqa: F401
+from .project_category import ProjectCategoryModel  # noqa: F401
 from .project_member import ProjectMemberModel  # noqa: F401
 from .project_status_transition import ProjectStatusTransitionModel  # noqa: F401
 from .project_vendor import ProjectVendorModel  # noqa: F401
@@ -41,12 +45,16 @@ __all__ = [
     "ActivityDependencyModel",
     "ActivityModel",
     "ActivityResourceModel",
+    "ActivityStatusModel",
+    "ActivityTypeModel",
     "CommentModel",
     "DivisionModel",
     "MilestoneDependencyModel",
     "MilestoneModel",
+    "MilestoneStatusModel",
     "MilestoneVendorModel",
     "ProjectAuditLogModel",
+    "ProjectCategoryModel",
     "ProjectMemberModel",
     "ProjectModel",
     "ProjectStatusTransitionModel",

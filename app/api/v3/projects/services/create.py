@@ -85,11 +85,23 @@ def create_project(
             error_type="invalid_status",
         )
 
-    if category is not None and category not in PROJECT_CATEGORY_CHOICES:
-        return ServiceResult.fail(
-            error=f"Invalid category '{category}'.",
-            error_type="validation_error",
+    # Doc 37 part 1: catalog-first membership check, fallback to the
+    # in-code tuple when the catalog has no rows (covers tests on a
+    # fresh in-memory DB before init_db has seeded the table).
+    if category is not None:
+        from .....infrastructure.db.models.project_category import (
+            ProjectCategoryModel,
         )
+        from .....shared.static_catalog import is_known_code
+        if not is_known_code(
+            db, category,
+            model=ProjectCategoryModel,
+            fallback=PROJECT_CATEGORY_CHOICES,
+        ):
+            return ServiceResult.fail(
+                error=f"Invalid category '{category}'.",
+                error_type="validation_error",
+            )
 
     # "others" category: categoryOther is required, non-empty, <= 255 chars.
     # For non-'others' categories the field must be None (accidentally setting

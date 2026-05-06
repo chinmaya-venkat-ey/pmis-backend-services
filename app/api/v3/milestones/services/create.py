@@ -82,9 +82,22 @@ def create_milestone(
     )
 
     resolved_status = status or MILESTONE_STATUS_DEFAULT
-    if resolved_status not in MILESTONE_STATUS_CHOICES:
+    # Doc 37 part 1: catalog-first; fallback to in-code tuple.
+    from .....infrastructure.db.models.milestone_status import (
+        MilestoneStatusModel,
+    )
+    from .....shared.static_catalog import active_codes, is_known_code
+    if not is_known_code(
+        db, resolved_status,
+        model=MilestoneStatusModel,
+        fallback=MILESTONE_STATUS_CHOICES,
+    ):
+        valid = sorted(active_codes(
+            db, model=MilestoneStatusModel,
+            fallback=MILESTONE_STATUS_CHOICES,
+        ))
         raise ValidationError(
-            f"Milestone status must be one of: {', '.join(MILESTONE_STATUS_CHOICES)}."
+            f"Milestone status must be one of: {', '.join(valid)}."
         )
 
     # Validate depends_on targets BEFORE creating the row. Accepts UUIDs

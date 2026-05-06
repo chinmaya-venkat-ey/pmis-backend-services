@@ -6,6 +6,7 @@ bulk when the project's vendor list is set.
 from datetime import datetime, timezone
 
 from sqlalchemy import Column, DateTime, ForeignKey, Index, String
+from ..utc_datetime import UtcDateTime
 from ..session import Base
 
 
@@ -28,7 +29,7 @@ class ProjectVendorModel(Base):
         primary_key=True,
         index=True,
     )
-    created_at = Column(DateTime, default=_utcnow, nullable=False)
+    created_at = Column(UtcDateTime, default=_utcnow, nullable=False)
 
     __table_args__ = (
         Index("idx_project_vendors_project", "project_id"),

@@ -101,20 +101,13 @@ class ProjectStatusTransitionRepository:
         from_status: Optional[str],
         to_status: str,
         requires_admin: bool = False,
-        version_only: bool = False,
         description: Optional[str] = None,
     ) -> ProjectStatusTransitionModel:
-        """Add a new ``(from_status, to_status)`` edge. Caller commits.
-
-        The unique constraint on ``(from_status, to_status)`` rejects
-        duplicates at the DB layer; the route checks via
-        ``find_edge_any`` first to give a friendlier 409 message.
-        """
+        """Add a new ``(from_status, to_status)`` edge. Caller commits."""
         row = ProjectStatusTransitionModel(
             from_status=from_status,
             to_status=to_status,
             requires_admin=bool(requires_admin),
-            version_only=bool(version_only),
             active=True,
             description=description,
         )
@@ -127,7 +120,6 @@ class ProjectStatusTransitionRepository:
         row_id: int,
         *,
         requires_admin: Optional[bool] = None,
-        version_only: Optional[bool] = None,
         description: Optional[str] = None,
     ) -> Optional[ProjectStatusTransitionModel]:
         """Patch the policy fields on an edge.
@@ -143,8 +135,6 @@ class ProjectStatusTransitionRepository:
             return None
         if requires_admin is not None:
             row.requires_admin = bool(requires_admin)
-        if version_only is not None:
-            row.version_only = bool(version_only)
         if description is not None:
             row.description = description
         self.db.flush()

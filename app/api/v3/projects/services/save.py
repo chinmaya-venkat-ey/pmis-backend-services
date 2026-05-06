@@ -25,7 +25,7 @@ def save_project_setup(
     db: Session,
     project_id: str,
     *,
-    actor_id: Optional[int],
+    actor_id: Optional[str],
 ) -> ServiceResult:
     """
     Apply the ``Save Project`` action.

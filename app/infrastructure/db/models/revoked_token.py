@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, String
 
+from ..utc_datetime import UtcDateTime
 from ..session import Base
 
 
@@ -28,12 +29,13 @@ class RevokedTokenModel(Base):
     # The JWT's ``jti`` claim is a 32-char hex (uuid4().hex). We use it as
     # the natural primary key so duplicate revocations are a no-op.
     jti = Column(String(64), primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
-    revoked_at = Column(DateTime, default=_utcnow, nullable=False)
+    # Doc 26: users.id flipped to UUID String(36).
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=True, index=True)
+    revoked_at = Column(UtcDateTime, default=_utcnow, nullable=False)
     # The token's natural exp claim, in UTC. Once now > expires_at, this row
     # no longer has any effect on auth (the JWT verifier rejects expired
     # tokens unconditionally), so it can safely be cleaned up by a cron.
-    expires_at = Column(DateTime, nullable=False, index=True)
+    expires_at = Column(UtcDateTime, nullable=False, index=True)
 
     __table_args__ = (
         Index("idx_revoked_tokens_user", "user_id"),

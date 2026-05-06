@@ -1,7 +1,16 @@
-"""Attachment routes.
+"""Attachment routes (doc 35: collapsed onto the comments table).
 
-Standalone uploads (no comment) per target kind, plus id-scoped
-download + delete. Download is a streaming response, not an envelope.
+What changed:
+  - Endpoint paths are unchanged on the wire, so FE keeps working:
+      POST   /<entity>/{id}/attachments    upload one file as a body-empty comment
+      GET    /<entity>/{id}/attachments    list body-empty comments
+      DELETE /attachments/{id}              soft-delete that comment row
+  - The streaming download endpoint
+      GET /attachments/{id}/download
+    is REMOVED. The URL of the file is stored directly on the comment
+    row (``attachments[i].url``) and the FE fetches bytes from there.
+    For dev / legacy URLs the BE mounts a fallback ``GET /files/{key}``
+    route in ``app.main`` that streams bytes from local storage.
 """
 from typing import Any, Dict
 
@@ -13,7 +22,6 @@ from ....infrastructure.db.session import get_db
 from .controller import AttachmentController
 from ..comments.permissions import (
     ATTACHMENTS_CREATE,
-    ATTACHMENTS_DOWNLOAD,
     COMMENTS_READ,
 )
 
@@ -67,8 +75,9 @@ for _path, _kind in _KIND_BY_PATH.items():
         summary=f"Upload a standalone attachment to a {_kind}",
         description=(
             "Upload a single file via multipart/form-data (field name "
-            "`file`). The attachment is attached directly to the target "
-            "node, not to a comment."
+            "``file``). Doc 35: stored as a comment row with NULL body "
+            "and one attachment entry on the JSON column. The response "
+            "carries the file's public URL, fetched directly by the FE."
         ),
         status_code=201,
     )
@@ -78,32 +87,24 @@ for _path, _kind in _KIND_BY_PATH.items():
         methods=["GET"],
         dependencies=[require_permission(COMMENTS_READ)],
         summary=f"List standalone attachments under a {_kind}",
+        description=(
+            "Doc 35: returns comments rows whose body is NULL "
+            "(attachment-only sends), newest-first."
+        ),
     )
 
 
 # ---- id-scoped routes -------------------------------------------------
 
-@router.get(
-    "/attachments/{attachment_id}/download",
-    dependencies=[require_permission(ATTACHMENTS_DOWNLOAD)],
-    summary="Download an attachment's file bytes",
-    description=(
-        "Streams the file bytes back. Sets Content-Disposition so the "
-        "browser saves with the original filename."
-    ),
-)
-def download_attachment(
-    request: Request,
-    attachment_id: str,
-    db: Session = Depends(get_db),
-):
-    return AttachmentController.download(request, attachment_id, db)
-
-
 @router.delete(
     "/attachments/{attachment_id}",
     dependencies=[require_authenticated()],
     summary="Soft-delete an attachment (uploader or admin only)",
+    description=(
+        "Doc 35: aliased to DELETE /comments/{id}. The id resolves to "
+        "a comment row whose body is NULL. Bytes on disk are kept "
+        "until the retention cron sweeps them."
+    ),
 )
 def delete_attachment(
     request: Request,

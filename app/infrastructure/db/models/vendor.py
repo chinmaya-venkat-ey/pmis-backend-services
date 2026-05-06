@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, String, Text
+from ..utc_datetime import UtcDateTime
 from ..session import Base
 
 
@@ -36,6 +37,13 @@ class VendorModel(Base):
         index=True,
         default=lambda: str(uuid4()),
     )
+    # Doc 25: human-readable identifier separate from the UUID. Format
+    # ``VN-{4-char-name-slug}-{YYMMDDHHMMSS-IST}`` (see
+    # ``app/shared/code_generators.py``). Snapshot at create time;
+    # immutable on rename. Nullable in DB so the alembic migration can
+    # backfill existing rows in two phases (add column → backfill rows
+    # → DB-level UNIQUE index covers it).
+    vendor_code = Column(String(50), nullable=True, unique=True, index=True)
     name = Column(String(255), nullable=False, unique=True, index=True)
     description = Column(Text, nullable=True)
     active = Column(Boolean, default=True, nullable=False, index=True)
@@ -46,14 +54,15 @@ class VendorModel(Base):
     contact_person = Column(String(255), nullable=True)
     phone_number = Column(String(50), nullable=True)
 
-    created_at = Column(DateTime, default=_utcnow, nullable=False, index=True)
-    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow, nullable=False)
+    created_at = Column(UtcDateTime, default=_utcnow, nullable=False, index=True)
+    updated_at = Column(UtcDateTime, default=_utcnow, onupdate=_utcnow, nullable=False)
 
     # Soft-delete. A non-NULL deleted_at hides the vendor from the catalog
     # endpoint and from picker validation, but the project_vendors /
     # milestone_vendors mapping rows are intentionally NOT touched.
-    deleted_at = Column(DateTime, nullable=True, index=True)
-    deleted_by = Column(Integer, nullable=True)
+    deleted_at = Column(UtcDateTime, nullable=True, index=True)
+    # Doc 26: UUID FK to users.id (was Integer pre-doc-26).
+    deleted_by = Column(String(36), ForeignKey("users.id"), nullable=True)
 
     __table_args__ = (
         Index("idx_vendors_active_name", "active", "name"),

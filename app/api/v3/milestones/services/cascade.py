@@ -10,7 +10,7 @@ need JOINs. Each UPDATE is one indexed scan per table.
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import update
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from .....infrastructure.db.models.milestone import MilestoneModel
@@ -20,10 +20,13 @@ from .....infrastructure.db.models.task import TaskModel
 from .....infrastructure.db.models.task_resource import TaskResourceModel
 from .....infrastructure.db.models.subtask import SubtaskModel
 from .....infrastructure.db.models.subtask_resource import SubtaskResourceModel
+from .....shared.comments_attachments_cascade import (
+    cascade_soft_delete_comments_and_attachments,
+)
 
 
 def cascade_soft_delete_project(
-    db: Session, project_id: str, deleted_by: Optional[int] = None,
+    db: Session, project_id: str, deleted_by: Optional[str] = None,
 ) -> None:
     """
     Stamp deleted_at on every live row under the project, across all seven
@@ -55,3 +58,31 @@ def cascade_soft_delete_project(
             .where(table.project_id == project_id, table.deleted_at.is_(None))
             .values(**values)
         )
+
+    # Doc 34: cascade comments + attachments under every M/A/T/S we
+    # just soft-deleted. The four entity tables all carry the
+    # denormalized ``project_id`` column so we can find the just-stamped
+    # rows in one indexed scan per kind.
+    cascade_soft_delete_comments_and_attachments(
+        db,
+        targets=[
+            ("milestone", select(MilestoneModel.id).where(
+                MilestoneModel.project_id == project_id,
+                MilestoneModel.deleted_at == now,
+            )),
+            ("activity", select(ActivityModel.id).where(
+                ActivityModel.project_id == project_id,
+                ActivityModel.deleted_at == now,
+            )),
+            ("task", select(TaskModel.id).where(
+                TaskModel.project_id == project_id,
+                TaskModel.deleted_at == now,
+            )),
+            ("subtask", select(SubtaskModel.id).where(
+                SubtaskModel.project_id == project_id,
+                SubtaskModel.deleted_at == now,
+            )),
+        ],
+        deleted_by=deleted_by,
+        now=now,
+    )

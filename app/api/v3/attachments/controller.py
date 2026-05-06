@@ -1,10 +1,17 @@
-"""Attachment controller — orchestrates services + builds responses
-including the streaming download path.
-"""
-from urllib.parse import quote
+"""Attachment controller (doc 35: thin shell over comments).
 
+After doc 35 the attachments table is gone — every attachment lives on
+a comment row. This controller preserves the historic endpoint shapes
+(POST, GET-list, DELETE) so the FE keeps working without a contract
+change, but everything routes through the comments services.
+
+The streaming-download endpoint is removed: clients fetch bytes
+directly from the URL stored on the comment row's ``attachments`` JSON
+column. The fallback ``/files/{key}`` route in app.main serves bytes
+in dev when no external file server is configured.
+"""
 from fastapi import Request, UploadFile
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from ....core.base_controller import BaseController
@@ -18,12 +25,8 @@ from ....core.response import (
 from .services import (
     delete_attachment,
     list_standalone_attachments,
-    open_attachment_for_download,
     upload_standalone_attachment,
 )
-
-
-_DOWNLOAD_CHUNK = 64 * 1024  # 64 KB
 
 
 class AttachmentController:
@@ -74,7 +77,7 @@ class AttachmentController:
         )
         if result.is_success():
             paged = result.data
-            items = [format_attachment_response(a.to_dict()) for a in paged.items]
+            items = [format_attachment_response(c.to_dict()) for c in paged.items]
             return BaseController.ok({
                 "_type": "Collection",
                 "total": paged.total,
@@ -84,45 +87,6 @@ class AttachmentController:
                 "_embedded": {"elements": items},
             })
         return _map_error(result)
-
-    @staticmethod
-    def download(
-        request: Request,
-        attachment_id: str,
-        db: Session,
-    ):
-        """Stream the file bytes back with proper Content-Disposition."""
-        result = open_attachment_for_download(db=db, attachment_id=attachment_id)
-        if not result.is_success():
-            return _map_error(result)
-
-        attachment = result.data["attachment"]
-        stream = result.data["stream"]
-
-        def chunk_iter():
-            try:
-                while True:
-                    chunk = stream.read(_DOWNLOAD_CHUNK)
-                    if not chunk:
-                        break
-                    yield chunk
-            finally:
-                stream.close()
-
-        # RFC 5987 — encode the filename so non-ASCII names work.
-        safe_name = quote(attachment.original_filename)
-        headers = {
-            "Content-Disposition": (
-                f'attachment; filename="{attachment.original_filename}"; '
-                f"filename*=UTF-8''{safe_name}"
-            ),
-            "Content-Length": str(attachment.size_bytes),
-        }
-        return StreamingResponse(
-            chunk_iter(),
-            media_type=attachment.mime_type or "application/octet-stream",
-            headers=headers,
-        )
 
     @staticmethod
     def delete(

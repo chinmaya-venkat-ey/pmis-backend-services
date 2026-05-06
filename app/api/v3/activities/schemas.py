@@ -4,6 +4,7 @@ from decimal import Decimal
 from typing import List, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from ....shared.datetime import IstCalendarDate
 from ....domain.activities.activity import (
     ACTIVITY_STATUS_CHOICES,
     ACTIVITY_STATUS_DEFAULT,
@@ -113,10 +114,11 @@ class ActivityCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = Field(None, max_length=5000)
     type: str = Field(...)
-    start_date: datetime = Field(..., alias="startDate")
-    end_date: datetime = Field(..., alias="endDate")
-    actual_start_date: Optional[datetime] = Field(None, alias="actualStartDate")
-    actual_end_date: Optional[datetime] = Field(None, alias="actualEndDate")
+    # Doc 29: IstCalendarDate normalization (calendar-date semantics).
+    start_date: IstCalendarDate = Field(..., alias="startDate")
+    end_date: IstCalendarDate = Field(..., alias="endDate")
+    actual_start_date: Optional[IstCalendarDate] = Field(None, alias="actualStartDate")
+    actual_end_date: Optional[IstCalendarDate] = Field(None, alias="actualEndDate")
     position: Optional[int] = Field(None, ge=0)
     resource_mode: Optional[str] = Field(None, alias="resourceMode")
     resource_count: Optional[int] = Field(None, ge=1, alias="resourceCount")
@@ -259,10 +261,11 @@ class ActivityUpdateRequest(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=255)
     description: Optional[str] = Field(None, max_length=5000)
     type: Optional[str] = None
-    start_date: Optional[datetime] = Field(None, alias="startDate")
-    end_date: Optional[datetime] = Field(None, alias="endDate")
-    actual_start_date: Optional[datetime] = Field(None, alias="actualStartDate")
-    actual_end_date: Optional[datetime] = Field(None, alias="actualEndDate")
+    # Doc 29: IstCalendarDate normalization (calendar-date semantics).
+    start_date: Optional[IstCalendarDate] = Field(None, alias="startDate")
+    end_date: Optional[IstCalendarDate] = Field(None, alias="endDate")
+    actual_start_date: Optional[IstCalendarDate] = Field(None, alias="actualStartDate")
+    actual_end_date: Optional[IstCalendarDate] = Field(None, alias="actualEndDate")
     position: Optional[int] = Field(None, ge=0)
     resource_mode: Optional[str] = Field(None, alias="resourceMode")
     resource_count: Optional[int] = Field(None, ge=1, alias="resourceCount")
@@ -345,10 +348,11 @@ class _ActivityCommonFields(BaseModel):
 
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = Field(None, max_length=5000)
-    start_date: datetime = Field(..., alias="startDate")
-    end_date: datetime = Field(..., alias="endDate")
-    actual_start_date: Optional[datetime] = Field(None, alias="actualStartDate")
-    actual_end_date: Optional[datetime] = Field(None, alias="actualEndDate")
+    # Doc 29: IstCalendarDate normalization (calendar-date semantics).
+    start_date: IstCalendarDate = Field(..., alias="startDate")
+    end_date: IstCalendarDate = Field(..., alias="endDate")
+    actual_start_date: Optional[IstCalendarDate] = Field(None, alias="actualStartDate")
+    actual_end_date: Optional[IstCalendarDate] = Field(None, alias="actualEndDate")
     position: Optional[int] = Field(None, ge=0)
     status: Optional[str] = Field(
         None,

@@ -37,7 +37,7 @@ def update_project(
     db: Session,
     project_id: str,
     *,
-    actor_id: Optional[int],
+    actor_id: Optional[str],
     patch: Dict[str, Any],
     vendor_ids: Optional[List[str]] = None,
 ) -> ServiceResult[Project]:
@@ -97,7 +97,6 @@ def update_project(
                 "rejected": rejected,
                 "allowed": sorted(allowed),
                 "project_status": project.status,
-                "is_version": project.is_version,
             },
         )
 
@@ -256,20 +255,34 @@ def update_project(
             # never validation.
 
     # Vendor-list replacement. Handled outside the column whitelist.
+    # Doc 25: each entry can be a UUID or a ``VN-...`` code; resolve
+    # before validating so callers can use either form.
     vendor_repo = VendorRepository(db)
     will_replace_vendors = vendor_ids is not None
     clean_vendor_ids: List[str] = []
     if will_replace_vendors:
-        unique_vids = list(dict.fromkeys(vendor_ids or []))
-        if unique_vids:
-            ok_ids = set(vendor_repo.existing_active_ids(unique_vids))
-            missing = [v for v in unique_vids if v not in ok_ids]
-            if missing:
+        unique_input = list(dict.fromkeys(vendor_ids or []))
+        if unique_input:
+            resolved_pairs = [
+                (token, vendor_repo.resolve_id(token)) for token in unique_input
+            ]
+            unresolved = [t for (t, rid) in resolved_pairs if rid is None]
+            if unresolved:
                 return ServiceResult.fail(
-                    error=f"Unknown or inactive vendor(s): {', '.join(missing)}",
+                    error=f"Unknown vendor(s): {', '.join(unresolved)}",
                     error_type="validation_error",
                 )
-        clean_vendor_ids = unique_vids
+            canonical_ids = [rid for (_t, rid) in resolved_pairs]
+            ok_ids = set(vendor_repo.existing_active_ids(canonical_ids))
+            missing_tokens = [
+                t for (t, rid) in resolved_pairs if rid not in ok_ids
+            ]
+            if missing_tokens:
+                return ServiceResult.fail(
+                    error=f"Unknown or inactive vendor(s): {', '.join(missing_tokens)}",
+                    error_type="validation_error",
+                )
+            clean_vendor_ids = canonical_ids
 
     before = project_snapshot(project)
 

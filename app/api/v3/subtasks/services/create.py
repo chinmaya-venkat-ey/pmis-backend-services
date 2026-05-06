@@ -1,21 +1,38 @@
-"""Create a subtask under a task. Enforces dependsOn hierarchy: target subtasks
-must live in the same project, and the source's parent task must already
-depend on the target's parent task (per task_dependencies). Same-task targets
-are always allowed."""
+"""Create a subtask. ``dependsOn`` rules: target subtasks must live in
+the same project, source != target. The legacy parent-task hierarchy
+rule was dropped in doc 24 — subtasks may now depend on any subtask in
+the same project regardless of parent-task linkage.
+
+Doc 24 also adds **nesting**: pass ``parent_subtask_id`` to attach the
+new subtask under another subtask (any depth). When set, ``task_id`` is
+inferred from the parent subtask's root task. Only one of
+(``task_id``, ``parent_subtask_id``) should be supplied by the caller.
+"""
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
+from .....core.config import settings
 from .....core.errors import NotFoundError, ValidationError
 from .....core.project_lock import assert_task_subtask_writable
 from .....infrastructure.db.models.project import ProjectModel
+from .....infrastructure.db.models.subtask import SubtaskModel
 from .....infrastructure.db.models.task import TaskModel
 from .....infrastructure.db.repositories.dependency_repository import (
     DependencyRepository,
 )
 from .....infrastructure.db.repositories.subtask_repository import SubtaskRepository
 from .....shared.date_rules import validate_entity_dates, validate_resource_dates
+from .....shared.dep_date_rules import (
+    collect_forward_violations,
+    raise_forward_if_violations,
+)
+from .....shared.labels import (
+    KIND_SUBTASK,
+    build_label_index_for_project,
+    resolve_labels_to_ids,
+)
 from .....domain.subtasks.subtask import (
     Subtask,
     SUBTASK_TYPE_RESOURCE,
@@ -25,39 +42,94 @@ from .....domain.subtasks.subtask import (
 from .....domain.subtasks.subtask_resource import SubtaskResource
 
 
-def _validate_subtask_deps_hierarchy(
+def _validate_subtask_deps_same_project(
     db: Session,
     *,
-    source_task_id: str,
     project_id: str,
     target_subtask_ids: List[str],
 ) -> None:
-    """Targets must live in the same project AND source.task must already
-    depend on target.task. Same-task is always allowed."""
+    """Targets must live in the same project. Doc 24: dropped the
+    parent-task hierarchy rule — any subtask in the project (top-level
+    or nested at any depth) is a valid dependency target."""
     if not target_subtask_ids:
         return
     dep_repo = DependencyRepository(db)
     found = dep_repo.existing_target_subtasks(project_id, target_subtask_ids)
-    if len(found) != len({sid for sid in target_subtask_ids if sid}):
-        ok_ids = {sid for sid, _ in found}
-        missing = [sid for sid in target_subtask_ids if sid and sid not in ok_ids]
+    ok_ids = {sid for sid, _ in found}
+    missing = [sid for sid in target_subtask_ids if sid and sid not in ok_ids]
+    if missing:
         raise ValidationError(
             f"Unknown or out-of-project subtask dependency target(s): "
             f"{', '.join(missing)}"
         )
-    for sid, parent_task in found:
-        if not dep_repo.task_pair_is_dependent(source_task_id, parent_task):
-            raise ValidationError(
-                f"Cannot add subtask dependency on subtask '{sid}': the "
-                f"source's parent task does not depend on that subtask's "
-                f"parent task. Add the task-level dependency first."
+
+
+def _resolve_parent(
+    db: Session,
+    *,
+    task_id: Optional[str],
+    parent_subtask_id: Optional[str],
+) -> Tuple[TaskModel, Optional[SubtaskModel], int]:
+    """Return ``(root_task, parent_subtask_or_None, depth_of_new_row)``.
+
+    Top-level create: caller passes ``task_id``, ``parent_subtask_id=None``.
+    Nested create: caller passes ``parent_subtask_id``; the root task is
+    derived from the parent's ``task_id`` and depth is ``len(ancestors)+1``
+    (parent's own ancestors + parent itself + the new row would be one
+    more level beyond — but for the depth-cap check we measure where the
+    new row sits, so depth = parent's ancestors + 1 + 1).
+    """
+    if (task_id is None) == (parent_subtask_id is None):
+        raise ValidationError(
+            "Exactly one of task_id or parent_subtask_id must be supplied."
+        )
+
+    if parent_subtask_id is not None:
+        repo = SubtaskRepository(db)
+        parent = repo.get_model(parent_subtask_id)
+        if parent is None:
+            raise NotFoundError("The parent subtask could not be found.")
+        task = (
+            db.query(TaskModel)
+            .filter(TaskModel.id == parent.task_id)
+            .filter(TaskModel.deleted_at.is_(None))
+            .first()
+        )
+        if task is None:
+            raise NotFoundError(
+                "The root task for the parent subtask could not be found."
             )
+        # Depth = (number of parent's ancestors) + 1 (parent itself)
+        # + 1 (the new row sits one level below parent).
+        new_depth = len(repo.ancestors(parent_subtask_id)) + 2
+        return task, parent, new_depth
+
+    task = (
+        db.query(TaskModel)
+        .filter(TaskModel.id == task_id)
+        .filter(TaskModel.deleted_at.is_(None))
+        .first()
+    )
+    if task is None:
+        raise NotFoundError("The task could not be found.")
+    return task, None, 1
+
+
+def _enforce_depth_cap(new_depth: int) -> None:
+    cap = settings.SUBTASK_MAX_NESTING_DEPTH
+    if cap is not None and new_depth > cap:
+        raise ValidationError(
+            f"Subtask nesting depth cap exceeded: configured maximum is "
+            f"{cap}, new subtask would sit at depth {new_depth}. Set "
+            "SUBTASK_MAX_NESTING_DEPTH (env) higher or move the work."
+        )
 
 
 def create_subtask(
     db: Session,
     *,
-    task_id: str,
+    task_id: Optional[str] = None,
+    parent_subtask_id: Optional[str] = None,
     name: str,
     description: Optional[str],
     start_date: datetime,
@@ -75,15 +147,11 @@ def create_subtask(
     # explicit type to support a future cross-type-mapping endpoint.
     type: Optional[str] = None,
 ) -> Tuple[Subtask, Optional[SubtaskResource]]:
-    task = (
-        db.query(TaskModel)
-        .filter(TaskModel.id == task_id)
-        .filter(TaskModel.deleted_at.is_(None))
-        .first()
+    task, parent_subtask, new_depth = _resolve_parent(
+        db, task_id=task_id, parent_subtask_id=parent_subtask_id,
     )
-    if task is None:
-        raise NotFoundError("The task could not be found.")
     assert_task_subtask_writable(db, task.project_id)
+    _enforce_depth_cap(new_depth)
 
     # Inherit type from the parent task when caller didn't pass one.
     if type is None:
@@ -138,13 +206,18 @@ def create_subtask(
             "The project this subtask belongs to could not be found or has no start date."
         )
 
+    # Date parent is the immediate parent (subtask if nested, task if top).
+    parent_start = (
+        parent_subtask.start_date if parent_subtask is not None else task.start_date
+    )
+    parent_label = "subtask" if parent_subtask is not None else "task"
     validate_entity_dates(
         entity_start=start_date, entity_end=end_date,
         actual_start=actual_start_date, actual_end=actual_end_date,
-        parent_start_date=task.start_date,
+        parent_start_date=parent_start,
         project_start_date=project.start_date,
         entity_label="subtask",
-        parent_label="task",
+        parent_label=parent_label,
     )
 
     if resource is not None:
@@ -158,17 +231,57 @@ def create_subtask(
 
     desired_deps: List[str] = []
     if depends_on is not None:
-        candidates = [d for d in dict.fromkeys(depends_on) if d]
-        _validate_subtask_deps_hierarchy(
+        candidates, _id_to_raw = resolve_labels_to_ids(
             db,
-            source_task_id=task_id,
+            project_id=task.project_id,
+            expected_kind=KIND_SUBTASK,
+            raw_inputs=depends_on,
+        )
+        _validate_subtask_deps_same_project(
+            db,
             project_id=task.project_id,
             target_subtask_ids=candidates,
         )
         desired_deps = candidates
 
+        # Doc 27: source.start_date >= target.end_date for every dep target.
+        if desired_deps:
+            target_rows = (
+                db.query(SubtaskModel.id, SubtaskModel.name, SubtaskModel.end_date)
+                .filter(SubtaskModel.id.in_(desired_deps))
+                .all()
+            )
+            label_index = build_label_index_for_project(db, task.project_id)
+            forward = [
+                (label_index.label_of(KIND_SUBTASK, tid) or tname, tend)
+                for (tid, tname, tend) in target_rows
+            ]
+            raise_forward_if_violations(
+                collect_forward_violations(
+                    source_start=start_date, targets=forward,
+                ),
+                source_label=f"Subtask '{name.strip()}'",
+                source_start=start_date,
+            )
+
     repo = SubtaskRepository(db)
-    pos = position if position is not None else repo.next_position(task_id)
+    # Doc 30 follow-up: auto-bump on position collision (see milestone
+    # create service for full rationale). Subtasks have two scopes:
+    # nested-under-subtask uses ``parent_subtask_id`` as the
+    # uniqueness key; top-level uses ``task_id`` with
+    # ``parent_subtask_id IS NULL``.
+    if parent_subtask is not None:
+        if position is None or repo.position_taken_under_subtask(
+            parent_subtask.id, position,
+        ):
+            pos = repo.next_position_under_subtask(parent_subtask.id)
+        else:
+            pos = position
+    else:
+        if position is None or repo.position_taken(task.id, position):
+            pos = repo.next_position(task.id)
+        else:
+            pos = position
 
     store_mode = resource_mode if type == SUBTASK_TYPE_RESOURCE else None
     store_count = resource_count if (
@@ -177,7 +290,8 @@ def create_subtask(
 
     subtask = repo.create(
         project_id=task.project_id,
-        task_id=task_id,
+        task_id=task.id,
+        parent_subtask_id=(parent_subtask.id if parent_subtask is not None else None),
         name=name.strip(),
         description=description,
         type=type,
@@ -200,6 +314,24 @@ def create_subtask(
             actor_id=current_user_id,
         )
 
+    # Doc 33: subtree audit expansion — record subtask creation on the
+    # project's audit log.
+    from ...projects.services.audit import ACTION_SUBTASK_CREATE, record_audit
+    record_audit(
+        db,
+        project_id=task.project_id,
+        actor_id=current_user_id,
+        action=ACTION_SUBTASK_CREATE,
+        before=None,
+        after={
+            "subtask_id": subtask.id,
+            "task_id": task.id,
+            "parent_subtask_id": (parent_subtask.id if parent_subtask is not None else None),
+            "name": subtask.name,
+            "type": subtask.type,
+            "depends_on": list(desired_deps),
+        },
+    )
     db.commit()
     refreshed = repo.get_by_id(subtask.id)
     out = refreshed or subtask

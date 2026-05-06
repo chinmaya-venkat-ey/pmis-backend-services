@@ -6,11 +6,7 @@ from sqlalchemy.orm import Session
 
 from .....core.errors import NotFoundError, ValidationError
 from .....core.project_lock import assert_milestone_activity_writable
-from ...projects.services.audit import record_audit
-from ...projects.services.baseline_version_sync import (
-    ACTION_ACTIVITY_CREATE,
-    propagate_activity_create,
-)
+from ...projects.services.audit import ACTION_ACTIVITY_CREATE, record_audit
 from .....domain.activities.activity import (
     ACTIVITY_STATUS_CHOICES,
     ACTIVITY_STATUS_DEFAULT,
@@ -21,6 +17,7 @@ from .....domain.activities.activity import (
     RESOURCE_MODE_DETAILS,
 )
 from .....domain.activities.activity_resource import ActivityResource
+from .....infrastructure.db.models.activity import ActivityModel
 from .....infrastructure.db.models.project import ProjectModel
 from .....infrastructure.db.models.milestone import MilestoneModel
 from .....infrastructure.db.repositories.activity_repository import ActivityRepository
@@ -31,6 +28,15 @@ from .....infrastructure.db.repositories.resource_type_repository import (
     ResourceTypeRepository,
 )
 from .....shared.date_rules import validate_entity_dates, validate_resource_dates
+from .....shared.dep_date_rules import (
+    collect_forward_violations,
+    raise_forward_if_violations,
+)
+from .....shared.labels import (
+    KIND_ACTIVITY,
+    build_label_index_for_project,
+    normalize_dependency_inputs,
+)
 
 
 def create_activity(
@@ -116,27 +122,53 @@ def create_activity(
         )
 
     # Validate dependsOn targets BEFORE creating the row, so we don't leave
-    # an orphan activity if validation fails.
+    # an orphan activity if validation fails. ``dependsOn`` accepts either
+    # UUIDs or display labels (e.g. "A1.2") — see app/shared/labels.py
+    # and planned_changes/22.
     desired_deps: List[str] = []
     if depends_on is not None:
         dep_repo = DependencyRepository(db)
-        # Drop dupes, keep order.
-        candidates = [d for d in dict.fromkeys(depends_on) if d]
-        if candidates:
-            ok = dep_repo.existing_target_activity_ids(milestone.project_id, candidates)
-            missing = [d for d in candidates if d not in ok]
-            if missing:
-                raise ValidationError(
-                    f"Unknown or out-of-project activity dependency target(s): "
-                    f"{', '.join(missing)}"
-                )
-            desired_deps = candidates
+        desired_deps = normalize_dependency_inputs(
+            db,
+            project_id=milestone.project_id,
+            expected_kind=KIND_ACTIVITY,
+            raw_inputs=depends_on,
+            existence_check=dep_repo.existing_target_activity_ids,
+        )
         # No cycle / self check needed — the new activity has no id yet, so
         # it can't appear in any existing edge. (Self-edge is impossible on
         # create.) The cycle check kicks in on update.
 
+        # Doc 27: source.start_date >= target.end_date for every dep target.
+        if desired_deps:
+            target_rows = (
+                db.query(
+                    ActivityModel.id, ActivityModel.name, ActivityModel.end_date,
+                )
+                .filter(ActivityModel.id.in_(desired_deps))
+                .all()
+            )
+            label_index = build_label_index_for_project(db, milestone.project_id)
+            forward = [
+                (label_index.label_of(KIND_ACTIVITY, tid) or tname, tend)
+                for (tid, tname, tend) in target_rows
+            ]
+            raise_forward_if_violations(
+                collect_forward_violations(
+                    source_start=start_date, targets=forward,
+                ),
+                source_label=f"Activity '{name.strip()}'",
+                source_start=start_date,
+            )
+
     repo = ActivityRepository(db)
-    pos = position if position is not None else repo.next_position(milestone_id)
+    # Doc 30 follow-up: auto-bump on position collision (see milestone
+    # create service for full rationale). Caller-supplied position that
+    # already exists in the same milestone falls back to next_position.
+    if position is None or repo.position_taken(milestone_id, position):
+        pos = repo.next_position(milestone_id)
+    else:
+        pos = position
 
     activity = repo.create(
         project_id=milestone.project_id,
@@ -189,7 +221,6 @@ def create_activity(
         },
     )
     db.commit()
-    propagate_activity_create(db, baseline_activity_id=activity.id, actor_id=current_user_id)
     # Re-read so the returned domain model has the freshly-written mode/count.
     refreshed = repo.get_by_id(activity.id)
     out = refreshed or activity

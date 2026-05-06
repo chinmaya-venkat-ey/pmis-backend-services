@@ -204,30 +204,3 @@ def close_project(
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     return ProjectController.close(request, project_uuid, data, db)
-
-
-@router.post(
-    "/{project_uuid}/suspend",
-    dependencies=[require_permission(PROJECTS_UPDATE)],
-    summary="Suspend version project",
-)
-def suspend_project(
-    request: Request,
-    project_uuid: str,
-    db: Session = Depends(get_db),
-) -> Dict[str, Any]:
-    return ProjectController.suspend(request, project_uuid, db)
-
-
-@router.post(
-    "/{project_uuid}/versions/create",
-    dependencies=[require_permission(PROJECTS_CREATE)],
-    summary="Create new version of a published project",
-    status_code=201,
-)
-def create_project_version(
-    request: Request,
-    project_uuid: str,
-    db: Session = Depends(get_db),
-) -> Dict[str, Any]:
-    return ProjectController.create_version(request, project_uuid, db)

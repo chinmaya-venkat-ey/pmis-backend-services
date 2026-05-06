@@ -1,12 +1,10 @@
-"""Subtask resource sub-entity (for Resource-type subtasks). Ported verbatim.
-
-Same shape as TaskResource — no classification columns
-(``type_of_resource_id``, ``division``).
-"""
+"""Subtask resource sub-entity (for Resource-type subtasks)."""
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from typing import Optional
+from ...shared.datetime import iso_utc
+
 
 @dataclass
 class SubtaskResource:
@@ -34,16 +32,16 @@ class SubtaskResource:
             "subtask_id": self.subtask_id,
             "project_id": self.project_id,
             "resource_name": self.resource_name,
-            "onboard_date": self.onboard_date.isoformat() if self.onboard_date else None,
-            "actual_onboard_date": self.actual_onboard_date.isoformat() if self.actual_onboard_date else None,
-            "offboard_date": self.offboard_date.isoformat() if self.offboard_date else None,
-            "actual_offboard_date": self.actual_offboard_date.isoformat() if self.actual_offboard_date else None,
+            "onboard_date": iso_utc(self.onboard_date),
+            "actual_onboard_date": iso_utc(self.actual_onboard_date),
+            "offboard_date": iso_utc(self.offboard_date),
+            "actual_offboard_date": iso_utc(self.actual_offboard_date),
             "position": self.position,
             "designation": self.designation,
             "job_role": self.job_role,
             "qualification": self.qualification,
             "experience_years": float(self.experience_years) if self.experience_years is not None else None,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
-            "deleted_at": self.deleted_at.isoformat() if self.deleted_at else None,
-            }
+            "created_at": iso_utc(self.created_at),
+            "updated_at": iso_utc(self.updated_at),
+            "deleted_at": iso_utc(self.deleted_at),
+        }

@@ -1,12 +1,13 @@
 """Milestone API schemas (request/response)."""
 from datetime import datetime
-from typing import Any, List, Optional
+from typing import List, Optional
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 from ....domain.milestones.milestone import (
     MILESTONE_STATUS_CHOICES,
     MILESTONE_STATUS_DEFAULT,
 )
+from ....shared.datetime import IstCalendarDate
 
 
 class MilestoneCreateRequest(BaseModel):
@@ -15,8 +16,13 @@ class MilestoneCreateRequest(BaseModel):
 
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = Field(None, max_length=5000)
-    start_date: datetime = Field(..., alias="startDate")
-    end_date: datetime = Field(..., alias="endDate")
+    # Doc 29: IstCalendarDate normalizes any submitted datetime to IST
+    # midnight of the IST-local calendar date — collapses cross-format
+    # FE inputs (UTC Z, IST +05:30, naive, end-of-day variants) to a
+    # single canonical instant so milestone-vs-project comparisons
+    # don't trip on encoding mismatches.
+    start_date: IstCalendarDate = Field(..., alias="startDate")
+    end_date: IstCalendarDate = Field(..., alias="endDate")
     position: Optional[int] = Field(None, ge=0, description="Optional; auto-assigned if omitted")
 
     # Configurable status — values in MILESTONE_STATUS_CHOICES. Defaults to
@@ -25,9 +31,18 @@ class MilestoneCreateRequest(BaseModel):
         MILESTONE_STATUS_DEFAULT,
         description=f"One of: {', '.join(MILESTONE_STATUS_CHOICES)}",
     )
-    # Reserved: a list of other milestone ids this one depends on. No
-    # referential integrity is enforced yet; stored as-is.
-    depends: Optional[List[Any]] = Field(None)
+    # Other milestone ids in the SAME project this milestone depends on.
+    # Same-project, no self-edge, acyclic — enforced in the service layer
+    # against the milestone_dependencies edge table. Empty / null = no
+    # dependencies.
+    #
+    # Accepts either UUIDs or display labels (e.g. "M2"). The service
+    # resolves labels to UUIDs at write time. Wire field is `dependsOn`
+    # (camelCase) — matches activity / task / subtask schemas exactly.
+    depends_on: Optional[List[str]] = Field(
+        None,
+        alias="dependsOn",
+    )
     # Optional subset of the project's vendors. Each id MUST also appear in
     # the project's vendor list (enforced by the service layer).
     #
@@ -39,7 +54,11 @@ class MilestoneCreateRequest(BaseModel):
         None,
         validation_alias=AliasChoices("vendors", "vendorIds", "vendor_ids"),
         serialization_alias="vendors",
-        description="List of vendor UUIDs to attach to this milestone.",
+        description=(
+            "Vendor identifiers to attach to this milestone. Each entry "
+            "can be a UUID or a ``VN-...`` code (doc 25); the list may "
+            "freely mix the two forms."
+        ),
     )
 
     @field_validator("end_date")
@@ -70,11 +89,15 @@ class MilestoneUpdateRequest(BaseModel):
 
     name: Optional[str] = Field(None, min_length=1, max_length=255)
     description: Optional[str] = Field(None, max_length=5000)
-    start_date: Optional[datetime] = Field(None, alias="startDate")
-    end_date: Optional[datetime] = Field(None, alias="endDate")
+    # Doc 29: IstCalendarDate normalization (see MilestoneCreateRequest).
+    start_date: Optional[IstCalendarDate] = Field(None, alias="startDate")
+    end_date: Optional[IstCalendarDate] = Field(None, alias="endDate")
     position: Optional[int] = Field(None, ge=0)
     status: Optional[str] = None
-    depends: Optional[List[Any]] = None
+    depends_on: Optional[List[str]] = Field(
+        None,
+        alias="dependsOn",
+    )
     # Same renaming + back-compat aliases as the create schema.
     vendors: Optional[List[str]] = Field(
         None,

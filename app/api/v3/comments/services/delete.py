@@ -1,14 +1,16 @@
-"""Soft-delete a comment.
+"""Soft-delete a comment (doc 35: unified send-event model).
 
-Authorization: the author OR an admin can delete. Anyone else gets 403.
-Attachments belonging to this comment are also soft-deleted (the bytes
-remain on disk until the retention cron purges them).
+Author OR admin only. The whole row goes — body + attachments JSON
+together. Bytes on disk are not deleted here; the retention cron
+(future work) sweeps storage_keys whose comment rows are soft-deleted
+older than ATTACHMENTS_RETENTION_DAYS.
+
+Pre-doc-34 there was a soft-cascade that flipped the corresponding
+attachment rows' deleted_at as well. That's gone — the rows are
+collapsed, so soft-deleting the comment is equivalent.
 """
 from sqlalchemy.orm import Session
 
-from .....infrastructure.db.repositories.attachment_repository import (
-    AttachmentRepository,
-)
 from .....infrastructure.db.repositories.comment_repository import (
     CommentRepository,
 )
@@ -38,10 +40,6 @@ def delete_comment(
 
     try:
         repo.soft_delete(comment_id, actor_id)
-        # Soft-cascade: mark attached files deleted too.
-        att_repo = AttachmentRepository(db)
-        for att in att_repo.list_by_comment(comment_id):
-            att_repo.soft_delete(att.id, actor_id)
         db.commit()
         return ServiceResult.ok(True)
     except Exception as e:  # noqa: BLE001

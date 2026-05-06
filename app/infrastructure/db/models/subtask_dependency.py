@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, String, text
 
+from ..utc_datetime import UtcDateTime
 from ..session import Base
 
 
@@ -43,9 +44,10 @@ class SubtaskDependencyModel(Base):
         nullable=False,
         index=True,
     )
-    created_at = Column(DateTime, default=_utcnow, nullable=False)
-    deleted_at = Column(DateTime, nullable=True, index=True)
-    deleted_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(UtcDateTime, default=_utcnow, nullable=False)
+    deleted_at = Column(UtcDateTime, nullable=True, index=True)
+    # Doc 26: users.id flipped to UUID String(36).
+    deleted_by = Column(String(36), ForeignKey("users.id"), nullable=True)
 
     __table_args__ = (
         Index("idx_subtask_deps_source_live", "source_subtask_id", "deleted_at"),

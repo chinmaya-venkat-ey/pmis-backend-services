@@ -1,12 +1,19 @@
-"""Activity resource sub-entity. Ported verbatim from the monolith."""
+"""Activity resource sub-entity (for Resource-type activities)."""
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from typing import Optional
+from ...shared.datetime import iso_utc
+
 
 @dataclass
 class ActivityResource:
-    """1-to-1 with Activity via activity_id (live rows only)."""
+    """
+    Activity resource sub-entity.
+
+    1-to-1 with Activity via activity_id (live rows only; a partial unique
+    index on activity_id WHERE deleted_at IS NULL enforces this).
+    """
     id: str
     activity_id: str
     project_id: str
@@ -23,8 +30,11 @@ class ActivityResource:
     created_at: datetime
     updated_at: datetime
     deleted_at: Optional[datetime] = None
+    # Catalog reference — UUID of a row in `resource_types`.
     type_of_resource_id: Optional[str] = None
+    # Division: lowercase code ('tmd1', 'tmd2', 'others').
     division: Optional[str] = None
+    # When division == 'others', free-text label; NULL otherwise.
     division_other: Optional[str] = None
 
     def to_dict(self) -> dict:
@@ -33,10 +43,10 @@ class ActivityResource:
             "activity_id": self.activity_id,
             "project_id": self.project_id,
             "resource_name": self.resource_name,
-            "onboard_date": self.onboard_date.isoformat() if self.onboard_date else None,
-            "actual_onboard_date": self.actual_onboard_date.isoformat() if self.actual_onboard_date else None,
-            "offboard_date": self.offboard_date.isoformat() if self.offboard_date else None,
-            "actual_offboard_date": self.actual_offboard_date.isoformat() if self.actual_offboard_date else None,
+            "onboard_date": iso_utc(self.onboard_date),
+            "actual_onboard_date": iso_utc(self.actual_onboard_date),
+            "offboard_date": iso_utc(self.offboard_date),
+            "actual_offboard_date": iso_utc(self.actual_offboard_date),
             "position": self.position,
             "designation": self.designation,
             "job_role": self.job_role,
@@ -45,7 +55,7 @@ class ActivityResource:
             "type_of_resource_id": self.type_of_resource_id,
             "division": self.division,
             "division_other": self.division_other,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
-            "deleted_at": self.deleted_at.isoformat() if self.deleted_at else None,
-            }
+            "created_at": iso_utc(self.created_at),
+            "updated_at": iso_utc(self.updated_at),
+            "deleted_at": iso_utc(self.deleted_at),
+        }

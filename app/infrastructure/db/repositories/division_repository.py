@@ -102,6 +102,8 @@ class DivisionRepository:
         code: Optional[str],
         label: str,
         requires_other: bool = False,
+        email: str,
+        phone_number: str,
     ) -> DivisionModel:
         """Insert a new admin-managed (non-built-in) division.
 
@@ -113,17 +115,29 @@ class DivisionRepository:
         ``is_builtin`` is hard-coded to False here. Built-in rows are only
         created by the ``init_db`` seed and cannot be re-created via the
         API even if their code is reused (the unique constraint stops it).
+
+        Doc 36: ``email`` and ``phone_number`` are now REQUIRED. The
+        Pydantic schema rejects missing values at the wire; this method
+        rejects empty strings as a belt-and-braces guard.
         """
         wire_code = (code or "").strip().lower() or slugify(label)
         if not wire_code:
             # Defensive — caller's schema should prevent empty labels.
             raise ValueError("division code/label produces an empty wire code")
+        clean_email = (email or "").strip()
+        clean_phone = (phone_number or "").strip()
+        if not clean_email:
+            raise ValueError("division email is required (doc 36)")
+        if not clean_phone:
+            raise ValueError("division phone_number is required (doc 36)")
         row = DivisionModel(
             code=wire_code,
             label=(label or "").strip(),
             is_builtin=False,
             requires_other=requires_other,
             active=True,
+            email=clean_email,
+            phone_number=clean_phone,
         )
         self.db.add(row)
         self.db.flush()
@@ -135,13 +149,21 @@ class DivisionRepository:
         *,
         label: Optional[str] = None,
         requires_other: Optional[bool] = None,
+        email: Optional[str] = None,
+        phone_number: Optional[str] = None,
     ) -> Optional[DivisionModel]:
-        """Patch the label / requires_other on an existing row.
+        """Patch the label / requires_other / email / phone_number on an
+        existing row.
 
         ``code`` itself is NEVER updatable — it's the wire identifier
         every project's ``owner`` column points at; renaming would break
         every existing reference. The route layer enforces this by
         omitting ``code`` from the patch schema.
+
+        Doc 36: ``email`` / ``phone_number`` are NOT NULL on the column,
+        so empty-string-as-clear is no longer accepted; passing an empty
+        string raises ``ValueError``. ``None`` still means "leave the
+        existing value alone" (omitted from PATCH).
 
         Returns the updated row or None if not found. Caller commits.
         """
@@ -152,6 +174,16 @@ class DivisionRepository:
             row.label = label.strip()
         if requires_other is not None:
             row.requires_other = bool(requires_other)
+        if email is not None:
+            clean = email.strip()
+            if not clean:
+                raise ValueError("division email cannot be empty (doc 36)")
+            row.email = clean
+        if phone_number is not None:
+            clean = phone_number.strip()
+            if not clean:
+                raise ValueError("division phone_number cannot be empty (doc 36)")
+            row.phone_number = clean
         self.db.flush()
         return row
 

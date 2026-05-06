@@ -18,7 +18,7 @@ def close_project(
     db: Session,
     project_id: str,
     *,
-    actor_id: Optional[int],
+    actor_id: Optional[str],
     actor_is_admin: bool,
     reason: Optional[str] = None,
 ) -> ServiceResult[Project]:
@@ -42,7 +42,6 @@ def close_project(
             from_status=project.status,
             to_status=STATUS_CLOSED,
             actor_is_admin=actor_is_admin,
-            project_is_version=project.is_version,
             db=db,
         )
     except ValidationError as e:

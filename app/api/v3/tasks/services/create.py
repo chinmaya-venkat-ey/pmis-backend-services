@@ -1,7 +1,8 @@
-"""Create a task under an activity. Validates ``depends_on`` against the
-hierarchy rule: target tasks must live in the same project, and the source's
-parent activity must already depend on the target's parent activity (per the
-activity_dependencies edge set). Same-activity targets are always allowed."""
+"""Create a task under an activity. ``depends_on`` rules: target tasks
+must live in the same project, source != target (cycle prevention kicks
+in on update). The legacy parent-activity hierarchy rule was dropped in
+doc 24 — tasks may now depend on any task in the same project regardless
+of parent activity linkage."""
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -11,11 +12,21 @@ from .....core.errors import NotFoundError, ValidationError
 from .....core.project_lock import assert_task_subtask_writable
 from .....infrastructure.db.models.project import ProjectModel
 from .....infrastructure.db.models.activity import ActivityModel
+from .....infrastructure.db.models.task import TaskModel
 from .....infrastructure.db.repositories.dependency_repository import (
     DependencyRepository,
 )
 from .....infrastructure.db.repositories.task_repository import TaskRepository
 from .....shared.date_rules import validate_entity_dates, validate_resource_dates
+from .....shared.dep_date_rules import (
+    collect_forward_violations,
+    raise_forward_if_violations,
+)
+from .....shared.labels import (
+    KIND_TASK,
+    build_label_index_for_project,
+    resolve_labels_to_ids,
+)
 from .....domain.tasks.task import (
     Task,
     TASK_TYPE_RESOURCE,
@@ -25,36 +36,26 @@ from .....domain.tasks.task import (
 from .....domain.tasks.task_resource import TaskResource
 
 
-def _validate_task_deps_hierarchy(
+def _validate_task_deps_same_project(
     db: Session,
     *,
-    source_activity_id: str,
     project_id: str,
     target_task_ids: List[str],
 ) -> None:
-    """Ensure each target task lives in the same project AND its parent
-    activity is referenced by the source's parent activity in
-    activity_dependencies. Same-activity targets are allowed without an
-    activity-level edge.
-    """
+    """Targets must live in the same project. Doc 24: dropped the
+    parent-activity hierarchy rule — any task in the project is a valid
+    dependency target now."""
     if not target_task_ids:
         return
     dep_repo = DependencyRepository(db)
     found = dep_repo.existing_target_tasks(project_id, target_task_ids)
-    if len(found) != len({tid for tid in target_task_ids if tid}):
-        ok_ids = {tid for tid, _ in found}
-        missing = [tid for tid in target_task_ids if tid and tid not in ok_ids]
+    ok_ids = {tid for tid, _ in found}
+    missing = [tid for tid in target_task_ids if tid and tid not in ok_ids]
+    if missing:
         raise ValidationError(
             f"Unknown or out-of-project task dependency target(s): "
             f"{', '.join(missing)}"
         )
-    for tid, parent_act in found:
-        if not dep_repo.activity_pair_is_dependent(source_activity_id, parent_act):
-            raise ValidationError(
-                f"Cannot add task dependency on task '{tid}': the source's "
-                f"parent activity does not depend on that task's parent "
-                f"activity. Add the activity-level dependency first."
-            )
 
 
 def create_task(
@@ -170,21 +171,51 @@ def create_task(
             project_start_date=project.start_date,
         )
 
-    # Validate dependsOn BEFORE inserting the task row.
+    # Validate dependsOn BEFORE inserting the task row. Accepts UUIDs or
+    # labels (e.g. "T1.2.3") — see app/shared/labels.py.
     desired_deps: List[str] = []
     if depends_on is not None:
-        candidates = [d for d in dict.fromkeys(depends_on) if d]
-        # No self-edge needed (new id doesn't exist yet); cycle impossible.
-        _validate_task_deps_hierarchy(
+        candidates, _id_to_raw = resolve_labels_to_ids(
             db,
-            source_activity_id=activity_id,
+            project_id=activity.project_id,
+            expected_kind=KIND_TASK,
+            raw_inputs=depends_on,
+        )
+        # No self-edge / cycle needed (new id doesn't exist yet).
+        _validate_task_deps_same_project(
+            db,
             project_id=activity.project_id,
             target_task_ids=candidates,
         )
         desired_deps = candidates
 
+        # Doc 27: source.start_date >= target.end_date for every dep target.
+        if desired_deps:
+            target_rows = (
+                db.query(TaskModel.id, TaskModel.name, TaskModel.end_date)
+                .filter(TaskModel.id.in_(desired_deps))
+                .all()
+            )
+            label_index = build_label_index_for_project(db, activity.project_id)
+            forward = [
+                (label_index.label_of(KIND_TASK, tid) or tname, tend)
+                for (tid, tname, tend) in target_rows
+            ]
+            raise_forward_if_violations(
+                collect_forward_violations(
+                    source_start=start_date, targets=forward,
+                ),
+                source_label=f"Task '{name.strip()}'",
+                source_start=start_date,
+            )
+
     repo = TaskRepository(db)
-    pos = position if position is not None else repo.next_position(activity_id)
+    # Doc 30 follow-up: auto-bump on position collision (see milestone
+    # create service for full rationale).
+    if position is None or repo.position_taken(activity_id, position):
+        pos = repo.next_position(activity_id)
+    else:
+        pos = position
 
     store_mode = resource_mode if type == TASK_TYPE_RESOURCE else None
     store_count = resource_count if (
@@ -218,6 +249,25 @@ def create_task(
             actor_id=current_user_id,
         )
 
+    # Doc 33: audit task creation at the project level so the project's
+    # log shows every M/A/T/S write, not just M/A.
+    from ...projects.services.audit import ACTION_TASK_CREATE, record_audit
+    record_audit(
+        db,
+        project_id=activity.project_id,
+        actor_id=current_user_id,
+        action=ACTION_TASK_CREATE,
+        before=None,
+        after={
+            "task_id": task.id,
+            "activity_id": activity_id,
+            "name": task.name,
+            "type": task.type,
+            "start_date": task.start_date.isoformat() if task.start_date else None,
+            "end_date": task.end_date.isoformat() if task.end_date else None,
+            "depends_on": list(desired_deps),
+        },
+    )
     db.commit()
     refreshed = repo.get_by_id(task.id)
     out = refreshed or task

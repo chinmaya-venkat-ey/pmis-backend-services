@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 def _utcnow():
     return datetime.now(timezone.utc)
 from sqlalchemy import Column, Integer, String, DateTime, Index, ForeignKey, UniqueConstraint, JSON
+from ..utc_datetime import UtcDateTime
 from ..session import Base
 
 
@@ -17,10 +18,11 @@ class ProjectMemberModel(Base):
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     project_id = Column(String(36), ForeignKey("projects.id"), nullable=False, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    # Doc 26: users.id flipped to UUID String(36).
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
     roles = Column(JSON, default=list, nullable=False)
-    created_at = Column(DateTime, default=_utcnow, nullable=False)
-    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow, nullable=False)
+    created_at = Column(UtcDateTime, default=_utcnow, nullable=False)
+    updated_at = Column(UtcDateTime, default=_utcnow, onupdate=_utcnow, nullable=False)
 
     # Unique constraint: one membership per project-user pair
     __table_args__ = (

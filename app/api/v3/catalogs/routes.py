@@ -129,7 +129,6 @@ def list_project_status_transitions(
             "fromStatus": r.from_status,
             "toStatus": r.to_status,
             "requiresAdmin": r.requires_admin,
-            "versionOnly": r.version_only,
             "active": r.active,
             "description": r.description,
         }

@@ -13,6 +13,10 @@ from ..models.subtask import SubtaskModel
 from ..models.subtask_resource import SubtaskResourceModel
 from ....domain.activities.activity import Activity
 from ....domain.activities.activity_resource import ActivityResource
+from ....shared.comments_attachments_cascade import (
+    cascade_restore_comments_and_attachments,
+    cascade_soft_delete_comments_and_attachments,
+)
 
 
 class ActivityRepository:
@@ -108,6 +112,18 @@ class ActivityRepository:
         )
         return (cur or 0) + 1
 
+    def position_taken(self, milestone_id: str, position: int) -> bool:
+        """True iff a live activity in ``milestone_id`` already occupies
+        ``position``. Lets the create service auto-bump caller-supplied
+        positions that would otherwise trip the unique index — see
+        ``MilestoneRepository.position_taken`` for the same rationale.
+        """
+        return self.db.query(ActivityModel.id).filter(
+            ActivityModel.milestone_id == milestone_id,
+            ActivityModel.position == position,
+            ActivityModel.deleted_at.is_(None),
+        ).first() is not None
+
     def get_live_resource(self, activity_id: str) -> Optional[ActivityResource]:
         row = (
             self.db.query(ActivityResourceModel)
@@ -124,7 +140,7 @@ class ActivityRepository:
         project_id: str, milestone_id: str, name: str, description: Optional[str],
         type: str, start_date: datetime, end_date: datetime,
         actual_start_date: Optional[datetime], actual_end_date: Optional[datetime],
-        position: int, created_by: Optional[int],
+        position: int, created_by: Optional[str],
         resource_mode: Optional[str] = None,
         resource_count: Optional[int] = None,
         status: Optional[str] = None,
@@ -150,7 +166,7 @@ class ActivityRepository:
         self.db.flush()  # get the id without committing -- caller may also create resource in same txn
         return self._to_domain(a)
 
-    def update(self, activity_id: str, *, updates: dict, updated_by: Optional[int]) -> Activity:
+    def update(self, activity_id: str, *, updates: dict, updated_by: Optional[str]) -> Activity:
         a = self.get_model(activity_id)
         if a is None:
             raise LookupError(f"Activity {activity_id} not found")
@@ -231,7 +247,7 @@ class ActivityRepository:
 
     # ---------- delete + cascade (activity subtree) ----------
 
-    def soft_delete_with_cascade(self, activity_id: str, deleted_by: Optional[int]) -> None:
+    def soft_delete_with_cascade(self, activity_id: str, deleted_by: Optional[str]) -> None:
         now = datetime.now(timezone.utc)
         task_ids = select(TaskModel.id).where(
             TaskModel.activity_id == activity_id,
@@ -266,17 +282,119 @@ class ActivityRepository:
             ActivityModel.id == activity_id,
             ActivityModel.deleted_at.is_(None),
         ).values(deleted_at=now, updated_at=now, updated_by=deleted_by))
+
+        # Doc 34: cascade comments + attachments under the activity
+        # subtree we just soft-deleted. Re-deriving the subtree by
+        # ``deleted_at == now`` finds exactly the rows this cascade
+        # touched, so the matching restore-cascade can identify them.
+        cascade_soft_delete_comments_and_attachments(
+            self.db,
+            targets=[
+                ("activity", activity_id),
+                ("task", select(TaskModel.id).where(
+                    TaskModel.activity_id == activity_id,
+                    TaskModel.deleted_at == now,
+                )),
+                ("subtask", select(SubtaskModel.id).where(
+                    SubtaskModel.deleted_at == now,
+                    SubtaskModel.task_id.in_(
+                        select(TaskModel.id).where(
+                            TaskModel.activity_id == activity_id,
+                            TaskModel.deleted_at == now,
+                        )
+                    ),
+                )),
+            ],
+            deleted_by=deleted_by,
+            now=now,
+        )
+
         self.db.commit()
 
     def restore(self, activity_id: str, restored_by: Optional[int]) -> Activity:
+        """
+        Restore the activity + every T/S/resource/comment/attachment that
+        was soft-deleted as part of the same cascade event (doc 34).
+        Dep edges are NOT auto-restored.
+        """
         a = self.get_model(activity_id, include_deleted=True)
         if a is None:
             raise LookupError(f"Activity {activity_id} not found")
         if a.deleted_at is None:
             return self._to_domain(a)
+
+        cascade_ts = a.deleted_at
+        now = datetime.now(timezone.utc)
+
         a.deleted_at = None
-        a.updated_at = datetime.now(timezone.utc)
+        a.updated_at = now
         a.updated_by = restored_by
+        self.db.flush()
+
+        self.db.execute(update(TaskModel).where(
+            TaskModel.activity_id == activity_id,
+            TaskModel.deleted_at == cascade_ts,
+        ).values(deleted_at=None, updated_at=now, updated_by=restored_by))
+        self.db.execute(update(SubtaskModel).where(
+            SubtaskModel.deleted_at == cascade_ts,
+            SubtaskModel.task_id.in_(
+                select(TaskModel.id).where(
+                    TaskModel.activity_id == activity_id,
+                    TaskModel.deleted_at.is_(None),
+                )
+            ),
+        ).values(deleted_at=None, updated_at=now, updated_by=restored_by))
+
+        # Resources.
+        self.db.execute(update(ActivityResourceModel).where(
+            ActivityResourceModel.activity_id == activity_id,
+            ActivityResourceModel.deleted_at == cascade_ts,
+        ).values(deleted_at=None, updated_at=now))
+        self.db.execute(update(TaskResourceModel).where(
+            TaskResourceModel.deleted_at == cascade_ts,
+            TaskResourceModel.task_id.in_(
+                select(TaskModel.id).where(
+                    TaskModel.activity_id == activity_id,
+                    TaskModel.deleted_at.is_(None),
+                )
+            ),
+        ).values(deleted_at=None, updated_at=now))
+        self.db.execute(update(SubtaskResourceModel).where(
+            SubtaskResourceModel.deleted_at == cascade_ts,
+            SubtaskResourceModel.subtask_id.in_(
+                select(SubtaskModel.id).where(
+                    SubtaskModel.deleted_at.is_(None),
+                    SubtaskModel.task_id.in_(
+                        select(TaskModel.id).where(
+                            TaskModel.activity_id == activity_id,
+                            TaskModel.deleted_at.is_(None),
+                        )
+                    ),
+                )
+            ),
+        ).values(deleted_at=None, updated_at=now))
+
+        cascade_restore_comments_and_attachments(
+            self.db,
+            targets=[
+                ("activity", activity_id),
+                ("task", select(TaskModel.id).where(
+                    TaskModel.activity_id == activity_id,
+                    TaskModel.deleted_at.is_(None),
+                )),
+                ("subtask", select(SubtaskModel.id).where(
+                    SubtaskModel.deleted_at.is_(None),
+                    SubtaskModel.task_id.in_(
+                        select(TaskModel.id).where(
+                            TaskModel.activity_id == activity_id,
+                            TaskModel.deleted_at.is_(None),
+                        )
+                    ),
+                )),
+            ],
+            cascade_deleted_at=cascade_ts,
+        )
+
         self.db.commit()
         self.db.refresh(a)
         return self._to_domain(a)

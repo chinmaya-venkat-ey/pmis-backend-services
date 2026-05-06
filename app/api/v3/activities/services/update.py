@@ -30,10 +30,10 @@ from .....core.errors import (
     ValidationError,
 )
 from .....core.project_lock import assert_milestone_activity_writable
-from ...projects.services.audit import record_audit
-from ...projects.services.baseline_version_sync import (
+from ...projects.services.audit import (
+    ACTION_ACTIVITY_DEP_CHANGE,
     ACTION_ACTIVITY_UPDATE,
-    propagate_activity_update,
+    record_audit,
 )
 
 
@@ -46,10 +46,24 @@ from .....infrastructure.db.repositories.activity_repository import ActivityRepo
 from .....infrastructure.db.repositories.dependency_repository import (
     DependencyRepository,
 )
+from .....shared.labels import (
+    KIND_ACTIVITY,
+    build_label_index_for_project,
+    normalize_dependency_inputs,
+)
 from .....infrastructure.db.repositories.resource_type_repository import (
     ResourceTypeRepository,
 )
 from .....shared.date_rules import validate_entity_dates, validate_resource_dates
+from .....shared.dep_date_rules import (
+    collect_forward_violations,
+    collect_reverse_violations,
+    raise_forward_if_violations,
+    raise_reverse_if_violations,
+)
+from .....infrastructure.db.models.activity_dependency import (
+    ActivityDependencyModel,
+)
 from .....domain.activities.activity import (
     Activity,
     ACTIVITY_STATUS_CHOICES,
@@ -277,24 +291,25 @@ def update_activity(
         else:
             _gate_status_against_deps(db, activity_id, ACTIVITY_STATUS_COMPLETED)
 
-    # Validate dependsOn targets for replace.
+    # Validate dependsOn targets for replace. Accepts UUIDs or labels
+    # (e.g. "A1.2"); see app/shared/labels.py and planned_changes/22.
     desired_deps: Optional[List[str]] = None
     if depends_on is not None:
         dep_repo = DependencyRepository(db)
-        candidates = [d for d in dict.fromkeys(depends_on) if d]
-        # Self-edge guard.
+        candidates = normalize_dependency_inputs(
+            db,
+            project_id=model.project_id,
+            expected_kind=KIND_ACTIVITY,
+            raw_inputs=depends_on,
+            existence_check=dep_repo.existing_target_activity_ids,
+        )
+        # Self-edge guard. Done AFTER normalization because a label like
+        # "A1.2" can resolve to the source's own UUID.
         if activity_id in candidates:
             raise ValidationError(
                 "An activity cannot depend on itself."
             )
         if candidates:
-            ok = dep_repo.existing_target_activity_ids(model.project_id, candidates)
-            missing = [d for d in candidates if d not in ok]
-            if missing:
-                raise ValidationError(
-                    f"Unknown or out-of-project activity dependency target(s): "
-                    f"{', '.join(missing)}"
-                )
             # Cycle detection: would adding any of these create a cycle?
             # Check against existing edges that don't include the source's
             # current outgoing set (those will be replaced below).
@@ -304,6 +319,74 @@ def update_activity(
                     f"Adding dependency on '{cycler}' would create a cycle."
                 )
         desired_deps = candidates
+
+    # Doc 27: cross-dependency date enforcement.
+    # Compute the activity's effective post-edit dates first.
+    effective_start = start_date if start_date is not None else model.start_date
+    effective_end = end_date if end_date is not None else model.end_date
+    label_index = None  # built lazily; only when we need labels
+    # Forward: validate this activity's effective start_date against the
+    # eventual outgoing dep target set (new if replacing, existing otherwise).
+    forward_targets_to_check: List[str]
+    if desired_deps is not None:
+        forward_targets_to_check = desired_deps
+    elif start_date is not None:
+        # depends_on unchanged but start_date moved — re-check existing edges.
+        forward_targets_to_check = DependencyRepository(db) \
+            .list_activity_dependencies(activity_id)
+    else:
+        forward_targets_to_check = []
+    if forward_targets_to_check and effective_start is not None:
+        target_rows = (
+            db.query(ActivityModel.id, ActivityModel.name, ActivityModel.end_date)
+            .filter(ActivityModel.id.in_(forward_targets_to_check))
+            .all()
+        )
+        if label_index is None:
+            label_index = build_label_index_for_project(db, model.project_id)
+        forward = [
+            (label_index.label_of(KIND_ACTIVITY, tid) or tname, tend)
+            for (tid, tname, tend) in target_rows
+        ]
+        raise_forward_if_violations(
+            collect_forward_violations(
+                source_start=effective_start, targets=forward,
+            ),
+            source_label=(
+                f"Activity '{label_index.label_of(KIND_ACTIVITY, activity_id) or model.name}'"
+            ),
+            source_start=effective_start,
+        )
+    # Reverse: if end_date is moving, walk the live sources pointing at me
+    # and reject if the new end_date would make any of them start too early.
+    if end_date is not None and effective_end is not None:
+        sources = (
+            db.query(ActivityModel.id, ActivityModel.name, ActivityModel.start_date)
+            .join(
+                ActivityDependencyModel,
+                ActivityDependencyModel.source_activity_id == ActivityModel.id,
+            )
+            .filter(ActivityDependencyModel.target_activity_id == activity_id)
+            .filter(ActivityDependencyModel.deleted_at.is_(None))
+            .filter(ActivityModel.deleted_at.is_(None))
+            .all()
+        )
+        if sources:
+            if label_index is None:
+                label_index = build_label_index_for_project(db, model.project_id)
+            rev = [
+                (label_index.label_of(KIND_ACTIVITY, sid) or sname, sstart)
+                for (sid, sname, sstart) in sources
+            ]
+            raise_reverse_if_violations(
+                collect_reverse_violations(
+                    target_end=effective_end, sources=rev,
+                ),
+                target_label=(
+                    f"Activity '{label_index.label_of(KIND_ACTIVITY, activity_id) or model.name}'"
+                ),
+                target_end=effective_end,
+            )
 
     # Build the activity-row update dict.
     updates: Dict[str, Any] = {}
@@ -377,15 +460,18 @@ def update_activity(
             after={k: _iso(v) for k, v in updates.items()},
         )
 
-    db.commit()
-
-    if updates:
-        propagate_activity_update(
+    if desired_deps is not None:
+        # Doc 33: dep-edge changes get their own audit row.
+        record_audit(
             db,
-            baseline_activity_id=activity_id,
-            updates=updates,
+            project_id=model.project_id,
             actor_id=current_user_id,
+            action=ACTION_ACTIVITY_DEP_CHANGE,
+            before={"activity_id": activity_id},
+            after={"activity_id": activity_id, "depends_on": list(desired_deps)},
         )
+
+    db.commit()
 
     updated = repo.get_by_id(activity_id)
     assert updated is not None

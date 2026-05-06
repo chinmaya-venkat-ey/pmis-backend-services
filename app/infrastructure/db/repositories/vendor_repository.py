@@ -15,6 +15,11 @@ from ..models.milestone_vendor import MilestoneVendorModel
 from ..models.project_vendor import ProjectVendorModel
 from ..models.vendor import VendorModel
 from ....domain.vendors.vendor import Vendor
+from ....shared.code_generators import (
+    build_code,
+    generate_unique_code,
+    looks_like_vendor_code,
+)
 
 
 def _utcnow() -> datetime:
@@ -34,6 +39,7 @@ def _to_domain(m: VendorModel) -> Vendor:
         email=getattr(m, "email", None),
         contact_person=getattr(m, "contact_person", None),
         phone_number=getattr(m, "phone_number", None),
+        vendor_code=getattr(m, "vendor_code", None),
     )
 
 
@@ -53,13 +59,29 @@ class VendorRepository:
         contact_person: Optional[str] = None,
         phone_number: Optional[str] = None,
     ) -> Vendor:
+        # Doc 25: generate the human-readable code BEFORE the insert so
+        # both the model row and the returned domain object carry it.
+        # Compute ``created_at`` in Python (rather than relying on the
+        # column default) so the code's timestamp segment matches the
+        # row's stored ``created_at`` exactly.
+        now = _utcnow()
+        clean_name = name.strip()
+        base_code = build_code("VN", clean_name, now)
+        code = generate_unique_code(
+            self.db.connection(),
+            table="vendors", code_column="vendor_code",
+            base_code=base_code,
+        )
         m = VendorModel(
-            name=name.strip(),
+            name=clean_name,
             description=description,
             active=active,
             email=(email.strip() if email else None),
             contact_person=(contact_person.strip() if contact_person else None),
             phone_number=(phone_number.strip() if phone_number else None),
+            vendor_code=code,
+            created_at=now,
+            updated_at=now,
         )
         self.db.add(m)
         self.db.flush()
@@ -71,6 +93,62 @@ class VendorRepository:
             q = q.filter(VendorModel.deleted_at.is_(None))
         m = q.first()
         return _to_domain(m) if m else None
+
+    def get_by_code(self, vendor_code: str, include_deleted: bool = False) -> Optional[Vendor]:
+        """Lookup by human-readable ``vendor_code`` (e.g. ``VN-ACME-260502143015``)."""
+        q = self.db.query(VendorModel).filter(VendorModel.vendor_code == vendor_code)
+        if not include_deleted:
+            q = q.filter(VendorModel.deleted_at.is_(None))
+        m = q.first()
+        return _to_domain(m) if m else None
+
+    def get_by_id_or_code(
+        self, identifier: str, include_deleted: bool = False,
+    ) -> Optional[Vendor]:
+        """Polymorphic lookup: dispatches to ``get_by_code`` if the
+        identifier looks like a vendor code, otherwise ``get_by_id``.
+
+        Used by every endpoint whose path param accepts either form,
+        and by the create-user / create-project services that accept
+        ``vendorId`` as either a UUID or a vendor code on input.
+        """
+        if looks_like_vendor_code(identifier):
+            return self.get_by_code(identifier, include_deleted=include_deleted)
+        return self.get_by_id(identifier, include_deleted=include_deleted)
+
+    def get_model_by_id_or_code(
+        self, identifier: str, include_deleted: bool = False,
+    ) -> Optional[VendorModel]:
+        """Polymorphic write-path lookup. Mirrors ``get_by_id_or_code``
+        but returns the raw ORM model so callers can mutate it
+        (soft-delete, restore, patch)."""
+        if looks_like_vendor_code(identifier):
+            q = self.db.query(VendorModel).filter(
+                VendorModel.vendor_code == identifier,
+            )
+        else:
+            q = self.db.query(VendorModel).filter(VendorModel.id == identifier)
+        if not include_deleted:
+            q = q.filter(VendorModel.deleted_at.is_(None))
+        return q.first()
+
+    def resolve_id(self, identifier: str) -> Optional[str]:
+        """Return the canonical UUID for either a UUID or a vendor code.
+
+        Used by upstream services (user create, project create) that
+        already work in terms of ``vendor_id`` (UUID) but want to accept
+        a code on input. Returns ``None`` if the identifier doesn't
+        resolve to any LIVE vendor.
+        """
+        if looks_like_vendor_code(identifier):
+            row = (
+                self.db.query(VendorModel.id)
+                .filter(VendorModel.vendor_code == identifier)
+                .filter(VendorModel.deleted_at.is_(None))
+                .first()
+            )
+            return row[0] if row else None
+        return identifier  # assume already a UUID; existence check is downstream
 
     def get_model_by_id(self, vendor_id: str, include_deleted: bool = False) -> Optional[VendorModel]:
         """Return the raw model for write paths that need to mutate it.
@@ -135,7 +213,7 @@ class VendorRepository:
 
     # ---- Soft delete / restore ---------------------------------------
 
-    def soft_delete(self, vendor_id: str, *, actor_id: Optional[int]) -> Optional[Vendor]:
+    def soft_delete(self, vendor_id: str, *, actor_id: Optional[str]) -> Optional[Vendor]:
         """Mark a vendor deleted. Idempotent on already-deleted rows.
 
         Sets ``deleted_at`` + ``deleted_by`` and flips ``active`` to False so

@@ -1,99 +1,69 @@
 """
-RBAC middleware for permission-based authorization.
+RBAC middleware: permission-based authorization.
+
+Doc 21 part B reworks this from in-memory ``Role -> Permission`` lookup
+to a string-coded, DB-backed check. Routes pass a permission *code*
+(e.g. ``"projects:create"``) to ``require_permission(...)``; the
+dependency consults ``request.state.user_permissions`` — a Set[str]
+populated once per request by ``AuthenticationMiddleware`` after JWT
+decode.
+
+Anonymous (no token, revoked token, decode failure) requests have an
+empty permissions set → every ``require_permission`` rejects with 401.
 """
-from typing import Callable
-from fastapi import Request, Depends
-from ..rbac import Permission, Role, has_permission
-from ..dependencies import get_current_user_role
+from typing import Optional, Set, Union
+from fastapi import Depends, Request
+
 from ..errors import AuthenticationError, AuthorizationError
 
 
-def require_permission(permission: Permission):
-    """
-    Dependency factory to require a specific permission.
+def _user_permissions(request: Request) -> Set[str]:
+    return getattr(request.state, "user_permissions", set()) or set()
 
-    Args:
-        permission: Required permission
 
-    Returns:
-        Dependency function that validates permission
+def _user_id(request: Request) -> Optional[str]:
+    """Doc 26: returns the caller's UUID (was int pre-doc-26)."""
+    return getattr(request.state, "user_id", None)
+
+
+def require_permission(permission: Union[str, "object"]):
     """
+    Dependency factory: require the caller to hold a specific permission.
+
+    ``permission`` is the canonical string code (recommended). The legacy
+    ``Permission`` enum from ``app.core.rbac`` is also accepted to keep
+    in-flight route imports working — ``.value`` is read off enum members.
+    """
+    code = getattr(permission, "value", permission)
+
     def check_permission(request: Request) -> None:
-        """
-        Check if current user has required permission.
-
-        Args:
-            request: FastAPI request
-
-        Raises:
-            AuthenticationError: If user is not authenticated
-            AuthorizationError: If user lacks required permission
-        """
-        user_role = get_current_user_role(request)
-
-        # Check if user is authenticated (not anonymous)
-        if user_role == Role.ANONYMOUS:
+        if _user_id(request) is None:
             raise AuthenticationError("Authentication required")
-
-        # Check if user has required permission
-        if not has_permission(user_role, permission):
+        if code not in _user_permissions(request):
             raise AuthorizationError(
-                f"Insufficient permissions. Required: {permission.value}"
+                f"Insufficient permissions. Required: {code}"
             )
 
     return Depends(check_permission)
 
 
 def require_authenticated():
-    """
-    Dependency to require authenticated user.
+    """Dependency: require an authenticated (non-anonymous) caller."""
 
-    Returns:
-        Dependency function that validates authentication
-    """
     def check_authenticated(request: Request) -> None:
-        """
-        Check if user is authenticated.
-
-        Args:
-            request: FastAPI request
-
-        Raises:
-            AuthenticationError: If user is not authenticated
-        """
-        user_role = get_current_user_role(request)
-
-        if user_role == Role.ANONYMOUS:
+        if _user_id(request) is None:
             raise AuthenticationError("Authentication required")
 
     return Depends(check_authenticated)
 
 
 def require_admin():
-    """
-    Dependency to require admin user.
+    """Dependency: require the caller to be a superuser (admin role)."""
 
-    Returns:
-        Dependency function that validates admin status
-    """
     def check_admin(request: Request) -> None:
-        """
-        Check if user is admin.
-
-        Args:
-            request: FastAPI request
-
-        Raises:
-            AuthenticationError: If user is not authenticated
-            AuthorizationError: If user is not admin
-        """
-        user_role = get_current_user_role(request)
-
-        if user_role == Role.ANONYMOUS:
+        if _user_id(request) is None:
             raise AuthenticationError("Authentication required")
-
-        is_admin = getattr(request.state, "is_admin", False)
-        if not is_admin:
+        if not getattr(request.state, "is_admin", False):
             raise AuthorizationError("Admin privileges required")
 
     return Depends(check_admin)

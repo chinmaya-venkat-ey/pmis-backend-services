@@ -2,38 +2,46 @@
 Shared write-lock helpers for milestones / activities / tasks / subtasks.
 
 Every write path in those modules calls one of these guards before mutating
-anything, so the rule for "can this project accept THIS kind of write right
+anything, so the rule for "can this project accept this kind of write right
 now?" lives in one place.
 
-Level semantics
----------------
-Under the baseline/version split:
+Lifecycle gates (post-doc-35 follow-up: tasks + subtasks are publish-gated)
+--------------------------------------------------------------------------
+- Milestones / activities are writable any time the project is live (i.e.
+  exists and is not soft-deleted). They're how the user assembles the
+  baseline that's later signed off by publishing.
 
-- A **baseline** project (``is_version=False``) owns its milestones and
-  activities. Task and subtask rows must not be added to a baseline.
-- A **version** project (``is_version=True``) is a fork of a published
-  baseline. It inherits milestones and activities (via the clone at
-  versioning time) but owns its own task / subtask rows. Milestones and
-  activities on a version are driven by baseline propagation, not by
-  direct writes.
+- Tasks / subtasks are writable ONLY while the project's status is
+  ``published``. A user must add the milestones + activities, satisfy the
+  doc 27 publish gate ("≥1 milestone, every milestone has ≥1 activity"),
+  publish the project, and only then add tasks / subtasks. Reverting a
+  published project to draft locks T/S writes again until the next
+  publish.
 
-Published baselines remain editable: changes applied to a baseline
-propagate to its active versions (see ``cascade_baseline_*`` helpers).
+  Rationale: tasks and subtasks are execution-detail rows; the design
+  intent is that they can only exist on a project that's been formally
+  published once. Captured by the senior in the post-doc-33 review.
 
 Functions
 ---------
 - ``assert_project_editable`` — project exists and is not soft-deleted.
-  Used for any write that is allowed on both baselines and versions
-  (e.g. restore, project-level updates).
-- ``assert_milestone_activity_writable`` — project is a live baseline.
-  Used for milestone / activity create / update / delete.
-- ``assert_task_subtask_writable`` — project is a live version.
-  Used for task / subtask create / update / delete.
+- ``assert_milestone_activity_writable`` — same as above, kept distinct
+  so the M/A code paths read clearly.
+- ``assert_task_subtask_writable`` — project exists, not soft-deleted,
+  AND status is ``published``. Raises ``ValidationError`` (HTTP 422)
+  when the status gate fails.
 """
 from sqlalchemy.orm import Session
 
 from ..infrastructure.db.models.project import ProjectModel
-from .errors import AuthorizationError, NotFoundError
+from .errors import NotFoundError, ValidationError
+
+
+# Project status that unlocks task / subtask writes. Mirrors the
+# constant in ``app.api.v3.projects.services.transitions`` but kept
+# inline here so this module doesn't import the projects service layer
+# (would create a cycle).
+_STATUS_PUBLISHED = "published"
 
 
 def _load_live_project(db: Session, project_id: str) -> ProjectModel:
@@ -51,50 +59,33 @@ def _load_live_project(db: Session, project_id: str) -> ProjectModel:
 
 
 def assert_project_editable(db: Session, project_id: str) -> None:
-    """
-    Project exists and is not soft-deleted. No baseline/version check.
-
-    Raises:
-        NotFoundError: project does not exist, or has been soft-deleted.
-    """
+    """Project exists and is not soft-deleted."""
     _load_live_project(db, project_id)
 
 
 def assert_milestone_activity_writable(db: Session, project_id: str) -> None:
-    """
-    Project accepts milestone / activity writes.
-
-    Allowed only when the project is a live **baseline**. Versions reject
-    the write — M/A changes must be applied to the baseline, which then
-    propagates to active versions.
-
-    Raises:
-        NotFoundError: project missing or soft-deleted.
-        AuthorizationError: project is a version.
-    """
-    project = _load_live_project(db, project_id)
-    if getattr(project, "is_version", False):
-        raise AuthorizationError(
-            "Milestones and activities can only be added or modified on the "
-            "baseline project, not on a version. Apply the change on the "
-            "baseline — it will propagate to active versions automatically."
-        )
+    """Project accepts milestone / activity writes (any non-deleted state)."""
+    _load_live_project(db, project_id)
 
 
 def assert_task_subtask_writable(db: Session, project_id: str) -> None:
-    """
-    Project accepts task / subtask writes.
+    """Project accepts task / subtask writes.
 
-    Allowed only when the project is a live **version**. Baselines reject
-    the write — tasks and subtasks belong to a version.
-
-    Raises:
-        NotFoundError: project missing or soft-deleted.
-        AuthorizationError: project is a baseline.
+    Requires the project to be live AND in ``published`` status. A
+    project in ``new`` / ``draft`` / ``closed`` returns a 422
+    validation error with a clear message — the FE shows it as "publish
+    the project before adding tasks / subtasks".
     """
     project = _load_live_project(db, project_id)
-    if not getattr(project, "is_version", False):
-        raise AuthorizationError(
-            "Tasks and subtasks can only be added or modified within a "
-            "version. Create a version of this baseline first."
+    status = (getattr(project, "status", None) or "").lower()
+    if status != _STATUS_PUBLISHED:
+        raise ValidationError(
+            "Tasks and subtasks can only be added to a published project. "
+            "Publish the project first.",
+            details={
+                "errorIdentifier": "publish_required",
+                "projectId": project_id,
+                "projectStatus": status,
+                "requiredStatus": _STATUS_PUBLISHED,
+            },
         )

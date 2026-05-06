@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from sqlalchemy import Boolean, Column, DateTime, Index, String
+from ..utc_datetime import UtcDateTime
 from ..session import Base
 
 
@@ -32,8 +33,8 @@ class ResourceTypeModel(Base):
     name = Column(String(255), nullable=False)
     active = Column(Boolean, default=True, nullable=False, index=True)
 
-    created_at = Column(DateTime, default=_utcnow, nullable=False)
-    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow, nullable=False)
+    created_at = Column(UtcDateTime, default=_utcnow, nullable=False)
+    updated_at = Column(UtcDateTime, default=_utcnow, onupdate=_utcnow, nullable=False)
 
     __table_args__ = (
         Index("idx_resource_types_active_code", "active", "code"),

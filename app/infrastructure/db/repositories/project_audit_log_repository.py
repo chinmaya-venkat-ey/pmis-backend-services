@@ -24,6 +24,7 @@ class ProjectAuditLogRepository:
             id=model.id,
             project_id=model.project_id,
             actor_id=model.actor_id,
+            actor_role=getattr(model, "actor_role", None),
             action=model.action,
             before=model.before,
             after=model.after,
@@ -33,14 +34,16 @@ class ProjectAuditLogRepository:
     def add(
         self,
         project_id: str,
-        actor_id: Optional[int],
+        actor_id: Optional[str],
         action: str,
         before: Optional[Dict[str, Any]] = None,
         after: Optional[Dict[str, Any]] = None,
+        actor_role: Optional[str] = None,
     ) -> ProjectAuditLogModel:
         entry = ProjectAuditLogModel(
             project_id=project_id,
             actor_id=actor_id,
+            actor_role=actor_role,
             action=action,
             before=before,
             after=after,

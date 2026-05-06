@@ -17,14 +17,44 @@ from .....infrastructure.db.repositories.project_audit_log_repository import (
 
 # Well-known action names. Callers should use these rather than raw strings
 # so downstream log viewers stay consistent.
+#
+# Doc 33: with versioning removed, ACTION_SUSPEND and ACTION_VERSION_CREATE
+# are gone. Audit coverage was expanded to include the M/A/T/S subtree
+# writes plus dependency, status, vendor-association and member-association
+# changes — every state change to a project is captured here regardless of
+# which subtree handler made it.
 ACTION_CREATE = "project.create"
 ACTION_UPDATE = "project.update"
 ACTION_PUBLISH = "project.publish"
 ACTION_CLOSE = "project.close"
-ACTION_SUSPEND = "project.suspend"
-ACTION_VERSION_CREATE = "project.version.create"
 ACTION_SOFT_DELETE = "project.soft_delete"
 ACTION_DRAFT = "project.draft"
+ACTION_STATUS_CHANGE = "project.status_change"
+
+# Subtree write actions (doc 33 audit expansion).
+ACTION_MILESTONE_CREATE = "milestone.create"
+ACTION_MILESTONE_UPDATE = "milestone.update"
+ACTION_MILESTONE_DELETE = "milestone.soft_delete"
+ACTION_MILESTONE_DEP_CHANGE = "milestone.dep_change"
+ACTION_ACTIVITY_CREATE = "activity.create"
+ACTION_ACTIVITY_UPDATE = "activity.update"
+ACTION_ACTIVITY_DELETE = "activity.soft_delete"
+ACTION_ACTIVITY_DEP_CHANGE = "activity.dep_change"
+ACTION_TASK_CREATE = "task.create"
+ACTION_TASK_UPDATE = "task.update"
+ACTION_TASK_DELETE = "task.soft_delete"
+ACTION_TASK_DEP_CHANGE = "task.dep_change"
+ACTION_SUBTASK_CREATE = "subtask.create"
+ACTION_SUBTASK_UPDATE = "subtask.update"
+ACTION_SUBTASK_DELETE = "subtask.soft_delete"
+ACTION_SUBTASK_DEP_CHANGE = "subtask.dep_change"
+
+# Project-association actions (doc 33 audit expansion).
+ACTION_VENDOR_ASSOC_ADD = "project.vendor.assoc_add"
+ACTION_VENDOR_ASSOC_REMOVE = "project.vendor.assoc_remove"
+ACTION_MEMBER_ADD = "project.member.add"
+ACTION_MEMBER_UPDATE = "project.member.update"
+ACTION_MEMBER_REMOVE = "project.member.remove"
 
 
 def project_snapshot(project: Project) -> Dict[str, Any]:
@@ -44,17 +74,13 @@ def project_snapshot(project: Project) -> Dict[str, Any]:
             project.actual_end_date.isoformat() if project.actual_end_date else None
         ),
         "category": project.category,
-        "is_version": project.is_version,
-        "version_of": project.version_of,
-        "baseline_id": project.baseline_id,
-        "version_no": project.version_no,
     }
 
 
 def record_audit(
     db: Session,
     project_id: str,
-    actor_id: Optional[int],
+    actor_id: Optional[str],
     action: str,
     before: Optional[Dict[str, Any]] = None,
     after: Optional[Dict[str, Any]] = None,

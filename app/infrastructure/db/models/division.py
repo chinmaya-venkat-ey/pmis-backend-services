@@ -16,11 +16,21 @@ Schema:
 - ``requires_other``: True only for the ``others`` row — tells the FE to
                      show the free-text "Specify owner" follow-up input.
 - ``active``       : flips a row off without deleting it (history-safe).
+- ``email``        : contact email for the division (e.g. a shared
+                     mailbox alias). **Doc 36: NOT NULL — required at
+                     create time.** The seeded rows are backfilled from
+                     ``DIVISION_DEFAULT_EMAIL`` env var. Mirrors the
+                     ``vendors.email`` pattern from doc 18.
+- ``phone_number`` : contact phone for the division. **Doc 36: NOT
+                     NULL — required at create time.** Backfilled from
+                     ``DIVISION_DEFAULT_PHONE`` env var. Free-form (no
+                     regex) — same convention as ``vendors.phone_number``.
 """
 from datetime import datetime, timezone
 
 from sqlalchemy import Boolean, Column, DateTime, Index, Integer, String
 
+from ..utc_datetime import UtcDateTime
 from ..session import Base
 
 
@@ -38,8 +48,12 @@ class DivisionModel(Base):
     requires_other = Column(Boolean, default=False, nullable=False)
     active = Column(Boolean, default=True, nullable=False, index=True)
 
-    created_at = Column(DateTime, default=_utcnow, nullable=False)
-    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow, nullable=False)
+    # Doc 36: contact details are mandatory.
+    email = Column(String(255), nullable=False, index=True)
+    phone_number = Column(String(50), nullable=False)
+
+    created_at = Column(UtcDateTime, default=_utcnow, nullable=False)
+    updated_at = Column(UtcDateTime, default=_utcnow, onupdate=_utcnow, nullable=False)
 
     __table_args__ = (
         Index("idx_divisions_code_active", "code", "active"),
@@ -49,5 +63,6 @@ class DivisionModel(Base):
         return (
             f"<DivisionModel(id={self.id}, code='{self.code}', "
             f"label='{self.label}', builtin={self.is_builtin}, "
-            f"active={self.active})>"
+            f"active={self.active}, email={self.email!r}, "
+            f"phone_number={self.phone_number!r})>"
         )

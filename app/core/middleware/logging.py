@@ -1,33 +1,71 @@
-"""Request/response logging middleware — ported from the monolith / user-service."""
-import logging
+"""
+Logging middleware for request/response tracking.
+"""
 import time
 import uuid
+import logging
 from typing import Callable
-
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
 logger = logging.getLogger(__name__)
 
+
 class LoggingMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+    """
+    Middleware for logging requests and responses.
+
+    This middleware:
+    1. Generates unique request ID
+    2. Logs incoming requests
+    3. Logs outgoing responses with duration
+    4. Attaches request ID to request state
+    """
+
+    async def dispatch(
+        self,
+        request: Request,
+        call_next: Callable
+    ) -> Response:
+        """
+        Process request with logging.
+
+        Args:
+            request: Incoming request
+            call_next: Next middleware/handler
+
+        Returns:
+            Response from next handler
+        """
+        # Generate unique request ID
         request_id = str(uuid.uuid4())
         request.state.request_id = request_id
 
+        # Log request
         logger.info(
-            "Request: %s %s [%s] User: %s",
-            request.method, request.url.path, request_id,
-            getattr(request.state, "user_login", "anonymous"),
-            )
+            f"Request: {request.method} {request.url.path} "
+            f"[{request_id}] "
+            f"User: {getattr(request.state, 'user_login', 'anonymous')}"
+        )
 
-        start = time.time()
+        # Track request duration
+        start_time = time.time()
+
+        # Process request
         response = await call_next(request)
-        duration = time.time() - start
 
+        # Calculate duration
+        duration = time.time() - start_time
+
+        # Log response
         logger.info(
-            "Response: %s %s [%s] Status: %s Duration: %.3fs",
-            request.method, request.url.path, request_id,
-            response.status_code, duration,
-            )
+            f"Response: {request.method} {request.url.path} "
+            f"[{request_id}] "
+            f"Status: {response.status_code} "
+            f"Duration: {duration:.3f}s"
+        )
+
+        # Add request ID to response headers
         response.headers["X-Request-ID"] = request_id
+
         return response

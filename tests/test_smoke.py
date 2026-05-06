@@ -35,7 +35,7 @@ def project_id(db_session, client, admin_headers):
         name=f"P-{uuid4().hex[:6]}",
         description="-",
         active=True, public=False, status="new",
-        owner="tmd1", is_version=False,
+        owner="tmd1",
         start_date=datetime(2026, 5, 1, tzinfo=timezone.utc),
     )
     db_session.add(p)

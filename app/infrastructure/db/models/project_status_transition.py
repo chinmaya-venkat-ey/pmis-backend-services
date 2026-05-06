@@ -20,8 +20,6 @@ Schema:
 - ``to_status``         : the destination status the system permits.
 - ``requires_admin``    : if true, the actor must be an admin to take this
                           edge. Mirrors ADMIN_ONLY_TRANSITIONS in code.
-- ``version_only``      : if true, only versions (is_version=True) may take
-                          this edge. Mirrors VERSION_ONLY_TRANSITIONS.
 - ``active``            : flips a row off without deleting it (history-safe).
 - ``description``       : free-text description of the rule for docs/UI.
 
@@ -34,6 +32,7 @@ from sqlalchemy import (
     Boolean, Column, DateTime, Index, Integer, String, UniqueConstraint,
 )
 
+from ..utc_datetime import UtcDateTime
 from ..session import Base
 
 
@@ -53,13 +52,12 @@ class ProjectStatusTransitionModel(Base):
     to_status = Column(String(50), nullable=False, index=True)
 
     requires_admin = Column(Boolean, default=False, nullable=False)
-    version_only = Column(Boolean, default=False, nullable=False)
     active = Column(Boolean, default=True, nullable=False, index=True)
 
     description = Column(String(500), nullable=True)
 
-    created_at = Column(DateTime, default=_utcnow, nullable=False)
-    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow, nullable=False)
+    created_at = Column(UtcDateTime, default=_utcnow, nullable=False)
+    updated_at = Column(UtcDateTime, default=_utcnow, onupdate=_utcnow, nullable=False)
 
     __table_args__ = (
         UniqueConstraint(
@@ -73,5 +71,5 @@ class ProjectStatusTransitionModel(Base):
         return (
             f"<ProjectStatusTransitionModel("
             f"{self.from_status} -> {self.to_status}, "
-            f"admin={self.requires_admin}, version_only={self.version_only})>"
+            f"admin={self.requires_admin})>"
         )

@@ -3,8 +3,9 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from sqlalchemy import (
-    JSON, Column, Integer, String, DateTime, ForeignKey, Text, Index,
+    Column, Integer, String, DateTime, ForeignKey, Text, Index, text,
 )
+from ..utc_datetime import UtcDateTime
 from ..session import Base
 
 
@@ -26,8 +27,8 @@ class MilestoneModel(Base):
     name = Column(String(255), nullable=False, index=True)
     description = Column(Text, nullable=True)
 
-    start_date = Column(DateTime, nullable=False)
-    end_date = Column(DateTime, nullable=False)
+    start_date = Column(UtcDateTime, nullable=False)
+    end_date = Column(UtcDateTime, nullable=False)
 
     position = Column(Integer, nullable=False, default=0)
 
@@ -35,28 +36,35 @@ class MilestoneModel(Base):
     # (app/domain/milestones/milestone.py). Defaults to 'not_completed'.
     status = Column(String(32), nullable=False, default="not_completed", index=True)
 
-    # List of milestone ids this milestone depends on. Stored as JSON so we
-    # can extend later without a schema migration. Currently carried through
-    # the API unchanged — no referential integrity is enforced.
-    depends = Column(JSON, nullable=True)
+    # The legacy ``depends`` JSON column was removed in doc 22 (display-label
+    # rework). Milestone-to-milestone dependencies now live in the
+    # ``milestone_dependencies`` edge table (per doc 21A) and are surfaced
+    # through the API as ``dependsOn`` / ``dependsOnDisplay``.
 
-    # Lineage pointer: when a version project is created from a baseline,
-    # each cloned milestone records the id of its source baseline milestone
-    # here. Baseline milestones have cloned_from_id=NULL. Used by the
-    # baseline-to-versions propagation cascade.
-    cloned_from_id = Column(
-        String(36), ForeignKey("milestones.id"), nullable=True, index=True,
-    )
+    # Doc 33: ``cloned_from_id`` was removed along with the versioning
+    # feature. Milestones live directly under their project.
 
-    created_at = Column(DateTime, default=_utcnow, nullable=False)
-    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow, nullable=False)
-    created_by = Column(Integer, nullable=True)
-    updated_by = Column(Integer, nullable=True)
-    deleted_at = Column(DateTime, nullable=True, index=True)
+    created_at = Column(UtcDateTime, default=_utcnow, nullable=False)
+    updated_at = Column(UtcDateTime, default=_utcnow, onupdate=_utcnow, nullable=False)
+    # Doc 26: users.id flipped to UUID String(36).
+    created_by = Column(String(36), ForeignKey("users.id"), nullable=True)
+    updated_by = Column(String(36), ForeignKey("users.id"), nullable=True)
+    deleted_at = Column(UtcDateTime, nullable=True, index=True)
 
     __table_args__ = (
         Index("idx_milestones_project_live", "project_id", "deleted_at"),
         Index("idx_milestones_project_position", "project_id", "position"),
+        # One LIVE milestone per (project_id, position). Position is the
+        # rank source for display labels (M1, M2, …); duplicates would make
+        # label resolution ambiguous. Soft-deleted rows can share positions
+        # with a live row (history kept).
+        Index(
+            "uq_milestones_project_position_live",
+            "project_id", "position",
+            unique=True,
+            sqlite_where=text("deleted_at IS NULL"),
+            postgresql_where=text("deleted_at IS NULL"),
+        ),
     )
 
     def __repr__(self) -> str:

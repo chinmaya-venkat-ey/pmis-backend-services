@@ -97,11 +97,19 @@ def client(db_engine, db_session):
 # Auth fixtures
 # ---------------------------------------------------------------------------
 
+# Doc 26: ``users.id`` is a UUID String(36). The auth middleware's doc-27
+# hotfix rejects non-UUID user_id claims as anonymous (matches
+# pmis-user-service's mint shape). Use deterministic UUIDs in tests so
+# fixtures referencing ``admin_token``'s identity stay stable.
+_ADMIN_UUID = "00000000-0000-0000-0000-000000000001"
+_MEMBER_UUID = "00000000-0000-0000-0000-000000000002"
+
+
 @pytest.fixture(scope="function")
 def admin_token():
     return create_access_token({
         "sub": "admin",
-        "user_id": 1,
+        "user_id": _ADMIN_UUID,
         "email": "admin@example.com",
         "role": "admin",
         "is_admin": True,
@@ -112,7 +120,7 @@ def admin_token():
 def member_token():
     return create_access_token({
         "sub": "member",
-        "user_id": 2,
+        "user_id": _MEMBER_UUID,
         "email": "member@example.com",
         "role": "member",
         "is_admin": False,

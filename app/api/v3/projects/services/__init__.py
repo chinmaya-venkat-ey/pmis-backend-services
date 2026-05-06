@@ -9,8 +9,6 @@ from .delete import delete_project
 from .upsert import upsert_project
 from .publish import publish_project
 from .close import close_project
-from .suspend import suspend_version
-from .version import create_version
 from .save import save_project_setup
 from .transitions import (
     transition_to_draft_if_new,
@@ -28,8 +26,6 @@ __all__ = [
     "upsert_project",
     "publish_project",
     "close_project",
-    "suspend_version",
-    "create_version",
     "save_project_setup",
     "transition_to_draft_if_new",
     "editable_fields_for",

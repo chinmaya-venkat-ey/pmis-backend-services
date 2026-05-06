@@ -1,15 +1,21 @@
-"""Create-comment service.
+"""Create-comment service (doc 35: unified send-event model).
 
-Handles the body + optional files in one transaction:
+A single insert into ``comments`` carries body + JSON attachments
+together. Steps:
+
   1. Verify target exists.
   2. Validate body and/or files were supplied (at least one).
-  3. Persist the comment row.
-  4. For each uploaded file: validate (size, extension), save bytes
-     to storage, persist attachment row pointing at the comment.
-  5. Hydrate attachments back onto the returned domain object.
+  3. Per-file validation (size, extension) BEFORE any upload.
+  4. Upload each file via ``get_file_client()`` — writes bytes locally
+     (or forwards to an external server when configured), returns the
+     public URL + storage key + metadata.
+  5. Persist a single ``comments`` row with the body and a JSON list
+     of attachment-info objects.
+  6. If anything fails after a file's bytes are already on disk,
+     best-effort delete the bytes so we don't leak.
 
-If anything fails partway, the DB transaction rolls back AND any
-already-written files are deleted. No orphans.
+The previous two-table flow (one comments INSERT + N attachments
+INSERTs) has been collapsed into one row + one JSON column.
 """
 from typing import List, Optional
 
@@ -17,18 +23,16 @@ from fastapi import UploadFile
 from sqlalchemy.orm import Session
 
 from .....core.config import settings
-from .....domain.comments.comment import Comment
-from .....infrastructure.db.repositories.attachment_repository import (
-    AttachmentRepository,
-)
+from .....domain.comments.comment import AttachmentInfo, Comment
 from .....infrastructure.db.repositories.comment_repository import (
     CommentRepository,
 )
 from .....infrastructure.storage import (
     StorageUnavailableError,
-    get_storage,
+    get_file_client,
 )
 from .....infrastructure.storage.file_storage import file_extension
+from .....shared.file_content_check import validate_content_matches_extension
 from .....shared.service_result import ServiceResult
 
 from .._target_helper import is_valid_target_kind, target_exists
@@ -47,9 +51,9 @@ def create_comment(
     *,
     target_kind: str,
     target_id: str,
-    body: str,
+    body: Optional[str],
     files: Optional[List[UploadFile]],
-    author_user_id: int,
+    author_user_id: str,
 ) -> ServiceResult[Comment]:
     files = files or []
 
@@ -80,16 +84,15 @@ def create_comment(
             error_type="not_found",
         )
 
-    # Per-file validation (size + extension whitelist).
+    # Per-file validation (size + extension whitelist). Run BEFORE the
+    # comment row is touched so an obviously-bad file doesn't leave an
+    # orphan row.
     allowed_exts = _allowed_extensions()
     max_bytes = settings.ATTACHMENTS_MAX_BYTES
-    file_specs = []  # collected after validation
     for upload in files:
-        # Read the actual size by seeking. UploadFile.size is sometimes
-        # None depending on the spool path; stat the underlying file.
-        upload.file.seek(0, 2)  # seek to end
+        upload.file.seek(0, 2)
         size = upload.file.tell()
-        upload.file.seek(0)     # rewind for streaming write
+        upload.file.seek(0)
         if size > max_bytes:
             return ServiceResult.fail(
                 error=(
@@ -109,54 +112,59 @@ def create_comment(
                 error_type="validation_error",
                 details={"file": upload.filename, "extension": ext},
             )
-        file_specs.append({
-            "upload": upload,
-            "size": size,
-            "extension": ext,
-        })
 
-    # ---- Persist comment + attachments ---------------------------------
+        # Magic-byte / declared-extension content check. Catches renamed
+        # payloads (evil.exe -> report.pdf) that pass the extension
+        # whitelist but lie about their content. Project-service-only
+        # post-demo client requirement; not present in monolith.
+        sniff_buf = upload.file.read(262)
+        upload.file.seek(0)
+        is_valid, content_err = validate_content_matches_extension(sniff_buf, ext)
+        if not is_valid:
+            return ServiceResult.fail(
+                error=content_err,
+                error_type="validation_error",
+                details={"file": upload.filename, "extension": ext},
+            )
 
-    storage = get_storage()
-    written_keys: List[str] = []  # for rollback on failure
+    # ---- Upload bytes + collect URLs -----------------------------------
+
+    client = get_file_client()
+    stored_keys: List[str] = []  # for rollback on later failure
+    attachment_infos: List[AttachmentInfo] = []
 
     try:
+        for upload in files:
+            stored = client.upload(
+                upload.file,
+                upload.filename or "unnamed",
+                upload.content_type or "application/octet-stream",
+            )
+            stored_keys.append(stored.storage_key)
+            attachment_infos.append(AttachmentInfo(
+                url=stored.url,
+                filename=stored.filename,
+                mime_type=stored.mime_type,
+                size_bytes=stored.size_bytes,
+                uploaded_at=stored.uploaded_at,
+            ))
+
+        # ---- Persist single comment row --------------------------------
         comment = CommentRepository(db).create(
             target_kind=target_kind,
             target_id=target_id,
-            body=body,
+            body=body or None,
+            attachments=attachment_infos or None,
             author_user_id=author_user_id,
         )
-
-        attach_repo = AttachmentRepository(db)
-        attachments = []
-        for spec in file_specs:
-            up = spec["upload"]
-            key = storage.generate_storage_key(up.filename or "unnamed")
-            storage.save(key, up.file)
-            written_keys.append(key)
-            attachment = attach_repo.create(
-                comment_id=comment.id,
-                target_kind=None,
-                target_id=None,
-                original_filename=up.filename or "unnamed",
-                storage_key=key,
-                mime_type=up.content_type or "application/octet-stream",
-                size_bytes=spec["size"],
-                uploaded_by_user_id=author_user_id,
-            )
-            attachments.append(attachment)
-
-        comment.attachments = attachments
         db.commit()
         return ServiceResult.ok(comment)
 
     except StorageUnavailableError as e:
         db.rollback()
-        # Best-effort cleanup of any files written before the failure.
-        for k in written_keys:
+        for k in stored_keys:
             try:
-                storage.delete(k)
+                client.delete(k)
             except Exception:
                 pass
         return ServiceResult.fail(
@@ -165,9 +173,9 @@ def create_comment(
         )
     except Exception as e:  # noqa: BLE001
         db.rollback()
-        for k in written_keys:
+        for k in stored_keys:
             try:
-                storage.delete(k)
+                client.delete(k)
             except Exception:
                 pass
         return ServiceResult.fail(

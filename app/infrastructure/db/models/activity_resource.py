@@ -5,6 +5,7 @@ from uuid import uuid4
 from sqlalchemy import (
     Column, Integer, String, DateTime, ForeignKey, Numeric, Index, text,
 )
+from ..utc_datetime import UtcDateTime
 from ..session import Base
 
 
@@ -24,10 +25,10 @@ class ActivityResourceModel(Base):
 
     resource_name = Column(String(255), nullable=False)
 
-    onboard_date = Column(DateTime, nullable=True)
-    actual_onboard_date = Column(DateTime, nullable=True)
-    offboard_date = Column(DateTime, nullable=True)
-    actual_offboard_date = Column(DateTime, nullable=True)
+    onboard_date = Column(UtcDateTime, nullable=True)
+    actual_onboard_date = Column(UtcDateTime, nullable=True)
+    offboard_date = Column(UtcDateTime, nullable=True)
+    actual_offboard_date = Column(UtcDateTime, nullable=True)
 
     position = Column(String(255), nullable=True)
     designation = Column(String(255), nullable=True)
@@ -49,9 +50,9 @@ class ActivityResourceModel(Base):
     division = Column(String(32), nullable=True)
     division_other = Column(String(255), nullable=True)
 
-    created_at = Column(DateTime, default=_utcnow, nullable=False)
-    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow, nullable=False)
-    deleted_at = Column(DateTime, nullable=True, index=True)
+    created_at = Column(UtcDateTime, default=_utcnow, nullable=False)
+    updated_at = Column(UtcDateTime, default=_utcnow, onupdate=_utcnow, nullable=False)
+    deleted_at = Column(UtcDateTime, nullable=True, index=True)
 
     __table_args__ = (
         Index(

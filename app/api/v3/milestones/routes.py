@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from ....core.middleware.rbac import require_permission
 from ....infrastructure.db.session import get_db
+from .._inline_attachments import dispatch_create
 from .controller import MilestoneController
 from .permissions import (
     MILESTONES_CREATE, MILESTONES_READ, MILESTONES_UPDATE,
@@ -29,15 +30,115 @@ milestones_router = APIRouter(prefix="/milestones", tags=["milestones"])
     "/{project_uuid}/milestones/create",
     dependencies=[require_permission(MILESTONES_CREATE)],
     summary="Create milestone under project",
+    description=(
+        "Create a milestone. Accepts EITHER ``application/json`` (legacy "
+        "shape — milestone fields only) OR ``multipart/form-data`` (doc 30 — "
+        "milestone fields as form fields, plus optional ``body`` (comment "
+        "text) and ``files`` (file uploads). When attachments are present, "
+        "the milestone + comment + attachments are persisted in the same "
+        "request. Array-typed fields (``dependsOn``, ``vendors``) are "
+        "JSON-encoded strings inside multipart."
+    ),
     status_code=201,
+    # Doc 30: route signature is ``Request`` (so we can dispatch on
+    # Content-Type), which means FastAPI can't auto-generate the
+    # request-body OpenAPI schema. We declare it explicitly here so
+    # Swagger UI renders body input fields for both shapes. The JSON
+    # schema is generated from the Pydantic model directly to keep
+    # Swagger in sync with the validators (MilestoneCreateRequest is
+    # the same source of truth for both paths).
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": MilestoneCreateRequest.model_json_schema(
+                        by_alias=True,
+                    ),
+                },
+                "multipart/form-data": {
+                    "schema": {
+                        "type": "object",
+                        "required": ["name", "startDate", "endDate"],
+                        "properties": {
+                            "name": {"type": "string", "minLength": 1, "maxLength": 255},
+                            "description": {"type": "string", "maxLength": 5000},
+                            "startDate": {
+                                "type": "string", "format": "date-time",
+                                "description": "ISO 8601, e.g. 2026-05-04T00:00:00+05:30",
+                            },
+                            "endDate": {"type": "string", "format": "date-time"},
+                            "position": {"type": "integer", "minimum": 0},
+                            "status": {
+                                "type": "string",
+                                "description": "One of: not_completed, completed",
+                            },
+                            "dependsOn": {
+                                "type": "string",
+                                "description": (
+                                    "JSON-encoded array of milestone UUIDs or "
+                                    "labels (e.g. ``[\"M2\"]``). Multipart can't "
+                                    "carry typed arrays natively, so the FE "
+                                    "JSON-encodes them as a string."
+                                ),
+                            },
+                            "vendors": {
+                                "type": "string",
+                                "description": (
+                                    "JSON-encoded array of vendor UUIDs or "
+                                    "vendor codes (e.g. ``[\"VN-ACME-...\"]``)."
+                                ),
+                            },
+                            "body": {
+                                "type": "string",
+                                "description": (
+                                    "Optional comment text. If supplied, a "
+                                    "comment row is created against the new "
+                                    "milestone, and any uploaded files are "
+                                    "bound to that comment."
+                                ),
+                            },
+                            "files": {
+                                "type": "array",
+                                "items": {"type": "string", "format": "binary"},
+                                "description": (
+                                    "Optional file uploads. With ``body`` → "
+                                    "bound to the comment. Without ``body`` → "
+                                    "standalone attachments on the milestone."
+                                ),
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
 )
-def create(
+async def create(
     request: Request,
     project_uuid: str,
-    data: MilestoneCreateRequest,
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
-    return MilestoneController.create(request, project_uuid, data, db)
+    """Doc 30 dual-mode dispatch.
+
+    * ``application/json``       → existing path, no inline attachments
+    * ``multipart/form-data``    → milestone + optional comment / files
+
+    Both paths share the same ``MilestoneCreateRequest`` Pydantic
+    validators (and therefore the same error shapes) — only the parser
+    differs. The shared helper handles content-type sniffing,
+    JSON-decode-error plumbing, and the Pydantic-to-422 conversion.
+    """
+    return await dispatch_create(
+        request,
+        schema_cls=MilestoneCreateRequest,
+        json_handler=lambda req, project_uuid, db, data:
+            MilestoneController.create(req, project_uuid, data, db),
+        multipart_handler=lambda req, project_uuid, db:
+            MilestoneController.create_multipart(req, project_uuid, db),
+        json_args=(project_uuid, db),
+        multipart_args=(project_uuid, db),
+    )
 
 
 @milestones_project_router.get(

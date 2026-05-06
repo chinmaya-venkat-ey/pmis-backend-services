@@ -6,9 +6,15 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field
 class VendorCreateRequest(BaseModel):
     """Body for POST /vendors/create.
 
-    Contact fields (`email`, `contactPerson`, `phoneNumber`) are
-    optional. Email goes through Pydantic's loose RFC 5322 check; phone
-    is a free-form string (international formats vary too much for a
+    Contact fields:
+      * ``email`` and ``contactPerson`` are optional.
+      * ``phoneNumber`` is **required** on create (matches the user
+        schema so both entities now demand a phone number for new rows).
+        Existing vendors with NULL phone numbers stay readable; only
+        creates and explicit re-sets are gated.
+
+    Email goes through Pydantic's loose RFC 5322 check; phone is a
+    free-form string (international formats vary too much for a
     one-size regex).
     """
     model_config = ConfigDict(populate_by_name=True)
@@ -23,11 +29,16 @@ class VendorCreateRequest(BaseModel):
         None, alias="contact_person", max_length=255,
         description="Person at the vendor org to reach out to.",
     )
-    phoneNumber: Optional[str] = Field(
-        None, alias="phone_number", max_length=50,
+    phoneNumber: str = Field(
+        ...,
+        alias="phone_number",
+        min_length=1,
+        max_length=50,
         description=(
-            "Free-form phone number. No regex check — international "
-            "formats vary; FE may apply its own client-side mask."
+            "Required on create. Free-form phone number — no regex "
+            "check (international formats vary; FE may apply its own "
+            "client-side mask). Mirrors the user schema's "
+            "``phoneNumber`` field exactly."
         ),
     )
     projectIds: Optional[List[str]] = Field(

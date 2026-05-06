@@ -1,13 +1,13 @@
-"""Comments + attachments domain — Phases 11 + 12.
+"""Comments domain entities (doc 35: unified send-event model).
 
-Polymorphic over the M/A/T/S nodes — single ``comments`` and
-``attachments`` tables both serve milestones / activities / tasks /
-subtasks via ``target_kind`` + ``target_id``.
+The legacy ``Attachment`` standalone domain entity is gone — file
+metadata now travels embedded on the comment row as ``AttachmentInfo``.
 """
-from .attachment import Attachment
-from .comment import Comment
+from .comment import AttachmentInfo, Comment
 
-__all__ = ["Attachment", "Comment"]
+__all__ = ["AttachmentInfo", "Comment"]
 
-# Allowed target kinds for comments and attachments.
+
+# Allowed target kinds for comments + attachment-only sends.
+# Mirrors the design (panel sits on every M/A/T/S node).
 TARGET_KINDS = ("milestone", "activity", "task", "subtask")

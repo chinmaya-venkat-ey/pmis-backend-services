@@ -1,16 +1,26 @@
 """
-Role-Based Access Control (RBAC) system.
+Role-Based Access Control (RBAC) — permission constants.
+
+Doc 33 (change 2) RBAC artifact cleanup:
+- ``Role`` enum DELETED. Doc 21B replaced the in-memory role concept
+  with seeded ``roles`` table rows. The enum had no remaining call
+  sites — its only consumers were ``ROLE_PERMISSIONS`` (also deleted
+  here) and the dead helpers ``has_permission`` / ``get_role_permissions``.
+- ``ROLE_PERMISSIONS`` dict DELETED. Per-role permission sets now live
+  in the ``role_permissions`` DB table, seeded by
+  ``RbacRepository.sync_builtin_permissions`` from the lists in
+  ``app/core/permissions.py``.
+- ``has_permission()`` / ``get_role_permissions()`` DELETED — never
+  called. The runtime check uses ``request.state.user_permissions``,
+  populated per-request from the DB by the auth middleware.
+
+The ``Permission`` enum below is kept as a transitional bridge: every
+``app/api/v3/*/permissions.py`` re-export shim still imports it. The
+canonical form going forward is the string constants in
+``app/core/permissions.py``; the enum will be deprecated when those
+shims are migrated to direct strings.
 """
 from enum import Enum
-from typing import Set, Dict
-
-
-class Role(str, Enum):
-    """User roles in the system."""
-    ADMIN = "admin"
-    MEMBER = "member"
-    VIEWER = "viewer"
-    ANONYMOUS = "anonymous"
 
 
 class Permission(str, Enum):
@@ -119,162 +129,77 @@ class Permission(str, Enum):
     ATTACHMENTS_DELETE = "attachments:delete"
 
 
-# Role -> Permissions mapping
-ROLE_PERMISSIONS: Dict[Role, Set[Permission]] = {
-    Role.ADMIN: {
-        Permission.USERS_CREATE,
-        Permission.USERS_READ,
-        Permission.USERS_READ_ALL,
-        Permission.USERS_UPDATE,
-        Permission.USERS_UPDATE_ALL,
-        Permission.USERS_DELETE,
-        Permission.USERS_DELETE_ALL,
-        Permission.PROJECTS_CREATE,
-        Permission.PROJECTS_READ,
-        Permission.PROJECTS_READ_ALL,
-        Permission.PROJECTS_UPDATE,
-        Permission.PROJECTS_UPDATE_ALL,
-        Permission.PROJECTS_DELETE,
-        Permission.PROJECTS_DELETE_ALL,
-        Permission.PROJECTS_PUBLISH,
-        Permission.PROJECTS_CLOSE,
-        Permission.VENDORS_READ,
-        Permission.VENDORS_MANAGE,
-        Permission.RESOURCE_TYPES_READ,
-        Permission.RESOURCE_TYPES_MANAGE,
-        Permission.MASTER_DATA_VIEW,
-        Permission.MASTER_DATA_MANAGE,
-        Permission.PROJECT_MEMBERS_READ,
-        Permission.PROJECT_MEMBERS_ADD,
-        Permission.PROJECT_MEMBERS_UPDATE,
-        Permission.PROJECT_MEMBERS_DELETE,
-        Permission.ROLES_READ,
-        Permission.ROLES_CREATE,
-        Permission.ROLES_UPDATE,
-        Permission.ROLES_DELETE,
-        Permission.WORK_PACKAGES_VIEW,
-        Permission.WORK_PACKAGES_CREATE,
-        Permission.WORK_PACKAGES_UPDATE,
-        Permission.WORK_PACKAGES_DELETE,
-        Permission.WORK_PACKAGE_TYPES_VIEW,
-        Permission.WORK_PACKAGE_TYPES_MANAGE,
-        Permission.MEETINGS_VIEW,
-        Permission.MEETINGS_CREATE,
-        Permission.MEETINGS_UPDATE,
-        Permission.MEETINGS_DELETE,
-        Permission.MILESTONES_CREATE,
-        Permission.MILESTONES_READ,
-        Permission.MILESTONES_UPDATE,
-        Permission.MILESTONES_DELETE,
-        Permission.MILESTONES_RESTORE,
-        Permission.ACTIVITIES_CREATE,
-        Permission.ACTIVITIES_READ,
-        Permission.ACTIVITIES_UPDATE,
-        Permission.ACTIVITIES_DELETE,
-        Permission.ACTIVITIES_RESTORE,
-        Permission.TASKS_CREATE,
-        Permission.TASKS_READ,
-        Permission.TASKS_UPDATE,
-        Permission.TASKS_DELETE,
-        Permission.TASKS_RESTORE,
-        Permission.SUBTASKS_CREATE,
-        Permission.SUBTASKS_READ,
-        Permission.SUBTASKS_UPDATE,
-        Permission.SUBTASKS_DELETE,
-        Permission.SUBTASKS_RESTORE,
-        Permission.COMMENTS_CREATE,
-        Permission.COMMENTS_READ,
-        Permission.COMMENTS_DELETE,
-        Permission.ATTACHMENTS_CREATE,
-        Permission.ATTACHMENTS_DOWNLOAD,
-        Permission.ATTACHMENTS_DELETE,
-    },
-    Role.MEMBER: {
-        Permission.USERS_READ,
-        Permission.USERS_UPDATE,
-        Permission.PROJECTS_READ,
-        Permission.PROJECTS_CREATE,
-        Permission.PROJECTS_UPDATE,
-        Permission.VENDORS_READ,
-        Permission.RESOURCE_TYPES_READ,
-        Permission.MASTER_DATA_VIEW,
-        Permission.PROJECT_MEMBERS_READ,
-        Permission.PROJECT_MEMBERS_ADD,
-        Permission.PROJECT_MEMBERS_UPDATE,
-        Permission.WORK_PACKAGES_VIEW,
-        Permission.WORK_PACKAGES_CREATE,
-        Permission.WORK_PACKAGES_UPDATE,
-        Permission.WORK_PACKAGES_DELETE,
-        Permission.WORK_PACKAGE_TYPES_VIEW,
-        Permission.MEETINGS_VIEW,
-        Permission.MEETINGS_CREATE,
-        Permission.MEETINGS_UPDATE,
-        Permission.MEETINGS_DELETE,
-        Permission.MILESTONES_CREATE,
-        Permission.MILESTONES_READ,
-        Permission.MILESTONES_UPDATE,
-        Permission.MILESTONES_DELETE,
-        Permission.ACTIVITIES_CREATE,
-        Permission.ACTIVITIES_READ,
-        Permission.ACTIVITIES_UPDATE,
-        Permission.ACTIVITIES_DELETE,
-        Permission.TASKS_CREATE,
-        Permission.TASKS_READ,
-        Permission.TASKS_UPDATE,
-        Permission.TASKS_DELETE,
-        Permission.SUBTASKS_CREATE,
-        Permission.SUBTASKS_READ,
-        Permission.SUBTASKS_UPDATE,
-        Permission.SUBTASKS_DELETE,
-        Permission.COMMENTS_CREATE,
-        Permission.COMMENTS_READ,
-        Permission.COMMENTS_DELETE,
-        Permission.ATTACHMENTS_CREATE,
-        Permission.ATTACHMENTS_DOWNLOAD,
-        Permission.ATTACHMENTS_DELETE,
-    },
-    Role.VIEWER: {
-        Permission.USERS_READ,
-        Permission.PROJECTS_READ,
-        Permission.VENDORS_READ,
-        Permission.RESOURCE_TYPES_READ,
-        Permission.MASTER_DATA_VIEW,
-        Permission.PROJECT_MEMBERS_READ,
-        Permission.WORK_PACKAGES_VIEW,
-        Permission.MEETINGS_VIEW,
-        Permission.MILESTONES_READ,
-        Permission.ACTIVITIES_READ,
-        Permission.TASKS_READ,
-        Permission.SUBTASKS_READ,
-        Permission.COMMENTS_READ,
-        Permission.ATTACHMENTS_DOWNLOAD,
-    },
-    Role.ANONYMOUS: set(),
+# ----------------------------------------------------------------------
+# Role enum + ROLE_PERMISSIONS map.
+#
+# The monolith's doc-21B normalized permission tables don't exist in
+# user-service's schema, so project-service uses a simpler in-code mapping
+# from the role name minted into the JWT (`role` claim from user-service)
+# to the set of permissions that role grants. The auth middleware reads
+# this map to populate ``request.state.user_permissions``.
+#
+# Role names match user-service's ``app/core/rbac.py`` exactly so a JWT
+# minted there resolves cleanly here.
+# ----------------------------------------------------------------------
+
+
+class Role(str, Enum):
+    """Logical roles minted by user-service into the JWT."""
+    ADMIN = "admin"
+    MEMBER = "member"
+    VIEWER = "viewer"
+    ANONYMOUS = "anonymous"
+
+
+# Build out the role → permission set. Admins in practice get
+# the full registry via the auth middleware's ``is_admin`` short-circuit;
+# the explicit set below is kept for parity with user-service patterns.
+_ALL_PERMISSIONS = set(Permission)
+
+_VIEWER_PERMISSIONS = {
+    Permission.PROJECTS_READ,
+    Permission.MILESTONES_READ,
+    Permission.ACTIVITIES_READ,
+    Permission.TASKS_READ,
+    Permission.SUBTASKS_READ,
+    Permission.COMMENTS_READ,
+    Permission.VENDORS_READ,
+    Permission.RESOURCE_TYPES_READ,
+    Permission.MASTER_DATA_VIEW,
 }
 
+_MEMBER_PERMISSIONS = _VIEWER_PERMISSIONS | {
+    Permission.PROJECTS_CREATE,
+    Permission.PROJECTS_UPDATE,
+    Permission.PROJECTS_DELETE,
+    Permission.PROJECTS_PUBLISH,
+    Permission.PROJECTS_CLOSE,
+    Permission.MILESTONES_CREATE,
+    Permission.MILESTONES_UPDATE,
+    Permission.MILESTONES_DELETE,
+    Permission.MILESTONES_RESTORE,
+    Permission.ACTIVITIES_CREATE,
+    Permission.ACTIVITIES_UPDATE,
+    Permission.ACTIVITIES_DELETE,
+    Permission.ACTIVITIES_RESTORE,
+    Permission.TASKS_CREATE,
+    Permission.TASKS_UPDATE,
+    Permission.TASKS_DELETE,
+    Permission.TASKS_RESTORE,
+    Permission.SUBTASKS_CREATE,
+    Permission.SUBTASKS_UPDATE,
+    Permission.SUBTASKS_DELETE,
+    Permission.SUBTASKS_RESTORE,
+    Permission.COMMENTS_CREATE,
+    Permission.COMMENTS_DELETE,
+    Permission.ATTACHMENTS_CREATE,
+    Permission.ATTACHMENTS_DOWNLOAD,
+    Permission.ATTACHMENTS_DELETE,
+}
 
-def has_permission(role: Role, permission: Permission) -> bool:
-    """
-    Check if a role has a specific permission.
-
-    Args:
-        role: User role
-        permission: Required permission
-
-    Returns:
-        True if role has permission, False otherwise
-    """
-    return permission in ROLE_PERMISSIONS.get(role, set())
-
-
-def get_role_permissions(role: Role) -> Set[Permission]:
-    """
-    Get all permissions for a role.
-
-    Args:
-        role: User role
-
-    Returns:
-        Set of permissions for the role
-    """
-    return ROLE_PERMISSIONS.get(role, set())
+ROLE_PERMISSIONS = {
+    Role.ADMIN: _ALL_PERMISSIONS,
+    Role.MEMBER: _MEMBER_PERMISSIONS,
+    Role.VIEWER: _VIEWER_PERMISSIONS,
+    Role.ANONYMOUS: set(),
+}

@@ -11,6 +11,10 @@ from ..models.subtask import SubtaskModel
 from ..models.subtask_resource import SubtaskResourceModel
 from ....domain.tasks.task import Task
 from ....domain.tasks.task_resource import TaskResource
+from ....shared.comments_attachments_cascade import (
+    cascade_restore_comments_and_attachments,
+    cascade_soft_delete_comments_and_attachments,
+)
 
 
 class TaskRepository:
@@ -97,6 +101,18 @@ class TaskRepository:
         )
         return (cur or 0) + 1
 
+    def position_taken(self, activity_id: str, position: int) -> bool:
+        """True iff a live task in ``activity_id`` already occupies
+        ``position``. Lets the create service auto-bump caller-supplied
+        positions that would otherwise trip the unique index — see
+        ``MilestoneRepository.position_taken`` for the rationale.
+        """
+        return self.db.query(TaskModel.id).filter(
+            TaskModel.activity_id == activity_id,
+            TaskModel.position == position,
+            TaskModel.deleted_at.is_(None),
+        ).first() is not None
+
     def get_live_resource(self, task_id: str) -> Optional[TaskResource]:
         row = (
             self.db.query(TaskResourceModel)
@@ -113,7 +129,7 @@ class TaskRepository:
         project_id: str, activity_id: str, name: str, description: Optional[str],
         type: str, start_date: datetime, end_date: datetime,
         actual_start_date: Optional[datetime], actual_end_date: Optional[datetime],
-        position: int, created_by: Optional[int],
+        position: int, created_by: Optional[str],
         resource_mode: Optional[str] = None,
         resource_count: Optional[int] = None,
     ) -> Task:
@@ -137,7 +153,7 @@ class TaskRepository:
         self.db.flush()
         return self._to_domain(t)
 
-    def update(self, task_id: str, *, updates: dict, updated_by: Optional[int]) -> Task:
+    def update(self, task_id: str, *, updates: dict, updated_by: Optional[str]) -> Task:
         t = self.get_model(task_id)
         if t is None:
             raise LookupError(f"Task {task_id} not found")
@@ -203,7 +219,7 @@ class TaskRepository:
 
     # ---------- delete + cascade (task subtree) ----------
 
-    def soft_delete_with_cascade(self, task_id: str, deleted_by: Optional[int]) -> None:
+    def soft_delete_with_cascade(self, task_id: str, deleted_by: Optional[str]) -> None:
         now = datetime.now(timezone.utc)
         subtask_ids = select(SubtaskModel.id).where(
             SubtaskModel.task_id == task_id,
@@ -225,17 +241,73 @@ class TaskRepository:
             TaskModel.id == task_id,
             TaskModel.deleted_at.is_(None),
         ).values(deleted_at=now, updated_at=now, updated_by=deleted_by))
+
+        # Doc 34: cascade comments + attachments under the task subtree.
+        cascade_soft_delete_comments_and_attachments(
+            self.db,
+            targets=[
+                ("task", task_id),
+                ("subtask", select(SubtaskModel.id).where(
+                    SubtaskModel.task_id == task_id,
+                    SubtaskModel.deleted_at == now,
+                )),
+            ],
+            deleted_by=deleted_by,
+            now=now,
+        )
+
         self.db.commit()
 
     def restore(self, task_id: str, restored_by: Optional[int]) -> Task:
+        """
+        Restore the task + every S/resource/comment/attachment that was
+        soft-deleted as part of the same cascade event (doc 34). Dep
+        edges are NOT auto-restored.
+        """
         t = self.get_model(task_id, include_deleted=True)
         if t is None:
             raise LookupError(f"Task {task_id} not found")
         if t.deleted_at is None:
             return self._to_domain(t)
+
+        cascade_ts = t.deleted_at
+        now = datetime.now(timezone.utc)
+
         t.deleted_at = None
-        t.updated_at = datetime.now(timezone.utc)
+        t.updated_at = now
         t.updated_by = restored_by
+        self.db.flush()
+
+        self.db.execute(update(SubtaskModel).where(
+            SubtaskModel.task_id == task_id,
+            SubtaskModel.deleted_at == cascade_ts,
+        ).values(deleted_at=None, updated_at=now, updated_by=restored_by))
+        self.db.execute(update(TaskResourceModel).where(
+            TaskResourceModel.task_id == task_id,
+            TaskResourceModel.deleted_at == cascade_ts,
+        ).values(deleted_at=None, updated_at=now))
+        self.db.execute(update(SubtaskResourceModel).where(
+            SubtaskResourceModel.deleted_at == cascade_ts,
+            SubtaskResourceModel.subtask_id.in_(
+                select(SubtaskModel.id).where(
+                    SubtaskModel.task_id == task_id,
+                    SubtaskModel.deleted_at.is_(None),
+                )
+            ),
+        ).values(deleted_at=None, updated_at=now))
+
+        cascade_restore_comments_and_attachments(
+            self.db,
+            targets=[
+                ("task", task_id),
+                ("subtask", select(SubtaskModel.id).where(
+                    SubtaskModel.task_id == task_id,
+                    SubtaskModel.deleted_at.is_(None),
+                )),
+            ],
+            cascade_deleted_at=cascade_ts,
+        )
+
         self.db.commit()
         self.db.refresh(t)
         return self._to_domain(t)

@@ -13,11 +13,12 @@ from .....infrastructure.db.repositories.activity_repository import ActivityRepo
 from .....infrastructure.db.repositories.dependency_repository import (
     DependencyRepository,
 )
-from ...projects.services.audit import record_audit
-from ...projects.services.baseline_version_sync import (
-    ACTION_ACTIVITY_DELETE,
-    propagate_activity_soft_delete,
+from .....shared.dep_block import (
+    KIND_ACTIVITY,
+    collect_external_dep_blockers,
+    raise_if_external_blockers,
 )
+from ...projects.services.audit import ACTION_ACTIVITY_DELETE, record_audit
 
 
 def delete_activity(db: Session, *, activity_id: str, current_user_id: Optional[int]) -> None:
@@ -26,6 +27,17 @@ def delete_activity(db: Session, *, activity_id: str, current_user_id: Optional[
     if model is None:
         raise NotFoundError("The activity could not be found.")
     assert_milestone_activity_writable(db, model.project_id)
+
+    # Doc 34: refuse delete if any external dep targets this subtree.
+    blockers = collect_external_dep_blockers(
+        db,
+        root_kind=KIND_ACTIVITY,
+        root_id=activity_id,
+        project_id=model.project_id,
+    )
+    raise_if_external_blockers(
+        blockers, root_label=model.name, root_kind=KIND_ACTIVITY,
+    )
 
     # Snapshot the subtree id sets BEFORE we soft-delete, so the
     # dependency-cascade query can use them. (After soft-delete, deleted_at
@@ -73,6 +85,3 @@ def delete_activity(db: Session, *, activity_id: str, current_user_id: Optional[
         after=None,
     )
     db.commit()
-    propagate_activity_soft_delete(
-        db, baseline_activity_id=activity_id, actor_id=current_user_id,
-    )

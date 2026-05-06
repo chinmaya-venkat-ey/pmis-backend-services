@@ -1,6 +1,6 @@
 """Create a milestone under a project."""
 from datetime import datetime
-from typing import Any, List, Optional
+from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
@@ -11,15 +11,24 @@ from .....domain.milestones.milestone import (
     MILESTONE_STATUS_DEFAULT,
     Milestone,
 )
+from .....infrastructure.db.models.milestone import MilestoneModel
 from .....infrastructure.db.models.project import ProjectModel
+from .....infrastructure.db.repositories.dependency_repository import (
+    DependencyRepository,
+)
 from .....infrastructure.db.repositories.milestone_repository import MilestoneRepository
 from .....infrastructure.db.repositories.vendor_repository import VendorRepository
 from .....shared.date_rules import validate_entity_dates
-from ...projects.services.audit import record_audit
-from ...projects.services.baseline_version_sync import (
-    ACTION_MILESTONE_CREATE,
-    propagate_milestone_create,
+from .....shared.dep_date_rules import (
+    collect_milestone_forward_violations,
+    raise_milestone_forward_if_violations,
 )
+from .....shared.labels import (
+    KIND_MILESTONE,
+    build_label_index_for_project,
+    normalize_dependency_inputs,
+)
+from ...projects.services.audit import ACTION_MILESTONE_CREATE, record_audit
 
 
 def create_milestone(
@@ -33,7 +42,7 @@ def create_milestone(
     position: Optional[int],
     current_user_id: Optional[int],
     status: Optional[str] = None,
-    depends: Optional[List[Any]] = None,
+    depends_on: Optional[List[str]] = None,
     vendor_ids: Optional[List[str]] = None,
 ) -> Milestone:
     """
@@ -45,6 +54,10 @@ def create_milestone(
       - start_date >= project.start_date; end_date >= start_date.
       - If ``vendor_ids`` given, each must also appear in the project's vendors.
       - ``status`` must be in MILESTONE_STATUS_CHOICES (default 'not_completed').
+      - If ``depends_on`` given, every target id must reference a live
+        milestone in the SAME project (cross-milestone within the project
+        is the point of this feature). No self-edge is possible on create
+        (the new id doesn't exist yet); cycle detection kicks in on update.
     """
     assert_milestone_activity_writable(db, project_id)
 
@@ -57,7 +70,6 @@ def create_milestone(
             "Please set the project start date before adding milestones."
         )
 
-    # Parent of a milestone is the project itself.
     validate_entity_dates(
         entity_start=start_date,
         entity_end=end_date,
@@ -75,30 +87,98 @@ def create_milestone(
             f"Milestone status must be one of: {', '.join(MILESTONE_STATUS_CHOICES)}."
         )
 
-    # Vendor validation: each must exist/be active AND be attached to the
-    # parent project. We don't allow attaching vendors to a milestone that the
-    # project hasn't signed off on.
+    # Validate depends_on targets BEFORE creating the row. Accepts UUIDs
+    # or labels (e.g. "M2"); see app/shared/labels.py.
+    desired_deps: List[str] = []
+    if depends_on is not None:
+        dep_repo = DependencyRepository(db)
+        desired_deps = normalize_dependency_inputs(
+            db,
+            project_id=project_id,
+            expected_kind=KIND_MILESTONE,
+            raw_inputs=depends_on,
+            existence_check=dep_repo.existing_target_milestone_ids,
+        )
+
+        # Doc 31: milestone-specific dep-date rules —
+        #   source.start_date >= target.start_date  (equality OK)
+        #   source.end_date   >  target.end_date    (strict)
+        # Both must hold. See app/shared/dep_date_rules.py.
+        if desired_deps:
+            target_rows = (
+                db.query(
+                    MilestoneModel.id, MilestoneModel.name,
+                    MilestoneModel.start_date, MilestoneModel.end_date,
+                )
+                .filter(MilestoneModel.id.in_(desired_deps))
+                .all()
+            )
+            label_index = build_label_index_for_project(db, project_id)
+            forward = [
+                (label_index.label_of(KIND_MILESTONE, tid) or tname, tstart, tend)
+                for (tid, tname, tstart, tend) in target_rows
+            ]
+            starts, ends = collect_milestone_forward_violations(
+                source_start=start_date, source_end=end_date, targets=forward,
+            )
+            raise_milestone_forward_if_violations(
+                starts, ends,
+                source_label=f"Milestone '{name.strip()}'",
+                source_start=start_date, source_end=end_date,
+            )
+
     vendor_repo = VendorRepository(db)
     resolved_vendor_ids: List[str] = []
     if vendor_ids:
-        unique = list(dict.fromkeys(vendor_ids))
-        active = set(vendor_repo.existing_active_ids(unique))
-        missing_active = [v for v in unique if v not in active]
+        # Doc 25: each entry can be a UUID or a ``VN-...`` code. Resolve
+        # to canonical UUIDs first, then run the existing
+        # active + on-project checks against the resolved set.
+        unique_input = list(dict.fromkeys(vendor_ids))
+        resolved_pairs = [
+            (token, vendor_repo.resolve_id(token)) for token in unique_input
+        ]
+        unresolved = [t for (t, rid) in resolved_pairs if rid is None]
+        if unresolved:
+            raise ValidationError(
+                f"Unknown vendor(s): {', '.join(unresolved)}"
+            )
+        canonical_ids = [rid for (_t, rid) in resolved_pairs]
+        active = set(vendor_repo.existing_active_ids(canonical_ids))
+        missing_active = [
+            t for (t, rid) in resolved_pairs if rid not in active
+        ]
         if missing_active:
             raise ValidationError(
                 f"Unknown or inactive vendor(s): {', '.join(missing_active)}"
             )
         project_vendor_ids = set(vendor_repo.project_vendor_ids(project_id))
-        not_on_project = [v for v in unique if v not in project_vendor_ids]
-        if not_on_project:
+        not_on_project_tokens = [
+            t for (t, rid) in resolved_pairs if rid not in project_vendor_ids
+        ]
+        if not_on_project_tokens:
             raise ValidationError(
-                f"Vendor(s) not attached to this project: {', '.join(not_on_project)}. "
+                f"Vendor(s) not attached to this project: {', '.join(not_on_project_tokens)}. "
                 "Add them to the project first."
             )
-        resolved_vendor_ids = unique
+        resolved_vendor_ids = canonical_ids
 
     repo = MilestoneRepository(db)
-    if position is None:
+    # Doc 30 follow-up: auto-bump on position collision.
+    #
+    # Pre-fix, the service only auto-assigned when ``position is None``.
+    # If the caller supplied a position that was already taken by a live
+    # milestone in the same project, the INSERT below tripped the
+    # ``uq_milestones_project_position_live`` unique index and bubbled up
+    # as a 500. Swagger UI's multipart "Try it out" auto-fills the
+    # ``position`` field with ``0``, making the second milestone created
+    # via Swagger a guaranteed crash.
+    #
+    # Position is only an ordering hint; if a caller's preferred slot is
+    # already filled we silently fall back to the next free slot rather
+    # than reject. Genuine "insert at the top" semantics aren't a thing
+    # on this endpoint — repositioning happens via separate
+    # update / move endpoints.
+    if position is None or repo.position_taken(project_id, position):
         position = repo.next_position(project_id)
 
     m = repo.create(
@@ -110,15 +190,20 @@ def create_milestone(
         position=position,
         created_by=current_user_id,
         status=resolved_status,
-        depends=depends,
     )
+
+    if desired_deps:
+        DependencyRepository(db).set_milestone_dependencies(
+            m.id, project_id, desired_deps, actor_id=current_user_id,
+        )
+        db.commit()
+        m.depends_on = list(desired_deps)
 
     if resolved_vendor_ids:
         vendor_repo.set_milestone_vendors(m.id, resolved_vendor_ids)
         db.commit()
         m.vendors = vendor_repo.list_milestone_vendors(m.id)
 
-    # Audit the baseline create and fan out to active versions.
     record_audit(
         db,
         project_id=project_id,
@@ -132,9 +217,8 @@ def create_milestone(
             "end_date": m.end_date.isoformat() if m.end_date else None,
             "position": m.position,
             "status": resolved_status,
+            "depends_on": desired_deps,
         },
     )
     db.commit()
-    propagate_milestone_create(db, baseline_milestone_id=m.id, actor_id=current_user_id)
-
     return m

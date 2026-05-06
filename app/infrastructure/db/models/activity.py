@@ -3,8 +3,9 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from sqlalchemy import (
-    Column, Integer, String, DateTime, ForeignKey, Text, Index, CheckConstraint,
+    Column, Integer, String, DateTime, ForeignKey, Text, Index, CheckConstraint, text,
 )
+from ..utc_datetime import UtcDateTime
 from ..session import Base
 
 
@@ -29,10 +30,10 @@ class ActivityModel(Base):
 
     type = Column(String(20), nullable=False)
 
-    start_date = Column(DateTime, nullable=False)
-    end_date = Column(DateTime, nullable=False)
-    actual_start_date = Column(DateTime, nullable=True)
-    actual_end_date = Column(DateTime, nullable=True)
+    start_date = Column(UtcDateTime, nullable=False)
+    end_date = Column(UtcDateTime, nullable=False)
+    actual_start_date = Column(UtcDateTime, nullable=True)
+    actual_end_date = Column(UtcDateTime, nullable=True)
 
     position = Column(Integer, nullable=False, default=0)
 
@@ -48,19 +49,15 @@ class ActivityModel(Base):
     # ``dependsOn`` (per the activity_dependencies table) is also 'completed'.
     status = Column(String(32), nullable=True, index=True)
 
-    # Lineage pointer: when a version project is created from a baseline,
-    # each cloned activity records the id of its source baseline activity
-    # here. Baseline activities have cloned_from_id=NULL. Used by the
-    # baseline-to-versions propagation cascade.
-    cloned_from_id = Column(
-        String(36), ForeignKey("activities.id"), nullable=True, index=True,
-    )
+    # Doc 33: ``cloned_from_id`` was removed along with the versioning
+    # feature. Activities live directly under their parent milestone.
 
-    created_at = Column(DateTime, default=_utcnow, nullable=False)
-    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow, nullable=False)
-    created_by = Column(Integer, nullable=True)
-    updated_by = Column(Integer, nullable=True)
-    deleted_at = Column(DateTime, nullable=True, index=True)
+    created_at = Column(UtcDateTime, default=_utcnow, nullable=False)
+    updated_at = Column(UtcDateTime, default=_utcnow, onupdate=_utcnow, nullable=False)
+    # Doc 26: users.id flipped to UUID String(36).
+    created_by = Column(String(36), ForeignKey("users.id"), nullable=True)
+    updated_by = Column(String(36), ForeignKey("users.id"), nullable=True)
+    deleted_at = Column(UtcDateTime, nullable=True, index=True)
 
     __table_args__ = (
         CheckConstraint(
@@ -78,6 +75,16 @@ class ActivityModel(Base):
         Index("idx_activities_milestone_live", "milestone_id", "deleted_at"),
         Index("idx_activities_milestone_position", "milestone_id", "position"),
         Index("idx_activities_project_live", "project_id", "deleted_at"),
+        # One LIVE activity per (milestone_id, position) — same rationale
+        # as the milestones uniqueness index. Source of truth for the rank
+        # used by display labels (A{m}.{a}).
+        Index(
+            "uq_activities_milestone_position_live",
+            "milestone_id", "position",
+            unique=True,
+            sqlite_where=text("deleted_at IS NULL"),
+            postgresql_where=text("deleted_at IS NULL"),
+        ),
     )
 
     def __repr__(self) -> str:

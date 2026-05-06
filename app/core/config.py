@@ -8,6 +8,8 @@ extra='ignore' is important: the shared .env file may contain keys that
 belong to docker-compose, the monolith, or user-service but not this
 service.
 """
+from typing import Optional
+
 from pydantic_settings import BaseSettings
 from pydantic import ConfigDict, Field
 
@@ -22,7 +24,7 @@ class Settings(BaseSettings):
 
     # ---- App ----
     APP_NAME: str = "PMIS Project Service"
-    APP_VERSION: str = "0.1.0"
+    APP_VERSION: str = "1.0.0"
     SERVICE_NAME: str = "pmis-project-service"
     DEBUG: bool = False
 
@@ -38,12 +40,35 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    # Grace window for the just-rotated-out refresh-token jti during
+    # /users/refresh — prevents 401s on multi-tab races. Mirrors monolith.
+    REFRESH_TOKEN_GRACE_SECONDS: int = 120
+
+    # Doc 24 part 2: optional cap on subtask nesting depth. ``None`` (the
+    # default) means unlimited.
+    SUBTASK_MAX_NESTING_DEPTH: Optional[int] = None
 
     # ---- Database (same DB as monolith + user-service) ----
     DATABASE_URL: str = Field(
         default="postgresql://pmis:admin123@localhost:5432/pmis",
         description="Shared Postgres — same instance the other services connect to.",
     )
+    DATABASE_URL_MIGRATIONS: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional elevated-privilege URL used ONLY for "
+            "``alembic upgrade head`` at startup. Falls back to "
+            "DATABASE_URL when unset."
+        ),
+    )
+
+    MIGRATIONS_AUTORUN: bool = True
+    MIGRATIONS_REQUIRED: bool = True
+
+    # ---- CORS / pagination ----
+    CORS_ORIGINS: list[str] = ["*"]
+    DEFAULT_PAGE_SIZE: int = 20
+    MAX_PAGE_SIZE: int = 100
 
     # ---- File attachments (NFS-backed in prod) ----
     ATTACHMENTS_STORAGE_BASE_PATH: str = Field(
@@ -67,16 +92,59 @@ class Settings(BaseSettings):
     #   Documents: pdf, docx, xlsx, txt, csv
     #   Images:    jpg, jpeg, png, heic
     #   Videos:    mp4, webm, mov
-    # Legacy doc/xls/ppt/pptx + gif/webp were dropped at the client's
-    # request. Re-enable here is a one-line config change; production
-    # validation is enforced by both extension AND magic-byte content
-    # sniffing in app/api/v3/attachments/services/upload.py.
     ATTACHMENTS_ALLOWED_EXTENSIONS: str = (
         "pdf,docx,xlsx,txt,csv,jpg,jpeg,png,heic,mp4,webm,mov"
     )
     ATTACHMENTS_SUBDIR_STRATEGY: str = "year_month"
     ATTACHMENTS_RETENTION_DAYS: int = 90
     ATTACHMENTS_ON_UNAVAILABLE: str = "fail"
+
+    # ---- Doc 35: external file server URLs ----
+    FILE_SERVER_PUBLIC_BASE_URL: str = Field(
+        default="",
+        description=(
+            "Public URL prefix for stored attachment files. When unset, "
+            "URLs are stored as relative paths and the BE's local "
+            "fallback route serves them."
+        ),
+    )
+    FILE_SERVER_LOCAL_FALLBACK_ENABLED: bool = Field(
+        default=True,
+        description=(
+            "Mount GET /files/{key} as a local fallback that streams "
+            "bytes from ATTACHMENTS_STORAGE_BASE_PATH."
+        ),
+    )
+    FILE_SERVER_BASE_URL: str = Field(
+        default="",
+        description=(
+            "Internal URL of the file-server upload endpoint. When set, "
+            "the BE forwards uploaded bytes there."
+        ),
+    )
+    FILE_SERVER_AUTH_TOKEN: str = Field(
+        default="",
+        description="Auth token for FILE_SERVER_BASE_URL upload calls.",
+    )
+
+    # ---- Frontend base URL (used by some link templates) ----
+    FRONTEND_BASE_URL: str = Field(
+        default="",
+        description="Public origin of the FE app, e.g. http://host:3000.",
+    )
+
+    # ---- Doc 36 division contact backfill defaults ----
+    DIVISION_DEFAULT_EMAIL: str = Field(
+        default="ops@pmis.example",
+        description="Backfill / seed default for divisions.email.",
+    )
+    DIVISION_DEFAULT_PHONE: str = Field(
+        default="+910000000000",
+        description="Backfill / seed default for divisions.phone_number.",
+    )
+
+    # NOTE: OTP / 2FA / notification / bootstrap-admin settings live on
+    # user-service. Not duplicated here.
 
 
 settings = Settings()

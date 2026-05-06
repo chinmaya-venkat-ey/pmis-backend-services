@@ -12,30 +12,54 @@ Notes:
     * No upper-bound check against parent.end_date or project.end_date --
       real projects overrun, and end dates are allowed to slip arbitrarily.
     * Messages are user-facing: plain English, capitalized, no field paths.
+    * Calendar-date semantics (doc 29 / doc 30 follow-up): the rules
+      describe IST calendar-date comparisons, not UTC-instant ordering.
+      ``_normalize`` collapses any submitted datetime to IST midnight of
+      its IST-local calendar date so the comparison is robust to:
+        - legacy stored values that pre-date IstCalendarDate normalization
+          (e.g. a project created before doc 29 was deployed has its
+          ``start_date`` stored as the FE-supplied UTC instant directly)
+        - cross-format inputs (UTC-Z vs IST-+05:30 vs naive)
+        - end-of-day vs midnight encodings of the same calendar day
+      Without this collapse, a legacy project stored as ``YYYY-MM-DD
+      00:00 UTC`` (5h30m AHEAD of the doc-29 canonical IST-midnight value
+      ``YYYY-MM-(DD-1) 18:30 UTC``) makes a same-IST-day milestone look
+      strictly earlier and the floor rule rejects.
 """
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional
 
 from ..core.errors import ValidationError
+from .datetime import to_ist_calendar_midnight
 
 
 def _normalize(v: Optional[datetime]) -> Optional[datetime]:
     """
-    Normalize a datetime for cross-comparison.
+    Normalize a datetime for cross-comparison on IST calendar-date semantics.
 
-    SQLite's DateTime column returns naive datetimes; Pydantic parses ISO
-    strings with a Z suffix as timezone-aware. We coerce everything to
-    naive UTC for consistent ordering.
+    Returns IST midnight of the IST-local calendar date (a tz-aware
+    datetime in IST). Two inputs that represent the same IST calendar
+    date — regardless of how they were originally encoded — produce the
+    same return value, so equality and ordering reflect calendar-day
+    semantics.
+
+    None passes through. Non-datetime inputs aren't expected (validators
+    upstream coerce to datetime); if one slips in, ``to_ist_calendar_
+    midnight`` returns it unchanged so the existing comparison fires the
+    same TypeError it did pre-fix.
     """
     if v is None:
         return None
-    if v.tzinfo is not None:
-        return v.astimezone(timezone.utc).replace(tzinfo=None)
-    return v
+    return to_ist_calendar_midnight(v)
 
 
 def _fmt(d: Optional[datetime]) -> str:
-    """Format date as YYYY-MM-DD for end-user messages."""
+    """Format date as YYYY-MM-DD for end-user messages.
+
+    ``d`` is expected to be the output of ``_normalize`` (i.e. IST
+    midnight, tz-aware). ``strftime`` operates on the wall-clock fields
+    of the datetime, so the formatted string is the IST calendar date.
+    """
     return d.strftime("%Y-%m-%d") if d else ""
 
 

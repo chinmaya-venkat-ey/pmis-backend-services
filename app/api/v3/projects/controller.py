@@ -28,13 +28,11 @@ from .schemas import (
 from .services import (
     close_project,
     create_project,
-    create_version,
     delete_project,
     get_project_by_id,
     list_projects,
     publish_project,
     save_project_setup,
-    suspend_version,
     update_project,
     upsert_project,
 )
@@ -43,9 +41,9 @@ from .services import (
 _HTTP_BY_ERROR_TYPE = {
     "validation_error": 422,
     "invalid_field": 422,
+    "invalid_publish": 422,  # doc 27: empty / no-milestone publish gate
     "invalid_transition": 409,
     "invalid_source": 409,
-    "active_version_exists": 409,
     "already_exists": 409,
     "project_locked": 409,
     "forbidden": 403,
@@ -229,31 +227,6 @@ class ProjectController:
             return _error_response(result)
         formatted = format_project_response(result.data.to_dict(), "/api/v3")
         return BaseController.ok(data=formatted)
-
-    @staticmethod
-    def suspend(request: Request, project_uuid: str, db: Session) -> JSONResponse:
-        if not _project_exists(db, project_uuid):
-            return _error_response(_NotFoundResult(), default_status=404)
-        pid = project_uuid  # project.id IS the UUID
-        actor_id = get_current_user_id(request)
-        result = suspend_version(
-            db, pid,
-            actor_id=actor_id,
-            actor_is_admin=_actor_is_admin(request),
-        )
-        if not result.is_success():
-            return _error_response(result)
-        formatted = format_project_response(result.data.to_dict(), "/api/v3")
-        return BaseController.ok(data=formatted)
-
-    @staticmethod
-    def create_version(request: Request, project_uuid: str, db: Session) -> JSONResponse:
-        actor_id = get_current_user_id(request)
-        result = create_version(db, project_uuid, actor_id=actor_id)
-        if not result.is_success():
-            return _error_response(result)
-        formatted = format_project_response(result.data.to_dict(), "/api/v3")
-        return BaseController.created(data=formatted)
 
     @staticmethod
     def save(request: Request, project_uuid: str, db: Session) -> JSONResponse:

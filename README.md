@@ -1,10 +1,33 @@
 # pmis-project-service
 
-PMIS project-management microservice. Owns the M-A-T-S hierarchy
-(projects → milestones → activities → tasks → subtasks), polymorphic
-comments + attachments, the read paths for catalog tables (vendors,
-resource_types, divisions, project_status_transitions), and the project
-tree view.
+PMIS project-management microservice — **the new authoritative home**
+for the project domain (the monolith is being decommissioned).
+
+Owns the M-A-T-S hierarchy (projects → milestones → activities → tasks →
+subtasks), polymorphic comments + unified attachments (doc 35), full
+catalog CRUD via the consolidated `/api/v3/master/*` router (doc 20)
+plus the legacy per-catalog read paths, the project tree view, and
+project-domain audit logs.
+
+Doc 20–36 parity with the monolith was ported in May 2026:
+- Versioning routes/services/columns removed (doc 33).
+- Comments + attachments unified — `attachments` table dropped, file
+  metadata now lives on `comments.attachments` JSON column (doc 35).
+- Inline multipart on M/A/T/S create, dependency-date enforcement,
+  publish gate, position auto-heal (docs 30 / 31 / 32 / 22).
+- Cascade delete/restore of comments + attachments + external-dep
+  blocking on delete (doc 34).
+- Local `/files/{storage_key}` fallback for FE attachment fetches when
+  no external file server is configured (doc 35).
+- Magic-byte sniffing on every uploaded file — project-service post-demo
+  client requirement, retained over the monolith's simpler check.
+
+NOT in this service (skipped per product flow):
+- meetings, work_packages / work_package_types, project_members CRUD —
+  dormant in monolith too. Models for `project_member` and shared user
+  references are kept as read-only references for cascade queries.
+- users / roles / permissions / RBAC catalog — owned by user-service.
+- notification / OTP / 2FA / password-reset flows — owned by user-service.
 
 Self-contained: JWT verification, RBAC, and the auth middleware all
 live inside this service. Cross-service token verification works

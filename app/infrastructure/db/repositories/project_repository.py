@@ -65,10 +65,6 @@ class ProjectRepository:
             end_date=model.end_date,
             actual_start_date=model.actual_start_date,
             actual_end_date=model.actual_end_date,
-            is_version=bool(model.is_version),
-            version_of=model.version_of,
-            baseline_id=model.baseline_id,
-            version_no=model.version_no,
             created_by=model.created_by,
             updated_by=model.updated_by,
             deleted_at=model.deleted_at,
@@ -103,11 +99,7 @@ class ProjectRepository:
         end_date: Optional[datetime] = None,
         actual_start_date: Optional[datetime] = None,
         actual_end_date: Optional[datetime] = None,
-        is_version: bool = False,
-        version_of: Optional[str] = None,
-        baseline_id: Optional[str] = None,
-        version_no: Optional[int] = None,
-        created_by: Optional[int] = None,
+        created_by: Optional[str] = None,
         # Caller may inject a pre-computed id (e.g. from the URL path of a
         # PUT upsert call). If omitted, a fresh uuid4 is generated.
         id: Optional[str] = None,
@@ -142,15 +134,19 @@ class ProjectRepository:
             end_date=end_date,
             actual_start_date=actual_start_date,
             actual_end_date=actual_end_date,
-            is_version=is_version,
-            version_of=version_of,
-            baseline_id=baseline_id,
-            version_no=version_no,
             created_by=created_by,
             updated_by=created_by,
         )
         self.db.add(model)
         self.db.flush()
+        # Doc 27 part 2: refresh so the in-memory object reflects the
+        # canonical naive UTC values written by the UtcDateTime column
+        # type. Without this, the response would echo whatever
+        # tz-aware string the FE sent (e.g. ``+05:30``) while sibling
+        # entities (milestones, etc.) emit naive UTC after their own
+        # refresh — confusing the FE with apparent date drift even
+        # though both represent the same instant.
+        self.db.refresh(model)
         return self._to_domain(model, with_vendors=False)
 
     def upsert_by_id(
@@ -255,7 +251,7 @@ class ProjectRepository:
         self,
         project_id: str,
         *,
-        updated_by: Optional[int] = None,
+        updated_by: Optional[str] = None,
         include_deleted: bool = False,
         **fields,
     ) -> Optional[Project]:
@@ -281,12 +277,16 @@ class ProjectRepository:
             model.updated_by = updated_by
 
         self.db.flush()
+        # Doc 27 part 2: refresh so the patched datetime fields come
+        # back as canonical naive UTC (after UtcDateTime normalization),
+        # matching what other entities' responses emit.
+        self.db.refresh(model)
         return self._to_domain(model)
 
     def soft_delete(
         self,
         project_id: str,
-        actor_id: Optional[int],
+        actor_id: Optional[str],
         when: Optional[datetime] = None,
     ) -> Optional[Project]:
         """Mark a project deleted. Idempotent on already-deleted rows."""
@@ -363,52 +363,3 @@ class ProjectRepository:
             .first()
             is not None
         )
-
-    # ------------------------------------------------------------------
-    # version helpers
-    # ------------------------------------------------------------------
-
-    def active_version_exists(self, baseline_id: str) -> bool:
-        """Any version of ``baseline_id`` that is not suspended or deleted."""
-        return (
-            self.db.query(ProjectModel.id)
-            .filter(
-                and_(
-                    ProjectModel.version_of == baseline_id,
-                    ProjectModel.is_version == True,  # noqa: E712
-                    ProjectModel.status != "suspended",
-                    ProjectModel.deleted_at.is_(None),
-                )
-            )
-            .first()
-            is not None
-        )
-
-    def next_version_no(self, baseline_id: str) -> int:
-        """Next sequential version number for a baseline (1-indexed)."""
-        max_no = (
-            self.db.query(func.max(ProjectModel.version_no))
-            .filter(ProjectModel.version_of == baseline_id)
-            .scalar()
-        )
-        return (max_no or 0) + 1
-
-    def list_live_version_ids(self, baseline_id: str) -> List[str]:
-        """Return the ids of every non-deleted version row for this baseline.
-
-        Used by the delete flow to cascade a baseline-level soft-delete down
-        to its versions. Includes versions in any status (including
-        'suspended') so long as they aren't already soft-deleted.
-        """
-        rows = (
-            self.db.query(ProjectModel.id)
-            .filter(
-                and_(
-                    ProjectModel.version_of == baseline_id,
-                    ProjectModel.is_version == True,  # noqa: E712
-                    ProjectModel.deleted_at.is_(None),
-                )
-            )
-            .all()
-        )
-        return [r[0] for r in rows]

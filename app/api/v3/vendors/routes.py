@@ -48,6 +48,10 @@ def _vendor_to_response(v, projects: List[Dict[str, Any]] | None = None) -> Dict
     return {
         "_type": "Vendor",
         "id": d["id"],
+        # Doc 25: human-readable identifier (e.g. ``VN-ACME-260502143015``).
+        # Always emitted; ``None`` on legacy rows that pre-date the
+        # backfill (none in production after the doc-25 migration).
+        "vendorCode": d.get("vendor_code"),
         "name": d["name"],
         "description": d.get("description"),
         "active": d.get("active", True),
@@ -67,25 +71,14 @@ def _vendor_to_response(v, projects: List[Dict[str, Any]] | None = None) -> Dict
     }
 
 
-def _project_entry(*, id, project_code, name, status, created_at,
-                   is_version, version_of) -> Dict[str, Any]:
+def _project_entry(*, id, project_code, name, status, created_at) -> Dict[str, Any]:
     """Single source of truth for the per-project shape returned by every
     vendor endpoint. Used by both ``_projects_by_vendor`` (the embedded
     array on /vendors and /vendors/{id}) and the dedicated
     /vendors/{id}/projects endpoint, so all three return identical entries.
 
-    The new fields vs the original three (id, projectCode, name):
-
-    - ``status``      — lets the FE render an "Active / Closed / Suspended"
-                        badge without a follow-up GET.
-    - ``isVersion``   — distinguishes a baseline from a version row.
-                        Critical because version projects inherit the
-                        baseline's name and would otherwise look like a
-                        duplicate row in the vendor's project list.
-    - ``versionOf``   — for version rows, the baseline UUID. The FE can
-                        group `[baseline, ...versions]` together, or hide
-                        versions altogether and only show baselines.
-    - ``createdAt``   — ISO 8601 timestamp the FE can use for sub-sort.
+    Doc 33: ``isVersion`` / ``versionOf`` were removed from this shape
+    along with the versioning feature.
     """
     return {
         "_type": "Project",
@@ -93,8 +86,6 @@ def _project_entry(*, id, project_code, name, status, created_at,
         "projectCode": project_code,
         "name": name,
         "status": status,
-        "isVersion": bool(is_version),
-        "versionOf": version_of,
         "createdAt": created_at.isoformat() if created_at else None,
     }
 
@@ -168,8 +159,6 @@ def _projects_by_vendor(
             ProjectModel.project_code,
             ProjectModel.name,
             ProjectModel.status,
-            ProjectModel.is_version,
-            ProjectModel.version_of,
             ProjectModel.created_at,
         )
         .join(ProjectModel, ProjectModel.id == ProjectVendorModel.project_id)
@@ -181,15 +170,13 @@ def _projects_by_vendor(
     )
     grouped: Dict[str, List[Dict[str, Any]]] = {}
     for (vendor_id, project_id, project_code, project_name,
-         status, is_version, version_of, created_at) in rows:
+         status, created_at) in rows:
         grouped.setdefault(vendor_id, []).append(_project_entry(
             id=project_id,
             project_code=project_code,
             name=project_name,
             status=status,
             created_at=created_at,
-            is_version=is_version,
-            version_of=version_of,
         ))
     return grouped
 
@@ -240,14 +227,17 @@ def get_vendor(
     vendor_id: str,
     db: Session = Depends(get_db),
 ) -> JSONResponse:
+    """Path param accepts either a UUID or a vendor code (e.g.
+    ``VN-ACME-260502143015``) per doc 25 — the repo dispatches based
+    on the literal ``VN-`` prefix."""
     repo = VendorRepository(db)
-    vendor = repo.get_by_id(vendor_id)
+    vendor = repo.get_by_id_or_code(vendor_id)
     if vendor is None:
         raise NotFoundError("Vendor not found.")
     projects = _projects_by_vendor(db, [vendor.id]).get(vendor.id, [])
     return BaseController.stamp_deprecation(
         BaseController.ok(data=_vendor_to_response(vendor, projects)),
-        successor_path=f"/api/v3/master/vendors/{vendor_id}",
+        successor_path=f"/api/v3/master/vendors/{vendor.id}",
     )
 
 
@@ -304,8 +294,9 @@ def update_vendor(
     data: VendorUpdateRequest,
     db: Session = Depends(get_db),
 ) -> JSONResponse:
+    """Path param accepts UUID or ``VN-...`` code (doc 25)."""
     repo = VendorRepository(db)
-    m = repo.get_model_by_id(vendor_id)
+    m = repo.get_model_by_id_or_code(vendor_id)
     if m is None:
         raise NotFoundError("Vendor not found.")
     # If projectIds is supplied, validate BEFORE applying any field changes
@@ -343,7 +334,7 @@ def update_vendor(
     projects = _projects_by_vendor(db, [domain.id]).get(domain.id, [])
     return BaseController.stamp_deprecation(
         BaseController.ok(data=_vendor_to_response(domain, projects)),
-        successor_path=f"/api/v3/master/vendors/{vendor_id}",
+        successor_path=f"/api/v3/master/vendors/{domain.id}",
     )
 
 
@@ -363,18 +354,21 @@ def delete_vendor(
     vendor_id: str,
     db: Session = Depends(get_db),
 ) -> JSONResponse:
+    """Path param accepts UUID or ``VN-...`` code (doc 25)."""
     repo = VendorRepository(db)
     actor_id = get_current_user_id(request)
     # Use include_deleted=False so a double-delete returns 404 rather than a
     # silent no-op — clearer signal to the FE.
-    m = repo.get_model_by_id(vendor_id)
+    m = repo.get_model_by_id_or_code(vendor_id)
     if m is None:
         raise NotFoundError("Vendor not found or already deleted.")
-    repo.soft_delete(vendor_id, actor_id=actor_id)
+    # Always pass the canonical UUID downstream — repo.soft_delete keys
+    # on the PK, not on vendor_code.
+    repo.soft_delete(m.id, actor_id=actor_id)
     db.commit()
     return BaseController.stamp_deprecation(
         BaseController.no_content(),
-        successor_path=f"/api/v3/master/vendors/{vendor_id}",
+        successor_path=f"/api/v3/master/vendors/{m.id}",
     )
 
 
@@ -394,23 +388,25 @@ def restore_vendor(
     vendor_id: str,
     db: Session = Depends(get_db),
 ) -> JSONResponse:
+    """Path param accepts UUID or ``VN-...`` code (doc 25)."""
     repo = VendorRepository(db)
-    m = repo.get_model_by_id(vendor_id, include_deleted=True)
+    m = repo.get_model_by_id_or_code(vendor_id, include_deleted=True)
     if m is None:
         raise NotFoundError("Vendor not found.")
-    successor = f"/api/v3/master/vendors/{vendor_id}/restore"
+    canonical_id = m.id  # use UUID for downstream repo calls + successor URL
+    successor = f"/api/v3/master/vendors/{canonical_id}/restore"
     if m.deleted_at is None:
         # Already live — return the current snapshot so the call is idempotent
         # rather than 409'ing a benign retry.
-        live = repo.get_by_id(vendor_id)
-        projects = _projects_by_vendor(db, [vendor_id]).get(vendor_id, [])
+        live = repo.get_by_id(canonical_id)
+        projects = _projects_by_vendor(db, [canonical_id]).get(canonical_id, [])
         return BaseController.stamp_deprecation(
             BaseController.ok(data=_vendor_to_response(live, projects)),
             successor_path=successor,
         )
-    restored = repo.restore(vendor_id)
+    restored = repo.restore(canonical_id)
     db.commit()
-    projects = _projects_by_vendor(db, [vendor_id]).get(vendor_id, [])
+    projects = _projects_by_vendor(db, [canonical_id]).get(canonical_id, [])
     return BaseController.stamp_deprecation(
         BaseController.ok(data=_vendor_to_response(restored, projects)),
         successor_path=successor,
@@ -433,13 +429,16 @@ def list_vendor_projects(
     vendor_id: str,
     db: Session = Depends(get_db),
 ) -> JSONResponse:
+    """Path param accepts UUID or ``VN-...`` code (doc 25)."""
     repo = VendorRepository(db)
-    if repo.get_by_id(vendor_id, include_deleted=True) is None:
+    vendor = repo.get_by_id_or_code(vendor_id, include_deleted=True)
+    if vendor is None:
         raise NotFoundError("Vendor not found.")
+    canonical_id = vendor.id
     # Reuse the batched helper so this endpoint and the embedded
     # projects array on /vendors and /vendors/{id} return identical
     # entries (same fields, same filter, same order).
-    items = _projects_by_vendor(db, [vendor_id]).get(vendor_id, [])
+    items = _projects_by_vendor(db, [canonical_id]).get(canonical_id, [])
     return BaseController.stamp_deprecation(
         BaseController.ok(data={
             "_type": "Collection",

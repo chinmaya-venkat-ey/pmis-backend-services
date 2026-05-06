@@ -18,11 +18,24 @@ from .....core.errors import NotFoundError, ValidationError
 from .....core.project_lock import assert_task_subtask_writable
 from .....infrastructure.db.models.project import ProjectModel
 from .....infrastructure.db.models.activity import ActivityModel
+from .....infrastructure.db.models.task import TaskModel
+from .....infrastructure.db.models.task_dependency import TaskDependencyModel
 from .....infrastructure.db.repositories.dependency_repository import (
     DependencyRepository,
 )
 from .....infrastructure.db.repositories.task_repository import TaskRepository
 from .....shared.date_rules import validate_entity_dates, validate_resource_dates
+from .....shared.dep_date_rules import (
+    collect_forward_violations,
+    collect_reverse_violations,
+    raise_forward_if_violations,
+    raise_reverse_if_violations,
+)
+from .....shared.labels import (
+    KIND_TASK,
+    build_label_index_for_project,
+    resolve_labels_to_ids,
+)
 from .....domain.tasks.task import (
     Task,
     TASK_TYPE_RESOURCE,
@@ -31,7 +44,7 @@ from .....domain.tasks.task import (
 )
 from .....domain.tasks.task_resource import TaskResource
 
-from .create import _validate_task_deps_hierarchy
+from .create import _validate_task_deps_same_project
 
 
 def update_task(
@@ -146,16 +159,20 @@ def update_task(
             project_start_date=project.start_date,
         )
 
-    # Validate dependsOn for replace.
+    # Validate dependsOn for replace. Accepts UUIDs or labels (T1.2.3).
     desired_deps: Optional[List[str]] = None
     if depends_on is not None:
-        candidates = [d for d in dict.fromkeys(depends_on) if d]
+        candidates, _id_to_raw = resolve_labels_to_ids(
+            db,
+            project_id=model.project_id,
+            expected_kind=KIND_TASK,
+            raw_inputs=depends_on,
+        )
         if task_id in candidates:
             raise ValidationError("A task cannot depend on itself.")
         if candidates:
-            _validate_task_deps_hierarchy(
+            _validate_task_deps_same_project(
                 db,
-                source_activity_id=model.activity_id,
                 project_id=model.project_id,
                 target_task_ids=candidates,
             )
@@ -167,6 +184,68 @@ def update_task(
                     f"Adding dependency on '{cycler}' would create a cycle."
                 )
         desired_deps = candidates
+
+    # Doc 27: cross-dependency date enforcement.
+    effective_start = start_date if start_date is not None else model.start_date
+    effective_end = end_date if end_date is not None else model.end_date
+    label_index = None
+    forward_targets_to_check: List[str]
+    if desired_deps is not None:
+        forward_targets_to_check = desired_deps
+    elif start_date is not None:
+        forward_targets_to_check = DependencyRepository(db) \
+            .list_task_dependencies(task_id)
+    else:
+        forward_targets_to_check = []
+    if forward_targets_to_check and effective_start is not None:
+        target_rows = (
+            db.query(TaskModel.id, TaskModel.name, TaskModel.end_date)
+            .filter(TaskModel.id.in_(forward_targets_to_check))
+            .all()
+        )
+        if label_index is None:
+            label_index = build_label_index_for_project(db, model.project_id)
+        forward = [
+            (label_index.label_of(KIND_TASK, tid) or tname, tend)
+            for (tid, tname, tend) in target_rows
+        ]
+        raise_forward_if_violations(
+            collect_forward_violations(
+                source_start=effective_start, targets=forward,
+            ),
+            source_label=(
+                f"Task '{label_index.label_of(KIND_TASK, task_id) or model.name}'"
+            ),
+            source_start=effective_start,
+        )
+    if end_date is not None and effective_end is not None:
+        sources = (
+            db.query(TaskModel.id, TaskModel.name, TaskModel.start_date)
+            .join(
+                TaskDependencyModel,
+                TaskDependencyModel.source_task_id == TaskModel.id,
+            )
+            .filter(TaskDependencyModel.target_task_id == task_id)
+            .filter(TaskDependencyModel.deleted_at.is_(None))
+            .filter(TaskModel.deleted_at.is_(None))
+            .all()
+        )
+        if sources:
+            if label_index is None:
+                label_index = build_label_index_for_project(db, model.project_id)
+            rev = [
+                (label_index.label_of(KIND_TASK, sid) or sname, sstart)
+                for (sid, sname, sstart) in sources
+            ]
+            raise_reverse_if_violations(
+                collect_reverse_violations(
+                    target_end=effective_end, sources=rev,
+                ),
+                target_label=(
+                    f"Task '{label_index.label_of(KIND_TASK, task_id) or model.name}'"
+                ),
+                target_end=effective_end,
+            )
 
     updates: Dict[str, Any] = {}
     if name is not None: updates["name"] = name.strip()

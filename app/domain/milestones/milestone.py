@@ -1,19 +1,25 @@
-"""Milestone domain entity. Ported verbatim from the monolith."""
+"""Milestone domain entity."""
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, List, Optional, Tuple
+from typing import List, Optional, Tuple
+from ...shared.datetime import iso_utc
 
+
+# Status choices — extensible by editing this tuple. Stored lowercase /
+# underscore_separated. Default is 'not_completed'.
 MILESTONE_STATUS_NOT_COMPLETED = "not_completed"
 MILESTONE_STATUS_COMPLETED = "completed"
 MILESTONE_STATUS_CHOICES: Tuple[str, ...] = (
     MILESTONE_STATUS_NOT_COMPLETED,
     MILESTONE_STATUS_COMPLETED,
-    )
+)
 MILESTONE_STATUS_DEFAULT = MILESTONE_STATUS_NOT_COMPLETED
+
 
 @dataclass
 class Milestone:
-    """Milestone domain entity.
+    """
+    Milestone domain entity.
 
     Milestones have NO type column and NO actual_* dates.
     """
@@ -30,7 +36,12 @@ class Milestone:
     updated_by: Optional[int] = None
     deleted_at: Optional[datetime] = None
     status: str = MILESTONE_STATUS_DEFAULT
-    depends: Optional[List[Any]] = None
+    # Live milestone-dependency target ids (sorted), populated from the
+    # milestone_dependencies edge table by the repository on read. The legacy
+    # JSON ``depends`` column on the model is no longer surfaced.
+    depends_on: List[str] = field(default_factory=list)
+    # (vendor_id, vendor_name) pairs attached to this milestone. Populated by
+    # the repository on eager-load reads; empty list otherwise.
     vendors: List[Tuple[str, str]] = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -39,15 +50,15 @@ class Milestone:
             "project_id": self.project_id,
             "name": self.name,
             "description": self.description,
-            "start_date": self.start_date.isoformat() if self.start_date else None,
-            "end_date": self.end_date.isoformat() if self.end_date else None,
+            "start_date": iso_utc(self.start_date),
+            "end_date": iso_utc(self.end_date),
             "position": self.position,
             "status": self.status,
-            "depends": self.depends if self.depends is not None else [],
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "depends_on": list(self.depends_on),
+            "created_at": iso_utc(self.created_at),
+            "updated_at": iso_utc(self.updated_at),
             "created_by": self.created_by,
             "updated_by": self.updated_by,
-            "deleted_at": self.deleted_at.isoformat() if self.deleted_at else None,
+            "deleted_at": iso_utc(self.deleted_at),
             "vendors": [{"id": vid, "name": vname} for (vid, vname) in self.vendors],
-            }
+        }

@@ -5,6 +5,7 @@ from uuid import uuid4
 from sqlalchemy import (
     Column, Integer, String, DateTime, ForeignKey, Numeric, Index, text,
 )
+from ..utc_datetime import UtcDateTime
 from ..session import Base
 
 
@@ -23,19 +24,19 @@ class SubtaskResourceModel(Base):
     project_id = Column(String(36), ForeignKey("projects.id"), nullable=False, index=True)
 
     resource_name = Column(String(255), nullable=False)
-    onboard_date = Column(DateTime, nullable=True)
-    actual_onboard_date = Column(DateTime, nullable=True)
-    offboard_date = Column(DateTime, nullable=True)
-    actual_offboard_date = Column(DateTime, nullable=True)
+    onboard_date = Column(UtcDateTime, nullable=True)
+    actual_onboard_date = Column(UtcDateTime, nullable=True)
+    offboard_date = Column(UtcDateTime, nullable=True)
+    actual_offboard_date = Column(UtcDateTime, nullable=True)
     position = Column(String(255), nullable=True)
     designation = Column(String(255), nullable=True)
     job_role = Column(String(255), nullable=True)
     qualification = Column(String(255), nullable=True)
     experience_years = Column(Numeric(4, 1), nullable=True)
 
-    created_at = Column(DateTime, default=_utcnow, nullable=False)
-    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow, nullable=False)
-    deleted_at = Column(DateTime, nullable=True, index=True)
+    created_at = Column(UtcDateTime, default=_utcnow, nullable=False)
+    updated_at = Column(UtcDateTime, default=_utcnow, onupdate=_utcnow, nullable=False)
+    deleted_at = Column(UtcDateTime, nullable=True, index=True)
 
     __table_args__ = (
         Index(

@@ -3,8 +3,9 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from sqlalchemy import (
-    Column, Integer, String, DateTime, ForeignKey, Text, Index, CheckConstraint,
+    Column, Integer, String, DateTime, ForeignKey, Text, Index, CheckConstraint, text,
 )
+from ..utc_datetime import UtcDateTime
 from ..session import Base
 
 
@@ -27,21 +28,22 @@ class TaskModel(Base):
     description = Column(Text, nullable=True)
     type = Column(String(20), nullable=False)
 
-    start_date = Column(DateTime, nullable=False)
-    end_date = Column(DateTime, nullable=False)
-    actual_start_date = Column(DateTime, nullable=True)
-    actual_end_date = Column(DateTime, nullable=True)
+    start_date = Column(UtcDateTime, nullable=False)
+    end_date = Column(UtcDateTime, nullable=False)
+    actual_start_date = Column(UtcDateTime, nullable=True)
+    actual_end_date = Column(UtcDateTime, nullable=True)
 
     position = Column(Integer, nullable=False, default=0)
 
     resource_mode = Column(String(10), nullable=True)
     resource_count = Column(Integer, nullable=True)
 
-    created_at = Column(DateTime, default=_utcnow, nullable=False)
-    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow, nullable=False)
-    created_by = Column(Integer, nullable=True)
-    updated_by = Column(Integer, nullable=True)
-    deleted_at = Column(DateTime, nullable=True, index=True)
+    created_at = Column(UtcDateTime, default=_utcnow, nullable=False)
+    updated_at = Column(UtcDateTime, default=_utcnow, onupdate=_utcnow, nullable=False)
+    # Doc 26: users.id flipped to UUID String(36).
+    created_by = Column(String(36), ForeignKey("users.id"), nullable=True)
+    updated_by = Column(String(36), ForeignKey("users.id"), nullable=True)
+    deleted_at = Column(UtcDateTime, nullable=True, index=True)
 
     __table_args__ = (
         CheckConstraint(
@@ -59,6 +61,15 @@ class TaskModel(Base):
         Index("idx_tasks_activity_live", "activity_id", "deleted_at"),
         Index("idx_tasks_activity_position", "activity_id", "position"),
         Index("idx_tasks_project_live", "project_id", "deleted_at"),
+        # One LIVE task per (activity_id, position) — drives label rank
+        # for T{m}.{a}.{t}.
+        Index(
+            "uq_tasks_activity_position_live",
+            "activity_id", "position",
+            unique=True,
+            sqlite_where=text("deleted_at IS NULL"),
+            postgresql_where=text("deleted_at IS NULL"),
+        ),
     )
 
     def __repr__(self) -> str:

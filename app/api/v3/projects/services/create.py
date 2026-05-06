@@ -30,7 +30,7 @@ from .transitions import (
 def create_project(
     db: Session,
     *,
-    actor_id: Optional[int],
+    actor_id: Optional[str],
     name: str,
     description: Optional[str] = None,
     active: bool = True,
@@ -166,16 +166,33 @@ def create_project(
         )
 
     # De-duplicate + validate vendor IDs.
+    # Doc 25: each entry can be a UUID OR a ``VN-...`` code. We resolve
+    # to canonical UUIDs first, surface the original token in the error
+    # message if any fail to resolve, then validate the resolved set
+    # against the live (active, non-deleted) catalogue.
     if vendor_ids:
-        unique_vids = list(dict.fromkeys(vendor_ids))  # preserve order, unique
-        ok_ids = set(vendor_repo.existing_active_ids(unique_vids))
-        missing = [v for v in unique_vids if v not in ok_ids]
-        if missing:
+        unique_input = list(dict.fromkeys(vendor_ids))  # preserve order, unique
+        # Per-token resolution so we can name the bad input verbatim.
+        resolved_pairs = [(token, vendor_repo.resolve_id(token)) for token in unique_input]
+        unresolved = [t for (t, rid) in resolved_pairs if rid is None]
+        if unresolved:
             return ServiceResult.fail(
-                error=f"Unknown or inactive vendor(s): {', '.join(missing)}",
+                error=f"Unknown vendor(s): {', '.join(unresolved)}",
                 error_type="validation_error",
             )
-        vendor_ids = unique_vids
+        canonical_ids = [rid for (_t, rid) in resolved_pairs]
+        ok_ids = set(vendor_repo.existing_active_ids(canonical_ids))
+        # Map back to caller tokens for the error so VN-codes show up
+        # rather than UUIDs the caller didn't send.
+        missing_tokens = [
+            t for (t, rid) in resolved_pairs if rid not in ok_ids
+        ]
+        if missing_tokens:
+            return ServiceResult.fail(
+                error=f"Unknown or inactive vendor(s): {', '.join(missing_tokens)}",
+                error_type="validation_error",
+            )
+        vendor_ids = canonical_ids
     else:
         vendor_ids = []
 
@@ -195,7 +212,6 @@ def create_project(
             category_other_reason=category_other_reason,
             start_date=start_date,
             end_date=end_date,
-            is_version=False,
             created_by=actor_id,
         )
 

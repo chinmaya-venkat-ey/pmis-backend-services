@@ -1,58 +1,64 @@
-"""Authentication service — login flow. Ported from the monolith."""
-from sqlalchemy.orm import Session
+"""
+User authentication service.
 
+Doc 21 part B: JWT no longer carries ``role`` or ``is_admin`` claims.
+Effective permissions and admin status are looked up per-request from
+the DB by the auth middleware. The token payload is the minimum needed
+to identify the caller — sub, user_id, email, jti, exp.
+"""
+from sqlalchemy.orm import Session
+from .....core.security import verify_password, create_access_token, create_refresh_token
 from .....core.config import settings
-from .....core.rbac import Role
-from .....core.security import (
-    create_access_token,
-    create_refresh_token,
-    verify_password,
-)
 from .....infrastructure.db.repositories.user_repository import UserRepository
 from .....shared.service_result import ServiceResult
 
 
-def authenticate_user(db: Session, login: str, password: str) -> ServiceResult[dict]:
-    """Verify credentials, mint access + refresh tokens, persist refresh
-    metadata on the user row. Returns tokens + user domain object.
-    """
-    repo = UserRepository(db)
+def authenticate_user(
+    db: Session,
+    login: str,
+    password: str
+) -> ServiceResult[dict]:
+    repository = UserRepository(db)
 
-    user = repo.get_by_login(login)
+    user = repository.get_by_login(login)
     if not user:
         return ServiceResult.fail(
-            error="Invalid credentials", error_type="invalid_credentials",
+            error="Invalid credentials",
+            error_type="invalid_credentials"
         )
 
     if user.status != "active":
         return ServiceResult.fail(
-            error="User account is not active", error_type="authentication_error",
+            error="User account is not active",
+            error_type="authentication_error"
         )
 
-    password_hash = repo.get_password_hash_by_login(login)
+    password_hash = repository.get_password_hash_by_login(login)
     if not password_hash or not verify_password(password, password_hash):
         return ServiceResult.fail(
-            error="Invalid credentials", error_type="invalid_credentials",
+            error="Invalid credentials",
+            error_type="invalid_credentials"
         )
-
-    role = Role.ADMIN if user.admin else Role.MEMBER
 
     token_data = {
         "sub": user.login,
         "user_id": user.id,
         "email": user.email,
-        "role": role.value,
-        "is_admin": user.admin,
     }
 
     access_token = create_access_token(token_data)
-    refresh_token, refresh_jti, refresh_expires = create_refresh_token(token_data)
+    refresh_token, refresh_jti, refresh_expires = create_refresh_token({
+        "sub": user.login,
+        "user_id": user.id,
+        "email": user.email,
+    })
 
     # Rotate the user's refresh-token jti. ``grace_seconds`` keeps the
-    # previously-issued refresh token valid for a short window so a
-    # parallel tab / login replay / in-flight refresh from before this
-    # login still resolves successfully.
-    repo.rotate_refresh_token(
+    # previously-issued refresh token valid for a short window so a parallel
+    # tab / login replay / in-flight refresh from before this login still
+    # resolves successfully. See settings.REFRESH_TOKEN_GRACE_SECONDS and
+    # the user-repository docstring for details.
+    repository.rotate_refresh_token(
         user.id, refresh_jti, refresh_expires,
         grace_seconds=settings.REFRESH_TOKEN_GRACE_SECONDS,
     )
@@ -61,5 +67,5 @@ def authenticate_user(db: Session, login: str, password: str) -> ServiceResult[d
         "access_token": access_token,
         "token_type": "bearer",
         "refresh_token": refresh_token,
-        "user": user,
+        "user": user
     })

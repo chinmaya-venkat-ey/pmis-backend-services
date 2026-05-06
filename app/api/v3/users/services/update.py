@@ -1,4 +1,5 @@
-"""User update + password update services.
+"""
+User update service.
 
 Adds two important behaviours on top of the basic patch:
   - Setting ``status='active'`` on a currently soft-deleted user
@@ -11,10 +12,14 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from .....core.security import hash_password
-from .....domain.users.division import DIVISION_CHOICES, DIVISION_OTHERS
+from .....domain.resource_types.resource_type import (
+    DIVISION_CHOICES,
+    DIVISION_OTHERS,
+)
 from .....domain.users.user import User
 from .....infrastructure.db.models.vendor import VendorModel
 from .....infrastructure.db.repositories.user_repository import UserRepository
+from .....infrastructure.db.repositories.vendor_repository import VendorRepository
 from .....shared.service_result import ServiceResult
 from .....shared.utils import (
     is_valid_email,
@@ -29,7 +34,7 @@ _USER_STATUS_CHOICES = ("active", "inactive", "locked", "registered")
 
 def update_user(
     db: Session,
-    user_id: int,
+    user_id: str,
     email: Optional[str] = None,
     first_name: Optional[str] = None,
     last_name: Optional[str] = None,
@@ -38,7 +43,8 @@ def update_user(
     vendor_id: Optional[str] = None,
     division: Optional[str] = None,
     division_other: Optional[str] = None,
-    requesting_user_id: Optional[int] = None,
+    phone_number: Optional[str] = None,
+    requesting_user_id: Optional[str] = None,
     is_admin: bool = False,
 ) -> ServiceResult[User]:
     """Update a user's mutable fields."""
@@ -77,6 +83,7 @@ def update_user(
     # cannot lock the system out of itself via demotion / deactivation.
 
     # Guard 1: An admin cannot demote themselves from admin.
+    # (Would also drop their own permission to undo the change.)
     if admin is False and is_self and user.admin:
         return ServiceResult.fail(
             error="Cannot demote yourself from admin.",
@@ -84,6 +91,8 @@ def update_user(
         )
 
     # Guard 2 + 3: Last-active-admin protection on demotion + deactivation.
+    # Demoting (admin=False) or deactivating (status='inactive') an
+    # active admin is refused if no OTHER active admin would remain.
     if user.admin and not user.is_deleted():
         removing_admin_flag = admin is False
         deactivating_status = status == "inactive"
@@ -123,18 +132,25 @@ def update_user(
         )
 
     if vendor_id is not None:
-        vendor = (
-            db.query(VendorModel)
-            .filter(VendorModel.id == vendor_id)
-            .filter(VendorModel.deleted_at.is_(None))
-            .first()
-        )
+        # Doc 25: ``vendor_id`` accepts UUID or ``VN-...`` code.
+        canonical_vendor_id = VendorRepository(db).resolve_id(vendor_id)
+        vendor = None
+        if canonical_vendor_id:
+            vendor = (
+                db.query(VendorModel)
+                .filter(VendorModel.id == canonical_vendor_id)
+                .filter(VendorModel.deleted_at.is_(None))
+                .first()
+            )
         if vendor is None:
             return ServiceResult.fail(
                 error=f"Vendor '{vendor_id}' not found or deleted.",
                 error_type="validation_error",
                 details={"field": "vendorId", "value": vendor_id},
             )
+        # Persist the canonical UUID so the row's FK is stable regardless
+        # of input form.
+        vendor_id = canonical_vendor_id
 
     # Division: needs joint validation with division_other (and the
     # already-stored value, since the patch may change one without the
@@ -193,6 +209,7 @@ def update_user(
             vendor_id=vendor_id,
             division=division,
             division_other=division_other,
+            phone_number=phone_number,
             clear_division_other=clear_division_other,
             restore=restore,
         )
@@ -213,9 +230,9 @@ def update_user(
 
 def update_password(
     db: Session,
-    user_id: int,
+    user_id: str,
     new_password: str,
-    requesting_user_id: Optional[int] = None,
+    requesting_user_id: Optional[str] = None,
     is_admin: bool = False,
 ) -> ServiceResult[bool]:
     """Update a user's password. Self or admin only."""

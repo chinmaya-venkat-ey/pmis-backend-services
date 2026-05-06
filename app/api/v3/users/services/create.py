@@ -1,4 +1,5 @@
-"""User creation service.
+"""
+User creation service.
 
 Single transaction:
   1. Validate inputs (login, email, password, division enum, division_other
@@ -13,12 +14,16 @@ from typing import List, Optional
 from sqlalchemy.orm import Session
 
 from .....core.security import hash_password
-from .....domain.users.division import DIVISION_CHOICES, DIVISION_OTHERS
+from .....domain.resource_types.resource_type import (
+    DIVISION_CHOICES,
+    DIVISION_OTHERS,
+)
 from .....domain.users.user import User
 from .....infrastructure.db.models.project import ProjectModel
 from .....infrastructure.db.models.project_member import ProjectMemberModel
 from .....infrastructure.db.models.vendor import VendorModel
 from .....infrastructure.db.repositories.user_repository import UserRepository
+from .....infrastructure.db.repositories.vendor_repository import VendorRepository
 from .....shared.service_result import ServiceResult
 from .....shared.utils import (
     is_valid_email,
@@ -38,13 +43,15 @@ def create_user(
     *,
     vendor_id: str,
     division: str,
+    phone_number: str,
     division_other: Optional[str] = None,
     project_ids: Optional[List[str]] = None,
     first_name: Optional[str] = None,
     last_name: Optional[str] = None,
     admin: bool = False,
 ) -> ServiceResult[User]:
-    """Create a new user and its project mappings.
+    """
+    Create a new user and its project mappings.
 
     All required-field semantics are enforced here so callers (the API
     controller) don't have to repeat them.
@@ -94,24 +101,49 @@ def create_user(
             )
         division_other = None
 
+    # ---- Phone number (required) ---------------------------------------
+    # Schema already enforces non-empty + max 50; this guard catches the
+    # direct-service-call path (CLI / internal scripts) that bypasses the
+    # Pydantic layer. Mirrors the vendor_id guard below.
+    phone_number = (phone_number or "").strip()
+    if not phone_number:
+        return ServiceResult.fail(
+            error="phoneNumber is required.",
+            error_type="validation_error",
+        )
+    if len(phone_number) > 50:
+        return ServiceResult.fail(
+            error="phoneNumber must be 1-50 characters.",
+            error_type="validation_error",
+        )
+
     # ---- Vendor --------------------------------------------------------
+    # Doc 25: ``vendor_id`` accepts either a UUID or a ``VN-...`` code.
+    # We resolve to the canonical UUID first (None on unresolvable),
+    # then verify the underlying row exists and is live.
     if not vendor_id:
         return ServiceResult.fail(
             error="vendorId is required.",
             error_type="validation_error",
         )
-    vendor = (
-        db.query(VendorModel)
-        .filter(VendorModel.id == vendor_id)
-        .filter(VendorModel.deleted_at.is_(None))
-        .first()
-    )
+    canonical_vendor_id = VendorRepository(db).resolve_id(vendor_id)
+    vendor = None
+    if canonical_vendor_id:
+        vendor = (
+            db.query(VendorModel)
+            .filter(VendorModel.id == canonical_vendor_id)
+            .filter(VendorModel.deleted_at.is_(None))
+            .first()
+        )
     if vendor is None:
         return ServiceResult.fail(
             error=f"Vendor '{vendor_id}' not found or has been deleted.",
             error_type="validation_error",
             details={"field": "vendorId", "value": vendor_id},
         )
+    # Pin to the canonical UUID so the inserted row holds the immutable
+    # FK regardless of whether the caller sent a UUID or a code.
+    vendor_id = canonical_vendor_id
 
     # ---- Project mapping ------------------------------------------------
     project_ids = list(dict.fromkeys(project_ids or []))  # de-dupe, preserve order
@@ -160,6 +192,7 @@ def create_user(
             vendor_id=vendor_id,
             division=division,
             division_other=division_other,
+            phone_number=phone_number,
         )
 
         # Wire up project_members rows.

@@ -1,8 +1,15 @@
-"""Role update service."""
+"""Role update service.
+
+Doc 21 part B: only the seeded ``admin`` role is fully locked (cannot be
+renamed and cannot have its permission list changed via the management
+endpoints — its permission set is auto-maintained by the startup sync).
+Other built-in roles can be renamed and edited freely.
+"""
 from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
+from .....core.permissions import ADMIN_ROLE_NAME
 from .....domain.roles.role import Role
 from .....infrastructure.db.repositories.role_repository import RoleRepository
 from .....shared.service_result import ServiceResult
@@ -13,8 +20,8 @@ def update_role(
     role_id: int,
     name: Optional[str] = None,
     permissions: Optional[List[str]] = None,
+    description: Optional[str] = None,
 ) -> ServiceResult[Role]:
-    """Update a role. Builtin roles cannot be modified."""
     repository = RoleRepository(db)
 
     role = repository.get_by_id(role_id)
@@ -24,22 +31,22 @@ def update_role(
             error_type="not_found",
         )
 
-    if role.builtin:
+    if role.name == ADMIN_ROLE_NAME:
         return ServiceResult.fail(
-            error="Cannot modify builtin roles",
+            error="The built-in 'admin' role cannot be modified.",
             error_type="forbidden",
         )
 
     if name is not None:
-        if not isinstance(name, str) or len(name) == 0:
+        if not isinstance(name, str) or len(name) == 0 or len(name) > 255:
             return ServiceResult.fail(
-                error="Role name must be a non-empty string",
+                error="Role name must be a non-empty string ≤ 255 chars",
                 error_type="validation_error",
             )
-        if len(name) > 255:
+        if name == ADMIN_ROLE_NAME:
             return ServiceResult.fail(
-                error="Role name must not exceed 255 characters",
-                error_type="validation_error",
+                error="Cannot rename a role to 'admin' (reserved).",
+                error_type="forbidden",
             )
         existing = repository.get_by_name(name)
         if existing and existing.id != role_id:
@@ -57,10 +64,11 @@ def update_role(
     try:
         updated = repository.update(
             role_id=role_id, name=name, permissions=permissions,
+            description=description,
         )
         return ServiceResult.ok(updated)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return ServiceResult.fail(
-            error=f"Failed to update role: {e}",
-            error_type="internal_error",
+            error=f"Failed to update role: {str(e)}",
+            error_type="database_error",
         )

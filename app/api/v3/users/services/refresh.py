@@ -1,8 +1,9 @@
-"""Refresh-token rotation service.
+"""
+Refresh-token rotation service.
 
-Backs ``POST /api/v3/users/refresh``. Takes a refresh token, validates
-it against the user row's stored jti + expiry, and on success issues a
-fresh access + refresh pair.
+Backs ``POST /api/v3/users/refresh``. Takes a refresh token, validates it
+against the user row's stored jti + expiry, and on success issues a fresh
+access + refresh pair.
 
 The user row carries TWO valid jtis at any moment:
 
@@ -121,14 +122,16 @@ def refresh_tokens(
     )
 
     if not (matches_current or matches_previous_in_grace):
+        # Either logged out (both slots cleared), wrong user, or this is an
+        # old token whose grace window already expired.
         return ServiceResult.fail(
             error="Refresh token invalid or already rotated.",
             error_type="authentication_error",
         )
 
-    # Hard-expiry check on the live token's TTL. Only enforced on the
-    # CURRENT slot — the previous slot lives only as long as the grace
-    # window so its underlying TTL is moot.
+    # Hard-expiry check on the live token's TTL (7-day TTL by default).
+    # Only enforced on the CURRENT slot — the previous slot lives only as
+    # long as the grace window so its underlying TTL is moot.
     if matches_current and current_expires is not None:
         if _as_utc(current_expires) < now:
             return ServiceResult.fail(

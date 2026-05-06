@@ -1,46 +1,71 @@
-"""User controller — orchestrates requests into service calls and maps
-service results to HAL+JSON envelopes.
+"""
+User controller - orchestrates requests and responses.
 """
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
-
-from ....core.base_controller import BaseController
-from ....core.dependencies import get_current_user_id
-from ....core.response import (
-    format_collection_response,
-    format_error_response,
-    format_success_response,
-    format_user_response,
-)
 from .schemas import (
-    LoginRequest,
     UserCreateRequest,
-    UserListQuery,
-    UserPasswordUpdateRequest,
     UserUpdateRequest,
+    UserPasswordUpdateRequest,
+    LoginRequest,
+    UserListQuery
 )
 from .services import (
-    authenticate_user,
     create_user,
-    delete_user,
     get_user_by_id,
     list_users,
-    logout_user,
-    restore_user,
-    update_password,
     update_user,
+    update_password,
+    delete_user,
+    restore_user,
+    authenticate_user,
+    logout_user,
 )
+from ....core.response import (
+    format_user_response,
+    format_collection_response,
+    format_error_response,
+    format_success_response
+)
+from ....core.base_controller import BaseController
+from ....core.dependencies import get_current_user_id
+from ....infrastructure.db.repositories.user_repository import UserRepository
+
+
+def _resolve_user_id(db: Session, user_id):
+    """Resolve either a UUID or a ``US-...`` code to the canonical UUID.
+    Returns ``None`` if the input doesn't map to a live user (caller
+    surfaces 404).
+
+    Doc 26: ``users.id`` is now a UUID string (was integer pre-doc-26),
+    so this is identical to vendor's ``resolve_id`` — UUID-or-code, no
+    int coercion. Every controller action that takes a path-param user
+    id funnels through here.
+    """
+    return UserRepository(db).resolve_id(user_id)
 
 
 class UserController:
     """Controller for user operations."""
 
-    # ----- Create --------------------------------------------------------
     @staticmethod
     def create(
-        request: Request, data: UserCreateRequest, db: Session,
+        request: Request,
+        data: UserCreateRequest,
+        db: Session
     ) -> JSONResponse:
+        """
+        Create a new user.
+
+        Args:
+            request: FastAPI request
+            data: User creation data
+            db: Database session
+
+        Returns:
+            JSONResponse
+        """
         result = create_user(
             db=db,
             login=data.login,
@@ -53,206 +78,517 @@ class UserController:
             division=data.division,
             division_other=data.divisionOther,
             project_ids=data.projectIds,
+            phone_number=data.phoneNumber,
         )
-        if result.is_success():
-            return BaseController.created(format_user_response(result.data.to_dict()))
-        error_payload = format_error_response(
-            error_type=result.error_type, message=result.error, details=result.details,
-        )
-        status_code = 422 if result.error_type == "validation_error" else 409
-        return BaseController.error(error_payload, status=status_code)
 
-    # ----- Get -----------------------------------------------------------
+        if result.is_success():
+            payload = format_user_response(result.data.to_dict())
+            resp = BaseController.created(payload)
+            return resp
+        else:
+            error_payload = format_error_response(
+                error_type=result.error_type,
+                message=result.error,
+                details=result.details
+            )
+            status_code = 422 if result.error_type == "validation_error" else 409
+            resp = BaseController.error(error_payload, status=status_code)
+            return resp
+
     @staticmethod
-    def get(request: Request, user_id: int, db: Session) -> JSONResponse:
+    def get(
+        request: Request,
+        user_id,
+        db: Session
+    ) -> JSONResponse:
+        """
+        Get user by ID.
+
+        Args:
+            request: FastAPI request
+            user_id: User ID — accepts integer ``id`` or ``US-...`` code
+                (doc 25). The dispatch happens here so the service layer
+                keeps its existing integer-only signature.
+            db: Database session
+
+        Returns:
+            JSONResponse
+        """
         requesting_user_id = get_current_user_id(request)
         is_admin = getattr(request.state, "is_admin", False)
-        result = get_user_by_id(
-            db=db, user_id=user_id,
-            requesting_user_id=requesting_user_id, is_admin=is_admin,
-        )
-        if result.is_success():
-            return BaseController.ok(format_user_response(result.data.to_dict()))
-        return BaseController.error(
-            format_error_response(
-                error_type=result.error_type,
-                message=result.error, details=result.details,
-            ),
-            status=404,
-        )
 
-    # ----- Me ------------------------------------------------------------
-    @staticmethod
-    def get_me(request: Request, db: Session) -> JSONResponse:
-        user_id = get_current_user_id(request)
-        if not user_id:
+        canonical_id = _resolve_user_id(db, user_id)
+        if canonical_id is None:
             return BaseController.error(
                 format_error_response(
-                    error_type="authentication_error", message="Not authenticated",
+                    error_type="not_found",
+                    message=f"User with ID {user_id} not found",
                 ),
-                status=401,
+                status=404,
             )
+
         result = get_user_by_id(
-            db=db, user_id=user_id,
-            requesting_user_id=user_id, is_admin=True,  # always view self
-        )
-        if result.is_success():
-            return BaseController.ok(format_user_response(result.data.to_dict()))
-        return BaseController.error(
-            format_error_response(
-                error_type=result.error_type,
-                message=result.error, details=result.details,
-            ),
-            status=404,
+            db=db,
+            user_id=canonical_id,
+            requesting_user_id=requesting_user_id,
+            is_admin=is_admin
         )
 
-    # ----- List ----------------------------------------------------------
+        if result.is_success():
+            payload = format_user_response(result.data.to_dict())
+            return BaseController.ok(payload)
+        else:
+            error_payload = format_error_response(
+                error_type=result.error_type,
+                message=result.error,
+                details=result.details
+            )
+            resp = BaseController.error(error_payload, status=404)
+            return resp
+
     @staticmethod
-    def list(request: Request, query: UserListQuery, db: Session) -> JSONResponse:
+    def logout(
+        request: Request,
+        db: Session
+    ) -> JSONResponse:
+        """
+        Hard logout: revoke the access token (jti blacklist) AND clear the
+        refresh-token jti on the user row. Idempotent.
+        """
+        user_id = get_current_user_id(request)
+        if not user_id:
+            error_payload = format_error_response(
+                error_type="authentication_error",
+                message="Not authenticated",
+            )
+            return BaseController.error(error_payload, status=401)
+
+        result = logout_user(
+            db=db,
+            user_id=user_id,
+            token_jti=getattr(request.state, "token_jti", None),
+            token_exp=getattr(request.state, "token_exp", None),
+        )
+        if result.is_success():
+            return BaseController.ok(
+                format_success_response(result.data["message"])
+            )
+        error_payload = format_error_response(
+            error_type=result.error_type,
+            message=result.error,
+        )
+        return BaseController.error(error_payload, status=500)
+
+    @staticmethod
+    def get_me(
+        request: Request,
+        db: Session
+    ) -> JSONResponse:
+        """
+        Get current user.
+
+        Args:
+            request: FastAPI request
+            db: Database session
+
+        Returns:
+            JSONResponse
+        """
+        user_id = get_current_user_id(request)
+
+        if not user_id:
+            error_payload = format_error_response(
+                error_type="authentication_error",
+                message="Not authenticated"
+            )
+            resp = BaseController.error(error_payload, status=401)
+            return resp
+
+        result = get_user_by_id(
+            db=db,
+            user_id=user_id,
+            requesting_user_id=user_id,
+            is_admin=True  # Users can always view themselves
+        )
+
+        if result.is_success():
+            payload = format_user_response(result.data.to_dict())
+            resp = BaseController.ok(payload)
+            return resp
+        else:
+            error_payload = format_error_response(
+                error_type=result.error_type,
+                message=result.error,
+                details=result.details
+            )
+            resp = BaseController.error(error_payload, status=404)
+            return resp
+
+    @staticmethod
+    def list(
+        request: Request,
+        query: UserListQuery,
+        db: Session
+    ) -> JSONResponse:
+        """
+        List users.
+
+        Args:
+            request: FastAPI request
+            query: Query parameters
+            db: Database session
+
+        Returns:
+            JSONResponse
+        """
         is_admin = getattr(request.state, "is_admin", False)
+
         result = list_users(
-            db=db, page=query.offset, page_size=query.pageSize,
-            status=query.status, is_admin=is_admin,
+            db=db,
+            page=query.offset,
+            page_size=query.pageSize,
+            status=query.status,
+            is_admin=is_admin,
             include_deleted=getattr(query, "includeDeleted", False),
         )
-        if result.is_success():
-            p = result.data
-            user_dicts = [u.to_dict() for u in p.items]
-            return BaseController.ok(format_collection_response(
-                items=user_dicts, total=p.total, page=p.page, page_size=p.page_size,
-                collection_type="users",
-            ))
-        error_payload = format_error_response(
-            error_type=result.error_type, message=result.error, details=result.details,
-        )
-        status_code = (
-            422 if result.error_type == "validation_error"
-            else 403 if result.error_type == "authorization_error"
-            else 500
-        )
-        return BaseController.error(error_payload, status=status_code)
 
-    # ----- Update --------------------------------------------------------
+        if result.is_success():
+            paginated = result.data
+            user_dicts = [user.to_dict() for user in paginated.items]
+
+            payload = format_collection_response(
+                items=user_dicts,
+                total=paginated.total,
+                page=paginated.page,
+                page_size=paginated.page_size,
+                collection_type="users"
+            )
+            resp = BaseController.ok(payload)
+            return resp
+        else:
+            error_payload = format_error_response(
+                error_type=result.error_type,
+                message=result.error,
+                details=result.details
+            )
+            status_code = 422 if result.error_type == "validation_error" else 500
+            resp = BaseController.error(error_payload, status=status_code)
+            return resp
+
     @staticmethod
     def update(
-        request: Request, user_id: int, data: UserUpdateRequest, db: Session,
+        request: Request,
+        user_id,
+        data: UserUpdateRequest,
+        db: Session
     ) -> JSONResponse:
+        """
+        Update user.
+
+        Args:
+            request: FastAPI request
+            user_id: User ID — accepts integer ``id`` or ``US-...`` code
+                (doc 25).
+            data: Update data
+            db: Database session
+
+        Returns:
+            JSONResponse
+        """
         requesting_user_id = get_current_user_id(request)
         is_admin = getattr(request.state, "is_admin", False)
+
+        canonical_id = _resolve_user_id(db, user_id)
+        if canonical_id is None:
+            return BaseController.error(
+                format_error_response(
+                    error_type="not_found",
+                    message=f"User with ID {user_id} not found",
+                ),
+                status=404,
+            )
+
         result = update_user(
-            db=db, user_id=user_id, email=data.email,
-            first_name=data.firstName, last_name=data.lastName,
-            admin=data.admin, status=data.status,
+            db=db,
+            user_id=canonical_id,
+            email=data.email,
+            first_name=data.firstName,
+            last_name=data.lastName,
+            admin=data.admin,
+            status=data.status,
             vendor_id=data.vendorId,
             division=data.division,
             division_other=data.divisionOther,
-            requesting_user_id=requesting_user_id, is_admin=is_admin,
+            phone_number=data.phoneNumber,
+            requesting_user_id=requesting_user_id,
+            is_admin=is_admin
         )
-        if result.is_success():
-            return BaseController.ok(format_user_response(result.data.to_dict()))
-        error_payload = format_error_response(
-            error_type=result.error_type, message=result.error, details=result.details,
-        )
-        status_code = {
-            "not_found": 404,
-            "authorization_error": 403,
-            "validation_error": 422,
-            "already_exists": 409,
-        }.get(result.error_type, 500)
-        return BaseController.error(error_payload, status=status_code)
 
-    # ----- Update password ----------------------------------------------
+        if result.is_success():
+            payload = format_user_response(result.data.to_dict())
+            resp = BaseController.ok(payload)
+            return resp
+        else:
+            error_payload = format_error_response(
+                error_type=result.error_type,
+                message=result.error,
+                details=result.details
+            )
+
+            if result.error_type == "not_found":
+                status_code = 404
+            elif result.error_type == "authorization_error":
+                status_code = 403
+            elif result.error_type == "validation_error":
+                status_code = 422
+            else:
+                status_code = 500
+
+            resp = BaseController.error(error_payload, status=status_code)
+            return resp
+
     @staticmethod
     def update_password(
-        request: Request, user_id: int,
-        data: UserPasswordUpdateRequest, db: Session,
+        request: Request,
+        user_id,
+        data: UserPasswordUpdateRequest,
+        db: Session
     ) -> JSONResponse:
+        """
+        Update user password.
+
+        Args:
+            request: FastAPI request
+            user_id: User ID — accepts integer ``id`` or ``US-...`` code
+                (doc 25).
+            data: Password update data
+            db: Database session
+
+        Returns:
+            JSONResponse
+        """
         requesting_user_id = get_current_user_id(request)
         is_admin = getattr(request.state, "is_admin", False)
+
+        canonical_id = _resolve_user_id(db, user_id)
+        if canonical_id is None:
+            return BaseController.error(
+                format_error_response(
+                    error_type="not_found",
+                    message=f"User with ID {user_id} not found",
+                ),
+                status=404,
+            )
+
         result = update_password(
-            db=db, user_id=user_id, new_password=data.password,
-            requesting_user_id=requesting_user_id, is_admin=is_admin,
+            db=db,
+            user_id=canonical_id,
+            new_password=data.password,
+            requesting_user_id=requesting_user_id,
+            is_admin=is_admin
         )
-        if result.is_success():
-            return BaseController.ok(format_success_response(
-                "Password updated successfully",
-            ))
-        error_payload = format_error_response(
-            error_type=result.error_type, message=result.error, details=result.details,
-        )
-        status_code = {
-            "not_found": 404,
-            "authorization_error": 403,
-            "validation_error": 422,
-        }.get(result.error_type, 500)
-        return BaseController.error(error_payload, status=status_code)
 
-    # ----- Delete (soft) -------------------------------------------------
+        if result.is_success():
+            payload = format_success_response("Password updated successfully")
+            resp = BaseController.ok(payload)
+            return resp
+        else:
+            error_payload = format_error_response(
+                error_type=result.error_type,
+                message=result.error,
+                details=result.details
+            )
+
+            if result.error_type == "not_found":
+                status_code = 404
+            elif result.error_type == "authorization_error":
+                status_code = 403
+            elif result.error_type == "validation_error":
+                status_code = 422
+            else:
+                status_code = 500
+
+            resp = BaseController.error(error_payload, status=status_code)
+            return resp
+
     @staticmethod
-    def delete(request: Request, user_id: int, db: Session) -> JSONResponse:
+    def delete(
+        request: Request,
+        user_id,
+        db: Session
+    ) -> JSONResponse:
+        """
+        Delete user.
+
+        Args:
+            request: FastAPI request
+            user_id: User ID — accepts integer ``id`` or ``US-...`` code
+                (doc 25).
+            db: Database session
+
+        Returns:
+            JSONResponse
+        """
         actor_id = get_current_user_id(request)
-        result = delete_user(db=db, user_id=user_id, actor_id=actor_id)
-        if result.is_success():
-            return BaseController.ok(format_success_response(
-                f"User {user_id} deleted successfully",
-            ))
-        error_payload = format_error_response(
-            error_type=result.error_type, message=result.error, details=result.details,
-        )
-        status_code = {
-            "not_found": 404,
-            "authorization_error": 403,
-            "validation_error": 422,
-        }.get(result.error_type, 500)
-        return BaseController.error(error_payload, status=status_code)
 
-    # ----- Restore -------------------------------------------------------
+        canonical_id = _resolve_user_id(db, user_id)
+        if canonical_id is None:
+            return BaseController.error(
+                format_error_response(
+                    error_type="not_found",
+                    message=f"User with ID {user_id} not found",
+                ),
+                status=404,
+            )
+
+        result = delete_user(db=db, user_id=canonical_id, actor_id=actor_id)
+
+        if result.is_success():
+            payload = format_success_response(
+                f"User {canonical_id} deleted successfully"
+            )
+            resp = BaseController.ok(payload)
+            return resp
+        else:
+            error_payload = format_error_response(
+                error_type=result.error_type,
+                message=result.error,
+                details=result.details
+            )
+            if result.error_type == "not_found":
+                status_code = 404
+            elif result.error_type == "authorization_error":
+                status_code = 403
+            elif result.error_type == "validation_error":
+                status_code = 422
+            else:
+                status_code = 500
+            resp = BaseController.error(error_payload, status=status_code)
+            return resp
+
     @staticmethod
-    def restore(request: Request, user_id: int, db: Session) -> JSONResponse:
-        """Restore a soft-deleted user. Idempotent on already-active users."""
+    def restore(
+        request: Request,
+        user_id,
+        db: Session
+    ) -> JSONResponse:
+        """
+        Restore a soft-deleted user.
+
+        Mirrors POST /vendors/{id}/restore. Idempotent on already-active
+        users (returns 200 with the current snapshot).
+
+        Requires: USERS_DELETE_ALL permission (admin only)
+        """
         requesting_user_id = get_current_user_id(request)
         is_admin = getattr(request.state, "is_admin", False)
+
+        # Resolve ``user_id`` (integer id OR ``US-...`` code, doc 25) with
+        # ``include_deleted`` so we can restore tombstoned rows. The
+        # repository's ``resolve_id`` filters out deleted rows for code
+        # input — bypass it for the restore path.
+        repo = UserRepository(db)
+        u = repo.get_by_id_or_code(user_id, include_deleted=True)
+        if u is None:
+            return BaseController.error(
+                format_error_response(
+                    error_type="not_found",
+                    message=f"User with ID {user_id} not found",
+                ),
+                status=404,
+            )
+        canonical_id = u.id
 
         result = restore_user(
             db=db,
-            user_id=user_id,
+            user_id=canonical_id,
             requesting_user_id=requesting_user_id,
             is_admin=is_admin,
         )
 
         if result.is_success():
-            return BaseController.ok(format_user_response(result.data.to_dict()))
-        error_payload = format_error_response(
-            error_type=result.error_type,
-            message=result.error,
-            details=result.details,
-        )
-        status_code = {
-            "not_found": 404,
-            "authorization_error": 403,
-        }.get(result.error_type, 500)
-        return BaseController.error(error_payload, status=status_code)
+            payload = format_user_response(result.data.to_dict())
+            return BaseController.ok(payload)
+        else:
+            error_payload = format_error_response(
+                error_type=result.error_type,
+                message=result.error,
+                details=result.details,
+            )
+            if result.error_type == "not_found":
+                status_code = 404
+            elif result.error_type == "authorization_error":
+                status_code = 403
+            else:
+                status_code = 500
+            return BaseController.error(error_payload, status=status_code)
 
-    # ----- Login ---------------------------------------------------------
     @staticmethod
-    def login(data: LoginRequest, db: Session) -> JSONResponse:
-        result = authenticate_user(db=db, login=data.login, password=data.password)
+    def login(
+        data: LoginRequest,
+        db: Session
+    ) -> JSONResponse:
+        """
+        Authenticate user and return token.
+
+        Doc 33 change 3 — 2FA gate: if the user has 2FA enabled (and
+        the global ``REQUIRE_2FA`` setting allows it), this endpoint
+        returns an ephemeral session token + the available channels
+        instead of the access token. The client then calls
+        ``/login/send-otp`` to receive an OTP and ``/login/verify-otp``
+        to mint the real JWT pair.
+
+        Args:
+            data: Login credentials
+            db: Database session
+
+        Returns:
+            JSONResponse
+        """
+        result = authenticate_user(
+            db=db,
+            login=data.login,
+            password=data.password
+        )
+
         if result.is_success():
-            td = result.data
+            token_data = result.data
+            # Doc 33 change 3: 2FA gate.
+            from ....infrastructure.db.repositories.user_repository import UserRepository
+            from .services.two_factor import begin_otp_challenge, is_2fa_required_for
+            user_obj = token_data.get("user")
+            if user_obj is not None and is_2fa_required_for(user_obj):
+                challenge = begin_otp_challenge(db, user_obj)
+                if challenge.is_success():
+                    # Return a 200 with requires_otp=True. No JWT minted
+                    # yet — client must call /login/send-otp + /login/verify-otp.
+                    payload = {
+                        "_type": "LoginOtpRequired",
+                        "requires_otp": True,
+                        "ephemeral_token": challenge.data["ephemeral_token"],
+                        "channels_available": challenge.data["channels_available"],
+                        "message": (
+                            "Two-factor authentication required. "
+                            "Call /users/login/send-otp with the "
+                            "ephemeral_token and a chosen channel."
+                        ),
+                    }
+                    return BaseController.ok(payload)
             # Decode the freshly-minted tokens to surface their expiry /
             # issued-at timestamps to the FE. Lets the client schedule a
             # preemptive refresh without having to decode the JWT itself.
             from .services.refresh import _exp_metadata
-            access_meta = _exp_metadata(td["access_token"])
+            access_meta = _exp_metadata(token_data["access_token"])
             refresh_meta = (
-                _exp_metadata(td["refresh_token"])
-                if td.get("refresh_token") else {}
+                _exp_metadata(token_data["refresh_token"])
+                if token_data.get("refresh_token") else {}
             )
-            return BaseController.ok({
+            # Keep HAL+JSON for the user inside the `data` payload.
+            response_payload = {
                 "_type": "Login",
-                "access_token": td["access_token"],
-                "refresh_token": td.get("refresh_token"),
-                "token_type": td["token_type"],
+                "access_token": token_data["access_token"],
+                "refresh_token": token_data.get("refresh_token"),
+                "token_type": token_data["token_type"],
                 "accessTokenExpiresAt": access_meta.get("expiresAt"),
                 "accessTokenIssuedAt": access_meta.get("issuedAt"),
                 "refreshTokenExpiresAt": refresh_meta.get("expiresAt"),
@@ -261,52 +597,176 @@ class UserController:
                     int(access_meta["exp"] - access_meta["iat"])
                     if access_meta.get("exp") and access_meta.get("iat") else None
                 ),
-                "user": format_user_response(td["user"].to_dict()),
-            })
-        return BaseController.error(
-            format_error_response(
+                "user": format_user_response(token_data["user"].to_dict()),
+            }
+            # Opt-in envelope using BaseController helper which calls `api_response()` internally.
+            resp = BaseController.ok(response_payload)
+            return resp
+        else:
+            error_response = format_error_response(
                 error_type=result.error_type,
-                message=result.error, details=result.details,
-            ),
-            status=401,
-        )
+                message=result.error,
+                details=result.details
+            )
+            resp = BaseController.error(error_response, status=401)
+            return resp
 
-    # ----- Logout --------------------------------------------------------
     @staticmethod
-    def logout(request: Request, db: Session) -> JSONResponse:
-        user_id = get_current_user_id(request)
-        if not user_id:
+    def send_otp(data, db: Session) -> JSONResponse:
+        """Doc 33 change 3 — POST /users/login/send-otp."""
+        from .services.two_factor import send_or_resend_otp
+        from ....shared.otp import hash_secret
+        # Map ephemeral_token → user_id by looking it up.
+        from ....infrastructure.db.models.otp_code import OtpCodeModel
+        # First-time send: no row exists yet. We need to fish out the
+        # user_id from the recently-issued ephemeral token. The token
+        # itself is opaque — but the login flow stamped its hash onto a
+        # Login response and the FE passes it back here. We honor either
+        # path:
+        #   (a) an existing OtpCode row already exists for this token →
+        #       pick the user_id from there (resend path).
+        #   (b) no row yet → we need to look up the user. Approach: the
+        #       ephemeral_token only appears on a successful login
+        #       response, and the FE stores it client-side. We DO NOT
+        #       have a server-side mapping from token to user yet, so
+        #       we must add one. Easiest: a tiny in-memory cache keyed
+        #       by hash, but that doesn't survive restarts. Instead,
+        #       the login controller already created a sentinel
+        #       OtpCodeModel row with consumed_at=now and user_id set
+        #       so we can resolve here even before any code is sent.
+        # Implementation note: we sidestep the bookkeeping by stamping
+        # a sentinel OTP row at /login (consumed=True, no code generated).
+        # See login() above where this is wired.
+        token_hash = hash_secret(data.ephemeral_token)
+        sentinel = (
+            db.query(OtpCodeModel)
+            .filter(OtpCodeModel.ephemeral_token_hash == token_hash)
+            .order_by(OtpCodeModel.id.desc())
+            .first()
+        )
+        if sentinel is None:
             return BaseController.error(
                 format_error_response(
-                    error_type="authentication_error", message="Not authenticated",
+                    "invalid_credentials",
+                    "Invalid or expired ephemeral session.",
                 ),
                 status=401,
             )
-        result = logout_user(
-            db=db,
-            user_id=user_id,
-            token_jti=getattr(request.state, "token_jti", None),
-            token_exp=getattr(request.state, "token_exp", None),
+        result = send_or_resend_otp(
+            db, user_id=sentinel.user_id,
+            ephemeral_token=data.ephemeral_token,
+            channel=data.channel,
         )
-        if result.is_success():
-            return BaseController.ok(format_success_response(result.data["message"]))
-        return BaseController.error(
-            format_error_response(
-                error_type=result.error_type, message=result.error,
-            ),
-            status=500,
-        )
+        if not result.is_success():
+            err_status = 429 if result.error_type == "cooldown" else (
+                422 if result.error_type == "validation_error" else 401
+            )
+            return BaseController.error(
+                format_error_response(
+                    result.error_type, result.error, details=result.details,
+                ),
+                status=err_status,
+            )
+        payload = {"_type": "OtpSent", **result.data}
+        return BaseController.ok(payload)
 
-    # ----- Introspect (RFC 7662 read-only) -------------------------------
     @staticmethod
-    def introspect(data, db: Session) -> JSONResponse:
+    def verify_otp(data, db: Session) -> JSONResponse:
+        """Doc 33 change 3 — POST /users/login/verify-otp.
+
+        On success returns the same shape as a regular /login response
+        (access + refresh tokens + user object + expiry metadata).
+        """
+        from .services.two_factor import verify_otp
+        result = verify_otp(
+            db, ephemeral_token=data.ephemeral_token, code=data.code,
+        )
+        if not result.is_success():
+            return BaseController.error(
+                format_error_response(
+                    result.error_type, result.error, details=result.details,
+                ),
+                status=401,
+            )
+        token_data = result.data
+        # Same response shape as regular login.
+        from .services.refresh import _exp_metadata
+        access_meta = _exp_metadata(token_data["access_token"])
+        refresh_meta = _exp_metadata(token_data["refresh_token"])
+        payload = {
+            "_type": "Login",
+            "access_token": token_data["access_token"],
+            "refresh_token": token_data["refresh_token"],
+            "token_type": token_data["token_type"],
+            "accessTokenExpiresAt": access_meta.get("expiresAt"),
+            "accessTokenIssuedAt": access_meta.get("issuedAt"),
+            "refreshTokenExpiresAt": refresh_meta.get("expiresAt"),
+            "refreshTokenIssuedAt": refresh_meta.get("issuedAt"),
+            "expiresInSeconds": (
+                int(access_meta["exp"] - access_meta["iat"])
+                if access_meta.get("exp") and access_meta.get("iat") else None
+            ),
+            "user": format_user_response(token_data["user"].to_dict()),
+        }
+        return BaseController.ok(payload)
+
+    @staticmethod
+    def forgot_password(data, db: Session) -> JSONResponse:
+        """Doc 33 change 3 — POST /users/forgot-password.
+
+        Always returns 200 (anti-enumeration). The body is identical
+        whether the user exists or not."""
+        from .services.password_reset import request_password_reset
+        result = request_password_reset(
+            db, login_or_email=data.login_or_email, channel=data.channel,
+        )
+        if not result.is_success():
+            # Only fires on validation_error (invalid channel) — other
+            # cases fall through to the generic 200 response.
+            return BaseController.error(
+                format_error_response(result.error_type, result.error),
+                status=422,
+            )
+        return BaseController.ok(result.data)
+
+    @staticmethod
+    def reset_password(data, db: Session) -> JSONResponse:
+        """Doc 33 change 3 — POST /users/reset-password."""
+        from .services.password_reset import perform_password_reset
+        result = perform_password_reset(
+            db, token_or_code=data.token_or_code,
+            new_password=data.new_password,
+        )
+        if not result.is_success():
+            err_status = 422 if result.error_type == "validation_error" else 401
+            return BaseController.error(
+                format_error_response(result.error_type, result.error),
+                status=err_status,
+            )
+        return BaseController.ok(result.data)
+
+    @staticmethod
+    def introspect(
+        data,
+        db: Session
+    ) -> JSONResponse:
+        """
+        Public introspection endpoint. No auth middleware. RFC 7662-style
+        read-only: returns token metadata without ever rotating. Use
+        POST /users/refresh to rotate.
+        """
         from .services.introspect import introspect_tokens
 
         result = introspect_tokens(
-            db=db, access_token=data.access_token, refresh_token=data.refresh_token,
+            db=db,
+            access_token=data.access_token,
+            refresh_token=data.refresh_token,
         )
 
         if not result.is_success():
+            # Only happens for "no token provided" — a 422 from the schema
+            # would be cleaner but the body is well-formed JSON, so the
+            # service-layer 400 is appropriate.
             error_payload = format_error_response(
                 error_type=result.error_type,
                 message=result.error,
@@ -315,14 +775,14 @@ class UserController:
             return BaseController.error(error_payload, status=status)
 
         payload = result.data
-        # Tag the envelope so the FE can disambiguate from other responses.
-        if isinstance(payload, dict):
-            payload = {**payload, "_type": "Introspect"}
+        payload["_type"] = "Introspect"
         return BaseController.ok(payload)
 
-    # ----- Refresh (rotates access + refresh) ----------------------------
     @staticmethod
-    def refresh(data, db: Session) -> JSONResponse:
+    def refresh(
+        data,
+        db: Session,
+    ) -> JSONResponse:
         """Public refresh endpoint. Validates a refresh token and returns
         a freshly-rotated access + refresh pair plus expiry metadata.
         """

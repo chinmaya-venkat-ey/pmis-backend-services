@@ -1,7 +1,9 @@
-"""User-module permission shortcuts."""
+"""
+User module permissions.
+"""
 from ....core.rbac import Permission
 
-
+# Export permissions for convenience
 USERS_CREATE = Permission.USERS_CREATE
 USERS_READ = Permission.USERS_READ
 USERS_READ_ALL = Permission.USERS_READ_ALL

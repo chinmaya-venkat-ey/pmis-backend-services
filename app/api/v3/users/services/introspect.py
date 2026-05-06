@@ -1,4 +1,5 @@
-"""Token introspection service — RFC 7662 style.
+"""
+Token introspection service — RFC 7662 style.
 
 Pure read-only metadata lookup. NEVER rotates tokens; rotation lives in
 ``services.refresh.refresh_tokens`` behind the dedicated
@@ -32,16 +33,30 @@ from .....shared.service_result import ServiceResult
 
 def _claims_to_response(
     payload: Dict[str, Any], *, token_type: str,
+    db: Optional[Session] = None,
 ) -> Dict[str, Any]:
-    """Project a decoded JWT payload into the public introspect response shape."""
+    """Project a decoded JWT payload into the public introspect response shape.
+
+    Doc 21 part B: ``role`` and ``isAdmin`` are resolved from the DB at
+    introspect time (the JWT no longer carries those claims). Tokens
+    issued before the rework still carry ``role``/``is_admin`` claims;
+    those are honored as a fallback if a DB lookup isn't possible.
+    """
     exp = payload.get("exp")
     iat = payload.get("iat")
+    user_id = payload.get("user_id")
+    is_admin = payload.get("is_admin", False)
+    if db is not None and user_id is not None:
+        # Local import to avoid module-load cycles.
+        from .....infrastructure.db.repositories.rbac_repository import (
+            RbacRepository,
+        )
+        is_admin = RbacRepository(db).user_has_admin_role(user_id)
     return {
         "active": True,
         "tokenType": token_type,
         "exp": exp,
         "iat": iat,
-        # ISO 8601 forms for FE convenience — same value, easier to read.
         "expiresAt": (
             datetime.fromtimestamp(exp, tz=timezone.utc).isoformat()
             if isinstance(exp, (int, float)) else None
@@ -53,10 +68,13 @@ def _claims_to_response(
         "jti": payload.get("jti"),
         "sub": payload.get("sub"),
         "username": payload.get("sub"),
-        "userId": payload.get("user_id"),
+        "userId": user_id,
         "email": payload.get("email"),
+        # ``role`` is no longer a single value in the new model. Kept here
+        # as None for back-compat with old FE consumers; use the
+        # /users/me/permissions endpoint for the authoritative answer.
         "role": payload.get("role"),
-        "isAdmin": payload.get("is_admin", False),
+        "isAdmin": bool(is_admin),
     }
 
 
@@ -73,7 +91,7 @@ def _introspect_access(db: Session, token: str) -> Dict[str, Any]:
     if jti and RevokedTokenRepository(db).is_revoked(jti):
         return {"active": False, "tokenType": "access"}
 
-    return _claims_to_response(payload, token_type="access")
+    return _claims_to_response(payload, token_type="access", db=db)
 
 
 def _introspect_refresh(db: Session, token: str) -> Dict[str, Any]:
@@ -82,11 +100,13 @@ def _introspect_refresh(db: Session, token: str) -> Dict[str, Any]:
     A refresh token is "active" when:
       - signature is valid AND not expired
       - its jti matches EITHER the user row's stored ``refresh_token_jti``
-        OR the ``previous_refresh_token_jti`` while the grace window
-        (``previous_refresh_token_jti_valid_until``) is still open.
-        Outside the grace window, only the current jti counts as active.
-      - the user row's stored ``refresh_token_expires_at`` is in the
-        future (only enforced on the current slot).
+        (the latest issued) OR the ``previous_refresh_token_jti`` while
+        the grace window (``previous_refresh_token_jti_valid_until``) is
+        still open. Outside the grace window, only the current jti
+        counts as active.
+      - the user row's stored ``refresh_token_expires_at`` is in the future
+        (only enforced when the incoming token resolves to the current slot;
+        the previous slot is bounded by the grace window itself).
     """
     payload = verify_refresh_token(token)
     if not payload:
@@ -121,7 +141,7 @@ def _introspect_refresh(db: Session, token: str) -> Dict[str, Any]:
         if _as_utc(current_expires) < now:
             return {"active": False, "tokenType": "refresh"}
 
-    return _claims_to_response(payload, token_type="refresh")
+    return _claims_to_response(payload, token_type="refresh", db=db)
 
 
 def _as_utc(dt: datetime) -> datetime:

@@ -1,13 +1,17 @@
-"""Dedicated user-restore service.
+"""
+Dedicated user-restore service.
 
-Mirrors the ``POST /vendors/{id}/restore`` pattern: every resource that
-has a soft-DELETE has an explicit POST /<id>/restore counterpart. The
+Mirrors the ``POST /vendors/{id}/restore`` pattern kamal added on the
+vendor side, so the API surface is symmetric: every resource that has
+a soft-DELETE has an explicit POST /<id>/restore counterpart. The
 PATCH ``{status: "active"}`` path on a soft-deleted user remains
 supported (it falls through to ``update.py``); both paths converge on
 the same ``UserRepository.update(restore=True)`` call.
 
 Idempotent: calling restore on an already-active user returns the
-current snapshot with HTTP 200 rather than 409.
+current snapshot with HTTP 200 rather than 409. Treating it as a
+benign retry matches the vendor restore behaviour and keeps the
+frontend simple.
 """
 from typing import Optional
 
@@ -20,9 +24,9 @@ from .....shared.service_result import ServiceResult
 
 def restore_user(
     db: Session,
-    user_id: int,
+    user_id: str,
     *,
-    requesting_user_id: Optional[int] = None,
+    requesting_user_id: Optional[str] = None,
     is_admin: bool = False,
 ) -> ServiceResult[User]:
     """Clear soft-delete flags + set status='active' on a user.

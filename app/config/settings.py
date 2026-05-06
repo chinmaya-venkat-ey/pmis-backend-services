@@ -61,6 +61,28 @@ class Settings(BaseSettings):
     otp_max_attempts: int = 5
     otp_resend_cooldown_seconds: int = 30
 
+    # ---- Doc 38: database + auth + template rendering -----------------
+    # Shared Postgres with monolith + user-service. SQLite fallback for
+    # local-dev / tests. ``MIGRATIONS_AUTORUN=false`` is the default in
+    # shared-DB deploys (monolith owns alembic).
+    database_url: str = Field(
+        default="sqlite:///./notification_service.db",
+        description="Postgres URL (shared with monolith) or SQLite path for dev.",
+    )
+    migrations_autorun: bool = False
+    migrations_required: bool = True
+
+    # Shared SECRET_KEY — MUST match monolith + user-service so JWTs
+    # minted by user-service verify here.
+    secret_key: str = Field(
+        default="change-me-to-a-long-random-string-min-32-chars-shared-with-backend",
+        description="HS256 signing key — identical to monolith and user-service.",
+    )
+    algorithm: str = "HS256"
+
+    # Used by template_service when rendering password-reset emails.
+    frontend_base_url: str = ""
+
     @field_validator("email_provider", "sms_provider")
     @classmethod
     def lower_provider(cls, v: str) -> str:

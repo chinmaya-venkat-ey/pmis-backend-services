@@ -7,3 +7,12 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+
+# Local SQLite DBs (dev/test artifacts; real env uses Postgres)
+*.db
+*.sqlite
+*.sqlite3
+
+# Local environment overrides
+.env
+.env.local

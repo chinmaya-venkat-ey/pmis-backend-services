@@ -27,12 +27,22 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(request: Request, exc: RequestValidationError):
+        # Pydantic 2 errors can carry raw Python objects in ``ctx``
+        # (e.g. ValueError instances from custom validators), which
+        # don't JSON-serialize directly. Use jsonable_encoder to
+        # coerce them. Also drop the ``url`` field — it's a Pydantic
+        # docs link, not useful in API responses.
+        from fastapi.encoders import jsonable_encoder
+        details = jsonable_encoder(
+            exc.errors(),
+            custom_encoder={ValueError: lambda v: str(v)},
+        )
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             content={
                 "success": False,
                 "error": "Validation failed",
-                "details": exc.errors(),
+                "details": details,
                 "status_code": status.HTTP_422_UNPROCESSABLE_ENTITY,
                 "request_id": _request_id(request),
             },

@@ -1,5 +1,6 @@
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 # Ensure repo root is on sys.path so `import app` works without install
@@ -12,6 +13,21 @@ os.environ.setdefault("SMS_PROVIDER", "mock")
 os.environ.setdefault("OTP_RESEND_COOLDOWN_SECONDS", "0")
 os.environ.setdefault("OTP_LENGTH", "6")
 os.environ.setdefault("OTP_TTL_SECONDS", "300")
+
+# Doc 38: DB-backed templates need a real test DB. Use a tempfile-
+# backed SQLite so multiple SessionLocal() calls (fixture seeding +
+# auth middleware lookup) share the same data. Pure ``:memory:``
+# would isolate each connection.
+_TMPDB = os.path.join(tempfile.gettempdir(), f"notif_test_{os.getpid()}.db")
+if os.path.exists(_TMPDB):
+    os.remove(_TMPDB)
+os.environ.setdefault(
+    "DATABASE_URL", f"sqlite:///{_TMPDB.replace(os.sep, '/')}"
+)
+os.environ.setdefault(
+    "SECRET_KEY", "shared-test-secret-key-32-chars-min-shared-test",
+)
+os.environ.setdefault("ALGORITHM", "HS256")
 
 import pytest
 from fastapi.testclient import TestClient

@@ -128,6 +128,10 @@ def update_activity(
     current_user_id: Optional[int],
     status: Optional[str] = None,
     depends_on: Optional[List[str]] = None,
+    # Doc 38 additions — all optional.
+    owner_division: Optional[str] = None,
+    concerned_division: Optional[str] = None,
+    vendor_id: Optional[str] = None,
 ) -> Tuple[Activity, Optional[ActivityResource]]:
     repo = ActivityRepository(db)
     model = repo.get_model(activity_id)
@@ -433,6 +437,14 @@ def update_activity(
     # stays 'completed' if its type flips to standard).
     if status_supplied:
         updates["status"] = status
+
+    # Doc 38 additions — null is meaningful (clear the field).
+    if owner_division is not None:
+        updates["owner_division"] = owner_division
+    if concerned_division is not None:
+        updates["concerned_division"] = concerned_division
+    if vendor_id is not None:
+        updates["vendor_id"] = vendor_id
 
     before_snapshot = {k: _iso(getattr(model, k)) for k in updates.keys()} if updates else {}
 

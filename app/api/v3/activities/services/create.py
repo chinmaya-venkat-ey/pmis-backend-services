@@ -45,7 +45,7 @@ def create_activity(
     milestone_id: str,
     name: str,
     description: Optional[str],
-    type: str,
+    type: Optional[str],
     start_date: datetime,
     end_date: datetime,
     actual_start_date: Optional[datetime],
@@ -57,6 +57,10 @@ def create_activity(
     current_user_id: Optional[int],
     status: Optional[str] = None,
     depends_on: Optional[List[str]] = None,
+    # Doc 38 additions — all optional.
+    owner_division: Optional[str] = None,
+    concerned_division: Optional[str] = None,
+    vendor_id: Optional[str] = None,
 ) -> Tuple[Activity, Optional[ActivityResource]]:
     milestone = (
         db.query(MilestoneModel)
@@ -104,32 +108,33 @@ def create_activity(
                     "The selected 'type of resource' could not be found or is inactive."
                 )
 
-    # Normalize: for non-resource activities, mode + count must be NULL.
-    store_mode = resource_mode if type == ACTIVITY_TYPE_RESOURCE else None
+    # Normalize: for non-resource activities (or doc-38 type-less rows),
+    # mode + count must be NULL.
+    is_resource = type == ACTIVITY_TYPE_RESOURCE
+    store_mode = resource_mode if is_resource else None
     store_count = resource_count if (
-        type == ACTIVITY_TYPE_RESOURCE and resource_mode == RESOURCE_MODE_COUNT
+        is_resource and resource_mode == RESOURCE_MODE_COUNT
     ) else None
 
-    # Lifecycle status: applies to all activity types. Default to
-    # ACTIVITY_STATUS_DEFAULT when the caller omits it. The schema layer
-    # already enforces value-membership for any non-None input, but we
-    # re-validate here so a future direct-service caller (CLI, internal
-    # script) can't bypass the choices.
-    resolved_status: str = status or ACTIVITY_STATUS_DEFAULT
-    # Doc 37 part 1: catalog-first; fallback to in-code tuple.
-    from .....infrastructure.db.models.activity_status import ActivityStatusModel
-    from .....shared.static_catalog import active_codes, is_known_code
-    if not is_known_code(
-        db, resolved_status,
-        model=ActivityStatusModel,
-        fallback=ACTIVITY_STATUS_CHOICES,
-    ):
-        valid = sorted(active_codes(
-            db, model=ActivityStatusModel, fallback=ACTIVITY_STATUS_CHOICES,
-        ))
-        raise ValidationError(
-            f"Activity status must be one of: {', '.join(valid)}."
-        )
+    # Doc 38: status is no longer accepted on create — it's a PATCH-time
+    # field. When the (legacy) caller still supplies a status, validate
+    # it against the catalog like before. New rows default to NULL until
+    # the user explicitly sets one via PATCH.
+    resolved_status: Optional[str] = status
+    if resolved_status is not None:
+        from .....infrastructure.db.models.activity_status import ActivityStatusModel
+        from .....shared.static_catalog import active_codes, is_known_code
+        if not is_known_code(
+            db, resolved_status,
+            model=ActivityStatusModel,
+            fallback=ACTIVITY_STATUS_CHOICES,
+        ):
+            valid = sorted(active_codes(
+                db, model=ActivityStatusModel, fallback=ACTIVITY_STATUS_CHOICES,
+            ))
+            raise ValidationError(
+                f"Activity status must be one of: {', '.join(valid)}."
+            )
 
     # Validate dependsOn targets BEFORE creating the row, so we don't leave
     # an orphan activity if validation fails. ``dependsOn`` accepts either
@@ -195,6 +200,9 @@ def create_activity(
         resource_mode=store_mode,
         resource_count=store_count,
         status=resolved_status,
+        owner_division=owner_division,
+        concerned_division=concerned_division,
+        vendor_id=vendor_id,
     )
 
     resource_domain = None

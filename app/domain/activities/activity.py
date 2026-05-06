@@ -53,7 +53,7 @@ class Activity:
     milestone_id: str
     name: str
     description: Optional[str]
-    type: str
+    type: Optional[str]
     start_date: datetime
     end_date: datetime
     actual_start_date: Optional[datetime]
@@ -74,6 +74,10 @@ class Activity:
     # service layer from the activity_dependencies association table; never
     # stored on the activity row itself.
     depends_on: List[str] = field(default_factory=list)
+    # Doc 38 additions — optional ownership / partner / consulted-division.
+    owner_division: Optional[str] = None
+    concerned_division: Optional[str] = None
+    vendor_id: Optional[str] = None
 
     def to_dict(self) -> dict:
         return {
@@ -92,6 +96,9 @@ class Activity:
             "resource_count": self.resource_count,
             "status": self.status,
             "depends_on": list(self.depends_on or []),
+            "owner_division": self.owner_division,
+            "concerned_division": self.concerned_division,
+            "vendor_id": self.vendor_id,
             "created_at": iso_utc(self.created_at),
             "updated_at": iso_utc(self.updated_at),
             "created_by": self.created_by,

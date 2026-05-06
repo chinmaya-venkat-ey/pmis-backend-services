@@ -57,7 +57,9 @@ class SubtaskModel(Base):
 
     name = Column(String(255), nullable=False, index=True)
     description = Column(Text, nullable=True)
-    type = Column(String(20), nullable=False)
+    # Doc 38: ``type`` no longer accepted on create — inherited from parent
+    # task / activity (both nullable). Column kept for legacy rows.
+    type = Column(String(20), nullable=True)
 
     start_date = Column(UtcDateTime, nullable=False)
     end_date = Column(UtcDateTime, nullable=False)
@@ -69,6 +71,9 @@ class SubtaskModel(Base):
     resource_mode = Column(String(10), nullable=True)
     resource_count = Column(Integer, nullable=True)
 
+    # Doc 38: lifecycle status, settable via PATCH only (not on create).
+    status = Column(String(32), nullable=True, index=True)
+
     created_at = Column(UtcDateTime, default=_utcnow, nullable=False)
     updated_at = Column(UtcDateTime, default=_utcnow, onupdate=_utcnow, nullable=False)
     # Doc 26: users.id flipped to UUID String(36).
@@ -78,7 +83,8 @@ class SubtaskModel(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "type IN ('standard', 'resource', 'transactional')",
+            # Doc 38: NULL allowed for new rows (type deprecated).
+            "type IS NULL OR type IN ('standard', 'resource', 'transactional')",
             name="ck_subtasks_type",
         ),
         CheckConstraint(

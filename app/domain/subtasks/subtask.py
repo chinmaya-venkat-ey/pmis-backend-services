@@ -30,7 +30,7 @@ class Subtask:
     task_id: str
     name: str
     description: Optional[str]
-    type: str
+    type: Optional[str]
     start_date: datetime
     end_date: datetime
     actual_start_date: Optional[datetime]
@@ -43,6 +43,8 @@ class Subtask:
     deleted_at: Optional[datetime] = None
     resource_mode: Optional[str] = None
     resource_count: Optional[int] = None
+    # Doc 38: lifecycle status, set via PATCH only.
+    status: Optional[str] = None
     parent_subtask_id: Optional[str] = None
     # Target subtask ids this subtask depends on. Populated from
     # subtask_dependencies association table.
@@ -64,6 +66,7 @@ class Subtask:
             "position": self.position,
             "resource_mode": self.resource_mode,
             "resource_count": self.resource_count,
+            "status": self.status,
             "depends_on": list(self.depends_on or []),
             "created_at": iso_utc(self.created_at),
             "updated_at": iso_utc(self.updated_at),

@@ -64,6 +64,7 @@ def update_task(
     resource: Optional[Dict[str, Any]],
     current_user_id: Optional[int],
     depends_on: Optional[List[str]] = None,
+    status: Optional[str] = None,  # doc 38: status now editable on PATCH
 ) -> Tuple[Task, Optional[TaskResource]]:
     repo = TaskRepository(db)
     model = repo.get_model(task_id)
@@ -256,6 +257,7 @@ def update_task(
     if actual_start_date is not None: updates["actual_start_date"] = actual_start_date
     if actual_end_date is not None: updates["actual_end_date"] = actual_end_date
     if position is not None: updates["position"] = position
+    if status is not None: updates["status"] = status  # doc 38
     if final_mode != model.resource_mode or final_count != model.resource_count:
         updates["resource_mode"] = final_mode
         updates["resource_count"] = final_count

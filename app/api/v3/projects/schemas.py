@@ -25,7 +25,6 @@ class ProjectCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = Field(None, max_length=5000)
     active: bool = Field(True)
-    public: bool = Field(False, alias="isPublic")
     statusExplanation: Optional[str] = Field(None, max_length=5000, alias="status_explanation")
     parentId: Optional[str] = Field(None, alias="parent_id", description="Parent project UUID")
     status: str = Field(
@@ -50,29 +49,9 @@ class ProjectCreateRequest(BaseModel):
             "null for any other owner value."
         ),
     )
-    category: Optional[str] = Field(
-        None,
-        description=f"Category. One of: {', '.join(PROJECT_CATEGORY_CHOICES)}",
-    )
-    categoryOther: Optional[str] = Field(
-        None,
-        alias="category_other",
-        max_length=255,
-        description=(
-            f"Required (non-empty) when category == '{CATEGORY_OTHERS}'. "
-            "Must be omitted / null for any other category."
-        ),
-    )
-    categoryOtherReason: Optional[str] = Field(
-        None,
-        alias="category_other_reason",
-        max_length=1000,
-        description=(
-            f"Required when category == '{CATEGORY_OTHERS}'. Free-text "
-            "explanation of why 'others' was picked instead of MSAP/MSIP/"
-            "BSP. Captured for governance / category-curation review."
-        ),
-    )
+    # Doc 38: ``category`` / ``categoryOther`` / ``categoryOtherReason`` /
+    # ``isPublic`` were removed from the wire — DB columns kept (Option B
+    # deprecation) but the API no longer accepts them on create.
     vendorIds: Optional[List[str]] = Field(
         None,
         alias="vendor_ids",
@@ -95,15 +74,6 @@ class ProjectCreateRequest(BaseModel):
         if v not in PROJECT_STATUS_CHOICES:
             raise ValueError(
                 f"Invalid status '{v}'. Allowed: {', '.join(PROJECT_STATUS_CHOICES)}"
-            )
-        return v
-
-    @field_validator("category")
-    @classmethod
-    def validate_category(cls, v):
-        if v is not None and v not in PROJECT_CATEGORY_CHOICES:
-            raise ValueError(
-                f"Invalid category '{v}'. Allowed: {', '.join(PROJECT_CATEGORY_CHOICES)}"
             )
         return v
 
@@ -143,17 +113,11 @@ class ProjectUpdateRequest(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=255)
     description: Optional[str] = Field(None, max_length=5000)
     active: Optional[bool] = None
-    public: Optional[bool] = Field(None, alias="isPublic")
     statusExplanation: Optional[str] = Field(None, max_length=5000, alias="status_explanation")
     parentId: Optional[str] = Field(None, alias="parent_id", description="Parent project UUID")
     status: Optional[str] = Field(None)
     owner: Optional[str] = Field(None, min_length=1, max_length=255)
     ownerOther: Optional[str] = Field(None, alias="owner_other", max_length=255)
-    category: Optional[str] = Field(None)
-    categoryOther: Optional[str] = Field(None, alias="category_other", max_length=255)
-    categoryOtherReason: Optional[str] = Field(
-        None, alias="category_other_reason", max_length=1000,
-    )
     vendorIds: Optional[List[str]] = Field(
         None,
         alias="vendor_ids",
@@ -180,15 +144,6 @@ class ProjectUpdateRequest(BaseModel):
         if v is not None and v not in PROJECT_STATUS_CHOICES:
             raise ValueError(
                 f"Invalid status '{v}'. Allowed: {', '.join(PROJECT_STATUS_CHOICES)}"
-            )
-        return v
-
-    @field_validator("category")
-    @classmethod
-    def validate_category(cls, v):
-        if v is not None and v not in PROJECT_CATEGORY_CHOICES:
-            raise ValueError(
-                f"Invalid category '{v}'. Allowed: {', '.join(PROJECT_CATEGORY_CHOICES)}"
             )
         return v
 
@@ -221,7 +176,6 @@ class ProjectListQuery(BaseModel):
     offset: int = Field(1, ge=1, description="Page number (1-indexed)")
     pageSize: int = Field(20, ge=1, le=100)
     active: Optional[bool] = None
-    public: Optional[bool] = None
     # When True, the response includes soft-deleted rows (the "All projects"
     # admin view). The default GET /projects endpoint pins this False; the
     # GET /projects/all endpoint pins it True.
@@ -248,17 +202,11 @@ class ProjectUpsertRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = Field(None, max_length=5000)
     active: bool = Field(True)
-    public: bool = Field(False, alias="isPublic")
     statusExplanation: Optional[str] = Field(None, max_length=5000, alias="status_explanation")
     parentId: Optional[str] = Field(None, alias="parent_id", description="Parent project UUID")
     status: str = Field("new")
     owner: Optional[str] = Field(None, min_length=1, max_length=255)
     ownerOther: Optional[str] = Field(None, alias="owner_other", max_length=255)
-    category: Optional[str] = Field(None)
-    categoryOther: Optional[str] = Field(None, alias="category_other", max_length=255)
-    categoryOtherReason: Optional[str] = Field(
-        None, alias="category_other_reason", max_length=1000,
-    )
     vendorIds: Optional[List[str]] = Field(
         None, alias="vendor_ids",
         description=(
@@ -278,15 +226,6 @@ class ProjectUpsertRequest(BaseModel):
         if v not in PROJECT_STATUS_CHOICES:
             raise ValueError(
                 f"Invalid status '{v}'. Allowed: {', '.join(PROJECT_STATUS_CHOICES)}"
-            )
-        return v
-
-    @field_validator("category")
-    @classmethod
-    def validate_category(cls, v):
-        if v is not None and v not in PROJECT_CATEGORY_CHOICES:
-            raise ValueError(
-                f"Invalid category '{v}'. Allowed: {', '.join(PROJECT_CATEGORY_CHOICES)}"
             )
         return v
 

@@ -209,6 +209,7 @@ def format_subtask_response(
         "position": s["position"],
         "resourceMode": s.get("resource_mode"),
         "resourceCount": s.get("resource_count"),
+        "status": s.get("status"),
         "dependsOn": deps,
         "dependsOnDisplay": deps_display,
         "createdAt": s["created_at"],
@@ -227,7 +228,6 @@ class SubtaskController:
     @staticmethod
     def create(request: Request, task_id: str, data: SubtaskCreateRequest, db: Session) -> JSONResponse:
         cuid = getattr(request.state, "user_id", None)
-        rd = data.resource.model_dump() if data.resource else None
         s, r = create_subtask(
             db,
             task_id=task_id,
@@ -235,11 +235,11 @@ class SubtaskController:
             # from the parent task. Cross-type mapping reserved for future.
             name=data.name, description=data.description,
             start_date=data.start_date, end_date=data.end_date,
-            actual_start_date=data.actual_start_date, actual_end_date=data.actual_end_date,
-            position=data.position,
-            resource_mode=data.resource_mode, resource_count=data.resource_count,
-            resource=rd, current_user_id=cuid,
-            depends_on=data.depends_on,
+            actual_start_date=None, actual_end_date=None,
+            position=None,
+            resource_mode=None, resource_count=None,
+            resource=None, current_user_id=cuid,
+            depends_on=None,
         )
         idx = build_label_index_for_project(db, s.project_id)
         return BaseController.created(data=format_subtask_response(
@@ -260,19 +260,18 @@ class SubtaskController:
         ``parent_subtask_id`` so the new row sits as the parent's child.
         """
         cuid = getattr(request.state, "user_id", None)
-        rd = data.resource.model_dump() if data.resource else None
         s, r = create_subtask(
             db,
             parent_subtask_id=parent_subtask_id,
             name=data.name, description=data.description,
             start_date=data.start_date, end_date=data.end_date,
-            actual_start_date=data.actual_start_date,
-            actual_end_date=data.actual_end_date,
-            position=data.position,
-            resource_mode=data.resource_mode,
-            resource_count=data.resource_count,
-            resource=rd, current_user_id=cuid,
-            depends_on=data.depends_on,
+            actual_start_date=None,
+            actual_end_date=None,
+            position=None,
+            resource_mode=None,
+            resource_count=None,
+            resource=None, current_user_id=cuid,
+            depends_on=None,
         )
         idx = build_label_index_for_project(db, s.project_id)
         return BaseController.created(data=format_subtask_response(
@@ -299,17 +298,16 @@ class SubtaskController:
                 status=422,
             )
         cuid = getattr(request.state, "user_id", None)
-        rd = data.resource.model_dump() if data.resource else None
         s, r = create_subtask(
             db,
             task_id=task_id,
             name=data.name, description=data.description,
             start_date=data.start_date, end_date=data.end_date,
-            actual_start_date=data.actual_start_date, actual_end_date=data.actual_end_date,
-            position=data.position,
-            resource_mode=data.resource_mode, resource_count=data.resource_count,
-            resource=rd, current_user_id=cuid,
-            depends_on=data.depends_on,
+            actual_start_date=None, actual_end_date=None,
+            position=None,
+            resource_mode=None, resource_count=None,
+            resource=None, current_user_id=cuid,
+            depends_on=None,
         )
         return _persist_subtask_inline(request, db, s, r, body, files)
 
@@ -336,18 +334,18 @@ class SubtaskController:
                 status=422,
             )
         cuid = getattr(request.state, "user_id", None)
-        rd = data.resource.model_dump() if data.resource else None
+        # Doc 38: trimmed shape on create.
         s, r = create_subtask(
             db,
             parent_subtask_id=parent_subtask_id,
             name=data.name, description=data.description,
             start_date=data.start_date, end_date=data.end_date,
-            actual_start_date=data.actual_start_date,
-            actual_end_date=data.actual_end_date,
-            position=data.position,
-            resource_mode=data.resource_mode, resource_count=data.resource_count,
-            resource=rd, current_user_id=cuid,
-            depends_on=data.depends_on,
+            actual_start_date=None,
+            actual_end_date=None,
+            position=None,
+            resource_mode=None, resource_count=None,
+            resource=None, current_user_id=cuid,
+            depends_on=None,
         )
         return _persist_subtask_inline(request, db, s, r, body, files)
 
@@ -429,17 +427,19 @@ class SubtaskController:
     @staticmethod
     def update(request: Request, subtask_id: str, data: SubtaskUpdateRequest, db: Session) -> JSONResponse:
         cuid = getattr(request.state, "user_id", None)
-        rd = data.resource.model_dump() if data.resource else None
+        # Doc 38: type / resource_mode / resource_count / resource dropped
+        # from the wire. Pass None into the underlying service.
         s, r = update_subtask(
             db,
             subtask_id=subtask_id,
-            name=data.name, description=data.description, type=data.type,
+            name=data.name, description=data.description, type=None,
             start_date=data.start_date, end_date=data.end_date,
             actual_start_date=data.actual_start_date, actual_end_date=data.actual_end_date,
             position=data.position,
-            resource_mode=data.resource_mode, resource_count=data.resource_count,
-            resource=rd, current_user_id=cuid,
+            resource_mode=None, resource_count=None,
+            resource=None, current_user_id=cuid,
             depends_on=data.depends_on,
+            status=data.status,
         )
         idx = build_label_index_for_project(db, s.project_id)
         return BaseController.ok(data=format_subtask_response(

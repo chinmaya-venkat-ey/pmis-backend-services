@@ -27,7 +27,7 @@ class Task:
     activity_id: str
     name: str
     description: Optional[str]
-    type: str
+    type: Optional[str]
     start_date: datetime
     end_date: datetime
     actual_start_date: Optional[datetime]
@@ -40,6 +40,8 @@ class Task:
     deleted_at: Optional[datetime] = None
     resource_mode: Optional[str] = None
     resource_count: Optional[int] = None
+    # Doc 38: lifecycle status, set via PATCH only.
+    status: Optional[str] = None
     # Target task ids this task depends on. Populated by the service from the
     # task_dependencies association table.
     depends_on: List[str] = field(default_factory=list)
@@ -59,6 +61,7 @@ class Task:
             "position": self.position,
             "resource_mode": self.resource_mode,
             "resource_count": self.resource_count,
+            "status": self.status,
             "depends_on": list(self.depends_on or []),
             "created_at": iso_utc(self.created_at),
             "updated_at": iso_utc(self.updated_at),

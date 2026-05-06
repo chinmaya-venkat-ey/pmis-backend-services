@@ -28,7 +28,20 @@ class ActivityModel(Base):
     name = Column(String(255), nullable=False, index=True)
     description = Column(Text, nullable=True)
 
-    type = Column(String(20), nullable=False)
+    # Doc 38: ``type`` (standard / resource / transactional) is deprecated.
+    # New rows default to NULL; column kept for read-side back-compat with
+    # legacy rows. The four type-specific create endpoints collapsed into a
+    # single POST /activities/create. ``resource_mode`` / ``resource_count``
+    # are similarly deprecated.
+    type = Column(String(20), nullable=True)
+
+    # Doc 38: optional ownership / partner / consulted-division per activity.
+    # ``owner_division`` and ``concerned_division`` reference the divisions
+    # catalog (codes: 'tmd1' / 'tmd2' / 'others'). ``vendor_id`` references
+    # vendors.id. All optional.
+    owner_division = Column(String(32), nullable=True, index=True)
+    concerned_division = Column(String(32), nullable=True, index=True)
+    vendor_id = Column(String(36), ForeignKey("vendors.id"), nullable=True, index=True)
 
     start_date = Column(UtcDateTime, nullable=False)
     end_date = Column(UtcDateTime, nullable=False)
@@ -61,7 +74,9 @@ class ActivityModel(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "type IN ('standard', 'resource', 'transactional')",
+            # Doc 38: NULL allowed for new rows (type deprecated). Existing
+            # legacy rows still validate against the historic value set.
+            "type IS NULL OR type IN ('standard', 'resource', 'transactional')",
             name="ck_activities_type",
         ),
         CheckConstraint(

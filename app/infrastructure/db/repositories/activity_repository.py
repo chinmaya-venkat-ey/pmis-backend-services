@@ -44,6 +44,9 @@ class ActivityRepository:
             # depends_on is populated by the service layer from
             # DependencyRepository.list_activity_dependencies(...).
             depends_on=[],
+            owner_division=getattr(a, "owner_division", None),
+            concerned_division=getattr(a, "concerned_division", None),
+            vendor_id=getattr(a, "vendor_id", None),
             created_at=a.created_at,
             updated_at=a.updated_at,
             created_by=a.created_by,
@@ -138,12 +141,16 @@ class ActivityRepository:
     def create(
         self, *,
         project_id: str, milestone_id: str, name: str, description: Optional[str],
-        type: str, start_date: datetime, end_date: datetime,
+        type: Optional[str], start_date: datetime, end_date: datetime,
         actual_start_date: Optional[datetime], actual_end_date: Optional[datetime],
         position: int, created_by: Optional[str],
         resource_mode: Optional[str] = None,
         resource_count: Optional[int] = None,
         status: Optional[str] = None,
+        # Doc 38 additions — all optional.
+        owner_division: Optional[str] = None,
+        concerned_division: Optional[str] = None,
+        vendor_id: Optional[str] = None,
     ) -> Activity:
         a = ActivityModel(
             project_id=project_id,
@@ -159,6 +166,9 @@ class ActivityRepository:
             resource_mode=resource_mode,
             resource_count=resource_count,
             status=status,
+            owner_division=owner_division,
+            concerned_division=concerned_division,
+            vendor_id=vendor_id,
             created_by=created_by,
             updated_by=created_by,
         )

@@ -79,21 +79,25 @@ class ProjectController:
     @staticmethod
     def create(request: Request, data: ProjectCreateRequest, db: Session) -> JSONResponse:
         actor_id = get_current_user_id(request)
+        # Doc 38: ``public`` / ``category`` / ``categoryOther`` /
+        # ``categoryOtherReason`` were removed from the request schema.
+        # Pass None so the service stores defaults (DB columns kept for
+        # legacy rows but new rows leave them empty).
         result = create_project(
             db=db,
             actor_id=actor_id,
             name=data.name,
             description=data.description,
             active=data.active,
-            public=data.public,
+            public=False,
             status_explanation=data.statusExplanation,
             parent_id=data.parentId,
             status=data.status,
             owner=data.owner,
             owner_other=data.ownerOther,
-            category=data.category,
-            category_other=data.categoryOther,
-            category_other_reason=data.categoryOtherReason,
+            category=None,
+            category_other=None,
+            category_other_reason=None,
             vendor_ids=data.vendorIds,
             start_date=data.start_date,
             end_date=data.end_date,
@@ -110,7 +114,7 @@ class ProjectController:
             page=query.offset,
             page_size=query.pageSize,
             active=query.active,
-            public=query.public,
+            public=None,  # doc 38: dropped from list-query schema
             include_deleted=query.includeDeleted,
         )
         if not result.is_success():
@@ -146,19 +150,16 @@ class ProjectController:
             return _error_response(_NotFoundResult(), default_status=404)
         pid = project_uuid  # project.id IS the UUID
         actor_id = get_current_user_id(request)
+        # Doc 38: public / category* removed from update schema.
         patch: Dict[str, Any] = {
             "name": data.name,
             "description": data.description,
             "active": data.active,
-            "public": data.public,
             "status_explanation": data.statusExplanation,
             "parent_id": data.parentId,
             "status": data.status,
             "owner": data.owner,
             "owner_other": data.ownerOther,
-            "category": data.category,
-            "category_other": data.categoryOther,
-            "category_other_reason": data.categoryOtherReason,
             "start_date": data.start_date,
             "end_date": data.end_date,
             "actual_start_date": data.actual_start_date,
@@ -258,6 +259,7 @@ class ProjectController:
         current_user_login = getattr(request.state, "user_login", None)
         is_admin = _actor_is_admin(request)
 
+        # Doc 38: public / category* removed from upsert schema.
         result = upsert_project(
             db=db,
             id=project_uuid,
@@ -266,15 +268,15 @@ class ProjectController:
             is_admin=is_admin,
             description=data.description,
             active=data.active,
-            public=data.public,
+            public=False,
             status_explanation=data.statusExplanation,
             parent_id=data.parentId,
             status=data.status,
             owner=data.owner,
             owner_other=data.ownerOther,
-            category=data.category,
-            category_other=data.categoryOther,
-            category_other_reason=data.categoryOtherReason,
+            category=None,
+            category_other=None,
+            category_other_reason=None,
             start_date=data.start_date,
             end_date=data.end_date,
         )

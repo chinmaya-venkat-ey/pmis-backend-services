@@ -190,12 +190,12 @@ EDITABLE_FIELDS_PROJECT: Set[str] = {
     "end_date",
     "actual_start_date",
     "actual_end_date",
-    "public",
     "active",
     "status_explanation",
-    "category",
-    "category_other",
-    "category_other_reason",
+    # Doc 38: ``public`` / ``category`` / ``category_other`` /
+    # ``category_other_reason`` were removed from the editable surface.
+    # DB columns kept (Option B deprecation); read-side keeps returning
+    # them for legacy rows but PATCH and upsert no longer accept them.
 }
 
 # Doc 33: published projects keep the same editable surface — publish is now

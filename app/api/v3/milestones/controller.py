@@ -112,11 +112,11 @@ class MilestoneController:
             description=data.description,
             start_date=data.start_date,
             end_date=data.end_date,
-            position=data.position,
+            position=None,  # doc 38: position is PATCH-only
             current_user_id=current_user_id,
-            status=data.status,
-            depends_on=data.depends_on,
-            vendor_ids=data.vendors,
+            status=None,  # doc 38: status is PATCH-only
+            depends_on=None,  # doc 38: dependsOn is PATCH-only
+            vendor_ids=None,  # doc 38: vendors are PATCH-only
         )
         idx = build_label_index_for_project(db, project_id)
         return BaseController.created(data=format_milestone_response(m.to_dict(), idx))
@@ -219,11 +219,11 @@ class MilestoneController:
             description=data.description,
             start_date=data.start_date,
             end_date=data.end_date,
-            position=data.position,
+            position=None,  # doc 38: position is PATCH-only
             current_user_id=current_user_id,
-            status=data.status,
-            depends_on=data.depends_on,
-            vendor_ids=data.vendors,
+            status=None,  # doc 38: status is PATCH-only
+            depends_on=None,  # doc 38: dependsOn is PATCH-only
+            vendor_ids=None,  # doc 38: vendors are PATCH-only
         )
 
         # ---- 3. Inline comment / attachments (optional) ------------------
@@ -290,6 +290,9 @@ class MilestoneController:
     @staticmethod
     def update(request: Request, milestone_id: str, data: MilestoneUpdateRequest, db: Session) -> JSONResponse:
         current_user_id = getattr(request.state, "user_id", None)
+        # Doc 38: status / dependsOn / vendors / position were removed
+        # from the CREATE schema but PATCH still accepts them — that's the
+        # whole point of the trim. Pass the schema fields through here.
         m = update_milestone(
             db,
             milestone_id=milestone_id,

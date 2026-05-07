@@ -81,6 +81,9 @@ class Activity:
     # legacy single ``concerned_division`` for existing rows.
     concerned_divisions: Optional[List[str]] = None
     vendor_id: Optional[str] = None
+    # Doc 41: priority code from the ``priorities`` catalog. Required on
+    # the wire on create; legacy rows backfilled to ``p3``.
+    priority: Optional[str] = None
 
     def to_dict(self) -> dict:
         return {
@@ -103,6 +106,7 @@ class Activity:
             "concerned_division": self.concerned_division,
             "concerned_divisions": list(self.concerned_divisions) if self.concerned_divisions else None,
             "vendor_id": self.vendor_id,
+            "priority": self.priority,
             "created_at": iso_ist(self.created_at),
             "updated_at": iso_ist(self.updated_at),
             "created_by": self.created_by,

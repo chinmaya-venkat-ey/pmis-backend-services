@@ -49,6 +49,13 @@ class ActivityModel(Base):
     concerned_divisions = Column(JSON, nullable=True)
     vendor_id = Column(String(36), ForeignKey("vendors.id"), nullable=True, index=True)
 
+    # Doc 41: priority code (one of the active codes in the
+    # ``priorities`` catalog). Required on the wire on create; backfill
+    # gives existing rows the ``p3`` (low) default. Stored as the
+    # catalog code, not as a FK — same idiom as ``status`` /
+    # ``owner_division`` / ``concerned_division``.
+    priority = Column(String(16), nullable=True, index=True)
+
     start_date = Column(UtcDateTime, nullable=False)
     end_date = Column(UtcDateTime, nullable=False)
     actual_start_date = Column(UtcDateTime, nullable=True)

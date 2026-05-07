@@ -21,6 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ....shared.datetime import IstCalendarDate
 from ....domain.activities.activity import ACTIVITY_STATUS_CHOICES
+from ....domain.priorities.priority import PRIORITY_CHOICES
 from ....domain.resource_types.resource_type import DIVISION_CHOICES
 
 
@@ -80,6 +81,18 @@ class ActivityCreateRequest(BaseModel):
             f"must be one of: {', '.join(DIVISION_CHOICES)}."
         ),
     )
+    # Doc 41: priority code — REQUIRED on create. The wire string is
+    # validated against the in-code fallback here (cheap), and the
+    # service layer re-validates against the live DB catalog so
+    # admin-added codes (p4, p5, …) are also accepted.
+    priority: str = Field(
+        ..., min_length=1, max_length=16,
+        description=(
+            "Priority code from the priorities catalog. Built-in codes: "
+            f"{', '.join(PRIORITY_CHOICES)}. Admins can add more via "
+            "POST /api/v3/master/priorities/create."
+        ),
+    )
 
     @field_validator("end_date")
     @classmethod
@@ -114,6 +127,15 @@ class ActivityCreateRequest(BaseModel):
             raise ValueError("concernedDivision must be a list of division codes.")
         return [_validate_division_code(item) for item in v]
 
+    @field_validator("priority", mode="before")
+    @classmethod
+    def _normalize_priority(cls, v):
+        # Lowercase + strip; live catalog validation happens in the
+        # service layer (so p4/p5 etc. added by an admin are accepted).
+        if isinstance(v, str):
+            v = v.strip().lower()
+        return v
+
 
 class ActivityUpdateRequest(BaseModel):
     """PATCH /activities/{id}. Partial update — doc 38 / 39 wire surface only.
@@ -142,6 +164,8 @@ class ActivityUpdateRequest(BaseModel):
     owner_division: Optional[str] = Field(None, alias="ownerDivision")
     vendor_id: Optional[str] = Field(None, alias="vendorId")
     concerned_divisions: Optional[List[str]] = Field(None, alias="concernedDivision")
+    # Doc 41: priority code — optional on PATCH (None = no change).
+    priority: Optional[str] = Field(None, max_length=16)
 
     @field_validator("status", mode="before")
     @classmethod
@@ -171,6 +195,15 @@ class ActivityUpdateRequest(BaseModel):
         if not isinstance(v, list):
             raise ValueError("concernedDivision must be a list of division codes.")
         return [_validate_division_code(item) for item in v]
+
+    @field_validator("priority", mode="before")
+    @classmethod
+    def _normalize_priority(cls, v):
+        if v is None:
+            return v
+        if isinstance(v, str):
+            v = v.strip().lower()
+        return v
 
 
 class ActivityListQuery(BaseModel):

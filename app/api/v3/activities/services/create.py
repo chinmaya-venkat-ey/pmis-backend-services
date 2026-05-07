@@ -64,6 +64,8 @@ def create_activity(
     # concerned_division for legacy rows; primary write target now.
     concerned_divisions: Optional[List[str]] = None,
     vendor_id: Optional[str] = None,
+    # Doc 41: priority code from the priorities catalog.
+    priority: Optional[str] = None,
 ) -> Tuple[Activity, Optional[ActivityResource]]:
     milestone = (
         db.query(MilestoneModel)
@@ -111,6 +113,27 @@ def create_activity(
                 f"vendorId '{vendor_id}' is not in the project's vendor "
                 f"list. Add the vendor to the project before assigning "
                 f"it to an activity."
+            )
+
+    # Doc 41: priority code (when supplied) must reference an active row
+    # in the priorities catalog. Catalog-first with in-code fallback —
+    # mirrors the pattern used for ``status``.
+    if priority is not None:
+        from .....infrastructure.db.models.priority import PriorityModel
+        from .....shared.static_catalog import is_known_code, active_codes
+        from .....domain.priorities.priority import PRIORITY_CHOICES
+
+        # Reuse the generic catalog helper. Treats the catalog as the
+        # source of truth; falls back to PRIORITY_CHOICES on empty DB
+        # (test fixtures, fresh init).
+        if not is_known_code(
+            db, priority, model=PriorityModel, fallback=PRIORITY_CHOICES,
+        ):
+            valid = sorted(active_codes(
+                db, model=PriorityModel, fallback=PRIORITY_CHOICES,
+            ))
+            raise ValidationError(
+                f"Priority must be one of: {', '.join(valid)}."
             )
 
     # Resource block: validate the classification columns now that we know we
@@ -250,6 +273,7 @@ def create_activity(
         concerned_division=concerned_division,
         concerned_divisions=concerned_divisions,
         vendor_id=vendor_id,
+        priority=priority,
     )
 
     resource_domain = None

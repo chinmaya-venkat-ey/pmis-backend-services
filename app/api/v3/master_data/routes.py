@@ -68,6 +68,8 @@ from .schemas import (
     DivisionUpdateRequest,
     MilestoneStatusCreateRequest,
     MilestoneStatusUpdateRequest,
+    PriorityCreateRequest,
+    PriorityUpdateRequest,
     ProjectCategoryCreateRequest,
     ProjectCategoryUpdateRequest,
     ProjectStatusTransitionCreateRequest,
@@ -1290,3 +1292,167 @@ def restore_master_activity_status(
         projector=_activity_status_to_response,
         kind="activity_status", code=code, active=True,
     )
+
+
+# ---------------------------------------------------------------------------
+# Doc 41 — priorities catalog
+#
+# Six-endpoint shape (list / get / create / patch / delete / restore)
+# matching the rest of the master surface, but the column is called
+# ``name`` (not ``label``), so the priority-specific helpers below
+# don't share the catalog base. Tiny duplication — keeps the wire
+# keyword aligned with the column name.
+# ---------------------------------------------------------------------------
+
+from ....infrastructure.db.models.priority import PriorityModel
+
+
+def _priority_to_response(row) -> Dict[str, Any]:
+    return {
+        "_type": "Priority",
+        "id": row.id,
+        "code": row.code,
+        "name": row.name,
+        "description": row.description,
+        "position": row.position,
+        "active": bool(row.active),
+        "isBuiltin": bool(row.is_builtin),
+    }
+
+
+@router.get(
+    "/priorities",
+    dependencies=[require_permission(Permission.MASTER_DATA_VIEW)],
+    summary="List priorities (sorted by position)",
+)
+def list_master_priorities(
+    request: Request,
+    include_inactive: bool = False,
+    db: Session = Depends(get_db),
+) -> JSONResponse:
+    q = db.query(PriorityModel).filter(PriorityModel.deleted_at.is_(None))
+    if not include_inactive:
+        q = q.filter(PriorityModel.active.is_(True))
+    rows = q.order_by(
+        PriorityModel.position.asc(),
+        PriorityModel.code.asc(),
+    ).all()
+    items = [_priority_to_response(r) for r in rows]
+    return BaseController.ok(data=_collection(items, "/api/v3/master/priorities"))
+
+
+@router.get(
+    "/priorities/{code}",
+    dependencies=[require_permission(Permission.MASTER_DATA_VIEW)],
+    summary="Get a priority by code",
+)
+def get_master_priority(
+    request: Request, code: str, db: Session = Depends(get_db),
+) -> JSONResponse:
+    row = db.query(PriorityModel).filter(PriorityModel.code == code).first()
+    if row is None:
+        raise NotFoundError(f"No priority with code '{code}'.")
+    return BaseController.ok(data=_priority_to_response(row))
+
+
+@router.post(
+    "/priorities/create",
+    dependencies=[require_permission(Permission.MASTER_DATA_MANAGE)],
+    summary="Create a priority (admin)",
+    status_code=201,
+)
+def create_master_priority(
+    request: Request,
+    data: PriorityCreateRequest,
+    db: Session = Depends(get_db),
+) -> JSONResponse:
+    code = data.code.strip()
+    existing = (
+        db.query(PriorityModel).filter(PriorityModel.code == code).first()
+    )
+    if existing is not None:
+        raise AlreadyExistsError(
+            f"A priority with code '{code}' already exists "
+            f"(active={existing.active}).",
+        )
+    row = PriorityModel(
+        code=code,
+        name=data.name.strip(),
+        description=data.description,
+        position=data.position if data.position is not None else 0,
+        active=bool(data.active),
+        is_builtin=False,
+    )
+    db.add(row)
+    db.flush()
+    db.commit()
+    return BaseController.created(data=_priority_to_response(row))
+
+
+@router.patch(
+    "/priorities/{code}",
+    dependencies=[require_permission(Permission.MASTER_DATA_MANAGE)],
+    summary="Update a priority (admin)",
+)
+def update_master_priority(
+    request: Request,
+    code: str,
+    data: PriorityUpdateRequest,
+    db: Session = Depends(get_db),
+) -> JSONResponse:
+    row = db.query(PriorityModel).filter(PriorityModel.code == code).first()
+    if row is None:
+        raise NotFoundError(f"No priority with code '{code}'.")
+    if data.name is not None:
+        row.name = data.name.strip()
+    if data.description is not None:
+        row.description = data.description
+    if data.position is not None:
+        row.position = data.position
+    if data.active is not None:
+        if row.is_builtin and not data.active:
+            raise AuthorizationError(
+                f"Built-in priority '{row.code}' cannot be deactivated.",
+            )
+        row.active = bool(data.active)
+    db.flush()
+    db.commit()
+    return BaseController.ok(data=_priority_to_response(row))
+
+
+@router.delete(
+    "/priorities/{code}",
+    dependencies=[require_permission(Permission.MASTER_DATA_MANAGE)],
+    summary="Soft-deactivate a priority (admin)",
+)
+def delete_master_priority(
+    request: Request, code: str, db: Session = Depends(get_db),
+) -> JSONResponse:
+    row = db.query(PriorityModel).filter(PriorityModel.code == code).first()
+    if row is None:
+        raise NotFoundError(f"No priority with code '{code}'.")
+    if row.is_builtin:
+        raise AuthorizationError(
+            f"Built-in priority '{row.code}' cannot be deactivated.",
+        )
+    row.active = False
+    db.flush()
+    db.commit()
+    return BaseController.ok(data=_priority_to_response(row))
+
+
+@router.post(
+    "/priorities/{code}/restore",
+    dependencies=[require_permission(Permission.MASTER_DATA_MANAGE)],
+    summary="Restore a soft-disabled priority (admin)",
+)
+def restore_master_priority(
+    request: Request, code: str, db: Session = Depends(get_db),
+) -> JSONResponse:
+    row = db.query(PriorityModel).filter(PriorityModel.code == code).first()
+    if row is None:
+        raise NotFoundError(f"No priority with code '{code}'.")
+    row.active = True
+    db.flush()
+    db.commit()
+    return BaseController.ok(data=_priority_to_response(row))

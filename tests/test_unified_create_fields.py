@@ -149,6 +149,7 @@ class TestActivityCreateUnifiedShape:
                 "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 7, 20),
                 "ownerDivision": "tmd1", "vendorId": vid,
                 "concernedDivision": ["tmd1"],
+                "priority": "p1",
                 "actualStartDate": _iso(2026, 7, 5),
                 "actualEndDate": _iso(2026, 7, 19),
                 "status": "completed",
@@ -167,6 +168,7 @@ class TestActivityCreateUnifiedShape:
                 "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 7, 25),
                 "ownerDivision": "tmd2", "vendorId": vid,
                 "concernedDivision": ["tmd1", "others"],
+                "priority": "p1",
                 "dependsOn": [a1["id"]],
                 "status": "not_completed",
             },
@@ -193,6 +195,7 @@ class TestActivityCreateUnifiedShape:
                 "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 7, 20),
                 "ownerDivision": "tmd1", "vendorId": vid,
                 "concernedDivision": ["tmd1"],
+                "priority": "p1",
                 # status defaults to NULL (not completed).
             },
         ).json()["data"]
@@ -204,6 +207,7 @@ class TestActivityCreateUnifiedShape:
                 "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 7, 25),
                 "ownerDivision": "tmd2", "vendorId": vid,
                 "concernedDivision": ["tmd1"],
+                "priority": "p1",
                 "dependsOn": [a1["id"]],
                 "status": "completed",
             },
@@ -232,6 +236,7 @@ def _publishable_setup(client, admin_headers):
             "name": "A1",
             "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 7, 30),
             "ownerDivision": "tmd1", "vendorId": vid, "concernedDivision": ["tmd1"],
+            "priority": "p1",
         },
     ).json()["data"]
     pub = client.post(f"/api/v3/projects/{pid}/publish", headers=admin_headers)

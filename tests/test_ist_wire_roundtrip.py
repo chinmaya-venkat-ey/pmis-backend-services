@@ -120,6 +120,7 @@ class TestActivityIstWire:
                 "name": "A1",
                 "startDate": _iso_ist(2026, 7, 1), "endDate": _iso_ist(2026, 7, 20),
                 "ownerDivision": "tmd1", "vendorId": vid, "concernedDivision": ["tmd1"],
+                "priority": "p1",
                 "actualStartDate": _iso_ist(2026, 7, 5),
                 "actualEndDate":   _iso_ist(2026, 7, 19),
             },
@@ -155,6 +156,7 @@ class TestTaskAndSubtaskIstWire:
                 "name": "A1",
                 "startDate": _iso_ist(2026, 7, 1), "endDate": _iso_ist(2026, 7, 30),
                 "ownerDivision": "tmd1", "vendorId": vid, "concernedDivision": ["tmd1"],
+                "priority": "p1",
             },
         ).json()["data"]
         client.post(f"/api/v3/projects/{pid}/publish", headers=admin_headers)

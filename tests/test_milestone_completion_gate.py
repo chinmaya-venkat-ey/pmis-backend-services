@@ -57,6 +57,7 @@ class TestMilestoneChildrenGate:
                 "name": "A1",
                 "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 7, 10),
                 "ownerDivision": "tmd1", "vendorId": vid, "concernedDivision": ["tmd1"],
+                "priority": "p1",
                 "status": "completed",
             },
         ).json()["data"]
@@ -67,6 +68,7 @@ class TestMilestoneChildrenGate:
                 "name": "A2 still-running",
                 "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 7, 20),
                 "ownerDivision": "tmd1", "vendorId": vid, "concernedDivision": ["tmd1"],
+                "priority": "p1",
                 # status defaults to NULL — definitely not completed.
             },
         ).json()["data"]
@@ -103,6 +105,7 @@ class TestMilestoneChildrenGate:
                     "name": name,
                     "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 7, end),
                     "ownerDivision": "tmd1", "vendorId": vid, "concernedDivision": ["tmd1"],
+                    "priority": "p1",
                     "status": "completed",
                 },
             )
@@ -155,6 +158,7 @@ class TestMilestoneChildrenGate:
                 "name": "A1 retro",
                 "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 7, 20),
                 "ownerDivision": "tmd1", "vendorId": vid, "concernedDivision": ["tmd1"],
+                "priority": "p1",
             },
         )
         # Now revert milestone to not_completed — must succeed even though

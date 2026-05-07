@@ -32,6 +32,8 @@ from .milestone import MilestoneModel  # noqa: F401
 from .milestone_dependency import MilestoneDependencyModel  # noqa: F401
 from .milestone_status import MilestoneStatusModel  # noqa: F401
 from .milestone_vendor import MilestoneVendorModel  # noqa: F401
+# Doc 41: priorities catalog (referenced from activities.priority).
+from .priority import PriorityModel  # noqa: F401
 from .project import ProjectModel  # noqa: F401
 from .project_audit_log import ProjectAuditLogModel  # noqa: F401
 from .project_category import ProjectCategoryModel  # noqa: F401
@@ -62,6 +64,7 @@ __all__ = [
     "MilestoneStatusModel",
     "MilestoneVendorModel",
     "PermissionModel",
+    "PriorityModel",
     "ProjectAuditLogModel",
     "ProjectCategoryModel",
     "ProjectMemberModel",

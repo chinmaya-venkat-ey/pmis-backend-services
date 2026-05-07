@@ -183,6 +183,8 @@ def update_activity(
     # Doc 39: replacement list (None = no change, [] = clear, [...] = replace).
     concerned_divisions: Optional[List[str]] = None,
     vendor_id: Optional[str] = None,
+    # Doc 41: priority code from the priorities catalog (None = no change).
+    priority: Optional[str] = None,
 ) -> Tuple[Activity, Optional[ActivityResource]]:
     repo = ActivityRepository(db)
     model = repo.get_model(activity_id)
@@ -539,6 +541,24 @@ def update_activity(
                 f"it to an activity."
             )
         updates["vendor_id"] = vendor_id
+
+    # Doc 41: priority — when supplied, must be an active code in the
+    # priorities catalog. None = no change. Catalog-first with in-code
+    # fallback (matches the ``status`` validation pattern).
+    if priority is not None:
+        from .....infrastructure.db.models.priority import PriorityModel
+        from .....shared.static_catalog import is_known_code, active_codes
+        from .....domain.priorities.priority import PRIORITY_CHOICES
+        if not is_known_code(
+            db, priority, model=PriorityModel, fallback=PRIORITY_CHOICES,
+        ):
+            valid = sorted(active_codes(
+                db, model=PriorityModel, fallback=PRIORITY_CHOICES,
+            ))
+            raise ValidationError(
+                f"Priority must be one of: {', '.join(valid)}."
+            )
+        updates["priority"] = priority
 
     before_snapshot = {k: _iso(getattr(model, k)) for k in updates.keys()} if updates else {}
 

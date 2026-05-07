@@ -86,6 +86,7 @@ def _create_full_tree(client, admin_headers):
         json={
             "name": "A1", "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 7, 20),
             "ownerDivision": "tmd1", "vendorId": vid, "concernedDivision": ["tmd1"],
+            "priority": "p1",
         },
     ).json()["data"]
     a2 = client.post(
@@ -95,6 +96,7 @@ def _create_full_tree(client, admin_headers):
             "name": "A2", "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 7, 25),
             "ownerDivision": "tmd2", "vendorId": vid,
             "concernedDivision": ["tmd1", "others"],
+            "priority": "p1",
         },
     ).json()["data"]
     # M2 placeholder activity so publish() passes its "every milestone has
@@ -105,6 +107,7 @@ def _create_full_tree(client, admin_headers):
         json={
             "name": "A_M2", "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 9, 20),
             "ownerDivision": "tmd1", "vendorId": vid, "concernedDivision": ["tmd1"],
+            "priority": "p1",
         },
     )
     client.patch(

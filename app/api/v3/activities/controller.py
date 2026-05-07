@@ -45,7 +45,7 @@ from .services import (
 # Doc 38 multipart-form key spec.
 # Doc 39: ownerDivision / vendorId are required on create; concernedDivision (list)
 # is required as a list (multipart parses it from a repeated form field).
-_ACTIVITY_REQUIRED_STRING_KEYS = ("name", "ownerDivision", "vendorId")
+_ACTIVITY_REQUIRED_STRING_KEYS = ("name", "ownerDivision", "vendorId", "priority")
 _ACTIVITY_OPTIONAL_STRING_KEYS = (
     "description", "startDate", "endDate",
 )
@@ -113,6 +113,8 @@ def format_activity_response(
         # column is kept on disk but never surfaced through the API.
         "concernedDivision": a.get("concerned_divisions") or [],
         "vendorId": a.get("vendor_id"),
+        # Doc 41: priority code from the priorities catalog.
+        "priority": a.get("priority"),
         "startDate": a["start_date"],
         "endDate": a["end_date"],
         "actualStartDate": a["actual_start_date"],
@@ -241,6 +243,7 @@ class ActivityController:
             concerned_division=None,  # doc 39: legacy single column not written from create
             concerned_divisions=data.concerned_divisions,
             vendor_id=data.vendor_id,
+            priority=data.priority,
         )
         idx = build_label_index_for_project(db, activity.project_id)
         return BaseController.created(data=format_activity_response(
@@ -289,6 +292,7 @@ class ActivityController:
             concerned_division=None,  # doc 39: legacy single column not written from create
             concerned_divisions=data.concerned_divisions,
             vendor_id=data.vendor_id,
+            priority=data.priority,
         )
         idx = build_label_index_for_project(db, activity.project_id)
         response_data = format_activity_response(
@@ -376,6 +380,7 @@ class ActivityController:
             concerned_division=None,  # doc 39: legacy single column not written from create
             concerned_divisions=data.concerned_divisions,
             vendor_id=data.vendor_id,
+            priority=data.priority,
         )
         idx = build_label_index_for_project(db, activity.project_id)
         return BaseController.ok(data=format_activity_response(

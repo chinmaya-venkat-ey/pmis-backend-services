@@ -60,6 +60,7 @@ def _setup_and_publish(client, admin_headers):
             "name": "A1",
             "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 7, 30),
             "ownerDivision": "tmd1", "vendorId": vid, "concernedDivision": ["tmd1"],
+            "priority": "p1",
         },
     ).json()["data"]
     pub = client.post(f"/api/v3/projects/{pid}/publish", headers=admin_headers)

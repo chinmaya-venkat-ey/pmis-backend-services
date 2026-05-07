@@ -69,11 +69,18 @@ def _activity_multipart_schema() -> Dict[str, Any]:
 
 
 def _activity_openapi_extra() -> Dict[str, Any]:
+    # Inline the JSON schema (rather than referencing
+    # #/components/schemas/ActivityCreateRequest, which never gets
+    # registered because this route uses the dispatcher pattern and
+    # doesn't take ActivityCreateRequest as a typed parameter — FastAPI
+    # only auto-registers schemas reachable from a typed handler arg).
+    # Inlining is what tasks/subtasks do; produces a fully expanded
+    # JSON-Schema in Swagger so the FE sees every field + alias + type.
     return {
         "requestBody": {
             "content": {
                 "application/json": {
-                    "schema": {"$ref": "#/components/schemas/ActivityCreateRequest"},
+                    "schema": ActivityCreateRequest.model_json_schema(by_alias=True),
                 },
                 "multipart/form-data": {"schema": _activity_multipart_schema()},
             },

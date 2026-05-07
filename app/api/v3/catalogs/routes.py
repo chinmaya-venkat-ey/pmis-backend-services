@@ -24,6 +24,9 @@ from ....core.middleware.rbac import require_authenticated
 from ....infrastructure.db.repositories.division_repository import (
     DivisionRepository,
 )
+from ....infrastructure.db.repositories.priority_repository import (
+    PriorityRepository,
+)
 from ....infrastructure.db.repositories.project_status_transition_repository import (
     ProjectStatusTransitionRepository,
 )
@@ -144,3 +147,47 @@ def list_project_status_transitions(
         }),
         successor_path="/api/v3/master/project_status_transitions",
     )
+
+
+# ---------------------------------------------------------------------------
+# Priorities (doc 41 — read-only picker endpoint for FE dropdowns)
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/priorities",
+    dependencies=[require_authenticated()],
+    summary="List active priorities (FE picker — any authenticated user)",
+    description=(
+        "Returns active priority entries (sorted by ``position``, then "
+        "``code``) that the FE renders in the activity priority "
+        "dropdown. Each entry has a ``code`` (the wire value the API "
+        "accepts in ``activities.priority``), a ``name`` (display label), "
+        "and a ``description``. Same dataset as "
+        "``GET /api/v3/master/priorities`` but gated by simple "
+        "authentication (no MASTER_DATA_VIEW required). Admin CRUD "
+        "lives at /api/v3/master/priorities/*."
+    ),
+)
+def list_priorities(
+    request: Request, db: Session = Depends(get_db),
+) -> JSONResponse:
+    rows = PriorityRepository(db).list_all(include_inactive=False)
+    items = [
+        {
+            "_type": "Priority",
+            "id": r.id,
+            "code": r.code,
+            "name": r.name,
+            "description": r.description,
+            "position": r.position,
+            "isBuiltin": r.is_builtin,
+        }
+        for r in rows
+    ]
+    return BaseController.ok(data={
+        "_type": "Collection",
+        "_links": {"self": {"href": "/api/v3/priorities"}},
+        "total": len(items),
+        "count": len(items),
+        "_embedded": {"elements": items},
+    })

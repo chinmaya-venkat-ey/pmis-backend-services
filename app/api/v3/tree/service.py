@@ -344,6 +344,8 @@ def build_project_tree(db: Session, project_id: str, include_deleted: bool = Fal
             # activity has no vendor or the vendor row has been hard-deleted
             # (soft-delete is fine — name still resolves).
             "vendorName": vendor_name_by_id.get(getattr(a, "vendor_id", None)),
+            # Doc 41: priority code from the priorities catalog.
+            "priority": getattr(a, "priority", None),
             "startDate": _iso(a.start_date), "endDate": _iso(a.end_date),
             "actualStartDate": _iso(a.actual_start_date),
             "actualEndDate": _iso(a.actual_end_date),

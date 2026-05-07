@@ -255,3 +255,40 @@ class ActivityStatusCreateRequest(_CatalogCreateBase):
 class ActivityStatusUpdateRequest(_CatalogUpdateBase):
     is_terminal: Optional[bool] = Field(None, alias="isTerminal")
 
+
+# ---------------------------------------------------------------------------
+# Priorities (doc 41) — own create/update shape because the column is
+# called ``name`` (not ``label`` like the rest of the catalogs).
+# ---------------------------------------------------------------------------
+
+class PriorityCreateRequest(BaseModel):
+    """POST /api/v3/master/priorities."""
+    model_config = ConfigDict(populate_by_name=True)
+
+    code: str = Field(
+        ..., min_length=1, max_length=16,
+        description="Wire identifier (e.g. ``p1``, ``p2``, ``p3``). Unique.",
+    )
+    name: str = Field(
+        ..., min_length=1, max_length=64,
+        description="Label shown in the dropdown (e.g. ``p1``).",
+    )
+    description: Optional[str] = Field(None, max_length=500)
+    position: Optional[int] = Field(None, ge=0)
+    active: bool = Field(True)
+
+
+class PriorityUpdateRequest(BaseModel):
+    """PATCH /api/v3/master/priorities/{code}.
+
+    ``code`` is never updatable — same rule as the rest of the
+    catalogs (it's the wire identifier referenced from
+    ``activities.priority``).
+    """
+    model_config = ConfigDict(populate_by_name=True)
+
+    name: Optional[str] = Field(None, min_length=1, max_length=64)
+    description: Optional[str] = Field(None, max_length=500)
+    position: Optional[int] = Field(None, ge=0)
+    active: Optional[bool] = None
+

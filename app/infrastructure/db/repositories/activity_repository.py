@@ -48,6 +48,7 @@ class ActivityRepository:
             concerned_division=getattr(a, "concerned_division", None),
             concerned_divisions=getattr(a, "concerned_divisions", None),
             vendor_id=getattr(a, "vendor_id", None),
+            priority=getattr(a, "priority", None),
             created_at=a.created_at,
             updated_at=a.updated_at,
             created_by=a.created_by,
@@ -154,6 +155,8 @@ class ActivityRepository:
         # Doc 39: list of division codes; primary write target.
         concerned_divisions: Optional[list] = None,
         vendor_id: Optional[str] = None,
+        # Doc 41: priority code from the priorities catalog.
+        priority: Optional[str] = None,
     ) -> Activity:
         a = ActivityModel(
             project_id=project_id,
@@ -173,6 +176,7 @@ class ActivityRepository:
             concerned_division=concerned_division,
             concerned_divisions=concerned_divisions,
             vendor_id=vendor_id,
+            priority=priority,
             created_by=created_by,
             updated_by=created_by,
         )

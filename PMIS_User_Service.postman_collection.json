@@ -2119,6 +2119,272 @@
           "response": []
         }
       ]
+    },
+    {
+      "name": "Role Assignments (doc 41)",
+      "item": [
+        {
+          "name": "List a user's role assignments (doc 41 — global / org / project)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "type": "text",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "users",
+                ":userId",
+                "role-assignments"
+              ],
+              "raw": "{{baseUrl}}/api/v3/users/:userId/role-assignments"
+            },
+            "description": "GET /api/v3/users/{id}/role-assignments — Returns every scoped role-assignment row for the user (global, org-scoped, project-scoped) in one list. Replaces the legacy GET /api/v3/users/{id}/roles which only surfaced global user_roles entries. Auth: USERS_READ on self, USERS_READ_ALL on others."
+          },
+          "response": []
+        },
+        {
+          "name": "Grant a scoped role to a user (doc 41)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "type": "text",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "type": "text",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "users",
+                ":userId",
+                "role-assignments"
+              ],
+              "raw": "{{baseUrl}}/api/v3/users/:userId/role-assignments"
+            },
+            "description": "POST /api/v3/users/{id}/role-assignments — Body: roleId (int) + exactly one of organizationId / projectId (or both omitted for global). Caller-vs-target gate enforced server-side: super_admin grants any; admin grants any except super_admin; org_admin grants project-tier roles within its vendor; project_admin grants project_member only on its project. Auth: rbac:assign + the caller-vs-target rule.",
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"roleId\": 0,\n  \"organizationId\": null,\n  \"projectId\": null\n}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Revoke a scoped role assignment (doc 41)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "type": "text",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "users",
+                ":userId",
+                "role-assignments",
+                ":assignmentId"
+              ],
+              "raw": "{{baseUrl}}/api/v3/users/:userId/role-assignments/:assignmentId"
+            },
+            "description": "DELETE /api/v3/users/{id}/role-assignments/{aid} — Revokes a single (user, role, scope) row. Last-super_admin lockout: the only global super_admin row cannot be revoked. Auth: rbac:assign + caller-vs-target."
+          },
+          "response": []
+        },
+        {
+          "name": "User's project map (User Mgmt landing) (doc 41)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "type": "text",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "users",
+                ":userId",
+                "projects"
+              ],
+              "raw": "{{baseUrl}}/api/v3/users/:userId/projects"
+            },
+            "description": "GET /api/v3/users/{id}/projects — Every project the user is assigned to + the role names they hold on each. Powers the User Mgmt menu landing view. Auth: USERS_READ on self / USERS_READ_ALL on others."
+          },
+          "response": []
+        },
+        {
+          "name": "Per-project role-assignment buckets (doc 41) — :8001 only",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "type": "text",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "projects",
+                ":projectUuid",
+                "role-assignments"
+              ],
+              "raw": "{{baseUrl}}/api/v3/projects/:projectUuid/role-assignments"
+            },
+            "description": "GET /api/v3/projects/{id}/role-assignments — Returns the per-project drill-down: every assignment on the project grouped by role bucket. Powers the FE Project-Mapping mock. NOT proxied through monolith :8000 — set baseUrl to user-mgmt :8001 to call this. Auth: project_members:read."
+          },
+          "response": []
+        },
+        {
+          "name": "Grant a project-scoped role (doc 41) — :8001 only",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "type": "text",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "type": "text",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "projects",
+                ":projectUuid",
+                "role-assignments"
+              ],
+              "raw": "{{baseUrl}}/api/v3/projects/:projectUuid/role-assignments"
+            },
+            "description": "POST /api/v3/projects/{id}/role-assignments — Body must include userId; project_id comes from the path. Always creates a project-scoped row. NOT proxied through monolith :8000. Auth: rbac:assign + caller-vs-target.",
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"userId\": \"\",\n  \"roleId\": 0\n}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Revoke a project-scoped role assignment (doc 41) — :8001 only",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "type": "text",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "projects",
+                ":projectUuid",
+                "role-assignments",
+                ":assignmentId"
+              ],
+              "raw": "{{baseUrl}}/api/v3/projects/:projectUuid/role-assignments/:assignmentId"
+            },
+            "description": "DELETE /api/v3/projects/{id}/role-assignments/{aid}. NOT proxied through monolith :8000. Auth: rbac:assign + caller-vs-target."
+          },
+          "response": []
+        },
+        {
+          "name": "Vendor's project map (Org Mgmt landing) (doc 41) — :8001 only",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "type": "text",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "vendors",
+                ":vendorId",
+                "projects"
+              ],
+              "raw": "{{baseUrl}}/api/v3/vendors/:vendorId/projects?expand=role-assignments",
+              "query": [
+                {
+                  "key": "expand",
+                  "value": "role-assignments"
+                }
+              ]
+            },
+            "description": "GET /api/v3/vendors/{id}/projects?expand=role-assignments — Every project owned by the vendor with optional inlined per-role assignment buckets. NOT proxied through monolith :8000 (monolith has its own /vendors/{id}/projects with a different shape). Auth: PROJECTS_READ_ALL OR org_admin of the vendor."
+          },
+          "response": []
+        }
+      ],
+      "description": "Doc 41 — scoped role assignments + project-mapping views.\n\nThree scopes per row in `user_role_assignments`: global (both scope cols NULL), org (`organization_id` set), project (`project_id` set). Caller-vs-target gate enforced by `app/api/v3/role_assignments/services.can_caller_grant`.\n\nAll eight endpoints here are user-mgmt-owned and reachable directly on port 8001. Set baseUrl to `http://127.0.0.1:8001` (or the deploy host's :8001) when running this collection.\n\nSee `C:/Programming/PMIS/DOC_41_FLOWS.md` for the full flow narrative."
     }
   ],
   "variable": [

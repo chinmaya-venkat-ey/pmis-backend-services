@@ -29,8 +29,8 @@ from .....infrastructure.db.repositories.resource_type_repository import (
 )
 from .....shared.date_rules import validate_entity_dates, validate_resource_dates
 from .....shared.dep_date_rules import (
-    collect_forward_violations,
-    raise_forward_if_violations,
+    collect_milestone_forward_violations,
+    raise_milestone_forward_if_violations,
 )
 from .....shared.labels import (
     KIND_ACTIVITY,
@@ -60,6 +60,9 @@ def create_activity(
     # Doc 38 additions — all optional.
     owner_division: Optional[str] = None,
     concerned_division: Optional[str] = None,
+    # Doc 39: list of division codes (multi). Backfilled from
+    # concerned_division for legacy rows; primary write target now.
+    concerned_divisions: Optional[List[str]] = None,
     vendor_id: Optional[str] = None,
 ) -> Tuple[Activity, Optional[ActivityResource]]:
     milestone = (
@@ -88,6 +91,27 @@ def create_activity(
         entity_label="activity",
         parent_label="milestone",
     )
+
+    # Doc 39: vendor_id (when provided) must be one of the project's
+    # vendors. Avoids attaching an activity to a vendor that's not part
+    # of the project — keeps the FE dropdown contract consistent on the
+    # server side.
+    if vendor_id is not None:
+        from .....infrastructure.db.models.project_vendor import ProjectVendorModel
+        in_project = (
+            db.query(ProjectVendorModel.vendor_id)
+            .filter(
+                ProjectVendorModel.project_id == milestone.project_id,
+                ProjectVendorModel.vendor_id == vendor_id,
+            )
+            .first()
+        )
+        if in_project is None:
+            raise ValidationError(
+                f"vendorId '{vendor_id}' is not in the project's vendor "
+                f"list. Add the vendor to the project before assigning "
+                f"it to an activity."
+            )
 
     # Resource block: validate the classification columns now that we know we
     # have a details-mode resource block.
@@ -154,26 +178,31 @@ def create_activity(
         # it can't appear in any existing edge. (Self-edge is impossible on
         # create.) The cycle check kicks in on update.
 
-        # Doc 27: source.start_date >= target.end_date for every dep target.
+        # Milestone-style outlasting rule extended to A/T/S:
+        #   source.start_date >= target.start_date    (equality allowed)
+        #   source.end_date   >  target.end_date      (strict — equality REJECTED)
         if desired_deps:
             target_rows = (
                 db.query(
-                    ActivityModel.id, ActivityModel.name, ActivityModel.end_date,
+                    ActivityModel.id, ActivityModel.name,
+                    ActivityModel.start_date, ActivityModel.end_date,
                 )
                 .filter(ActivityModel.id.in_(desired_deps))
                 .all()
             )
             label_index = build_label_index_for_project(db, milestone.project_id)
             forward = [
-                (label_index.label_of(KIND_ACTIVITY, tid) or tname, tend)
-                for (tid, tname, tend) in target_rows
+                (label_index.label_of(KIND_ACTIVITY, tid) or tname, tstart, tend)
+                for (tid, tname, tstart, tend) in target_rows
             ]
-            raise_forward_if_violations(
-                collect_forward_violations(
-                    source_start=start_date, targets=forward,
-                ),
+            starts_v, ends_v = collect_milestone_forward_violations(
+                source_start=start_date, source_end=end_date, targets=forward,
+            )
+            raise_milestone_forward_if_violations(
+                starts_v, ends_v,
                 source_label=f"Activity '{name.strip()}'",
-                source_start=start_date,
+                source_start=start_date, source_end=end_date,
+                kind_singular="activity",
             )
 
     repo = ActivityRepository(db)
@@ -202,6 +231,7 @@ def create_activity(
         status=resolved_status,
         owner_division=owner_division,
         concerned_division=concerned_division,
+        concerned_divisions=concerned_divisions,
         vendor_id=vendor_id,
     )
 

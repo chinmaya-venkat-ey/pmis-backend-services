@@ -18,6 +18,7 @@ from ....infrastructure.db.models.milestone import MilestoneModel
 from ....infrastructure.db.models.activity import ActivityModel
 from ....infrastructure.db.models.activity_dependency import ActivityDependencyModel
 from ....infrastructure.db.models.activity_resource import ActivityResourceModel
+from ....infrastructure.db.models.milestone_dependency import MilestoneDependencyModel
 from ....infrastructure.db.models.task import TaskModel
 from ....infrastructure.db.models.task_dependency import TaskDependencyModel
 from ....infrastructure.db.models.task_resource import TaskResourceModel
@@ -76,9 +77,21 @@ def build_project_tree(db: Session, project_id: str, include_deleted: bool = Fal
     subtasks = _q(SubtaskModel).order_by(SubtaskModel.position.asc(), SubtaskModel.id.asc()).all()
     sub_resources = _q(SubtaskResourceModel).all()
 
-    # Bulk-load dependency edges scoped to this project (3 queries — one per
+    # Bulk-load dependency edges scoped to this project (4 queries — one per
     # association table). Store as dicts keyed by source id -> list of target
     # ids so each node render is O(1).
+    milestone_deps_by_source: Dict[str, List[str]] = defaultdict(list)
+    for src, tgt in (
+        db.query(
+            MilestoneDependencyModel.source_milestone_id,
+            MilestoneDependencyModel.target_milestone_id,
+        )
+        .filter(MilestoneDependencyModel.project_id == project_id)
+        .filter(MilestoneDependencyModel.deleted_at.is_(None))
+        .all()
+    ):
+        milestone_deps_by_source[src].append(tgt)
+
     act_deps_by_source: Dict[str, List[str]] = defaultdict(list)
     for src, tgt in (
         db.query(
@@ -160,6 +173,7 @@ def build_project_tree(db: Session, project_id: str, include_deleted: bool = Fal
             "taskId": s.task_id, "projectId": s.project_id,
             "parentSubtaskId": getattr(s, "parent_subtask_id", None),
             "name": s.name, "description": s.description, "type": s.type,
+            "status": getattr(s, "status", None),
             "startDate": _iso(s.start_date), "endDate": _iso(s.end_date),
             "actualStartDate": _iso(s.actual_start_date),
             "actualEndDate": _iso(s.actual_end_date),
@@ -190,6 +204,7 @@ def build_project_tree(db: Session, project_id: str, include_deleted: bool = Fal
             "displayCode": label_idx.label_of(KIND_TASK, t.id),
             "activityId": t.activity_id, "projectId": t.project_id,
             "name": t.name, "description": t.description, "type": t.type,
+            "status": getattr(t, "status", None),
             "startDate": _iso(t.start_date), "endDate": _iso(t.end_date),
             "actualStartDate": _iso(t.actual_start_date),
             "actualEndDate": _iso(t.actual_end_date),
@@ -218,6 +233,13 @@ def build_project_tree(db: Session, project_id: str, include_deleted: bool = Fal
             "milestoneId": a.milestone_id, "projectId": a.project_id,
             "name": a.name, "description": a.description, "type": a.type,
             "status": getattr(a, "status", None),
+            # Doc 39 ownership fields. ``concernedDivision`` keyword
+            # preserved on the wire for FE compat; datatype is now a
+            # list. Legacy single-value column on disk is kept but
+            # never surfaced.
+            "ownerDivision": getattr(a, "owner_division", None),
+            "concernedDivision": getattr(a, "concerned_divisions", None) or [],
+            "vendorId": getattr(a, "vendor_id", None),
             "startDate": _iso(a.start_date), "endDate": _iso(a.end_date),
             "actualStartDate": _iso(a.actual_start_date),
             "actualEndDate": _iso(a.actual_end_date),
@@ -232,6 +254,7 @@ def build_project_tree(db: Session, project_id: str, include_deleted: bool = Fal
         }
 
     def milestone_node(m: MilestoneModel) -> Dict[str, Any]:
+        deps = sorted(milestone_deps_by_source.get(m.id, []))
         return {
             "id": m.id,
             "displayCode": label_idx.label_of(KIND_MILESTONE, m.id),
@@ -239,6 +262,9 @@ def build_project_tree(db: Session, project_id: str, include_deleted: bool = Fal
             "name": m.name, "description": m.description,
             "startDate": _iso(m.start_date), "endDate": _iso(m.end_date),
             "position": m.position,
+            "status": getattr(m, "status", None),
+            "dependsOn": deps,
+            "dependsOnDisplay": label_idx.labels_of(KIND_MILESTONE, deps),
             "deletedAt": _iso(m.deleted_at),
             "activities": [activity_node(a) for a in acts_by_milestone.get(m.id, [])],
         }

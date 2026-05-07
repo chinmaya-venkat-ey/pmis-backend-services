@@ -1,7 +1,7 @@
 """Milestone API schemas (request/response)."""
 from datetime import datetime
 from typing import List, Optional
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ....domain.milestones.milestone import (
     MILESTONE_STATUS_CHOICES,
@@ -37,7 +37,14 @@ class MilestoneCreateRequest(BaseModel):
 
 
 class MilestoneUpdateRequest(BaseModel):
-    """Partial update. Unspecified fields are left unchanged."""
+    """Partial update. Unspecified fields are left unchanged.
+
+    Doc 39: ``vendors`` was removed from the wire — vendor association
+    moved off milestones onto activities (one vendor per activity).
+    The DB table ``milestone_vendors`` and ``MilestoneVendorModel`` are
+    kept on disk for backwards-compat with legacy rows; the API silently
+    strips ``vendors`` if a caller still sends it.
+    """
     model_config = ConfigDict(populate_by_name=True)
 
     name: Optional[str] = Field(None, min_length=1, max_length=255)
@@ -50,12 +57,6 @@ class MilestoneUpdateRequest(BaseModel):
     depends_on: Optional[List[str]] = Field(
         None,
         alias="dependsOn",
-    )
-    # Same renaming + back-compat aliases as the create schema.
-    vendors: Optional[List[str]] = Field(
-        None,
-        validation_alias=AliasChoices("vendors", "vendorIds", "vendor_ids"),
-        serialization_alias="vendors",
     )
 
     @field_validator("status", mode="before")

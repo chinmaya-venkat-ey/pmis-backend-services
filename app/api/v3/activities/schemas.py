@@ -5,6 +5,15 @@ block (``resourceMode`` / ``resourceCount`` / ``resource``) are
 deprecated and were dropped from both create and update wire bodies.
 DB columns kept for legacy reads. Single create endpoint:
 ``POST /milestones/{id}/activities/create``.
+
+Doc 39:
+- Ownership fields ``ownerDivision`` / ``vendorId`` /
+  ``concernedDivision`` are REQUIRED on create.
+- ``concernedDivision`` keyword is preserved for FE compatibility; only
+  the *datatype* changed from string to list of division codes
+  (``["tmd1", "others"]``). Backed on disk by the new
+  ``concerned_divisions`` JSON column; the legacy single-value
+  ``concerned_division`` column is kept untouched for safety.
 """
 from typing import List, Optional
 
@@ -12,14 +21,30 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ....shared.datetime import IstCalendarDate
 from ....domain.activities.activity import ACTIVITY_STATUS_CHOICES
+from ....domain.resource_types.resource_type import DIVISION_CHOICES
+
+
+def _validate_division_code(v: str) -> str:
+    if isinstance(v, str):
+        v = v.strip().lower()
+    if v not in DIVISION_CHOICES:
+        raise ValueError(
+            f"Division code must be one of: {', '.join(DIVISION_CHOICES)}."
+        )
+    return v
 
 
 class ActivityCreateRequest(BaseModel):
     """POST /milestones/{milestone_id}/activities/create.
 
-    Doc 38 minimal shape: name + description + dates + ownership
-    fields. ``status`` / ``dependsOn`` / ``actualStartDate`` /
-    ``actualEndDate`` are NOT accepted here — they belong on PATCH.
+    Doc 38 + 39 minimal shape:
+      - name + description + dates  (existing)
+      - ownerDivision  (REQUIRED — division code)
+      - vendorId       (REQUIRED — must be in the project's vendor list)
+      - concernedDivision  (REQUIRED — list of division codes, min 1)
+
+    ``status`` / ``dependsOn`` / ``actualStartDate`` / ``actualEndDate``
+    are NOT accepted here — they belong on PATCH.
     """
     model_config = ConfigDict(populate_by_name=True)
 
@@ -30,13 +55,29 @@ class ActivityCreateRequest(BaseModel):
     end_date: IstCalendarDate = Field(..., alias="endDate")
     position: Optional[int] = Field(None, ge=0)
 
-    # Doc 38: optional ownership / partner / consulted-division fields.
-    # Both division fields reference the divisions catalog (codes
-    # tmd1 / tmd2 / others). vendorId references vendors.id (typically
-    # one of the project's vendors, but not enforced server-side).
-    owner_division: Optional[str] = Field(None, alias="ownerDivision")
-    concerned_division: Optional[str] = Field(None, alias="concernedDivision")
-    vendor_id: Optional[str] = Field(None, alias="vendorId")
+    # Doc 39 mandatory ownership fields.
+    owner_division: str = Field(
+        ..., alias="ownerDivision", min_length=1,
+        description=f"Division code. One of: {', '.join(DIVISION_CHOICES)}.",
+    )
+    vendor_id: str = Field(
+        ..., alias="vendorId", min_length=1,
+        description=(
+            "Vendor UUID. Must be one of the project's vendors — "
+            "service-side check rejects a vendor that's not in the "
+            "project's vendor list."
+        ),
+    )
+    # Doc 39: wire keyword kept as ``concernedDivision`` (singular) for FE
+    # backwards compatibility — only the *datatype* changed from string to
+    # list. The Python attribute is plural to match the new JSON DB column.
+    concerned_divisions: List[str] = Field(
+        ..., alias="concernedDivision", min_length=1,
+        description=(
+            "List of division codes — at least one required. Each entry "
+            f"must be one of: {', '.join(DIVISION_CHOICES)}."
+        ),
+    )
 
     @field_validator("end_date")
     @classmethod
@@ -46,14 +87,28 @@ class ActivityCreateRequest(BaseModel):
             raise ValueError("End date cannot be before the start date.")
         return v
 
+    @field_validator("owner_division", mode="before")
+    @classmethod
+    def _validate_owner(cls, v):
+        return _validate_division_code(v)
+
+    @field_validator("concerned_divisions", mode="before")
+    @classmethod
+    def _validate_concerned(cls, v):
+        if not isinstance(v, list):
+            raise ValueError("concernedDivision must be a list of division codes.")
+        return [_validate_division_code(item) for item in v]
+
 
 class ActivityUpdateRequest(BaseModel):
-    """PATCH /activities/{id}. Partial update — doc 38 wire surface only.
+    """PATCH /activities/{id}. Partial update — doc 38 / 39 wire surface only.
 
     Legacy ``type`` / ``resourceMode`` / ``resourceCount`` / ``resource``
-    were dropped from the wire (DB columns kept for read-side compat).
+    and the single-valued ``concernedDivision`` were dropped from the
+    wire (DB columns kept for read-side compat with legacy rows).
 
     ``dependsOn`` semantics: None = no change, [] = clear, [...] = replace.
+    Same semantics for ``concernedDivision``.
     """
     model_config = ConfigDict(populate_by_name=True)
 
@@ -68,10 +123,10 @@ class ActivityUpdateRequest(BaseModel):
     status: Optional[str] = None
     depends_on: Optional[List[str]] = Field(None, alias="dependsOn")
 
-    # Doc 38 additions.
+    # Doc 38 + 39 ownership fields (optional on PATCH; required on create).
     owner_division: Optional[str] = Field(None, alias="ownerDivision")
-    concerned_division: Optional[str] = Field(None, alias="concernedDivision")
     vendor_id: Optional[str] = Field(None, alias="vendorId")
+    concerned_divisions: Optional[List[str]] = Field(None, alias="concernedDivision")
 
     @field_validator("status", mode="before")
     @classmethod
@@ -85,6 +140,22 @@ class ActivityUpdateRequest(BaseModel):
                 f"Activity status must be one of: {', '.join(ACTIVITY_STATUS_CHOICES)}."
             )
         return v
+
+    @field_validator("owner_division", mode="before")
+    @classmethod
+    def _validate_owner(cls, v):
+        if v is None:
+            return v
+        return _validate_division_code(v)
+
+    @field_validator("concerned_divisions", mode="before")
+    @classmethod
+    def _validate_concerned(cls, v):
+        if v is None:
+            return v
+        if not isinstance(v, list):
+            raise ValueError("concernedDivision must be a list of division codes.")
+        return [_validate_division_code(item) for item in v]
 
 
 class ActivityListQuery(BaseModel):

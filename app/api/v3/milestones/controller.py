@@ -304,7 +304,7 @@ class MilestoneController:
             current_user_id=current_user_id,
             status=data.status,
             depends_on=data.depends_on,
-            vendor_ids=data.vendors,
+            vendor_ids=None,  # doc 39: vendors removed from milestone wire surface
         )
         idx = build_label_index_for_project(db, m.project_id)
         return BaseController.ok(data=format_milestone_response(m.to_dict(), idx))

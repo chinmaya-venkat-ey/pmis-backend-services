@@ -46,6 +46,7 @@ class ActivityRepository:
             depends_on=[],
             owner_division=getattr(a, "owner_division", None),
             concerned_division=getattr(a, "concerned_division", None),
+            concerned_divisions=getattr(a, "concerned_divisions", None),
             vendor_id=getattr(a, "vendor_id", None),
             created_at=a.created_at,
             updated_at=a.updated_at,
@@ -150,6 +151,8 @@ class ActivityRepository:
         # Doc 38 additions — all optional.
         owner_division: Optional[str] = None,
         concerned_division: Optional[str] = None,
+        # Doc 39: list of division codes; primary write target.
+        concerned_divisions: Optional[list] = None,
         vendor_id: Optional[str] = None,
     ) -> Activity:
         a = ActivityModel(
@@ -168,6 +171,7 @@ class ActivityRepository:
             status=status,
             owner_division=owner_division,
             concerned_division=concerned_division,
+            concerned_divisions=concerned_divisions,
             vendor_id=vendor_id,
             created_by=created_by,
             updated_by=created_by,

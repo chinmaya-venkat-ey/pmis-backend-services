@@ -19,8 +19,8 @@ from .....infrastructure.db.repositories.dependency_repository import (
 from .....infrastructure.db.repositories.task_repository import TaskRepository
 from .....shared.date_rules import validate_entity_dates, validate_resource_dates
 from .....shared.dep_date_rules import (
-    collect_forward_violations,
-    raise_forward_if_violations,
+    collect_milestone_forward_violations,
+    raise_milestone_forward_if_violations,
 )
 from .....shared.labels import (
     KIND_TASK,
@@ -192,21 +192,26 @@ def create_task(
         # Doc 27: source.start_date >= target.end_date for every dep target.
         if desired_deps:
             target_rows = (
-                db.query(TaskModel.id, TaskModel.name, TaskModel.end_date)
+                db.query(
+                    TaskModel.id, TaskModel.name,
+                    TaskModel.start_date, TaskModel.end_date,
+                )
                 .filter(TaskModel.id.in_(desired_deps))
                 .all()
             )
             label_index = build_label_index_for_project(db, activity.project_id)
             forward = [
-                (label_index.label_of(KIND_TASK, tid) or tname, tend)
-                for (tid, tname, tend) in target_rows
+                (label_index.label_of(KIND_TASK, tid) or tname, tstart, tend)
+                for (tid, tname, tstart, tend) in target_rows
             ]
-            raise_forward_if_violations(
-                collect_forward_violations(
-                    source_start=start_date, targets=forward,
-                ),
+            starts_v, ends_v = collect_milestone_forward_violations(
+                source_start=start_date, source_end=end_date, targets=forward,
+            )
+            raise_milestone_forward_if_violations(
+                starts_v, ends_v,
                 source_label=f"Task '{name.strip()}'",
-                source_start=start_date,
+                source_start=start_date, source_end=end_date,
+                kind_singular="task",
             )
 
     repo = TaskRepository(db)

@@ -240,11 +240,15 @@ def raise_milestone_forward_if_violations(
     source_label: str,
     source_start: Optional[datetime],
     source_end: Optional[datetime],
+    kind_singular: str = "milestone",
 ) -> None:
     """Raise ValidationError if either rule has violations.
 
     The two rules produce one combined message so the FE can display
-    every violation from a single response, in one render."""
+    every violation from a single response, in one render. ``kind_singular``
+    is the noun used in the message — defaults to "milestone" but is
+    overridden when the same helper is used for activity / task / subtask
+    deps (which adopted the milestone-style outlasting rule)."""
     if not starts and not ends:
         return
     parts: List[str] = []
@@ -254,7 +258,7 @@ def raise_milestone_forward_if_violations(
         )
         parts.append(
             f"{source_label} cannot start on {_fmt(_normalize(source_start))} "
-            f"— it must start on or after every milestone it depends on: "
+            f"— it must start on or after every {kind_singular} it depends on: "
             f"{labels}"
         )
     if ends:
@@ -263,7 +267,7 @@ def raise_milestone_forward_if_violations(
         )
         parts.append(
             f"{source_label} cannot end on {_fmt(_normalize(source_end))} "
-            f"— it must end strictly after every milestone it depends on: "
+            f"— it must end strictly after every {kind_singular} it depends on: "
             f"{labels}"
         )
     raise ValidationError(". ".join(parts) + ".")
@@ -276,6 +280,7 @@ def raise_milestone_reverse_if_violations(
     target_label: str,
     target_start: Optional[datetime],
     target_end: Optional[datetime],
+    kind_singular: str = "milestone",
 ) -> None:
     """Reverse direction: target's start_date or end_date moved and an
     existing source pointing at it would now violate one of the rules."""
@@ -288,8 +293,8 @@ def raise_milestone_reverse_if_violations(
         )
         parts.append(
             f"{target_label} cannot start on {_fmt(_normalize(target_start))} "
-            f"— the following dependent milestone(s) would then start before "
-            f"it: {labels}"
+            f"— the following dependent {kind_singular}(s) would then start "
+            f"before it: {labels}"
         )
     if ends:
         labels = ", ".join(
@@ -297,7 +302,7 @@ def raise_milestone_reverse_if_violations(
         )
         parts.append(
             f"{target_label} cannot end on {_fmt(_normalize(target_end))} "
-            f"— the following dependent milestone(s) would no longer end "
+            f"— the following dependent {kind_singular}(s) would no longer end "
             f"strictly after this target: {labels}"
         )
     raise ValidationError(". ".join(parts) + ".")

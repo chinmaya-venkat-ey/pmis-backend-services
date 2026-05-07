@@ -56,10 +56,10 @@ from .....infrastructure.db.repositories.resource_type_repository import (
 )
 from .....shared.date_rules import validate_entity_dates, validate_resource_dates
 from .....shared.dep_date_rules import (
-    collect_forward_violations,
-    collect_reverse_violations,
-    raise_forward_if_violations,
-    raise_reverse_if_violations,
+    collect_milestone_forward_violations,
+    collect_milestone_reverse_violations,
+    raise_milestone_forward_if_violations,
+    raise_milestone_reverse_if_violations,
 )
 from .....infrastructure.db.models.activity_dependency import (
     ActivityDependencyModel,
@@ -131,6 +131,8 @@ def update_activity(
     # Doc 38 additions — all optional.
     owner_division: Optional[str] = None,
     concerned_division: Optional[str] = None,
+    # Doc 39: replacement list (None = no change, [] = clear, [...] = replace).
+    concerned_divisions: Optional[List[str]] = None,
     vendor_id: Optional[str] = None,
 ) -> Tuple[Activity, Optional[ActivityResource]]:
     repo = ActivityRepository(db)
@@ -354,32 +356,43 @@ def update_activity(
             .list_activity_dependencies(activity_id)
     else:
         forward_targets_to_check = []
-    if forward_targets_to_check and effective_start is not None:
+    if forward_targets_to_check and (effective_start is not None or effective_end is not None):
         target_rows = (
-            db.query(ActivityModel.id, ActivityModel.name, ActivityModel.end_date)
+            db.query(
+                ActivityModel.id, ActivityModel.name,
+                ActivityModel.start_date, ActivityModel.end_date,
+            )
             .filter(ActivityModel.id.in_(forward_targets_to_check))
             .all()
         )
         if label_index is None:
             label_index = build_label_index_for_project(db, model.project_id)
         forward = [
-            (label_index.label_of(KIND_ACTIVITY, tid) or tname, tend)
-            for (tid, tname, tend) in target_rows
+            (label_index.label_of(KIND_ACTIVITY, tid) or tname, tstart, tend)
+            for (tid, tname, tstart, tend) in target_rows
         ]
-        raise_forward_if_violations(
-            collect_forward_violations(
-                source_start=effective_start, targets=forward,
-            ),
+        starts_v, ends_v = collect_milestone_forward_violations(
+            source_start=effective_start, source_end=effective_end, targets=forward,
+        )
+        raise_milestone_forward_if_violations(
+            starts_v, ends_v,
             source_label=(
                 f"Activity '{label_index.label_of(KIND_ACTIVITY, activity_id) or model.name}'"
             ),
-            source_start=effective_start,
+            source_start=effective_start, source_end=effective_end,
+            kind_singular="activity",
         )
-    # Reverse: if end_date is moving, walk the live sources pointing at me
-    # and reject if the new end_date would make any of them start too early.
-    if end_date is not None and effective_end is not None:
+    # Reverse: if start_date or end_date is moving, walk live sources
+    # pointing at me and reject if the new dates would put any of them
+    # in violation of the start-floor or end-strict rule.
+    if (start_date is not None or end_date is not None) and (
+        effective_start is not None or effective_end is not None
+    ):
         sources = (
-            db.query(ActivityModel.id, ActivityModel.name, ActivityModel.start_date)
+            db.query(
+                ActivityModel.id, ActivityModel.name,
+                ActivityModel.start_date, ActivityModel.end_date,
+            )
             .join(
                 ActivityDependencyModel,
                 ActivityDependencyModel.source_activity_id == ActivityModel.id,
@@ -393,17 +406,19 @@ def update_activity(
             if label_index is None:
                 label_index = build_label_index_for_project(db, model.project_id)
             rev = [
-                (label_index.label_of(KIND_ACTIVITY, sid) or sname, sstart)
-                for (sid, sname, sstart) in sources
+                (label_index.label_of(KIND_ACTIVITY, sid) or sname, sstart, send)
+                for (sid, sname, sstart, send) in sources
             ]
-            raise_reverse_if_violations(
-                collect_reverse_violations(
-                    target_end=effective_end, sources=rev,
-                ),
+            starts_v, ends_v = collect_milestone_reverse_violations(
+                target_start=effective_start, target_end=effective_end, sources=rev,
+            )
+            raise_milestone_reverse_if_violations(
+                starts_v, ends_v,
                 target_label=(
                     f"Activity '{label_index.label_of(KIND_ACTIVITY, activity_id) or model.name}'"
                 ),
-                target_end=effective_end,
+                target_start=effective_start, target_end=effective_end,
+                kind_singular="activity",
             )
 
     # Build the activity-row update dict.
@@ -443,7 +458,28 @@ def update_activity(
         updates["owner_division"] = owner_division
     if concerned_division is not None:
         updates["concerned_division"] = concerned_division
+    # Doc 39: list of division codes; None = no change, [] = clear,
+    # [...] = replace. Pydantic schema enforces value-membership.
+    if concerned_divisions is not None:
+        updates["concerned_divisions"] = list(concerned_divisions)
     if vendor_id is not None:
+        # Doc 39: vendor_id (when changed) must be one of the project's
+        # vendors. Same rule as create.
+        from .....infrastructure.db.models.project_vendor import ProjectVendorModel
+        in_project = (
+            db.query(ProjectVendorModel.vendor_id)
+            .filter(
+                ProjectVendorModel.project_id == model.project_id,
+                ProjectVendorModel.vendor_id == vendor_id,
+            )
+            .first()
+        )
+        if in_project is None:
+            raise ValidationError(
+                f"vendorId '{vendor_id}' is not in the project's vendor "
+                f"list. Add the vendor to the project before assigning "
+                f"it to an activity."
+            )
         updates["vendor_id"] = vendor_id
 
     before_snapshot = {k: _iso(getattr(model, k)) for k in updates.keys()} if updates else {}

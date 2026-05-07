@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from sqlalchemy import (
-    Column, Integer, String, DateTime, ForeignKey, Text, Index, CheckConstraint, text,
+    JSON, Column, Integer, String, DateTime, ForeignKey, Text, Index, CheckConstraint, text,
 )
 from ..utc_datetime import UtcDateTime
 from ..session import Base
@@ -40,7 +40,13 @@ class ActivityModel(Base):
     # catalog (codes: 'tmd1' / 'tmd2' / 'others'). ``vendor_id`` references
     # vendors.id. All optional.
     owner_division = Column(String(32), nullable=True, index=True)
+    # Doc 38 single column kept on disk for legacy reads; new writes
+    # target ``concerned_divisions`` (multi) instead. See doc 39.
     concerned_division = Column(String(32), nullable=True, index=True)
+    # Doc 39: list of division codes (e.g. ["tmd1", "others"]). Required
+    # at the wire on create; optional on update. Backfilled from
+    # ``concerned_division`` for legacy rows.
+    concerned_divisions = Column(JSON, nullable=True)
     vendor_id = Column(String(36), ForeignKey("vendors.id"), nullable=True, index=True)
 
     start_date = Column(UtcDateTime, nullable=False)

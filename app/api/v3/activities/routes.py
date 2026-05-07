@@ -42,7 +42,13 @@ def _activity_multipart_schema() -> Dict[str, Any]:
             "endDate": {"type": "string", "format": "date-time"},
             "position": {"type": "integer", "minimum": 0},
             "ownerDivision": {"type": "string", "maxLength": 32},
-            "concernedDivision": {"type": "string", "maxLength": 32},
+            # Doc 39: keyword preserved (singular), datatype is now a list
+            # of division codes. Send as JSON-encoded array in multipart
+            # (the parser parses it via _ACTIVITY_ARRAY_KEYS).
+            "concernedDivision": {
+                "type": "string",
+                "description": "JSON-encoded list of division codes.",
+            },
             "vendorId": {"type": "string", "maxLength": 36},
             "body": {
                 "type": "string",
@@ -54,7 +60,11 @@ def _activity_multipart_schema() -> Dict[str, Any]:
                 "description": "Optional file uploads attached to the activity comment.",
             },
         },
-        "required": ["name", "startDate", "endDate"],
+        # Doc 39: ownerDivision / vendorId / concernedDivision are mandatory on create.
+        "required": [
+            "name", "startDate", "endDate",
+            "ownerDivision", "vendorId", "concernedDivision",
+        ],
     }
 
 

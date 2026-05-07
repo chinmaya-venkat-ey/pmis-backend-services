@@ -77,6 +77,9 @@ class Activity:
     # Doc 38 additions — optional ownership / partner / consulted-division.
     owner_division: Optional[str] = None
     concerned_division: Optional[str] = None
+    # Doc 39: multi list of division codes; backfilled from the
+    # legacy single ``concerned_division`` for existing rows.
+    concerned_divisions: Optional[List[str]] = None
     vendor_id: Optional[str] = None
 
     def to_dict(self) -> dict:
@@ -98,6 +101,7 @@ class Activity:
             "depends_on": list(self.depends_on or []),
             "owner_division": self.owner_division,
             "concerned_division": self.concerned_division,
+            "concerned_divisions": list(self.concerned_divisions) if self.concerned_divisions else None,
             "vendor_id": self.vendor_id,
             "created_at": iso_utc(self.created_at),
             "updated_at": iso_utc(self.updated_at),

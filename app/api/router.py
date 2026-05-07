@@ -10,6 +10,11 @@ from fastapi import APIRouter
 
 from .v3.master_data import router as master_data_router
 from .v3.permissions import permissions_router
+from .v3.role_assignments import (
+    project_role_assignments_router,
+    user_role_assignments_router,
+    vendor_projects_router,
+)
 from .v3.roles import router as roles_router
 from .v3.users import router as users_router
 
@@ -19,3 +24,7 @@ api_v3_router.include_router(users_router)
 api_v3_router.include_router(roles_router)
 api_v3_router.include_router(permissions_router)
 api_v3_router.include_router(master_data_router)
+# Doc 41 — scoped role assignments + project-mapping views.
+api_v3_router.include_router(user_role_assignments_router)
+api_v3_router.include_router(project_role_assignments_router)
+api_v3_router.include_router(vendor_projects_router)

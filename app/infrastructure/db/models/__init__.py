@@ -24,6 +24,8 @@ from .permission import PermissionModel
 from .role_permission import RolePermissionModel
 from .user_role import UserRoleModel
 from .user_permission import UserPermissionModel
+# Doc 41 — scoped role assignments (org/project scope).
+from .user_role_assignment import UserRoleAssignmentModel
 # 2FA + password reset + notification audit log (notification_log
 # stays here — it's user-mgmt's own audit table; templates moved to
 # PMIS-notification-service per doc 38).
@@ -40,5 +42,6 @@ __all__ = [
     "VendorModel",
     "PermissionModel", "RolePermissionModel",
     "UserRoleModel", "UserPermissionModel",
+    "UserRoleAssignmentModel",
     "NotificationLogModel", "OtpCodeModel", "PasswordResetTokenModel",
 ]

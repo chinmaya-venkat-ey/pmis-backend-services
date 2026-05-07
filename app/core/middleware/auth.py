@@ -56,6 +56,10 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
         request.state.user_id = None
         request.state.user_login = None
         request.state.user_permissions = set()
+        # Doc 41: per-scope effective permissions (Dict[(scope_kind,
+        # scope_id), Set[str]]). Used by require_project_permission /
+        # require_org_permission. Empty for anonymous calls.
+        request.state.scoped_permissions = {}
         request.state.is_admin = False
         request.state.token_jti = None
         request.state.token_exp = None
@@ -97,9 +101,10 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
                         request.state.token_exp = None
 
                 # Hydrate effective permission set + admin flag from DB.
-                perms, is_admin = self._load_user_permissions(user_id)
+                perms, is_admin, scoped = self._load_user_permissions(user_id)
                 request.state.user_permissions = perms
                 request.state.is_admin = is_admin
+                request.state.scoped_permissions = scoped
 
         response = await call_next(request)
         return response
@@ -118,7 +123,14 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
 
     @staticmethod
     def _load_user_permissions(user_id: str):
-        """Returns (permissions: Set[str], is_admin: bool)."""
+        """Returns (union: Set[str], is_admin: bool, scoped: Dict).
+
+        Doc 41: ``scoped`` is the per-scope view returned by
+        :meth:`RbacRepository.effective_permissions_by_scope` —
+        ``{(scope_kind, scope_id): Set[str]}``. The legacy ``union``
+        Set is the flat union across all scopes (kept so existing
+        ``require_permission`` calls keep their semantics).
+        """
         from ...infrastructure.db.session import SessionLocal
         from ...infrastructure.db.repositories.rbac_repository import (
             RbacRepository,
@@ -128,6 +140,7 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
             repo = RbacRepository(db)
             perms = repo.effective_permissions_for_user(user_id)
             is_admin = repo.user_has_admin_role(user_id)
-            return perms, is_admin
+            scoped = repo.effective_permissions_by_scope(user_id)
+            return perms, is_admin, scoped
         finally:
             db.close()

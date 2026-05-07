@@ -82,6 +82,11 @@ PERMISSIONS_MANAGE = "permissions:manage"
 # RBAC assignment (user-role and user-permission grants)
 RBAC_ASSIGN = "rbac:assign"
 
+# Doc 41: granting the super_admin role is gated by this code (which
+# only super_admin holds itself). admin role does NOT hold this code,
+# so an admin can grant any role except super_admin.
+USERS_GRANT_SUPERADMIN = "users:grant_superadmin"
+
 # Work packages
 WORK_PACKAGES_VIEW = "work_packages:view"
 WORK_PACKAGES_CREATE = "work_packages:create"
@@ -173,6 +178,11 @@ BUILTIN_PERMISSIONS: List[PermissionDef] = [
     PermissionDef(PERMISSIONS_READ, "View permissions", "List the permission catalog."),
     PermissionDef(PERMISSIONS_MANAGE, "Manage permissions", "Create / edit / delete permission rows."),
     PermissionDef(RBAC_ASSIGN, "Assign roles & permissions", "Grant or revoke roles and direct permissions on users."),
+    PermissionDef(
+        USERS_GRANT_SUPERADMIN,
+        "Grant super_admin role",
+        "Required to assign the super_admin role to a user. Held only by super_admin.",
+    ),
 
     PermissionDef(WORK_PACKAGES_VIEW, "View work packages", "Read work packages."),
     PermissionDef(WORK_PACKAGES_CREATE, "Create work package", "Create a work package."),
@@ -231,6 +241,15 @@ VIEWER_ROLE_NAME = "viewer"
 # directly on the project (versioning was removed) but cannot create
 # new projects, change status, or touch RBAC / master data.
 VENDOR_ROLE_NAME = "vendor"
+
+# Doc 41 scoped-RBAC seed roles. Permission sets defined further down
+# the file. Naming convention: snake_case, no spaces — matches the
+# legacy ``admin`` / ``member`` / ``viewer`` / ``vendor`` rows.
+SUPER_ADMIN_ROLE_NAME = "super_admin"
+ORG_ADMIN_ROLE_NAME = "org_admin"
+PROJECT_ADMIN_ROLE_NAME = "project_admin"
+PROJECT_MEMBER_ROLE_NAME = "project_member"
+DIVISION_MEMBER_ROLE_NAME = "division_member"
 
 # The admin role holds EVERY permission in BUILTIN_PERMISSIONS — synced on
 # startup. Listed here for clarity / tests.
@@ -291,4 +310,90 @@ VENDOR_ROLE_PERMISSIONS: List[str] = [
     SUBTASKS_CREATE, SUBTASKS_READ, SUBTASKS_UPDATE, SUBTASKS_DELETE,
     COMMENTS_CREATE, COMMENTS_READ, COMMENTS_DELETE,
     ATTACHMENTS_CREATE, ATTACHMENTS_DOWNLOAD, ATTACHMENTS_DELETE,
+]
+
+
+# ---------------------------------------------------------------------------
+# Doc 41 — scoped-RBAC seed permission sets.
+#
+# These roles get their permission set via the SAME role_permissions table
+# as admin/member/viewer/vendor. The novelty is in the assignment side:
+# rows in user_role_assignments carry org_id / project_id, so the same
+# role grants different effective access depending on where it's
+# assigned. The permission strings here are what the role unlocks
+# *within that scope*; service-layer scope checks decide whether the
+# scope matches the resource being accessed.
+# ---------------------------------------------------------------------------
+
+# super_admin: every permission, including the gate to grant super_admin
+# itself. There is exactly one path to super_admin: an existing super_admin
+# grants it.
+SUPER_ADMIN_ROLE_PERMISSIONS: List[str] = (
+    [p.code for p in BUILTIN_PERMISSIONS]
+)
+
+# admin: every permission EXCEPT USERS_GRANT_SUPERADMIN. So an admin can
+# do everything else super_admin can — including grant any other role
+# (admin, org_admin, project_admin, project_member, division_member).
+ADMIN_FULL_ROLE_PERMISSIONS: List[str] = [
+    p.code for p in BUILTIN_PERMISSIONS if p.code != USERS_GRANT_SUPERADMIN
+]
+
+# org_admin: scoped to a vendor (= organization). Can manage project
+# membership and read project data within the org, but not edit project
+# content or do RBAC outside their org. The service-layer caller-vs-
+# target check enforces "scope = caller's vendor only."
+ORG_ADMIN_ROLE_PERMISSIONS: List[str] = [
+    USERS_READ, USERS_READ_ALL, USERS_UPDATE_ALL,
+    PROJECTS_READ, PROJECTS_READ_ALL,
+    PROJECT_MEMBERS_READ, PROJECT_MEMBERS_ADD,
+    PROJECT_MEMBERS_UPDATE, PROJECT_MEMBERS_DELETE,
+    VENDORS_READ, MASTER_DATA_VIEW,
+    RBAC_ASSIGN,
+]
+
+# project_admin: scoped to a single project. Manages membership +
+# task-level content but cannot publish / close / delete the project,
+# touch master-data, or grant project_admin itself (only project_member).
+PROJECT_ADMIN_ROLE_PERMISSIONS: List[str] = [
+    USERS_READ, PROJECTS_READ,
+    PROJECT_MEMBERS_READ, PROJECT_MEMBERS_ADD,
+    PROJECT_MEMBERS_UPDATE, PROJECT_MEMBERS_DELETE,
+    MILESTONES_READ, MILESTONES_UPDATE,
+    ACTIVITIES_READ, ACTIVITIES_UPDATE,
+    TASKS_CREATE, TASKS_READ, TASKS_UPDATE, TASKS_DELETE,
+    SUBTASKS_CREATE, SUBTASKS_READ, SUBTASKS_UPDATE, SUBTASKS_DELETE,
+    COMMENTS_CREATE, COMMENTS_READ, COMMENTS_DELETE,
+    ATTACHMENTS_CREATE, ATTACHMENTS_DOWNLOAD, ATTACHMENTS_DELETE,
+    RBAC_ASSIGN,
+]
+
+# project_member: scoped to a single project. Read everything in their
+# project, contribute updates on tasks they own, comment, attach.
+PROJECT_MEMBER_ROLE_PERMISSIONS: List[str] = [
+    USERS_READ, PROJECTS_READ,
+    PROJECT_MEMBERS_READ,
+    MILESTONES_READ,
+    ACTIVITIES_READ,
+    TASKS_READ, TASKS_UPDATE,
+    SUBTASKS_READ, SUBTASKS_UPDATE,
+    COMMENTS_CREATE, COMMENTS_READ,
+    ATTACHMENTS_CREATE, ATTACHMENTS_DOWNLOAD,
+]
+
+# division_member (Q4 — read-only for now). The inbox / approval
+# workflow this role drives doesn't exist yet; the role is seeded
+# read-only so it can be assigned in the meantime without granting
+# write access. When the workflow ships, two new permission codes
+# (ACTIVITIES_REQUEST_STATUS_CHANGE / ACTIVITIES_APPROVE_STATUS_CHANGE)
+# get added to this list in a follow-up doc.
+DIVISION_MEMBER_ROLE_PERMISSIONS: List[str] = [
+    USERS_READ, PROJECTS_READ,
+    PROJECT_MEMBERS_READ,
+    MILESTONES_READ,
+    ACTIVITIES_READ,
+    TASKS_READ,
+    SUBTASKS_READ,
+    COMMENTS_READ,
+    ATTACHMENTS_DOWNLOAD,
 ]

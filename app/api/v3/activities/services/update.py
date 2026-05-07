@@ -6,9 +6,16 @@ new ``depends_on`` and the status-completion gate.
 
 Status gate
 -----------
-Per the dependency spec, an activity may only flip ``status`` to
-``completed`` once every activity it ``depends_on`` is also ``completed``.
-Direct status check (no recursive children rollup); fast and predictable.
+Two independent gates fire on a flip to ``completed``:
+
+  1. Dep-target gate (cross-edge): every activity this one
+     ``depends_on`` must already be ``completed``.
+  2. Children gate (parent-child rollup): every child task under
+     this activity must already be ``completed``. By induction the
+     same rule on tasks/subtasks enforces the full descendant rollup.
+
+Reverts to ``not_completed`` are always allowed; only the forward
+``completed`` transition is gated.
 
 Depends-on
 ----------
@@ -42,6 +49,7 @@ def _iso(v):
 from .....infrastructure.db.models.project import ProjectModel
 from .....infrastructure.db.models.activity import ActivityModel
 from .....infrastructure.db.models.milestone import MilestoneModel
+from .....infrastructure.db.models.task import TaskModel
 from .....infrastructure.db.repositories.activity_repository import ActivityRepository
 from .....infrastructure.db.repositories.dependency_repository import (
     DependencyRepository,
@@ -107,6 +115,47 @@ def _gate_status_against_deps(
         raise ValidationError(
             f"Cannot mark this activity as completed — the following "
             f"dependency target(s) are not yet completed: {names}{more}.",
+        )
+
+
+def _gate_activity_status_against_children(
+    db: Session, activity_id: str, target_status: str,
+) -> None:
+    """Block flipping an activity's status to ``completed`` while any
+    of its child tasks is not yet ``completed``.
+
+    Mirrors the milestone-side children gate (introduced in commit
+    6c1ff47). Only fires on the ``completed`` transition; reverts are
+    always allowed. Soft-deleted tasks are out of scope.
+
+    By induction: each task itself can only flip to ``completed`` once
+    all its top-level subtasks are ``completed`` (and so on down the
+    hierarchy), so checking direct task children here is sufficient
+    to enforce the full descendant rollup.
+    """
+    if target_status != ACTIVITY_STATUS_COMPLETED:
+        return
+    rows = (
+        db.query(TaskModel.id, TaskModel.name, TaskModel.status)
+        .filter(TaskModel.activity_id == activity_id)
+        .filter(TaskModel.deleted_at.is_(None))
+        .all()
+    )
+    if not rows:
+        return
+    blockers = [
+        (row[0], row[1], row[2])
+        for row in rows
+        if (row[2] or "") != ACTIVITY_STATUS_COMPLETED
+    ]
+    if blockers:
+        names = ", ".join(f"'{b[1]}'" for b in blockers[:3])
+        more = "" if len(blockers) <= 3 else f" (+{len(blockers) - 3} more)"
+        raise ValidationError(
+            f"Cannot mark this activity as completed — the following "
+            f"child task{'' if len(blockers) == 1 else 's'} "
+            f"{'is' if len(blockers) == 1 else 'are'} not yet completed: "
+            f"{names}{more}.",
         )
 
 
@@ -310,6 +359,15 @@ def update_activity(
                     )
         else:
             _gate_status_against_deps(db, activity_id, ACTIVITY_STATUS_COMPLETED)
+
+        # Children-completion gate: an activity may only flip to
+        # ``completed`` when every child task under it is also
+        # ``completed``. By induction (each child task enforces the
+        # same rule against its own subtasks, and so on), this
+        # enforces the full descendant rollup.
+        _gate_activity_status_against_children(
+            db, activity_id, ACTIVITY_STATUS_COMPLETED,
+        )
 
     # Validate dependsOn targets for replace. Accepts UUIDs or labels
     # (e.g. "A1.2"); see app/shared/labels.py and planned_changes/22.

@@ -40,6 +40,45 @@ from .....domain.subtasks.subtask_resource import SubtaskResource
 from .create import _validate_subtask_deps_same_project
 
 
+_SUBTASK_STATUS_COMPLETED = "completed"
+
+
+def _gate_subtask_status_against_children(
+    db: Session, subtask_id: str, target_status: str,
+) -> None:
+    """Block flipping a subtask's status to ``completed`` while any
+    of its nested subtasks is not yet ``completed``.
+
+    A subtask's children are subtasks attached under it via
+    ``parent_subtask_id``. Soft-deleted children are out of scope.
+    Only the forward ``completed`` transition is gated.
+    """
+    if target_status != _SUBTASK_STATUS_COMPLETED:
+        return
+    rows = (
+        db.query(SubtaskModel.id, SubtaskModel.name, SubtaskModel.status)
+        .filter(SubtaskModel.parent_subtask_id == subtask_id)
+        .filter(SubtaskModel.deleted_at.is_(None))
+        .all()
+    )
+    if not rows:
+        return
+    blockers = [
+        (row[0], row[1], row[2])
+        for row in rows
+        if (row[2] or "") != _SUBTASK_STATUS_COMPLETED
+    ]
+    if blockers:
+        names = ", ".join(f"'{b[1]}'" for b in blockers[:3])
+        more = "" if len(blockers) <= 3 else f" (+{len(blockers) - 3} more)"
+        raise ValidationError(
+            f"Cannot mark this subtask as completed — the following "
+            f"nested subtask{'' if len(blockers) == 1 else 's'} "
+            f"{'is' if len(blockers) == 1 else 'are'} not yet completed: "
+            f"{names}{more}.",
+        )
+
+
 def update_subtask(
     db: Session,
     *,
@@ -248,6 +287,14 @@ def update_subtask(
                 target_start=effective_start, target_end=effective_end,
                 kind_singular="subtask",
             )
+
+    # Children-completion gate: a subtask may only flip to
+    # ``completed`` when every nested subtask under it is also
+    # ``completed``. Recursive depth is handled by induction —
+    # each nested subtask runs the same gate against its own
+    # children at flip time.
+    if status is not None:
+        _gate_subtask_status_against_children(db, subtask_id, status)
 
     updates: Dict[str, Any] = {}
     if name is not None: updates["name"] = name.strip()

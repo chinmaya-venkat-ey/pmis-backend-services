@@ -45,6 +45,52 @@ from .....domain.tasks.task import (
 from .....domain.tasks.task_resource import TaskResource
 
 from .create import _validate_task_deps_same_project
+from .....infrastructure.db.models.subtask import SubtaskModel
+
+
+_TASK_STATUS_COMPLETED = "completed"
+
+
+def _gate_task_status_against_children(
+    db: Session, task_id: str, target_status: str,
+) -> None:
+    """Block flipping a task's status to ``completed`` while any of
+    its top-level subtasks is not yet ``completed``.
+
+    Top-level here means subtasks attached directly to this task
+    (``parent_subtask_id IS NULL``). By induction each top-level
+    subtask itself enforces the same rule against its nested
+    children, so checking the immediate layer is sufficient to
+    cover the full descendant rollup.
+
+    Soft-deleted subtasks are out of scope. Only the forward
+    ``completed`` transition is gated.
+    """
+    if target_status != _TASK_STATUS_COMPLETED:
+        return
+    rows = (
+        db.query(SubtaskModel.id, SubtaskModel.name, SubtaskModel.status)
+        .filter(SubtaskModel.task_id == task_id)
+        .filter(SubtaskModel.parent_subtask_id.is_(None))
+        .filter(SubtaskModel.deleted_at.is_(None))
+        .all()
+    )
+    if not rows:
+        return
+    blockers = [
+        (row[0], row[1], row[2])
+        for row in rows
+        if (row[2] or "") != _TASK_STATUS_COMPLETED
+    ]
+    if blockers:
+        names = ", ".join(f"'{b[1]}'" for b in blockers[:3])
+        more = "" if len(blockers) <= 3 else f" (+{len(blockers) - 3} more)"
+        raise ValidationError(
+            f"Cannot mark this task as completed — the following "
+            f"child subtask{'' if len(blockers) == 1 else 's'} "
+            f"{'is' if len(blockers) == 1 else 'are'} not yet completed: "
+            f"{names}{more}.",
+        )
 
 
 def update_task(
@@ -259,6 +305,13 @@ def update_task(
                 target_start=effective_start, target_end=effective_end,
                 kind_singular="task",
             )
+
+    # Children-completion gate: a task may only flip to ``completed``
+    # when every direct top-level subtask under it is also
+    # ``completed``. By induction the subtask's own gate covers
+    # nested children below it.
+    if status is not None:
+        _gate_task_status_against_children(db, task_id, status)
 
     updates: Dict[str, Any] = {}
     if name is not None: updates["name"] = name.strip()

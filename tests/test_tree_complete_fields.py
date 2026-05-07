@@ -159,6 +159,15 @@ def _create_full_tree(client, admin_headers):
         headers=admin_headers,
         json={"dependsOn": [s1["id"]], "status": "completed"},
     )
+    # Mark S1 as completed BEFORE the nested child exists — at flip
+    # time S1 has no children, so the children-completion gate is a
+    # no-op. Adding an in-progress nested child afterwards is fine
+    # (the gate is checked at flip time, not retroactively).
+    client.patch(
+        f"/api/v3/subtasks/{s1['id']}",
+        headers=admin_headers,
+        json={"status": "completed"},
+    )
     nested = client.post(
         f"/api/v3/subtasks/{s1['id']}/subtasks/create",
         headers=admin_headers,
@@ -168,11 +177,6 @@ def _create_full_tree(client, admin_headers):
         f"/api/v3/subtasks/{nested['id']}",
         headers=admin_headers,
         json={"status": "in_progress"},
-    )
-    client.patch(
-        f"/api/v3/subtasks/{s1['id']}",
-        headers=admin_headers,
-        json={"status": "completed"},
     )
 
     return {

@@ -11,6 +11,7 @@ from .....domain.milestones.milestone import (
     MILESTONE_STATUS_COMPLETED,
     Milestone,
 )
+from .....infrastructure.db.models.activity import ActivityModel
 from .....infrastructure.db.models.milestone import MilestoneModel
 from .....infrastructure.db.models.milestone_dependency import (
     MilestoneDependencyModel,
@@ -80,6 +81,48 @@ def _gate_milestone_status_against_deps(
         )
 
 
+def _gate_milestone_status_against_children(
+    db: Session, milestone_id: str, target_status: str,
+) -> None:
+    """Block flipping a milestone's status to ``completed`` while any
+    of its child activities is not yet ``completed``.
+
+    A milestone represents the work below it; closing it out while
+    activities under it are still in progress would lose information.
+    Only fires on the completed transition; other status flips (back
+    to ``not_completed``, or to any future state) are always allowed.
+
+    Soft-deleted activities are ignored — they're considered out of
+    scope for the completion rollup.
+    """
+    if target_status != MILESTONE_STATUS_COMPLETED:
+        return
+    rows = (
+        db.query(ActivityModel.id, ActivityModel.name, ActivityModel.status)
+        .filter(ActivityModel.milestone_id == milestone_id)
+        .filter(ActivityModel.deleted_at.is_(None))
+        .all()
+    )
+    if not rows:
+        # No children — nothing to block. (e.g. milestone created with
+        # status='completed' before any activity is attached.)
+        return
+    blockers = [
+        (row[0], row[1], row[2])
+        for row in rows
+        if (row[2] or "") != MILESTONE_STATUS_COMPLETED
+    ]
+    if blockers:
+        names = ", ".join(f"'{b[1]}'" for b in blockers[:3])
+        more = "" if len(blockers) <= 3 else f" (+{len(blockers) - 3} more)"
+        raise ValidationError(
+            f"Cannot mark this milestone as completed — the following "
+            f"child activit{'y' if len(blockers) == 1 else 'ies'} "
+            f"{'is' if len(blockers) == 1 else 'are'} not yet completed: "
+            f"{names}{more}.",
+        )
+
+
 def update_milestone(
     db: Session,
     *,
@@ -145,6 +188,11 @@ def update_milestone(
     # dep target isn't, fail fast with the dep names.
     if status is not None:
         _gate_milestone_status_against_deps(db, milestone_id, status)
+        # Children-completion gate: a milestone may only flip to
+        # ``completed`` when every child activity under it is also
+        # ``completed``. Mirrors the dep-target gate above but checks
+        # the parent-child rollup instead of cross-edges.
+        _gate_milestone_status_against_children(db, milestone_id, status)
 
     # Validate depends_on (replace-list semantics) BEFORE writing.
     # Accepts UUIDs or labels (e.g. "M2"); see app/shared/labels.py.

@@ -26,6 +26,7 @@ from ....infrastructure.db.models.task_resource import TaskResourceModel
 from ....infrastructure.db.models.subtask import SubtaskModel
 from ....infrastructure.db.models.subtask_dependency import SubtaskDependencyModel
 from ....infrastructure.db.models.subtask_resource import SubtaskResourceModel
+from ....infrastructure.db.models.vendor import VendorModel
 from ....shared.datetime import IST, iso_ist
 from ....shared.labels import (
     KIND_ACTIVITY,
@@ -155,6 +156,20 @@ def build_project_tree(db: Session, project_id: str, include_deleted: bool = Fal
     milestones = _q(MilestoneModel).order_by(MilestoneModel.position.asc(), MilestoneModel.id.asc()).all()
     activities = _q(ActivityModel).order_by(ActivityModel.position.asc(), ActivityModel.id.asc()).all()
     act_resources = _q(ActivityResourceModel).all()
+
+    # One-shot vendor lookup so each activity node can emit ``vendorName``
+    # next to ``vendorId``. The FE consumes the tree to render dependency
+    # graphs and was forced to do a second round-trip per vendorId before
+    # this — pre-loading here keeps it to a single query per tree call.
+    vendor_ids: set = {a.vendor_id for a in activities if a.vendor_id}
+    vendor_name_by_id: Dict[str, str] = {}
+    if vendor_ids:
+        for vid, vname in (
+            db.query(VendorModel.id, VendorModel.name)
+            .filter(VendorModel.id.in_(vendor_ids))
+            .all()
+        ):
+            vendor_name_by_id[vid] = vname
     tasks = _q(TaskModel).order_by(TaskModel.position.asc(), TaskModel.id.asc()).all()
     task_resources = _q(TaskResourceModel).all()
     subtasks = _q(SubtaskModel).order_by(SubtaskModel.position.asc(), SubtaskModel.id.asc()).all()
@@ -325,6 +340,10 @@ def build_project_tree(db: Session, project_id: str, include_deleted: bool = Fal
             "ownerDivision": getattr(a, "owner_division", None),
             "concernedDivision": getattr(a, "concerned_divisions", None) or [],
             "vendorId": getattr(a, "vendor_id", None),
+            # Vendor name pulled from the bulk lookup above. Null when the
+            # activity has no vendor or the vendor row has been hard-deleted
+            # (soft-delete is fine — name still resolves).
+            "vendorName": vendor_name_by_id.get(getattr(a, "vendor_id", None)),
             "startDate": _iso(a.start_date), "endDate": _iso(a.end_date),
             "actualStartDate": _iso(a.actual_start_date),
             "actualEndDate": _iso(a.actual_end_date),

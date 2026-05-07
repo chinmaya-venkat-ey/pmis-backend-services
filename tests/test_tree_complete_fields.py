@@ -243,7 +243,7 @@ class TestTreeCompleteFields:
 
         for key in (
             "ownerDivision", "concernedDivision",
-            "vendorId", "status", "dependsOn", "dependsOnDisplay",
+            "vendorId", "vendorName", "status", "dependsOn", "dependsOnDisplay",
         ):
             assert key in a1_node, f"activity missing {key}"
             assert key in a2_node, f"activity missing {key}"
@@ -259,6 +259,9 @@ class TestTreeCompleteFields:
         assert a1_node["ownerDivision"] == "tmd1"
         assert a1_node["vendorId"] == ids["vid"]
         assert a1_node["concernedDivision"] == ["tmd1"]
+        # Vendor name resolved from id by the bulk lookup in tree service.
+        assert a1_node["vendorName"] is not None
+        assert a1_node["vendorName"] == a2_node["vendorName"]  # same vendor
 
         assert a2_node["ownerDivision"] == "tmd2"
         assert a2_node["concernedDivision"] == ["tmd1", "others"]

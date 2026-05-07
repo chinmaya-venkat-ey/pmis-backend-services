@@ -17,7 +17,7 @@ and RBAC permission change.
 """
 from typing import Any, Dict, Iterable, List
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
@@ -188,12 +188,27 @@ def _projects_by_vendor(
     summary="List live vendors (newest first)",
     description=(
         "Returns vendors that are not soft-deleted, ordered by createdAt "
-        "descending so the latest vendor is row 0 in Search Vendor."
+        "descending so the latest vendor is row 0 in Search Vendor. "
+        "Active and inactive vendors are returned by default so the FE "
+        "Search Vendor / management view can show the active toggle on "
+        "every row. Pass ``?active_only=true`` (used by picker dropdowns) "
+        "to filter the list down to active vendors only."
     ),
 )
-def list_vendors(request: Request, db: Session = Depends(get_db)) -> JSONResponse:
+def list_vendors(
+    request: Request,
+    active_only: bool = Query(
+        False,
+        description=(
+            "When true, return only active vendors (legacy picker "
+            "behaviour). Default false so management views see "
+            "inactive rows too. Soft-deleted rows are always hidden."
+        ),
+    ),
+    db: Session = Depends(get_db),
+) -> JSONResponse:
     repo = VendorRepository(db)
-    vendors = repo.list_active()
+    vendors = repo.list_active() if active_only else repo.list_all()
     projects_by_vendor = _projects_by_vendor(db, (v.id for v in vendors))
     items = [
         _vendor_to_response(v, projects_by_vendor.get(v.id, []))

@@ -16,7 +16,7 @@ on every response — see [vendors/routes.py](../vendors/routes.py),
 """
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
@@ -532,9 +532,20 @@ def _without_deprecation(response: JSONResponse) -> JSONResponse:
     summary="List live vendors (delegates to GET /api/v3/vendors)",
 )
 def list_master_vendors(
-    request: Request, db: Session = Depends(get_db),
+    request: Request,
+    active_only: bool = Query(
+        False,
+        description=(
+            "When true, return only active vendors (legacy picker "
+            "behaviour). Default false so management views see "
+            "inactive rows too. Soft-deleted rows are always hidden."
+        ),
+    ),
+    db: Session = Depends(get_db),
 ) -> JSONResponse:
-    return _without_deprecation(_vendor_list(request=request, db=db))
+    return _without_deprecation(
+        _vendor_list(request=request, active_only=active_only, db=db),
+    )
 
 
 @router.get(

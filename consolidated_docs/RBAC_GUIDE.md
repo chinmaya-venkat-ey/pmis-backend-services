@@ -1,29 +1,53 @@
 # RBAC Guide — pmis-user-service
 
-This service is the authoritative RBAC source for PMIS. The monolith reads from the same `roles` / `permissions` / `role_permissions` / `user_roles` / `user_permissions` tables (shared DB) but doesn't write — every assignment, grant, role mutation, and permission catalog edit lands here.
+**Last refresh**: 2026-05-08 (post-doc 41 deploy — scoped RBAC live).
 
-This guide is a copy-with-edits of the monolith's `RBAC_GUIDE.md`, scoped to user-mgmt. The mental model + 4-role bundles + lockout protections are identical across the two services because **they share the same `app/core/permissions.py` registry**.
+This service is the authoritative RBAC source for PMIS. The monolith reads from the same `roles` / `permissions` / `role_permissions` / `user_roles` / `user_permissions` / `user_role_assignments` tables (shared DB) but doesn't write to RBAC — every assignment, grant, role mutation, and permission catalog edit lands here. (Monolith does mutate `user_role_assignments` on the alembic migration backfill path during deploy, but at runtime all RBAC writes flow through user-mgmt.)
+
+This guide is a copy-with-edits of the monolith's `RBAC_GUIDE.md`, scoped to user-mgmt. The mental model + role bundles + lockout protections are identical across the two services because **they share the same `app/core/permissions.py` registry**.
 
 ---
 
 ## 1. The model (one paragraph)
 
-A user holds a set of **string permission codes** (`projects:create`, `master_data:manage`, …). The set is the **union** of permissions from every role they're assigned PLUS direct grants from `user_permissions`. The auth middleware loads the set into `request.state.user_permissions` per request via `RbacRepository.effective_permissions_for_user(user_id)`. Each route declares the code it needs via `require_permission("module:action")` — 401 if no token, 403 if the code is missing.
+A user holds a set of **string permission codes** (`projects:create`, `master_data:manage`, …). The effective set is the **union** of:
+- legacy `user_roles` global grants,
+- doc-41 `user_role_assignments` grants (global / org-scoped / project-scoped),
+- direct grants in `user_permissions`.
 
-Four seeded roles: `admin`, `member`, `viewer`, `vendor`. The `admin` role is auto-synced to hold every registered code on every boot, and is **protected** from delete / rename / permission-set mutation through the API.
+Auth middleware hydrates two views per request: the flat union (`request.state.user_permissions: Set[str]`) and the per-scope view (`request.state.scoped_permissions: Dict[(scope_kind, scope_id), Set[str]]`). Routes use `require_permission(code)` for global gates, `require_project_permission(code)` / `require_org_permission(code)` for scoped gates. 401 if no token, 403 if the code is missing at the required scope.
+
+**Nine seeded roles** as of doc 41: legacy four (`admin`, `member`, `viewer`, `vendor`) plus scoped five (`super_admin`, `org_admin`, `project_admin`, `project_member`, `division_member`). `admin` and `super_admin` are auto-synced to hold every registered code on every boot, and `admin` is **protected** from delete / rename / permission-set mutation through the API.
 
 ---
 
-## 2. The four seeded roles
+## 2. The nine seeded roles
 
-| Role | What they can do | What they can't |
-|------|-----------------|-----------------|
-| `admin` | Everything. Auto-synced to every registered permission. | Lockout protections still bite (last-admin lockout, admin-role mutation). |
-| `member` | Default contributor: read/update self, full CRUD on M/A/T/S, read on master data + vendor catalog. | Cannot publish/close/delete projects, no RBAC management, no master_data writes, no `*_all` (admin-tier) flavors. |
-| `viewer` | Read-only across projects + master data. Can download attachments. | No mutations. |
-| `vendor` | External collaborator: full CRUD on M/A/T/S + comments + attachments + own-user update. | Cannot create/publish/close/delete projects, no RBAC management, no master_data writes, no meeting writes, no work_packages access. |
+| Role | Tier | What they can do | What they can't |
+|------|------|-----------------|-----------------|
+| `super_admin` (doc 41) | global | Everything `admin` does + `users:grant_superadmin` (the gate to grant `super_admin` itself). | Nothing inside RBAC — but lockout-protected: last super_admin can't be revoked. |
+| `admin` | global | Everything except granting `super_admin`. Auto-synced. | Cannot grant `super_admin`. Lockout-protected (legacy last-admin guards still apply). |
+| `member` | global | Default contributor: read/update self, full CRUD on M/A/T/S, read on master data + vendor catalog. | Cannot publish/close/delete projects, no RBAC management, no master_data writes, no `*_all` (admin-tier) flavors. |
+| `viewer` | global | Read-only across projects + master data. Can download attachments. | No mutations. |
+| `vendor` | global | External collaborator: full CRUD on M/A/T/S + comments + attachments + own-user update. | Cannot create/publish/close/delete projects, no RBAC management, no master_data writes, no meeting writes, no work_packages access. |
+| `org_admin` (doc 41) | org (vendor) | Manage user / project memberships within their owning vendor. Caller-vs-target rules limit grants to `project_admin` / `project_member` / `division_member` on projects whose owning vendor matches. | Cannot publish/close/delete projects, cannot edit project content, cannot grant `org_admin` or `super_admin`. |
+| `project_admin` (doc 41) | project | Manage tasks/subtasks + project-membership on the specific project the assignment carries. Can grant `project_member` on that project only. | Cannot create projects, cannot grant `project_admin` (only `project_member`), cannot touch master data or RBAC outside their project. |
+| `project_member` (doc 41) | project | Read project + M/A/T/S, contribute task/subtask updates, comment, upload/download attachments. | Cannot delete project content, cannot grant any role, cannot manage milestones/activities create/delete. |
+| `division_member` (doc 41) | project | Read-only at this stage — workbox / approval workflow lands later. | Anything that mutates state. (Scoped to projects so the upcoming inbox can filter by membership.) |
 
-Seeded permission lists live in [`app/core/permissions.py`](../app/core/permissions.py): `MEMBER_ROLE_PERMISSIONS`, `VIEWER_ROLE_PERMISSIONS`, `VENDOR_ROLE_PERMISSIONS`, `ADMIN_ROLE_PERMISSIONS`. The seed loop in `RbacRepository.sync_builtin_permissions` upserts them on every boot.
+Seeded permission lists live in [`app/core/permissions.py`](../app/core/permissions.py). The seed loop in `RbacRepository.sync_builtin_permissions` upserts them on every boot.
+
+### Caller-vs-target gate (doc 41)
+
+Lives in [`app/api/v3/role_assignments/services.py::can_caller_grant`](../app/api/v3/role_assignments/services.py).
+
+| Caller | Can grant |
+|---|---|
+| `super_admin` | any role at any scope (only one who can grant `super_admin`) |
+| `admin` | any role except `super_admin` |
+| `org_admin` of vendor X | `project_admin` / `project_member` / `division_member` on projects in vendor X |
+| `project_admin` of project P | `project_member` on P only |
+| anyone else | nothing |
 
 ---
 
@@ -73,9 +97,22 @@ Operate on a specific user, not on the catalog.
 | `GET /api/v3/users/{id}/permissions` | `permissions:read` | Effective set + direct grants for any user |
 | `POST /api/v3/users/{id}/permissions/{code}` | `rbac:assign` | Direct grant (additive on top of role-derived) |
 | `DELETE /api/v3/users/{id}/permissions/{code}` | `rbac:assign` | Revoke a direct grant |
-| `GET /api/v3/users/{id}/roles` | `permissions:read` | List a user's roles |
-| `POST /api/v3/users/{id}/roles/{role_id}` | `rbac:assign` | Assign a role |
+| `GET /api/v3/users/{id}/roles` | `permissions:read` | List a user's roles (legacy `user_roles`) |
+| `POST /api/v3/users/{id}/roles/{role_id}` | `rbac:assign` | Assign a role (legacy global `user_roles`) |
 | `DELETE /api/v3/users/{id}/roles/{role_id}` | `rbac:assign` | Unassign; **last-admin lockout fires** on the seeded admin role |
+
+### Doc 41 — scoped role assignments + project-mapping views
+
+| Endpoint | Permission | Purpose |
+|---|---|---|
+| `GET /api/v3/users/{id}/role-assignments` | `users:read` (own) / `users:read_all` | List a user's scoped assignments (`user_role_assignments`) |
+| `POST /api/v3/users/{id}/role-assignments` | `rbac:assign` + caller-vs-target gate | Grant a scoped role |
+| `DELETE /api/v3/users/{id}/role-assignments/{aid}` | `rbac:assign` + last-super_admin lockout | Revoke a scoped assignment |
+| `POST /api/v3/projects/{id}/role-assignments` | `rbac:assign` | Project-side create — body must include `userId`; project comes from path |
+| `DELETE /api/v3/projects/{id}/role-assignments/{aid}` | `rbac:assign` | Project-side revoke |
+| `GET /api/v3/projects/{id}/role-assignments` | `project_members:read` | Per-project drill-down view, grouped by role bucket. Powers the FE Project-Mapping mock. |
+| `GET /api/v3/vendors/{id}/projects?expand=role-assignments` | `projects:read_all` OR `org_admin` of vendor | Org-Mgmt landing — projects mapped to a vendor + optional inline role buckets |
+| `GET /api/v3/users/{id}/projects` | `users:read` (own) / `users:read_all` | User-Mgmt landing — projects the user is assigned to + their roles on each |
 
 **There is no deny semantics.** Effective set = `union(role_derived, direct_grants)`. To revoke, delete the source row.
 

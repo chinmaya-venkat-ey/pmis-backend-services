@@ -18,7 +18,8 @@ These are the tables user-mgmt is the authoritative writer for. The monolith may
 | `roles` | Named permission bundles; built-in flag + description | doc 21B |
 | `permissions` | Permission catalog (string codes) | doc 21B |
 | `role_permissions` | M-N junction (role ↔ permission) | doc 21B |
-| `user_roles` | M-N junction (user ↔ role) | doc 21B |
+| `user_roles` | M-N junction (user ↔ role) — legacy global only | doc 21B |
+| `user_role_assignments` | Scoped role assignments (global / org / project); replaces `user_roles` for new writes; legacy rows backfilled in doc-41 alembic migration | doc 41 |
 | `user_permissions` | Direct user-level permission grants (additive) | doc 21B |
 | `revoked_tokens` | JWT JTI blacklist | |
 | `otp_codes` | 2FA OTP rows (hashed) | doc 33 change 3 |
@@ -98,6 +99,28 @@ Catalog of `module:action` codes. Built-ins upserted from `app/core/permissions.
 ### `role_permissions`, `user_roles`, `user_permissions`
 
 Junction tables. Composite PK: `(role_id|user_id, permission_code|role_id)`. `user_roles` and `user_permissions` carry `created_by VARCHAR(36) FK → users(id)`.
+
+### `user_role_assignments` (doc 41)
+
+Scoped role grants. Synthetic `id` PK lets a user hold the same role on multiple projects.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `INTEGER PK autoincrement` | |
+| `user_id` | `VARCHAR(36) NOT NULL FK → users(id)` | indexed |
+| `role_id` | `INTEGER NOT NULL FK → roles(id)` | indexed |
+| `organization_id` | `VARCHAR(36) NULL FK → vendors(id)` | non-NULL ⇒ org scope |
+| `project_id` | `VARCHAR(36) NULL FK → projects(id)` | non-NULL ⇒ project scope |
+| `created_at` | timestamp | |
+| `created_by` | `VARCHAR(36) FK → users(id) NULL` | actor who granted the assignment |
+
+**Constraints**:
+- `ck_ura_single_scope` — `(organization_id IS NULL OR project_id IS NULL)`. Both NULL ⇒ global; exactly one set ⇒ org or project; both set is rejected.
+- `uq_user_role_assignment_scope` — `UNIQUE(user_id, role_id, organization_id, project_id)`.
+
+**Backfill (alembic `d0c41a55145d`, deployed 2026-05-08)**: every legacy `user_roles` row was copied here as `(user, role, NULL, NULL)`; `project_members.roles[]` JSON entries that match a known role name were copied as `(user, role, NULL, project_id)`.
+
+**Lockout**: revoking the last global super_admin row returns 403.
 
 ### `revoked_tokens`
 
@@ -238,3 +261,4 @@ Avoid in shared-DB deploys. Use the standard "expand → migrate → contract" p
 - doc 33 change 3 — 2FA + password reset + notification audit (`otp_codes`, `password_reset_tokens`, `notification_log`).
 - doc 36 — `notification_templates` (DB-backed renderer).
 - doc 37 part 2 — this service brought to monolith parity + monolith proxy.
+- doc 41 — scoped RBAC: `user_role_assignments` with org / project scope; 5 new seeded roles; new `users:grant_superadmin` permission code. Deployed 2026-05-08.

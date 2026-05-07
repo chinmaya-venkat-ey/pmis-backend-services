@@ -183,6 +183,22 @@ Short version:
 - Both repos update the SQLAlchemy model.
 - Deploy monolith first (alembic runs), user-mgmt second.
 
+### Deploy log — recent shared-table migrations
+
+| Date | Doc | Migration | What changed |
+|---|---|---|---|
+| 2026-05-08 | 41 | `d0c41a55145d_doc41_user_role_assignments.py` | Added `user_role_assignments` (org/project scope); backfilled `user_roles` + `project_members.roles[]`. Monolith image `ritamhudait/pmic-backend:v83`; user-mgmt image `ritamhudait/pmis-usermanagement:v13`. **Lesson learned**: an earlier revision id collided with an existing migration; canonical id is `d0c41a55145d`. |
+
+### Rollback recipe — generic shared-DB deploy
+
+If a shared-DB deploy goes bad after the new images are live:
+
+1. **Stop containers**: `docker compose down` in both `pmis-backend/` and `pmis-usermanagement/`.
+2. **Roll images back**: `IMAGE_TAG=<previous_tag> docker compose up -d` (the previous N versions of each image are kept locally; `docker images | grep ritamhudait` lists them). For doc 41 specifically: `IMAGE_TAG=v82` (monolith), `IMAGE_TAG=v11` (user-mgmt).
+3. **Roll the schema back** *only* if the old image cannot start against the new schema. For doc 41 the old image (v82 / v11) is forward-compatible because `user_role_assignments` is additive and the old code never queries it. Skip step 3.
+4. **If schema rollback IS needed**: `alembic downgrade -1` from a one-shot container of the NEW image, OR restore `pmis_db_backup_pre_<doc>_<timestamp>.sql` via `psql`.
+5. **Health check** both services after rollback (`/health` on 8000 + 8001).
+
 ---
 
 ## 7. Pre-deployment checklist

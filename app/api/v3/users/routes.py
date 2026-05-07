@@ -526,30 +526,65 @@ def revoke_user_permission(
 @router.get(
     "/{user_id}/roles",
     dependencies=[require_permission(PERMISSIONS_READ)],
-    summary="List a user's roles",
+    summary=(
+        "List a user's roles "
+        "(DEPRECATED — use GET /api/v3/users/{id}/role-assignments for "
+        "the doc-41 scoped view; this endpoint returns only legacy global "
+        "roles from user_roles)"
+    ),
+    description=(
+        "**Deprecated**. Returns only the legacy global roles a user holds "
+        "(rows in `user_roles`). Doc 41 introduced scoped role assignments "
+        "in `user_role_assignments`, which this endpoint does not surface.\n\n"
+        "**Use instead**: `GET /api/v3/users/{id}/role-assignments`. That "
+        "endpoint returns global, org-scoped, and project-scoped grants "
+        "in one list with their scope key per row.\n\n"
+        "The response carries `Deprecation: true` and "
+        "`Link: </api/v3/users/{id}/role-assignments>; rel=\"successor-version\"` "
+        "so DevTools / API clients can highlight migration targets."
+    ),
 )
 def list_user_roles(
     request: Request, user_id: str, db: Session = Depends(get_db),
 ):
     user = _get_user_or_404(db, user_id)
     if user is None:
-        return BaseController.error(
-            format_error_response("not_found", f"User {user_id} not found."),
-            status=404,
+        return BaseController.stamp_deprecation(
+            BaseController.error(
+                format_error_response("not_found", f"User {user_id} not found."),
+                status=404,
+            ),
+            successor_path=f"/api/v3/users/{user_id}/role-assignments",
         )
     rows = RbacRepository(db).list_roles_for_user(user.id)
-    return BaseController.ok(data={
-        "_type": "Collection",
-        "userId": user.id,
-        "count": len(rows),
-        "_embedded": {"elements": [_serialize_role(r) for r in rows]},
-    })
+    return BaseController.stamp_deprecation(
+        BaseController.ok(data={
+            "_type": "Collection",
+            "userId": user.id,
+            "count": len(rows),
+            "_embedded": {"elements": [_serialize_role(r) for r in rows]},
+        }),
+        successor_path=f"/api/v3/users/{user.id}/role-assignments",
+    )
 
 
 @router.post(
     "/{user_id}/roles/{role_id}",
     dependencies=[require_permission(RBAC_ASSIGN)],
-    summary="Assign a role to a user",
+    summary=(
+        "Assign a role to a user (DEPRECATED — use POST /api/v3/users/"
+        "{id}/role-assignments for scoped assignments)"
+    ),
+    description=(
+        "**Deprecated**. Writes a global-scope grant to the legacy "
+        "`user_roles` table. Doc 41 introduced scope (org / project) on "
+        "role assignments via `user_role_assignments` — this endpoint "
+        "predates that and cannot express scope.\n\n"
+        "**Use instead**: `POST /api/v3/users/{id}/role-assignments` with "
+        "body `{ roleId, organizationId?, projectId? }`. Both scope "
+        "fields omitted ⇒ global (equivalent to this endpoint's effect). "
+        "Caller-vs-target gate enforced server-side."
+    ),
 )
 def assign_user_role(
     request: Request, user_id: str, role_id: int,
@@ -557,30 +592,52 @@ def assign_user_role(
 ):
     user = _get_user_or_404(db, user_id)
     if user is None:
-        return BaseController.error(
-            format_error_response("not_found", f"User {user_id} not found."),
-            status=404,
+        return BaseController.stamp_deprecation(
+            BaseController.error(
+                format_error_response("not_found", f"User {user_id} not found."),
+                status=404,
+            ),
+            successor_path=f"/api/v3/users/{user_id}/role-assignments",
         )
     canonical_id = user.id
     repo = RbacRepository(db)
     if repo.get_role(role_id) is None:
-        return BaseController.error(
-            format_error_response("not_found", f"Role {role_id} not found."),
-            status=404,
+        return BaseController.stamp_deprecation(
+            BaseController.error(
+                format_error_response("not_found", f"Role {role_id} not found."),
+                status=404,
+            ),
+            successor_path=f"/api/v3/users/{canonical_id}/role-assignments",
         )
     actor_id = getattr(request.state, "user_id", None)
     repo.assign_role_to_user(canonical_id, role_id, actor_id=actor_id)
     db.commit()
-    return BaseController.ok(data={
-        "userId": canonical_id,
-        "roles": [_serialize_role(r) for r in repo.list_roles_for_user(canonical_id)],
-    })
+    return BaseController.stamp_deprecation(
+        BaseController.ok(data={
+            "userId": canonical_id,
+            "roles": [_serialize_role(r) for r in repo.list_roles_for_user(canonical_id)],
+        }),
+        successor_path=f"/api/v3/users/{canonical_id}/role-assignments",
+    )
 
 
 @router.delete(
     "/{user_id}/roles/{role_id}",
     dependencies=[require_permission(RBAC_ASSIGN)],
-    summary="Unassign a role from a user (lockout-protected for 'admin')",
+    summary=(
+        "Unassign a role from a user (DEPRECATED — use DELETE /api/v3/"
+        "users/{id}/role-assignments/{aid}; lockout-protected for 'admin')"
+    ),
+    description=(
+        "**Deprecated**. Revokes the legacy global `user_roles` grant. "
+        "Doc 41's `user_role_assignments` rows are NOT affected by this "
+        "endpoint — only the legacy table.\n\n"
+        "**Use instead**: `DELETE /api/v3/users/{id}/role-assignments/"
+        "{assignment_id}`. That path covers both legacy-equivalent "
+        "(global) grants and the new org/project-scoped grants and "
+        "carries the same lockout protection (last super_admin / admin "
+        "cannot be revoked)."
+    ),
 )
 def unassign_user_role(
     request: Request, user_id: str, role_id: int,
@@ -595,24 +652,34 @@ def unassign_user_role(
     canonical_id = user.id
     repo = RbacRepository(db)
     role = repo.get_role(role_id)
+    successor = f"/api/v3/users/{canonical_id}/role-assignments"
     if role is None:
-        return BaseController.error(
-            format_error_response("not_found", f"Role {role_id} not found."),
-            status=404,
+        return BaseController.stamp_deprecation(
+            BaseController.error(
+                format_error_response("not_found", f"Role {role_id} not found."),
+                status=404,
+            ),
+            successor_path=successor,
         )
     # Lockout: removing the last live admin is rejected.
     if role.name == ADMIN_ROLE_NAME:
         currently_holding = repo.user_has_admin_role(canonical_id)
         if currently_holding and repo.count_users_with_role(role_id) <= 1:
-            return BaseController.error(
-                format_error_response(
-                    "forbidden",
-                    "Cannot remove the last user holding the 'admin' role. "
-                    "Assign 'admin' to another user before removing it from "
-                    "this one.",
+            return BaseController.stamp_deprecation(
+                BaseController.error(
+                    format_error_response(
+                        "forbidden",
+                        "Cannot remove the last user holding the 'admin' role. "
+                        "Assign 'admin' to another user before removing it from "
+                        "this one.",
+                    ),
+                    status=403,
                 ),
-                status=403,
+                successor_path=successor,
             )
     repo.unassign_role_from_user(canonical_id, role_id)
     db.commit()
-    return BaseController.no_content()
+    return BaseController.stamp_deprecation(
+        BaseController.no_content(),
+        successor_path=successor,
+    )

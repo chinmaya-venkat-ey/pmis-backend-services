@@ -51,8 +51,23 @@ app = FastAPI(
 
 
 # ---- CORS + middleware order -------------------------------------------
-# Starlette runs middleware in reverse of add order, so Auth → Logging.
-
+# Starlette wraps LIFO: last add_middleware is OUTERMOST.
+#
+# Final order on requests (outermost → innermost):
+#   1. CORSMiddleware (outermost) — handles OPTIONS preflights, stamps
+#      Access-Control-Allow-* on every response. Must be outermost so
+#      it sees responses from auth's early-return paths (revoked JTI,
+#      pre-doc-26 integer user_id claim) and any future middleware
+#      that short-circuits above it. Doc 39 lesson: CORS-as-innermost
+#      strips headers on proxied / short-circuited responses and the
+#      browser blocks them with "failed to fetch."
+#   2. AuthenticationMiddleware — JWT decode + revoked-jti check +
+#      effective-permissions hydration (incl. doc-41 scoped_permissions).
+#   3. LoggingMiddleware (innermost) — request/response logs +
+#      X-Request-Id stamping.
+app.add_middleware(LoggingMiddleware)
+app.add_middleware(AuthenticationMiddleware)
+# CORS added LAST → outermost. See docstring above for why.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -60,8 +75,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-app.add_middleware(LoggingMiddleware)
-app.add_middleware(AuthenticationMiddleware)
 
 
 # ---- Exception handlers ------------------------------------------------

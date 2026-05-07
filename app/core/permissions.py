@@ -355,12 +355,18 @@ ORG_ADMIN_ROLE_PERMISSIONS: List[str] = [
 # project_admin: scoped to a single project. Manages membership +
 # task-level content but cannot publish / close / delete the project,
 # touch master-data, or grant project_admin itself (only project_member).
+#
+# Spec ("manage task and sub-task and add project member") — milestones
+# and activities are READ-ONLY for project_admin: they're navigational
+# anchors above task/subtask, not directly editable. Trimming
+# MILESTONES_UPDATE / ACTIVITIES_UPDATE here keeps the role aligned
+# with the lead's brief.
 PROJECT_ADMIN_ROLE_PERMISSIONS: List[str] = [
     USERS_READ, PROJECTS_READ,
     PROJECT_MEMBERS_READ, PROJECT_MEMBERS_ADD,
     PROJECT_MEMBERS_UPDATE, PROJECT_MEMBERS_DELETE,
-    MILESTONES_READ, MILESTONES_UPDATE,
-    ACTIVITIES_READ, ACTIVITIES_UPDATE,
+    MILESTONES_READ,
+    ACTIVITIES_READ,
     TASKS_CREATE, TASKS_READ, TASKS_UPDATE, TASKS_DELETE,
     SUBTASKS_CREATE, SUBTASKS_READ, SUBTASKS_UPDATE, SUBTASKS_DELETE,
     COMMENTS_CREATE, COMMENTS_READ, COMMENTS_DELETE,

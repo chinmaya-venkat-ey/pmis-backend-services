@@ -13,9 +13,11 @@ from ....shared.datetime import IstCalendarDate
 class MilestoneCreateRequest(BaseModel):
     """Request body for creating a milestone under a project.
 
-    Doc 38: trimmed to name + description + dates only. Status,
-    dependsOn, vendors, and position are no longer accepted on create —
-    set them via PATCH after the row exists.
+    Unified shape (post-doc 39 follow-up): create accepts the same
+    superset of fields as PATCH. Required fields stay required;
+    everything else is optional and falls back to a sensible default
+    on omission. ``status`` defaults to ``not_completed`` if omitted;
+    ``dependsOn`` defaults to ``[]`` (no edges).
     """
     model_config = ConfigDict(populate_by_name=True)
 
@@ -26,6 +28,11 @@ class MilestoneCreateRequest(BaseModel):
     # encoding mismatches.
     start_date: IstCalendarDate = Field(..., alias="startDate")
     end_date: IstCalendarDate = Field(..., alias="endDate")
+    position: Optional[int] = Field(None, ge=0)
+    # Optional on create; if omitted the service defaults to ``not_completed``.
+    status: Optional[str] = None
+    # Optional on create. List of milestone UUIDs or display labels (M1, M2, …).
+    depends_on: Optional[List[str]] = Field(None, alias="dependsOn")
 
     @field_validator("end_date")
     @classmethod
@@ -33,6 +40,19 @@ class MilestoneCreateRequest(BaseModel):
         start = info.data.get("start_date")
         if start is not None and v < start:
             raise ValueError("End date cannot be before the start date.")
+        return v
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def _validate_status(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, str):
+            v = v.strip().lower()
+        if v not in MILESTONE_STATUS_CHOICES:
+            raise ValueError(
+                f"Milestone status must be one of: {', '.join(MILESTONE_STATUS_CHOICES)}."
+            )
         return v
 
 

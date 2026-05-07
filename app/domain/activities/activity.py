@@ -2,7 +2,7 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List, Optional, Tuple
-from ...shared.datetime import iso_utc
+from ...shared.datetime import iso_ist
 
 
 # Enum-style constants for type validation.
@@ -90,10 +90,10 @@ class Activity:
             "name": self.name,
             "description": self.description,
             "type": self.type,
-            "start_date": iso_utc(self.start_date),
-            "end_date": iso_utc(self.end_date),
-            "actual_start_date": iso_utc(self.actual_start_date),
-            "actual_end_date": iso_utc(self.actual_end_date),
+            "start_date": iso_ist(self.start_date),
+            "end_date": iso_ist(self.end_date),
+            "actual_start_date": iso_ist(self.actual_start_date),
+            "actual_end_date": iso_ist(self.actual_end_date),
             "position": self.position,
             "resource_mode": self.resource_mode,
             "resource_count": self.resource_count,
@@ -103,9 +103,9 @@ class Activity:
             "concerned_division": self.concerned_division,
             "concerned_divisions": list(self.concerned_divisions) if self.concerned_divisions else None,
             "vendor_id": self.vendor_id,
-            "created_at": iso_utc(self.created_at),
-            "updated_at": iso_utc(self.updated_at),
+            "created_at": iso_ist(self.created_at),
+            "updated_at": iso_ist(self.updated_at),
             "created_by": self.created_by,
             "updated_by": self.updated_by,
-            "deleted_at": iso_utc(self.deleted_at),
+            "deleted_at": iso_ist(self.deleted_at),
         }

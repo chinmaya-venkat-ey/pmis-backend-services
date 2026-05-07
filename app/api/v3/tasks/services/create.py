@@ -33,6 +33,13 @@ from .....domain.tasks.task import (
     RESOURCE_MODE_COUNT,
     RESOURCE_MODE_DETAILS,
 )
+
+
+# Doc 38: task status accepts any string on the wire (no catalog yet).
+# The only enforced rule on create is the completion gate — if the
+# caller wants to start the row off as "completed", every dep target
+# must already be "completed" too.
+_STATUS_COMPLETED = "completed"
 from .....domain.tasks.task_resource import TaskResource
 
 
@@ -79,6 +86,8 @@ def create_task(
     # ``type`` to support a future cross-type-mapping endpoint; when None,
     # the parent activity's type is used.
     type: Optional[str] = None,
+    # Unified create/update shape: status is now optional on create.
+    status: Optional[str] = None,
 ) -> Tuple[Task, Optional[TaskResource]]:
     activity = (
         db.query(ActivityModel)
@@ -189,6 +198,24 @@ def create_task(
         )
         desired_deps = candidates
 
+    # Status-completion gate: if the caller wants to start the row off
+    # as 'completed', every dep target must already be completed too.
+    # Mirrors the PATCH-time gate in update_task.
+    if status == _STATUS_COMPLETED and desired_deps:
+        rows = (
+            db.query(TaskModel.id, TaskModel.name, TaskModel.status)
+            .filter(TaskModel.id.in_(desired_deps))
+            .all()
+        )
+        blockers = [r for r in rows if (r[2] or "") != _STATUS_COMPLETED]
+        if blockers:
+            names = ", ".join(f"'{b[1]}'" for b in blockers[:3])
+            more = "" if len(blockers) <= 3 else f" (+{len(blockers) - 3} more)"
+            raise ValidationError(
+                f"Cannot create this task as completed — the following "
+                f"dependency target(s) are not yet completed: {names}{more}.",
+            )
+
         # Doc 27: source.start_date >= target.end_date for every dep target.
         if desired_deps:
             target_rows = (
@@ -241,6 +268,7 @@ def create_task(
         created_by=current_user_id,
         resource_mode=store_mode,
         resource_count=store_count,
+        status=status,
     )
     resource_domain = None
     if type == TASK_TYPE_RESOURCE and resource_mode == RESOURCE_MODE_DETAILS:

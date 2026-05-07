@@ -128,11 +128,13 @@ class TaskController:
             activity_id=activity_id,
             name=data.name, description=data.description,
             start_date=data.start_date, end_date=data.end_date,
-            actual_start_date=None, actual_end_date=None,
-            position=None,
+            actual_start_date=data.actual_start_date,
+            actual_end_date=data.actual_end_date,
+            position=data.position,
             resource_mode=None, resource_count=None,
             resource=None, current_user_id=cuid,
-            depends_on=None,
+            depends_on=data.depends_on,
+            status=data.status,
         )
         idx = build_label_index_for_project(db, t.project_id)
         return BaseController.created(data=format_task_response(
@@ -210,11 +212,13 @@ class TaskController:
             activity_id=activity_id,
             name=data.name, description=data.description,
             start_date=data.start_date, end_date=data.end_date,
-            actual_start_date=None, actual_end_date=None,
-            position=None,
+            actual_start_date=data.actual_start_date,
+            actual_end_date=data.actual_end_date,
+            position=data.position,
             resource_mode=None, resource_count=None,
             resource=None, current_user_id=cuid,
-            depends_on=None,
+            depends_on=data.depends_on,
+            status=data.status,
         )
 
         # ---- 3. Inline comment / standalone attachments ----------------

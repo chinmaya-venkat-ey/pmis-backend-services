@@ -205,6 +205,23 @@ def create_activity(
                 kind_singular="activity",
             )
 
+    # Status-completion gate: if the caller wants to start the row off
+    # as 'completed', every dep target must already be completed too.
+    if resolved_status == "completed" and desired_deps:
+        rows = (
+            db.query(ActivityModel.id, ActivityModel.name, ActivityModel.status)
+            .filter(ActivityModel.id.in_(desired_deps))
+            .all()
+        )
+        blockers = [r for r in rows if (r[2] or "") != "completed"]
+        if blockers:
+            names = ", ".join(f"'{b[1]}'" for b in blockers[:3])
+            more = "" if len(blockers) <= 3 else f" (+{len(blockers) - 3} more)"
+            raise ValidationError(
+                f"Cannot create this activity as completed — the following "
+                f"dependency target(s) are not yet completed: {names}{more}.",
+            )
+
     repo = ActivityRepository(db)
     # Doc 30 follow-up: auto-bump on position collision (see milestone
     # create service for full rationale). Caller-supplied position that

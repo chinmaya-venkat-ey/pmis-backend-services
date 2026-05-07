@@ -114,6 +114,10 @@ def iso_utc(dt: Optional[datetime]) -> Optional[str]:
     type guarantees stored values are canonical naive UTC; this helper
     guarantees responses re-attach the ``+00:00`` so FE never sees a
     bare naive datetime.
+
+    Note: kept for internal records (audit logs, debug payloads). Wire
+    responses now emit IST via ``iso_ist`` so the FE round-trips IST
+    inputs without converting on every render.
     """
     if dt is None:
         return None
@@ -122,6 +126,31 @@ def iso_utc(dt: Optional[datetime]) -> Optional[str]:
     else:
         dt = dt.astimezone(timezone.utc)
     return dt.isoformat()
+
+
+def iso_ist(dt: Optional[datetime]) -> Optional[str]:
+    """Format a datetime as a tz-aware IST ISO 8601 string.
+
+    Doc 39 follow-up: the FE picks calendar dates in IST and sends them
+    back as ``YYYY-MM-DDTHH:MM:SS+05:30``. Emitting wire responses in
+    the same zone (``+05:30``) lets the FE round-trip its own input
+    without an extra UTC→IST conversion on every render.
+
+    Pairs with ``IstCalendarDate`` input normalization: incoming dates
+    are collapsed to IST midnight; storage flips to canonical naive
+    UTC; this helper flips back to IST on the way out so the wire is
+    symmetric in IST.
+
+    Behavior:
+      - ``None`` → ``None``
+      - Naive datetime → assumed UTC; converted to IST.
+      - tz-aware datetime → converted to IST.
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(IST).isoformat()
 
 
 def parse_datetime(dt_str: str) -> Optional[datetime]:

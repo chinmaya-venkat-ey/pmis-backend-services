@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List, Optional
 
-from ...shared.datetime import iso_utc
+from ...shared.datetime import iso_ist
 
 
 @dataclass
@@ -37,7 +37,7 @@ class AttachmentInfo:
             "filename": self.filename,
             "mimeType": self.mime_type,
             "sizeBytes": self.size_bytes,
-            "uploadedAt": iso_utc(self.uploaded_at),
+            "uploadedAt": iso_ist(self.uploaded_at),
         }
 
     @classmethod
@@ -104,9 +104,9 @@ class Comment:
                 "last_name": self.author_last_name,
                 "email": self.author_email,
             },
-            "created_at": iso_utc(self.created_at),
-            "updated_at": iso_utc(self.updated_at),
-            "deleted_at": iso_utc(self.deleted_at),
+            "created_at": iso_ist(self.created_at),
+            "updated_at": iso_ist(self.updated_at),
+            "deleted_at": iso_ist(self.deleted_at),
             "attachments": [a.to_dict() for a in (self.attachments or [])],
         }
 

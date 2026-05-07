@@ -36,6 +36,7 @@ class SubtaskRepository:
             position=s.position,
             resource_mode=s.resource_mode,
             resource_count=s.resource_count,
+            status=getattr(s, "status", None),
             created_at=s.created_at,
             updated_at=s.updated_at,
             created_by=s.created_by,
@@ -259,6 +260,7 @@ class SubtaskRepository:
         resource_mode: Optional[str] = None,
         resource_count: Optional[int] = None,
         parent_subtask_id: Optional[str] = None,
+        status: Optional[str] = None,
     ) -> Subtask:
         s = SubtaskModel(
             project_id=project_id,
@@ -274,6 +276,7 @@ class SubtaskRepository:
             position=position,
             resource_mode=resource_mode,
             resource_count=resource_count,
+            status=status,
             created_by=created_by,
             updated_by=created_by,
         )

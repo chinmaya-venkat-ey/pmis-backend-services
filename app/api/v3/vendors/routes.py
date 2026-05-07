@@ -30,6 +30,7 @@ from ....infrastructure.db.models.project import ProjectModel
 from ....infrastructure.db.models.project_vendor import ProjectVendorModel
 from ....infrastructure.db.repositories.vendor_repository import VendorRepository
 from ....infrastructure.db.session import get_db
+from ....shared.datetime import iso_ist
 from .schemas import VendorCreateRequest, VendorUpdateRequest
 
 
@@ -86,7 +87,7 @@ def _project_entry(*, id, project_code, name, status, created_at) -> Dict[str, A
         "projectCode": project_code,
         "name": name,
         "status": status,
-        "createdAt": created_at.isoformat() if created_at else None,
+        "createdAt": iso_ist(created_at),
     }
 
 

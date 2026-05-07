@@ -235,11 +235,13 @@ class SubtaskController:
             # from the parent task. Cross-type mapping reserved for future.
             name=data.name, description=data.description,
             start_date=data.start_date, end_date=data.end_date,
-            actual_start_date=None, actual_end_date=None,
-            position=None,
+            actual_start_date=data.actual_start_date,
+            actual_end_date=data.actual_end_date,
+            position=data.position,
             resource_mode=None, resource_count=None,
             resource=None, current_user_id=cuid,
-            depends_on=None,
+            depends_on=data.depends_on,
+            status=data.status,
         )
         idx = build_label_index_for_project(db, s.project_id)
         return BaseController.created(data=format_subtask_response(
@@ -265,13 +267,14 @@ class SubtaskController:
             parent_subtask_id=parent_subtask_id,
             name=data.name, description=data.description,
             start_date=data.start_date, end_date=data.end_date,
-            actual_start_date=None,
-            actual_end_date=None,
-            position=None,
+            actual_start_date=data.actual_start_date,
+            actual_end_date=data.actual_end_date,
+            position=data.position,
             resource_mode=None,
             resource_count=None,
             resource=None, current_user_id=cuid,
-            depends_on=None,
+            depends_on=data.depends_on,
+            status=data.status,
         )
         idx = build_label_index_for_project(db, s.project_id)
         return BaseController.created(data=format_subtask_response(
@@ -303,11 +306,13 @@ class SubtaskController:
             task_id=task_id,
             name=data.name, description=data.description,
             start_date=data.start_date, end_date=data.end_date,
-            actual_start_date=None, actual_end_date=None,
-            position=None,
+            actual_start_date=data.actual_start_date,
+            actual_end_date=data.actual_end_date,
+            position=data.position,
             resource_mode=None, resource_count=None,
             resource=None, current_user_id=cuid,
-            depends_on=None,
+            depends_on=data.depends_on,
+            status=data.status,
         )
         return _persist_subtask_inline(request, db, s, r, body, files)
 
@@ -340,12 +345,13 @@ class SubtaskController:
             parent_subtask_id=parent_subtask_id,
             name=data.name, description=data.description,
             start_date=data.start_date, end_date=data.end_date,
-            actual_start_date=None,
-            actual_end_date=None,
-            position=None,
+            actual_start_date=data.actual_start_date,
+            actual_end_date=data.actual_end_date,
+            position=data.position,
             resource_mode=None, resource_count=None,
             resource=None, current_user_id=cuid,
-            depends_on=None,
+            depends_on=data.depends_on,
+            status=data.status,
         )
         return _persist_subtask_inline(request, db, s, r, body, files)
 

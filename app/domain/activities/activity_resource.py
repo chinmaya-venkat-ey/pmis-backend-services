@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from typing import Optional
-from ...shared.datetime import iso_utc
+from ...shared.datetime import iso_ist
 
 
 @dataclass
@@ -43,10 +43,10 @@ class ActivityResource:
             "activity_id": self.activity_id,
             "project_id": self.project_id,
             "resource_name": self.resource_name,
-            "onboard_date": iso_utc(self.onboard_date),
-            "actual_onboard_date": iso_utc(self.actual_onboard_date),
-            "offboard_date": iso_utc(self.offboard_date),
-            "actual_offboard_date": iso_utc(self.actual_offboard_date),
+            "onboard_date": iso_ist(self.onboard_date),
+            "actual_onboard_date": iso_ist(self.actual_onboard_date),
+            "offboard_date": iso_ist(self.offboard_date),
+            "actual_offboard_date": iso_ist(self.actual_offboard_date),
             "position": self.position,
             "designation": self.designation,
             "job_role": self.job_role,
@@ -55,7 +55,7 @@ class ActivityResource:
             "type_of_resource_id": self.type_of_resource_id,
             "division": self.division,
             "division_other": self.division_other,
-            "created_at": iso_utc(self.created_at),
-            "updated_at": iso_utc(self.updated_at),
-            "deleted_at": iso_utc(self.deleted_at),
+            "created_at": iso_ist(self.created_at),
+            "updated_at": iso_ist(self.updated_at),
+            "deleted_at": iso_ist(self.deleted_at),
         }

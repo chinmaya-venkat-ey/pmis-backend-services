@@ -4,7 +4,7 @@ Project audit log domain entity.
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional, Any, Dict
-from ...shared.datetime import iso_utc
+from ...shared.datetime import iso_ist
 
 
 @dataclass
@@ -29,5 +29,5 @@ class ProjectAuditLog:
             "action": self.action,
             "before": self.before,
             "after": self.after,
-            "created_at": iso_utc(self.created_at),
+            "created_at": iso_ist(self.created_at),
         }

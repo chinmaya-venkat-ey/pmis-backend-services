@@ -146,6 +146,8 @@ def create_subtask(
     # type from the parent task. Service callers may still pass an
     # explicit type to support a future cross-type-mapping endpoint.
     type: Optional[str] = None,
+    # Unified create/update shape: status is now optional on create.
+    status: Optional[str] = None,
 ) -> Tuple[Subtask, Optional[SubtaskResource]]:
     task, parent_subtask, new_depth = _resolve_parent(
         db, task_id=task_id, parent_subtask_id=parent_subtask_id,
@@ -271,6 +273,23 @@ def create_subtask(
                 kind_singular="subtask",
             )
 
+    # Status-completion gate: if the caller wants to start the row off
+    # as 'completed', every dep target must already be completed too.
+    if status == "completed" and desired_deps:
+        rows = (
+            db.query(SubtaskModel.id, SubtaskModel.name, SubtaskModel.status)
+            .filter(SubtaskModel.id.in_(desired_deps))
+            .all()
+        )
+        blockers = [r for r in rows if (r[2] or "") != "completed"]
+        if blockers:
+            names = ", ".join(f"'{b[1]}'" for b in blockers[:3])
+            more = "" if len(blockers) <= 3 else f" (+{len(blockers) - 3} more)"
+            raise ValidationError(
+                f"Cannot create this subtask as completed — the following "
+                f"dependency target(s) are not yet completed: {names}{more}.",
+            )
+
     repo = SubtaskRepository(db)
     # Doc 30 follow-up: auto-bump on position collision (see milestone
     # create service for full rationale). Subtasks have two scopes:
@@ -308,6 +327,7 @@ def create_subtask(
         created_by=current_user_id,
         resource_mode=store_mode,
         resource_count=store_count,
+        status=status,
     )
     resource_domain = None
     if type == SUBTASK_TYPE_RESOURCE and resource_mode == RESOURCE_MODE_DETAILS:

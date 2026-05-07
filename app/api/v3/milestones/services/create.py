@@ -140,6 +140,24 @@ def create_milestone(
                 source_start=start_date, source_end=end_date,
             )
 
+    # Status-completion gate: if the caller wants to start the row off
+    # as 'completed', every dep target must already be completed too.
+    # Mirrors the PATCH-time gate in update_milestone.
+    if resolved_status == "completed" and desired_deps:
+        rows = (
+            db.query(MilestoneModel.id, MilestoneModel.name, MilestoneModel.status)
+            .filter(MilestoneModel.id.in_(desired_deps))
+            .all()
+        )
+        blockers = [r for r in rows if (r[2] or "") != "completed"]
+        if blockers:
+            names = ", ".join(f"'{b[1]}'" for b in blockers[:3])
+            more = "" if len(blockers) <= 3 else f" (+{len(blockers) - 3} more)"
+            raise ValidationError(
+                f"Cannot create this milestone as completed — the following "
+                f"dependency target(s) are not yet completed: {names}{more}.",
+            )
+
     vendor_repo = VendorRepository(db)
     resolved_vendor_ids: List[str] = []
     if vendor_ids:

@@ -36,6 +36,7 @@ class TaskRepository:
             position=t.position,
             resource_mode=t.resource_mode,
             resource_count=t.resource_count,
+            status=getattr(t, "status", None),
             created_at=t.created_at,
             updated_at=t.updated_at,
             created_by=t.created_by,
@@ -132,6 +133,7 @@ class TaskRepository:
         position: int, created_by: Optional[str],
         resource_mode: Optional[str] = None,
         resource_count: Optional[int] = None,
+        status: Optional[str] = None,
     ) -> Task:
         t = TaskModel(
             project_id=project_id,
@@ -146,6 +148,7 @@ class TaskRepository:
             position=position,
             resource_mode=resource_mode,
             resource_count=resource_count,
+            status=status,
             created_by=created_by,
             updated_by=created_by,
         )

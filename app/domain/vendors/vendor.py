@@ -2,7 +2,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
-from ...shared.datetime import iso_utc
+from ...shared.datetime import iso_ist
 
 
 @dataclass
@@ -38,8 +38,8 @@ class Vendor:
             "email": self.email,
             "contact_person": self.contact_person,
             "phone_number": self.phone_number,
-            "created_at": iso_utc(self.created_at),
-            "updated_at": iso_utc(self.updated_at),
-            "deleted_at": iso_utc(self.deleted_at),
+            "created_at": iso_ist(self.created_at),
+            "updated_at": iso_ist(self.updated_at),
+            "deleted_at": iso_ist(self.deleted_at),
             "deleted_by": self.deleted_by,
         }

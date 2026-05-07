@@ -3,7 +3,7 @@ classification."""
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Tuple
-from ...shared.datetime import iso_utc
+from ...shared.datetime import iso_ist
 
 
 # Canonical well-known codes. The `resource_types` table is the source of
@@ -41,6 +41,6 @@ class ResourceType:
             "code": self.code,
             "name": self.name,
             "active": self.active,
-            "created_at": iso_utc(self.created_at),
-            "updated_at": iso_utc(self.updated_at),
+            "created_at": iso_ist(self.created_at),
+            "updated_at": iso_ist(self.updated_at),
         }

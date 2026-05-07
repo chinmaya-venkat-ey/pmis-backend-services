@@ -112,11 +112,13 @@ class MilestoneController:
             description=data.description,
             start_date=data.start_date,
             end_date=data.end_date,
-            position=None,  # doc 38: position is PATCH-only
+            position=data.position,
             current_user_id=current_user_id,
-            status=None,  # doc 38: status is PATCH-only
-            depends_on=None,  # doc 38: dependsOn is PATCH-only
-            vendor_ids=None,  # doc 38: vendors are PATCH-only
+            status=data.status,
+            depends_on=data.depends_on,
+            # Doc 39: vendors removed from milestone wire surface; service
+            # still accepts the kwarg for legacy callers.
+            vendor_ids=None,
         )
         idx = build_label_index_for_project(db, project_id)
         return BaseController.created(data=format_milestone_response(m.to_dict(), idx))
@@ -219,11 +221,13 @@ class MilestoneController:
             description=data.description,
             start_date=data.start_date,
             end_date=data.end_date,
-            position=None,  # doc 38: position is PATCH-only
+            position=data.position,
             current_user_id=current_user_id,
-            status=None,  # doc 38: status is PATCH-only
-            depends_on=None,  # doc 38: dependsOn is PATCH-only
-            vendor_ids=None,  # doc 38: vendors are PATCH-only
+            status=data.status,
+            depends_on=data.depends_on,
+            # Doc 39: vendors removed from milestone wire surface; service
+            # still accepts the kwarg for legacy callers.
+            vendor_ids=None,
         )
 
         # ---- 3. Inline comment / attachments (optional) ------------------

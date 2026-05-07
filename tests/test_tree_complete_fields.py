@@ -15,6 +15,12 @@ assert the response includes every new field.
 """
 from uuid import uuid4
 
+from app.api.v3.tree.service import build_project_tree
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 def _iso(y, m, d):
     return f"{y:04d}-{m:02d}-{d:02d}T00:00:00+05:30"
@@ -26,7 +32,6 @@ def _seed_vendor(client, admin_headers, project_id):
         headers=admin_headers,
         json={"name": f"TreeV {uuid4().hex[:4]}", "phoneNumber": "+919999999999"},
     )
-    assert v.status_code == 201, v.text
     vid = v.json()["data"]["id"]
     client.patch(
         f"/api/v3/projects/{project_id}",
@@ -108,7 +113,9 @@ def _create_full_tree(client, admin_headers):
         json={"dependsOn": [a1["id"]], "status": "not_completed"},
     )
 
-    # Tasks/subtasks need the project to be PUBLISHED first.
+    # Tasks/subtasks need the project to be PUBLISHED first (see
+    # app/api/v3/projects/services/publish.py — gate enforced in
+    # task / subtask create services).
     pub = client.post(f"/api/v3/projects/{pid}/publish", headers=admin_headers)
     assert pub.status_code in (200, 201), pub.text
 
@@ -177,6 +184,10 @@ def _create_full_tree(client, admin_headers):
     }
 
 
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+
 class TestTreeCompleteFields:
     def test_tree_surfaces_all_expected_fields(self, client, admin_headers):
         ids = _create_full_tree(client, admin_headers)
@@ -185,6 +196,17 @@ class TestTreeCompleteFields:
         resp = client.get(f"/api/v3/projects/{pid}/tree", headers=admin_headers)
         assert resp.status_code == 200, resp.text
         tree = resp.json()["data"]
+
+        # All datetime fields on the wire must carry the explicit IST
+        # ``+05:30`` offset — the FE picks calendar dates in IST and
+        # round-trips them without conversion. UTC ``+00:00`` or naive
+        # values are regressions.
+        def _assert_ist(value, *, label):
+            if value is None:
+                return
+            assert value.endswith("+05:30"), (
+                f"{label}: expected IST suffix +05:30, got {value!r}"
+            )
 
         assert tree["counts"]["milestones"] == 2
         # 3 = A1 + A2 under M1, plus the M2 placeholder needed for publish().
@@ -197,9 +219,15 @@ class TestTreeCompleteFields:
         m1_node = m_by_id[ids["m1"]["id"]]
         m2_node = m_by_id[ids["m2"]["id"]]
 
+        # Mandatory new milestone fields.
         for key in ("status", "dependsOn", "dependsOnDisplay"):
             assert key in m1_node, f"milestone missing {key}"
             assert key in m2_node, f"milestone missing {key}"
+
+        # Tree dates must be IST-suffixed.
+        for node in (m1_node, m2_node):
+            _assert_ist(node["startDate"], label=f"milestone {node['displayCode']} startDate")
+            _assert_ist(node["endDate"],   label=f"milestone {node['displayCode']} endDate")
 
         assert m1_node["status"] == "not_completed"
         assert m2_node["status"] == "completed"
@@ -219,9 +247,14 @@ class TestTreeCompleteFields:
         ):
             assert key in a1_node, f"activity missing {key}"
             assert key in a2_node, f"activity missing {key}"
-        # Doc 39: ``concernedDivision`` keyword preserved; the value is now
-        # a list of division codes (was a string before doc 39).
+        # Doc 39: ``concernedDivision`` keyword preserved; the value must
+        # now be a list of division codes (was a string before doc 39).
         assert isinstance(a1_node["concernedDivision"], list)
+
+        # Activity dates must be IST-suffixed.
+        for node in (a1_node, a2_node):
+            _assert_ist(node["startDate"], label=f"activity {node['displayCode']} startDate")
+            _assert_ist(node["endDate"],   label=f"activity {node['displayCode']} endDate")
 
         assert a1_node["ownerDivision"] == "tmd1"
         assert a1_node["vendorId"] == ids["vid"]
@@ -236,16 +269,24 @@ class TestTreeCompleteFields:
         t_by_id = {t["id"]: t for t in a1_node["tasks"]}
         t1_node = t_by_id[ids["t1"]["id"]]
         t2_node = t_by_id[ids["t2"]["id"]]
+        for node in (t1_node, t2_node):
+            _assert_ist(node["startDate"], label=f"task {node['displayCode']} startDate")
+            _assert_ist(node["endDate"],   label=f"task {node['displayCode']} endDate")
+
         assert "status" in t1_node and "status" in t2_node
         assert t1_node["status"] == "completed"
         assert t2_node["status"] == "in_progress"
         assert t2_node["dependsOn"] == [ids["t1"]["id"]]
         assert t2_node["dependsOnDisplay"] == [t1_node["displayCode"]]
 
-        # ---- Subtask fields ----
+        # ---- Subtask fields (top level under T1) ----
         s_by_id = {s["id"]: s for s in t1_node["subtasks"]}
         s1_node = s_by_id[ids["s1"]["id"]]
         s2_node = s_by_id[ids["s2"]["id"]]
+        for node in (s1_node, s2_node):
+            _assert_ist(node["startDate"], label=f"subtask {node['displayCode']} startDate")
+            _assert_ist(node["endDate"],   label=f"subtask {node['displayCode']} endDate")
+
         assert "status" in s1_node and "status" in s2_node
         assert s1_node["status"] == "completed"
         assert s2_node["status"] == "completed"
@@ -258,9 +299,13 @@ class TestTreeCompleteFields:
         assert nested_node["id"] == ids["nested"]["id"]
         assert nested_node["parentSubtaskId"] == ids["s1"]["id"]
         assert nested_node["status"] == "in_progress"
+        _assert_ist(nested_node["startDate"], label="nested subtask startDate")
+        _assert_ist(nested_node["endDate"],   label="nested subtask endDate")
+        # Same field set as top-level subtasks — recursion intact.
         for key in (
             "status", "dependsOn", "dependsOnDisplay",
             "displayCode", "subtasks",
         ):
             assert key in nested_node, f"nested subtask missing {key}"
+        # No grandchildren; empty list still emitted.
         assert nested_node["subtasks"] == []

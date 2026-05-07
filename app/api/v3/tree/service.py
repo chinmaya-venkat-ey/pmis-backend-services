@@ -7,7 +7,8 @@ activity_resources, tasks, task_resources, subtasks, subtask_resources).
 
 Returns a dict ready to serialize via api_response envelope.
 """
-from typing import Any, Dict, List, Optional
+from datetime import date as _date_type, datetime
+from typing import Any, Dict, List, Optional, Tuple
 from collections import defaultdict
 
 from sqlalchemy.orm import Session
@@ -25,6 +26,7 @@ from ....infrastructure.db.models.task_resource import TaskResourceModel
 from ....infrastructure.db.models.subtask import SubtaskModel
 from ....infrastructure.db.models.subtask_dependency import SubtaskDependencyModel
 from ....infrastructure.db.models.subtask_resource import SubtaskResourceModel
+from ....shared.datetime import IST, iso_ist
 from ....shared.labels import (
     KIND_ACTIVITY,
     KIND_MILESTONE,
@@ -35,7 +37,83 @@ from ....shared.labels import (
 
 
 def _iso(v) -> Optional[str]:
-    return v.isoformat() if v else None
+    """Emit datetimes in IST with explicit ``+05:30`` offset, matching
+    the rest of the wire surface. Naive stored values are treated as
+    UTC (per ``UtcDateTime`` storage contract) before conversion."""
+    return iso_ist(v)
+
+
+def _ist_calendar_date(dt: Optional[datetime]) -> Optional[_date_type]:
+    """IST-local calendar date for a UtcDateTime column.
+
+    Stored M/A/T/S start/end dates are IST midnight (see
+    ``shared.datetime.to_ist_calendar_midnight``); ``.date()`` on a
+    UTC-stored value would shift the calendar by 5h30m, so we explicitly
+    convert to IST first.
+    """
+    if dt is None:
+        return None
+    # Stored values are tz-aware UTC after the UtcDateTime bind. Naive
+    # values in old test fixtures are treated as UTC for safety.
+    if dt.tzinfo is None:
+        from datetime import timezone as _tz
+        dt = dt.replace(tzinfo=_tz.utc)
+    return dt.astimezone(IST).date()
+
+
+def _schedule_status(
+    start_date: Optional[datetime],
+    end_date: Optional[datetime],
+    today: _date_type,
+) -> Tuple[str, Optional[int]]:
+    """Compute schedule status + delay days from expected start/end only.
+
+    Returns a tuple ``(status, days_delayed)`` where:
+      * ``status`` is one of ``"not_started"``, ``"in_progress"``,
+        ``"delayed"``.
+      * ``days_delayed`` is the integer count of calendar days past the
+        expected end date when ``status == "delayed"``; ``None``
+        otherwise. Callers omit the field from the response unless it's
+        non-None.
+
+    Logic is purely based on **expected** start/end dates and the IST
+    calendar today — actual dates are intentionally not consulted.
+    Rationale: the field answers "is this on schedule?", not "is this
+    done?". Items completed before/on their deadline still appear as
+    ``in_progress`` until ``today > end_date``; items completed late
+    appear as ``delayed`` (the delay calc uses ``end_date``, not the
+    actual completion date).
+
+    Defensive default for legacy rows missing one of the dates:
+    ``("not_started", None)``.
+    """
+    if start_date is None or end_date is None:
+        return "not_started", None
+    sd = _ist_calendar_date(start_date)
+    ed = _ist_calendar_date(end_date)
+    if sd is None or ed is None:
+        return "not_started", None
+    if today < sd:
+        return "not_started", None
+    if today <= ed:
+        return "in_progress", None
+    return "delayed", (today - ed).days
+
+
+def _attach_schedule_status(
+    payload: Dict[str, Any],
+    start_date: Optional[datetime],
+    end_date: Optional[datetime],
+    today: _date_type,
+) -> Dict[str, Any]:
+    """Add ``scheduleStatus`` (always) and ``daysDelayed`` (only when
+    delayed) to ``payload`` in place, returning the same dict for
+    fluent use."""
+    status, delay = _schedule_status(start_date, end_date, today)
+    payload["scheduleStatus"] = status
+    if delay is not None:
+        payload["daysDelayed"] = delay
+    return payload
 
 
 def _resource_payload(r) -> Dict[str, Any]:
@@ -61,6 +139,11 @@ def build_project_tree(db: Session, project_id: str, include_deleted: bool = Fal
         raise NotFoundError(f"Project with ID {project_id} not found")
     if not include_deleted and getattr(project, "deleted_at", None) is not None:
         raise NotFoundError(f"Project with ID {project_id} has been deleted")
+
+    # Single "today" reference for the entire tree — sampled once so every
+    # node gets a consistent verdict even on a slow request that straddles
+    # IST midnight.
+    today_ist: _date_type = datetime.now(IST).date()
 
     # All queries filter by the denormalized project_id (one index per table).
     def _q(model):
@@ -167,7 +250,7 @@ def build_project_tree(db: Session, project_id: str, include_deleted: bool = Fal
             else None
         )
         deps = sorted(subtask_deps_by_source.get(s.id, []))
-        return {
+        payload = {
             "id": s.id,
             "displayCode": label_idx.label_of(KIND_SUBTASK, s.id),
             "taskId": s.task_id, "projectId": s.project_id,
@@ -191,6 +274,7 @@ def build_project_tree(db: Session, project_id: str, include_deleted: bool = Fal
                 for child in children_by_parent_sub.get(s.id, [])
             ],
         }
+        return _attach_schedule_status(payload, s.start_date, s.end_date, today_ist)
 
     def task_node(t: TaskModel) -> Dict[str, Any]:
         resource = (
@@ -199,7 +283,7 @@ def build_project_tree(db: Session, project_id: str, include_deleted: bool = Fal
             else None
         )
         deps = sorted(task_deps_by_source.get(t.id, []))
-        return {
+        payload = {
             "id": t.id,
             "displayCode": label_idx.label_of(KIND_TASK, t.id),
             "activityId": t.activity_id, "projectId": t.project_id,
@@ -219,6 +303,7 @@ def build_project_tree(db: Session, project_id: str, include_deleted: bool = Fal
                 subtask_node(s) for s in top_subs_by_task.get(t.id, [])
             ],
         }
+        return _attach_schedule_status(payload, t.start_date, t.end_date, today_ist)
 
     def activity_node(a: ActivityModel) -> Dict[str, Any]:
         resource = (
@@ -227,7 +312,7 @@ def build_project_tree(db: Session, project_id: str, include_deleted: bool = Fal
             else None
         )
         deps = sorted(act_deps_by_source.get(a.id, []))
-        return {
+        payload = {
             "id": a.id,
             "displayCode": label_idx.label_of(KIND_ACTIVITY, a.id),
             "milestoneId": a.milestone_id, "projectId": a.project_id,
@@ -252,10 +337,11 @@ def build_project_tree(db: Session, project_id: str, include_deleted: bool = Fal
             "resource": _resource_payload(resource) if resource else None,
             "tasks": [task_node(t) for t in tasks_by_activity.get(a.id, [])],
         }
+        return _attach_schedule_status(payload, a.start_date, a.end_date, today_ist)
 
     def milestone_node(m: MilestoneModel) -> Dict[str, Any]:
         deps = sorted(milestone_deps_by_source.get(m.id, []))
-        return {
+        payload = {
             "id": m.id,
             "displayCode": label_idx.label_of(KIND_MILESTONE, m.id),
             "projectId": m.project_id,
@@ -268,6 +354,7 @@ def build_project_tree(db: Session, project_id: str, include_deleted: bool = Fal
             "deletedAt": _iso(m.deleted_at),
             "activities": [activity_node(a) for a in acts_by_milestone.get(m.id, [])],
         }
+        return _attach_schedule_status(payload, m.start_date, m.end_date, today_ist)
 
     tree_milestones = [milestone_node(m) for m in milestones]
 

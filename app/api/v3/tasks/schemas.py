@@ -15,9 +15,11 @@ from ....shared.datetime import IstCalendarDate
 class TaskCreateRequest(BaseModel):
     """POST /activities/{activity_id}/tasks/create.
 
-    Doc 38: trimmed to name + description + dates only. Status,
-    dependsOn, resource block, actual dates, and comments/attachments
-    move to PATCH (and to dedicated comment/attachment endpoints).
+    Unified shape: same superset of fields as PATCH. Required fields
+    stay required (name + dates); everything else is optional and falls
+    back to a sensible default on omission. Comments / attachments
+    remain on dedicated endpoints (only meaningful after the task has
+    an id).
     """
     model_config = ConfigDict(populate_by_name=True)
     name: str = Field(..., min_length=1, max_length=255)
@@ -25,6 +27,11 @@ class TaskCreateRequest(BaseModel):
     # Doc 29: IstCalendarDate normalization (calendar-date semantics).
     start_date: IstCalendarDate = Field(..., alias="startDate")
     end_date: IstCalendarDate = Field(..., alias="endDate")
+    actual_start_date: Optional[IstCalendarDate] = Field(None, alias="actualStartDate")
+    actual_end_date: Optional[IstCalendarDate] = Field(None, alias="actualEndDate")
+    position: Optional[int] = Field(None, ge=0)
+    status: Optional[str] = None
+    depends_on: Optional[List[str]] = Field(None, alias="dependsOn")
 
     @field_validator("end_date")
     @classmethod

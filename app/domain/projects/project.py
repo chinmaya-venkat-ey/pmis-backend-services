@@ -4,7 +4,7 @@ Project domain model.
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List, Optional, Tuple
-from ...shared.datetime import iso_utc
+from ...shared.datetime import iso_ist
 
 
 @dataclass
@@ -67,16 +67,16 @@ class Project:
             "status": self.status,
             "owner": self.owner,
             "category": self.category,
-            "start_date": iso_utc(self.start_date),
-            "end_date": iso_utc(self.end_date),
-            "actual_start_date": iso_utc(self.actual_start_date),
-            "actual_end_date": iso_utc(self.actual_end_date),
-            "created_at": iso_utc(self.created_at),
-            "updated_at": iso_utc(self.updated_at),
+            "start_date": iso_ist(self.start_date),
+            "end_date": iso_ist(self.end_date),
+            "actual_start_date": iso_ist(self.actual_start_date),
+            "actual_end_date": iso_ist(self.actual_end_date),
+            "created_at": iso_ist(self.created_at),
+            "updated_at": iso_ist(self.updated_at),
             "parent_id": self.parent_id,
             "created_by": self.created_by,
             "updated_by": self.updated_by,
-            "deleted_at": iso_utc(self.deleted_at),
+            "deleted_at": iso_ist(self.deleted_at),
             "deleted_by": self.deleted_by,
             "category_other": self.category_other,
             "category_other_reason": self.category_other_reason,

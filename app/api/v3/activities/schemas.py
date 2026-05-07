@@ -37,14 +37,12 @@ def _validate_division_code(v: str) -> str:
 class ActivityCreateRequest(BaseModel):
     """POST /milestones/{milestone_id}/activities/create.
 
-    Doc 38 + 39 minimal shape:
-      - name + description + dates  (existing)
-      - ownerDivision  (REQUIRED — division code)
-      - vendorId       (REQUIRED — must be in the project's vendor list)
-      - concernedDivision  (REQUIRED — list of division codes, min 1)
-
-    ``status`` / ``dependsOn`` / ``actualStartDate`` / ``actualEndDate``
-    are NOT accepted here — they belong on PATCH.
+    Unified shape: same superset of fields as PATCH. Required fields
+    stay required (name + dates + ownership trio); everything else is
+    optional and falls back to a sensible default on omission.
+    ``status`` / ``actualStartDate`` / ``actualEndDate`` / ``dependsOn``
+    can all be supplied at creation time when the FE has them, or
+    deferred to PATCH after the row exists.
     """
     model_config = ConfigDict(populate_by_name=True)
 
@@ -53,7 +51,11 @@ class ActivityCreateRequest(BaseModel):
     # Doc 29: IstCalendarDate normalization.
     start_date: IstCalendarDate = Field(..., alias="startDate")
     end_date: IstCalendarDate = Field(..., alias="endDate")
+    actual_start_date: Optional[IstCalendarDate] = Field(None, alias="actualStartDate")
+    actual_end_date: Optional[IstCalendarDate] = Field(None, alias="actualEndDate")
     position: Optional[int] = Field(None, ge=0)
+    status: Optional[str] = None
+    depends_on: Optional[List[str]] = Field(None, alias="dependsOn")
 
     # Doc 39 mandatory ownership fields.
     owner_division: str = Field(
@@ -85,6 +87,19 @@ class ActivityCreateRequest(BaseModel):
         s = info.data.get("start_date")
         if s is not None and v < s:
             raise ValueError("End date cannot be before the start date.")
+        return v
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def _validate_status(cls, v):
+        if v is None:
+            return v
+        if isinstance(v, str):
+            v = v.strip().lower()
+        if v not in ACTIVITY_STATUS_CHOICES:
+            raise ValueError(
+                f"Activity status must be one of: {', '.join(ACTIVITY_STATUS_CHOICES)}."
+            )
         return v
 
     @field_validator("owner_division", mode="before")

@@ -50,7 +50,7 @@ _ACTIVITY_OPTIONAL_STRING_KEYS = (
     "description", "startDate", "endDate",
 )
 _ACTIVITY_INT_KEYS = ("position",)
-_ACTIVITY_ARRAY_KEYS = ("concernedDivision",)
+_ACTIVITY_ARRAY_KEYS = ("concernedDivision", "dependsOn")
 
 
 def _format_resource(r: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -228,15 +228,15 @@ class ActivityController:
             type=None,
             start_date=data.start_date,
             end_date=data.end_date,
-            actual_start_date=None,
-            actual_end_date=None,
+            actual_start_date=data.actual_start_date,
+            actual_end_date=data.actual_end_date,
             position=data.position,
             resource_mode=None,
             resource_count=None,
             resource=None,
             current_user_id=current_user_id,
-            status=None,
-            depends_on=None,
+            status=data.status,
+            depends_on=data.depends_on,
             owner_division=data.owner_division,
             concerned_division=None,  # doc 39: legacy single column not written from create
             concerned_divisions=data.concerned_divisions,
@@ -276,15 +276,15 @@ class ActivityController:
             type=None,
             start_date=data.start_date,
             end_date=data.end_date,
-            actual_start_date=None,
-            actual_end_date=None,
+            actual_start_date=data.actual_start_date,
+            actual_end_date=data.actual_end_date,
             position=data.position,
             resource_mode=None,
             resource_count=None,
             resource=None,
             current_user_id=current_user_id,
-            status=None,
-            depends_on=None,
+            status=data.status,
+            depends_on=data.depends_on,
             owner_division=data.owner_division,
             concerned_division=None,  # doc 39: legacy single column not written from create
             concerned_divisions=data.concerned_divisions,

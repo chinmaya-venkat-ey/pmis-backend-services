@@ -103,16 +103,18 @@ Operate on a specific user, not on the catalog.
 
 ### Doc 41 — scoped role assignments + project-mapping views
 
-| Endpoint | Permission | Purpose |
-|---|---|---|
-| `GET /api/v3/users/{id}/role-assignments` | `users:read` (own) / `users:read_all` | List a user's scoped assignments (`user_role_assignments`) |
-| `POST /api/v3/users/{id}/role-assignments` | `rbac:assign` + caller-vs-target gate | Grant a scoped role |
-| `DELETE /api/v3/users/{id}/role-assignments/{aid}` | `rbac:assign` + last-super_admin lockout | Revoke a scoped assignment |
-| `POST /api/v3/projects/{id}/role-assignments` | `rbac:assign` | Project-side create — body must include `userId`; project comes from path |
-| `DELETE /api/v3/projects/{id}/role-assignments/{aid}` | `rbac:assign` | Project-side revoke |
-| `GET /api/v3/projects/{id}/role-assignments` | `project_members:read` | Per-project drill-down view, grouped by role bucket. Powers the FE Project-Mapping mock. |
-| `GET /api/v3/vendors/{id}/projects?expand=role-assignments` | `projects:read_all` OR `org_admin` of vendor | Org-Mgmt landing — projects mapped to a vendor + optional inline role buckets |
-| `GET /api/v3/users/{id}/projects` | `users:read` (own) / `users:read_all` | User-Mgmt landing — projects the user is assigned to + their roles on each |
+| Endpoint | Permission | Purpose | Proxy via :8000 |
+|---|---|---|---|
+| `GET /api/v3/users/{id}/role-assignments` | `users:read` (own) / `users:read_all` | List a user's scoped assignments (`user_role_assignments`) | Yes (`/users/*` prefix) |
+| `POST /api/v3/users/{id}/role-assignments` | `rbac:assign` + caller-vs-target gate | Grant a scoped role | Yes |
+| `DELETE /api/v3/users/{id}/role-assignments/{aid}` | `rbac:assign` + last-super_admin lockout | Revoke a scoped assignment | Yes |
+| `POST /api/v3/projects/{id}/role-assignments` | `rbac:assign` | Project-side create — body must include `userId`; project comes from path | **No — :8001 only** |
+| `DELETE /api/v3/projects/{id}/role-assignments/{aid}` | `rbac:assign` | Project-side revoke | **No — :8001 only** |
+| `GET /api/v3/projects/{id}/role-assignments` | `project_members:read` | Per-project drill-down view, grouped by role bucket. Powers the FE Project-Mapping mock. | **No — :8001 only** |
+| `GET /api/v3/vendors/{id}/projects?expand=role-assignments` | `projects:read_all` OR `org_admin` of vendor | Org-Mgmt landing — projects mapped to a vendor + optional inline role buckets | **No — :8001 only**. Monolith has its own `/vendors/{id}/projects` (different shape, no `roleAssignments`). |
+| `GET /api/v3/users/{id}/projects` | `users:read` (own) / `users:read_all` | User-Mgmt landing — projects the user is assigned to + their roles on each | Yes (`/users/*` prefix) |
+
+**Note on proxy reach**: only the user-side variants (`/users/{id}/role-assignments`, `/users/{id}/projects`) are reachable via the monolith's :8000 proxy because they match the existing `/api/v3/users/*` prefix rule. The project-side and vendor-side variants are intentionally **not** proxied — FE talks to user-mgmt :8001 directly. This keeps the new doc-41 surface decoupled from monolith and avoids dragging in monolith's `/projects/*` and `/vendors/*` namespaces.
 
 **There is no deny semantics.** Effective set = `union(role_derived, direct_grants)`. To revoke, delete the source row.
 

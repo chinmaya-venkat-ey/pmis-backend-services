@@ -254,6 +254,21 @@ To roll back: `USER_SERVICE_PROXY_ENABLED=false` + restart the monolith. Local h
 
 For the cutover plan + per-commit history, see `planned_changes/37` in the monolith repo.
 
+### Proxy reach — what monolith forwards vs what FE must hit on :8001
+
+The proxy only forwards path prefixes the monolith explicitly opts in. Doc 41 added scoped role-assignment + project-mapping endpoints to user-mgmt; **only the user-side variants are reachable through the proxy**:
+
+| Endpoint | :8000 (proxy) | :8001 (direct) |
+|---|---|---|
+| `/api/v3/users/*` (login, OTP, refresh, user CRUD, etc.) | ✅ forwarded | ✅ |
+| `/api/v3/users/{id}/role-assignments` (doc 41) | ✅ forwarded (matches `/users/*` prefix) | ✅ |
+| `/api/v3/users/{id}/projects` (doc 41) | ✅ forwarded | ✅ |
+| `/api/v3/master/roles/*`, `/api/v3/master/permissions/*` | ✅ forwarded | ✅ |
+| `/api/v3/projects/{id}/role-assignments` (doc 41) | ❌ — monolith returns 404 | ✅ |
+| `/api/v3/vendors/{id}/projects?expand=role-assignments` (doc 41) | ❌ — monolith has its own legacy `/vendors/{id}/projects` handler with a different shape | ✅ |
+
+The project-side and vendor-side doc-41 endpoints are **intentionally not proxied**. FE must call `:8001` directly for them. Rationale: those URLs share the `/projects/*` and `/vendors/*` namespaces that monolith owns, so blanket-proxying them would either drag in unrelated routes or shadow existing monolith handlers.
+
 ---
 
 ## 9. Integration with PMIS-notification-service

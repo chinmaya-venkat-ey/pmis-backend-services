@@ -1,0 +1,252 @@
+"""
+Project API schemas (request/response models).
+"""
+from typing import List, Optional
+from datetime import datetime, timezone
+from pydantic import BaseModel, Field, field_validator, ConfigDict
+
+from ....shared.datetime import IstCalendarDate
+
+from .services.transitions import (
+    CATEGORY_OTHERS,
+    PROJECT_STATUS_CHOICES,
+    PROJECT_CATEGORY_CHOICES,
+)
+
+
+class ProjectCreateRequest(BaseModel):
+    """Request schema for creating a project.
+
+    The server generates ``id`` (UUID) and ``projectCode`` on insert; neither
+    is accepted in the request body.
+    """
+    model_config = ConfigDict(populate_by_name=True)
+
+    name: str = Field(..., min_length=1, max_length=255)
+    description: Optional[str] = Field(None, max_length=5000)
+    active: bool = Field(True)
+    statusExplanation: Optional[str] = Field(None, max_length=5000, alias="status_explanation")
+    parentId: Optional[str] = Field(None, alias="parent_id", description="Parent project UUID")
+    status: str = Field(
+        "new",
+        description=f"Project status. One of: {', '.join(PROJECT_STATUS_CHOICES)}",
+    )
+    owner: Optional[str] = Field(
+        None, min_length=1, max_length=255,
+        description=(
+            "Project owner — division code: 'tmd1' / 'tmd2' / 'others'. "
+            "Required at the service layer on create + upsert. When set "
+            "to 'others', a non-empty `ownerOther` follow-up label is "
+            "required (max 255 chars)."
+        ),
+    )
+    ownerOther: Optional[str] = Field(
+        None,
+        alias="owner_other",
+        max_length=255,
+        description=(
+            "Required (non-empty) when owner == 'others'. Must be omitted / "
+            "null for any other owner value."
+        ),
+    )
+    # Doc 38: ``category`` / ``categoryOther`` / ``categoryOtherReason`` /
+    # ``isPublic`` were removed from the wire — DB columns kept (Option B
+    # deprecation) but the API no longer accepts them on create.
+    vendorIds: Optional[List[str]] = Field(
+        None,
+        alias="vendor_ids",
+        description=(
+            "Optional list of vendor identifiers to associate with this "
+            "project. Each entry can be a vendor UUID or its human-readable "
+            "``vendorCode`` (``VN-XXXX-YYMMDDHHMMSS`` — see doc 25); the "
+            "list may freely mix the two forms."
+        ),
+    )
+    # Doc 29: IstCalendarDate normalizes any submitted datetime to IST
+    # midnight of the IST-local calendar date. Eliminates cross-format
+    # mismatches between project / milestone / activity creates.
+    start_date: Optional[IstCalendarDate] = Field(None, alias="startDate")
+    end_date: Optional[IstCalendarDate] = Field(None, alias="endDate")
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, v):
+        if v not in PROJECT_STATUS_CHOICES:
+            raise ValueError(
+                f"Invalid status '{v}'. Allowed: {', '.join(PROJECT_STATUS_CHOICES)}"
+            )
+        return v
+
+    @field_validator("end_date")
+    @classmethod
+    def validate_end_date_in_future(cls, v):
+        # Doc 24: ``start_date`` is now allowed in the past — projects
+        # may be entered after work has already begun. ``end_date`` keeps
+        # the future-only constraint; finished projects are out of scope.
+        if v is not None:
+            now = datetime.now(timezone.utc)
+            check_v = v if v.tzinfo is not None else v.replace(tzinfo=timezone.utc)
+            if check_v <= now:
+                raise ValueError("Date must be in the future")
+        return v
+
+    @field_validator("end_date")
+    @classmethod
+    def validate_end_date_after_start_date(cls, v, info):
+        if v is not None and "start_date" in info.data and info.data["start_date"] is not None:
+            # Inclusive: end_date == start_date is allowed (one-day projects /
+            # milestones / activities). Only reject when end is strictly before.
+            if v < info.data["start_date"]:
+                raise ValueError("end_date cannot be before start_date")
+        return v
+
+
+class ProjectUpdateRequest(BaseModel):
+    """Request schema for updating a project (PATCH).
+
+    The server filters supplied fields through the editable-field whitelist
+    for the project's current state; fields outside the whitelist produce a
+    422 invalid_field error.
+    """
+    model_config = ConfigDict(populate_by_name=True)
+
+    name: Optional[str] = Field(None, min_length=1, max_length=255)
+    description: Optional[str] = Field(None, max_length=5000)
+    active: Optional[bool] = None
+    statusExplanation: Optional[str] = Field(None, max_length=5000, alias="status_explanation")
+    parentId: Optional[str] = Field(None, alias="parent_id", description="Parent project UUID")
+    status: Optional[str] = Field(None)
+    owner: Optional[str] = Field(None, min_length=1, max_length=255)
+    ownerOther: Optional[str] = Field(None, alias="owner_other", max_length=255)
+    vendorIds: Optional[List[str]] = Field(
+        None,
+        alias="vendor_ids",
+        description=(
+            "Replace the full vendor list for this project. Omit to leave the "
+            "existing list unchanged; send `[]` to clear. Each entry can be a "
+            "vendor UUID or its human-readable ``vendorCode`` "
+            "(``VN-XXXX-YYMMDDHHMMSS`` — see doc 25); the list may freely mix "
+            "the two forms."
+        ),
+    )
+    # Doc 29: IstCalendarDate normalizes any submitted datetime to IST
+    # midnight of the IST-local calendar date. Eliminates cross-format
+    # mismatches between project / milestone / activity creates.
+    start_date: Optional[IstCalendarDate] = Field(None, alias="startDate")
+    end_date: Optional[IstCalendarDate] = Field(None, alias="endDate")
+    # Doc 29: IstCalendarDate normalization (see start_date above).
+    actual_start_date: Optional[IstCalendarDate] = Field(None, alias="actualStartDate")
+    actual_end_date: Optional[IstCalendarDate] = Field(None, alias="actualEndDate")
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, v):
+        if v is not None and v not in PROJECT_STATUS_CHOICES:
+            raise ValueError(
+                f"Invalid status '{v}'. Allowed: {', '.join(PROJECT_STATUS_CHOICES)}"
+            )
+        return v
+
+    @field_validator("end_date")
+    @classmethod
+    def validate_end_date_in_future(cls, v):
+        # Doc 24: ``start_date`` is now allowed in the past — projects
+        # may be entered after work has already begun. ``end_date`` keeps
+        # the future-only constraint; finished projects are out of scope.
+        if v is not None:
+            now = datetime.now(timezone.utc)
+            check_v = v if v.tzinfo is not None else v.replace(tzinfo=timezone.utc)
+            if check_v <= now:
+                raise ValueError("Date must be in the future")
+        return v
+
+    @field_validator("end_date")
+    @classmethod
+    def validate_end_date_after_start_date(cls, v, info):
+        if v is not None and "start_date" in info.data and info.data["start_date"] is not None:
+            # Inclusive: end_date == start_date is allowed.
+            if v < info.data["start_date"]:
+                raise ValueError("end_date cannot be before start_date")
+        return v
+
+
+class ProjectListQuery(BaseModel):
+    """Query parameters for listing projects."""
+
+    offset: int = Field(1, ge=1, description="Page number (1-indexed)")
+    pageSize: int = Field(20, ge=1, le=100)
+    active: Optional[bool] = None
+    # When True, the response includes soft-deleted rows (the "All projects"
+    # admin view). The default GET /projects endpoint pins this False; the
+    # GET /projects/all endpoint pins it True.
+    includeDeleted: bool = Field(False)
+
+
+class ProjectCloseRequest(BaseModel):
+    """Optional body for POST /projects/{id}/close."""
+    model_config = ConfigDict(populate_by_name=True)
+
+    reason: Optional[str] = Field(None, max_length=5000)
+
+
+class ProjectUpsertRequest(BaseModel):
+    """Body for PUT /projects/{project_uuid} (idempotent create-or-update).
+
+    The project's ``id`` comes from the URL path (a UUID string). The server
+    auto-generates ``projectCode`` on the INSERT branch and preserves it on
+    the UPDATE branch. Neither ``id`` nor ``projectCode`` is accepted in the
+    body.
+    """
+    model_config = ConfigDict(populate_by_name=True)
+
+    name: str = Field(..., min_length=1, max_length=255)
+    description: Optional[str] = Field(None, max_length=5000)
+    active: bool = Field(True)
+    statusExplanation: Optional[str] = Field(None, max_length=5000, alias="status_explanation")
+    parentId: Optional[str] = Field(None, alias="parent_id", description="Parent project UUID")
+    status: str = Field("new")
+    owner: Optional[str] = Field(None, min_length=1, max_length=255)
+    ownerOther: Optional[str] = Field(None, alias="owner_other", max_length=255)
+    vendorIds: Optional[List[str]] = Field(
+        None, alias="vendor_ids",
+        description=(
+            "Vendor identifiers. Each entry can be a UUID or a "
+            "``VN-...`` code (doc 25); the list may freely mix forms."
+        ),
+    )
+    # Doc 29: IstCalendarDate normalizes any submitted datetime to IST
+    # midnight of the IST-local calendar date. Eliminates cross-format
+    # mismatches between project / milestone / activity creates.
+    start_date: Optional[IstCalendarDate] = Field(None, alias="startDate")
+    end_date: Optional[IstCalendarDate] = Field(None, alias="endDate")
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, v):
+        if v not in PROJECT_STATUS_CHOICES:
+            raise ValueError(
+                f"Invalid status '{v}'. Allowed: {', '.join(PROJECT_STATUS_CHOICES)}"
+            )
+        return v
+
+    @field_validator("end_date")
+    @classmethod
+    def validate_end_date_in_future(cls, v):
+        # Doc 24: ``start_date`` is now allowed in the past — projects
+        # may be entered after work has already begun. ``end_date`` keeps
+        # the future-only constraint; finished projects are out of scope.
+        if v is not None:
+            now = datetime.now(timezone.utc)
+            check_v = v if v.tzinfo is not None else v.replace(tzinfo=timezone.utc)
+            if check_v <= now:
+                raise ValueError("Date must be in the future")
+        return v
+
+    @field_validator("end_date")
+    @classmethod
+    def validate_end_date_after_start_date(cls, v, info):
+        if v is not None and "start_date" in info.data and info.data["start_date"] is not None:
+            # Inclusive: end_date == start_date is allowed.
+            if v < info.data["start_date"]:
+                raise ValueError("end_date cannot be before start_date")
+        return v

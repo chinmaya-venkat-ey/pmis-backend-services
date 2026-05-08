@@ -1,0 +1,47 @@
+# ================================================================
+# PMIS Project Management Service – docker-compose.yml
+# ================================================================
+# This compose file runs ONLY the project-management service.
+# PostgreSQL is already running as 'pmis-postgres' on the host.
+# pmis-user-service handles user/auth on port 8001; this service
+# trusts JWTs minted there via the shared SECRET_KEY env var.
+#
+# network_mode: host  →  container shares host's network stack,
+# so DATABASE_URL points to localhost:5432 (the exposed postgres).
+#
+# Usage:
+#   docker compose up -d          # start
+#   docker compose logs -f        # follow logs
+#   docker compose down           # stop
+#   docker compose up -d --build  # rebuild + restart
+# ================================================================
+
+name: pmis-projectmanagement
+
+services:
+  pmis-projectmanagement:
+    image: ritamhudait/pmis-projectmanagement:${IMAGE_TAG:-latest}
+    container_name: pmis-projectmanagement
+    restart: unless-stopped
+
+    # Shares host network — lets the container reach
+    # pmis-postgres at localhost:5432 without extra network config.
+    network_mode: host
+
+    env_file:
+      - /home/uidaiadmin/pmis-projectmanagement/.env
+
+    # NFS attachments mount — same path as the monolith uses.
+    # Host path is the OS-level NFS mount; container path is the same
+    # so logs / stack traces stay readable.
+    volumes:
+      - /mnt/pmis_files:/mnt/pmis_files:rw
+
+    # Healthcheck hits the /health endpoint
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8003/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s

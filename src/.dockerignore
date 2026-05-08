@@ -1,0 +1,27 @@
+# Don't bake env files into the image — supplied at runtime.
+.env
+*.env
+!.env.example
+
+# Don't ship dev tooling / venvs.
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Don't ship local upload dir or local SQLite from dev runs.
+local_uploads/
+*.db
+*.sqlite
+*.sqlite3
+
+# IDE / OS
+.vscode/
+.idea/
+.git/
+.gitignore
+.DS_Store
+Thumbs.db

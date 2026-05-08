@@ -19,7 +19,7 @@ are returned under ``access`` and ``refresh`` keys. When only one is
 supplied, the response is a single inline result.
 """
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
@@ -48,7 +48,7 @@ def _claims_to_response(
     is_admin = payload.get("is_admin", False)
     org_role: Optional[str] = None
     vendor_id: Optional[str] = None
-    project_role_map: Dict[str, str] = {}
+    project_ids: List[str] = []
     if db is not None and user_id is not None:
         # Local import to avoid module-load cycles.
         from .....infrastructure.db.repositories.rbac_repository import (
@@ -58,14 +58,19 @@ def _claims_to_response(
         is_admin = rbac.user_has_admin_role(user_id)
         # Doc 44 — surface the FE-friendly role projection on introspect
         # too, so the session manager can refresh role context without
-        # a full /me round-trip.
+        # a full /me round-trip. Doc 44 round 2: per-project role
+        # dropped — projects[] surfaces project IDs only.
         org_role = rbac.derive_org_role(user_id)
-        project_role_map = rbac.get_project_role_map(user_id)
-        # Vendor id lives on the user row (1:1 mapping). Cheap lookup.
+        # Vendor id + the user's mapped project IDs live on the user
+        # row (project_members join). Read both in one user-repo call.
         user_repo = UserRepository(db)
         user_row = user_repo.get_by_id(user_id, include_deleted=True)
         if user_row is not None:
             vendor_id = getattr(user_row, "vendor_id", None)
+            project_ids = [
+                p.get("id") for p in (getattr(user_row, "projects", []) or [])
+                if p.get("id")
+            ]
     return {
         "active": True,
         "tokenType": token_type,
@@ -92,10 +97,10 @@ def _claims_to_response(
         # Doc 44 role projection.
         "orgRole": org_role,
         "vendorId": vendor_id,
-        "projects": [
-            {"projectId": pid, "role": role}
-            for pid, role in sorted(project_role_map.items())
-        ],
+        # Doc 44 round 2: flat list of project IDs the user is mapped
+        # to. Per-project role removed; the user's role on each
+        # project is the orgRole above.
+        "projects": [{"projectId": pid} for pid in sorted(project_ids)],
     }
 
 

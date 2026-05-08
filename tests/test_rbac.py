@@ -284,15 +284,15 @@ class TestUserRoleAssignment:
         names = [r["name"] for r in resp.json()["data"]["roles"]]
         assert "test_assignable_role" in names
 
-    def test_admin_caller_cannot_remove_admin_role_post_doc42b(
+    def test_admin_caller_can_remove_admin_role_post_doc44(
         self, client, admin_user, admin_headers, db_session,
+        second_admin_user,
     ):
-        """Doc 42b caller-vs-target: an admin-tier caller is NOT
-        authorized to revoke the admin role from anyone (themselves
-        included). Only super_admin can. The 'last admin' lockout
-        that used to gate this is gone — replaced by the symmetric
-        caller-vs-target gate which fires earlier and harder.
-        """
+        """Doc 44 round 2: admin tier opened up. Symmetric grant +
+        revoke matrix means an admin caller CAN now revoke the admin
+        role from another admin. (Pre-doc-44 only super_admin could.)
+        Self-revoke is still blocked by the existing self-demote
+        guard, so we revoke from a different admin user."""
         admin_role_id = (
             db_session.query(RoleModel)
             .filter(RoleModel.name == "admin")
@@ -300,13 +300,10 @@ class TestUserRoleAssignment:
             .id
         )
         resp = client.delete(
-            f"/api/v3/users/{admin_user.id}/roles/{admin_role_id}",
+            f"/api/v3/users/{second_admin_user.id}/roles/{admin_role_id}",
             headers=admin_headers,
         )
-        assert resp.status_code == 403, resp.text
-        # New gate message — references super_admin as the only role
-        # that can grant/revoke admin.
-        assert "super_admin" in resp.json()["error"]["message"].lower()
+        assert resp.status_code == 204, resp.text
 
     def test_super_admin_caller_can_remove_admin_role(
         self, client, admin_user, db_session,

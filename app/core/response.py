@@ -47,32 +47,33 @@ def format_user_response(
             "name": user_data.get("vendor_name"),
         }
 
-    # Doc 44 role projection: precompute the per-project role map so
-    # we can surface it on each project entry below. Skipped if no db
-    # session was passed (legacy callers).
-    project_role_map: Dict[str, str] = {}
+    # Doc 44 role projection: derive the user's single FE-friendly
+    # orgRole label. Per-project role concept was removed in doc 44
+    # round 2 — the user's role on each project equals their orgRole
+    # globally (no separate per-project role to surface on projects[]).
     org_role: Optional[str] = None
     if db is not None and user_id:
         from ..infrastructure.db.repositories.rbac_repository import (
             RbacRepository,
         )
-        repo = RbacRepository(db)
-        org_role = repo.derive_org_role(user_id)
-        project_role_map = repo.get_project_role_map(user_id)
+        org_role = RbacRepository(db).derive_org_role(user_id)
 
-    # Mapped projects (slim). Doc 44 attaches the user's role on each
-    # project when the role projection is available.
+    # Mapped projects (slim shape — id + name + status; no per-project
+    # role field, the FE no longer tracks that).
     projects_block = []
+    project_assignments_block = []
     for p in (user_data.get("projects") or []):
-        entry = {
-            "id": p.get("id"),
+        pid = p.get("id")
+        projects_block.append({
+            "id": pid,
             "projectCode": p.get("project_code"),
             "name": p.get("name"),
             "status": p.get("status"),
-        }
-        if project_role_map:
-            entry["role"] = project_role_map.get(p.get("id"))
-        projects_block.append(entry)
+        })
+        # Doc 44 round 2 — projectAssignments is a flat {projectId} list,
+        # FE-friendly mirror of project_ids in the create payload.
+        if pid:
+            project_assignments_block.append({"projectId": pid})
 
     response = {
         "_type": "User",
@@ -102,6 +103,10 @@ def format_user_response(
         "divisionOther": user_data.get("division_other"),
         "phoneNumber": user_data.get("phone_number"),
         "projects": projects_block,
+        # Doc 44 round 2 — flat projectAssignments mirror of the create
+        # payload, surfaced on every user response so the FE can read
+        # the same shape it sent.
+        "projectAssignments": project_assignments_block,
         # Doc 44: single FE-friendly role label. None when the user
         # holds no role known to the FE (e.g. only division_member,
         # or no role at all).

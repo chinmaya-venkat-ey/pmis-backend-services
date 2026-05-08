@@ -401,24 +401,25 @@ class TestPeerTakeoverDelete:
 
 
 # ---------------------------------------------------------------------------
-# Round 3 — admin peer-takeover (G4 password / G5 DELETE)
+# Round 3 (REMOVED in doc 44 round 2) — admin peers can now password-change
+# and DELETE each other. The tests below assert the relaxed behaviour;
+# the previous "must 403" assertions were flipped per the FE spec which
+# treats admin tier as peers for destructive ops too.
 # ---------------------------------------------------------------------------
 
-class TestAdminPeerTakeoverPasswordChange:
-    """G4: an admin caller cannot change ANOTHER admin's password.
-    Mirrors G2 for the admin tier. Escape hatch: revoke target's
-    admin role first."""
+class TestAdminPeerOpsAllowed:
+    """Doc 44 round 2: admin-peer destructive ops are allowed.
+    super_admin → super_admin destructive remains blocked (G2/G3)."""
 
-    def test_admin_cannot_change_peer_admin_password(
+    def test_admin_can_change_peer_admin_password(
         self, client, admin_user, admin_headers, second_admin_user,
     ):
         resp = client.patch(
             f"/api/v3/users/{second_admin_user.id}/password",
-            json={"password": "PeerHijack!"},
+            json={"password": "PeerSetsPwd@1"},
             headers=admin_headers,
         )
-        assert resp.status_code == 403, resp.text
-        assert "another admin" in resp.json()["error"]["message"].lower()
+        assert resp.status_code == 200, resp.text
 
     def test_admin_can_change_own_password(
         self, client, admin_user, admin_headers,
@@ -440,11 +441,9 @@ class TestAdminPeerTakeoverPasswordChange:
         )
         assert resp.status_code == 200, resp.text
 
-    def test_super_admin_can_change_admin_peer_password_post_g4(
+    def test_super_admin_can_change_admin_peer_password(
         self, client, db_session, admin_user,
     ):
-        # Sanity: G4 only applies when caller is admin (not super_admin).
-        # super_admin remains free to manage admin tier.
         sa, headers = _bootstrap_super_admin(db_session)
         resp = client.patch(
             f"/api/v3/users/{admin_user.id}/password",
@@ -453,46 +452,17 @@ class TestAdminPeerTakeoverPasswordChange:
         )
         assert resp.status_code == 200, resp.text
 
-
-class TestAdminPeerTakeoverDelete:
-    """G5: an admin caller cannot DELETE another admin without first
-    demoting (revoking the admin role)."""
-
-    def test_admin_cannot_delete_peer_admin(
+    def test_admin_can_delete_peer_admin(
         self, client, admin_user, admin_headers, second_admin_user,
     ):
         resp = client.delete(
             f"/api/v3/users/{second_admin_user.id}", headers=admin_headers,
         )
-        assert resp.status_code == 403, resp.text
-        assert "another admin" in resp.json()["error"]["message"].lower()
-
-    def test_admin_can_delete_after_demoting_target(
-        self, client, db_session, admin_user, admin_headers,
-        second_admin_user,
-    ):
-        # Demote second_admin_user (revoke admin role membership) and
-        # try DELETE again. After demotion the destructive guard
-        # doesn't fire and the DELETE proceeds.
-        from app.infrastructure.db.models.user_role import UserRoleModel
-        admin_role_id = (
-            db_session.query(RoleModel)
-            .filter(RoleModel.name == ADMIN_ROLE_NAME).one().id
-        )
-        db_session.query(UserRoleModel).filter(
-            UserRoleModel.user_id == second_admin_user.id,
-            UserRoleModel.role_id == admin_role_id,
-        ).delete()
-        db_session.commit()
-        resp = client.delete(
-            f"/api/v3/users/{second_admin_user.id}", headers=admin_headers,
-        )
         assert resp.status_code in (200, 204), resp.text
 
-    def test_super_admin_can_delete_admin_post_g5(
+    def test_super_admin_can_delete_admin(
         self, client, db_session, admin_user,
     ):
-        # Sanity: G5 only applies when caller is admin (not super_admin).
         sa, headers = _bootstrap_super_admin(db_session)
         resp = client.delete(
             f"/api/v3/users/{admin_user.id}", headers=headers,

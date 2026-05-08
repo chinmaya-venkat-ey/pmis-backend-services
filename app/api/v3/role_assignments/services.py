@@ -132,19 +132,17 @@ def can_caller_grant(
     if SUPER_ADMIN_ROLE_NAME in global_roles:
         return True, ""
 
-    # Granting super_admin or admin requires super_admin (already gated
-    # above). admin is the next tier down and per spec only super_admin
-    # can promote others to it; admin can hand out the lower tiers.
+    # Granting super_admin requires super_admin (already gated above).
+    # Doc 44 round 2 — admin tier opened up: admins can now grant the
+    # admin role to other users (peer-grant). Previously (doc 43 round 1)
+    # only super_admin could promote to admin; the FE spec reverses
+    # that and treats admins as peers for grant + edit purposes.
     if target_role_name == SUPER_ADMIN_ROLE_NAME:
         return False, (
             "Only super_admin can grant the super_admin role."
         )
-    if target_role_name == ADMIN_ROLE_NAME:
-        return False, (
-            "Only super_admin can grant the admin role."
-        )
 
-    # admin can grant anything except super_admin / admin.
+    # admin can grant anything except super_admin (incl. peer admin).
     if ADMIN_ROLE_NAME in global_roles:
         return True, ""
 
@@ -233,43 +231,6 @@ def _user_holds_super_admin(db: Session, user_id: str) -> bool:
     )
 
 
-def _user_holds_admin_role(db: Session, user_id: str) -> bool:
-    """Return True iff user_id holds the admin role specifically
-    (NOT super_admin). Checks both the legacy ``user_roles`` table
-    and the doc-41 ``user_role_assignments`` global rows.
-
-    Used by the doc-43 round-3 admin-peer destructive guard
-    (G4/G5) — distinct from ``RbacRepository.user_has_admin_role``,
-    which collapses admin and super_admin into a single legacy
-    ``is_admin`` flag.
-    """
-    from ....infrastructure.db.models.role import RoleModel as _Role
-    from ....infrastructure.db.models.user_role import UserRoleModel as _UR
-    from ....infrastructure.db.models.user_role_assignment import (
-        UserRoleAssignmentModel as _URA,
-    )
-    legacy = (
-        db.query(_UR)
-        .join(_Role, _Role.id == _UR.role_id)
-        .filter(_UR.user_id == user_id, _Role.name == ADMIN_ROLE_NAME)
-        .first()
-    )
-    if legacy is not None:
-        return True
-    scoped = (
-        db.query(_URA)
-        .join(_Role, _Role.id == _URA.role_id)
-        .filter(
-            _URA.user_id == user_id,
-            _Role.name == ADMIN_ROLE_NAME,
-            _URA.organization_id.is_(None),
-            _URA.project_id.is_(None),
-        )
-        .first()
-    )
-    return scoped is not None
-
-
 def can_caller_modify_user(
     db: Session,
     caller_id: Optional[str],
@@ -299,10 +260,11 @@ def can_caller_modify_user(
             super_admin (peer-takeover prevention, doc-43 G2/G3).
             Operator must demote target's super_admin role assignment
             first, then perform the destructive action.
-          - admin caller, admin target (and neither holds super_admin):
-            refused (peer-takeover prevention, doc-43 round-3 G4/G5).
-            Operator must demote target's admin role assignment first.
           - non-super_admin caller: refused if target holds super_admin.
+
+    Doc 44 round 2: admin peer-takeover protection (G4/G5) was REMOVED
+    — the FE spec treats admin tier as peers for destructive ops too.
+    Only super_admin peer destructive ops remain blocked.
 
     The check looks at the TARGET user's super_admin grant via the
     ``user_role_assignments`` table (where doc-41 super_admin lives),
@@ -327,19 +289,11 @@ def can_caller_modify_user(
             "by revoking their super_admin role assignment."
         )
 
-    # Doc 43 round 3 (G4/G5): mirror G2/G3 for admin peers. An admin
-    # caller cannot DELETE or password-change another admin without
-    # first demoting the target. super_admin callers are not subject
-    # to this — they manage the tier below them.
-    if op == "destructive" and not caller_is_super_admin and not target_is_super_admin:
-        caller_is_admin = _user_holds_admin_role(db, caller_id)
-        target_is_admin = _user_holds_admin_role(db, target_user_id)
-        if caller_is_admin and target_is_admin:
-            return False, (
-                "Cannot perform destructive actions (DELETE / password "
-                "change) on another admin. Demote the target first by "
-                "revoking their admin role assignment."
-            )
+    # Doc 44 round 2 — admin peer-takeover guard (G4/G5) REMOVED.
+    # Spec change: admin tier is now treated as a peer set for
+    # destructive ops too. An admin can DELETE / password-change
+    # another admin user. super_admin → super_admin destructive is
+    # still blocked above (G2/G3 retained).
 
     # super_admin caller: allowed for non-destructive ops on any
     # target, AND destructive ops on non-super_admin targets.

@@ -319,12 +319,15 @@ class TestCreateUserWithOrgRole:
             for r in rows
         )
 
-    def test_admin_creates_project_admin_with_per_project_roles(
+    def test_admin_creates_project_admin_with_project_mapping(
         self, client, admin_user, admin_headers, vendor_for_doc44,
         db_session,
     ):
-        # Two projects, the user gets project_admin on one + project_member
-        # on the other (the FE's "downgrade per project" use case).
+        """Doc 44 round 2: project mapping is no longer per-project-role.
+        FE sends projectAssignments as just [{projectId}]; the user's
+        role on every mapped project equals their orgRole. Response
+        carries projects[] + projectAssignments[] without per-project
+        role fields."""
         p1 = ProjectModel(
             id=str(uuid4()), project_code=f"UIDAI-PR{uuid4().hex[:14].upper()}",
             name="P1", description="-", active=True, public=False, status="new",
@@ -341,8 +344,8 @@ class TestCreateUserWithOrgRole:
             project_ids=[p1.id, p2.id],
             org_role="project_admin",
             project_assignments=[
-                {"projectId": p1.id, "role": "Project Admin"},
-                {"projectId": p2.id, "role": "Project Member"},
+                {"projectId": p1.id},
+                {"projectId": p2.id},
             ],
         )
         resp = client.post(
@@ -351,15 +354,18 @@ class TestCreateUserWithOrgRole:
         assert resp.status_code == 201, resp.text
         data = resp.json()["data"]
         assert data["orgRole"] == "project_admin"
-        # Per-project role surfaces under projects[].role.
-        roles_by_pid = {p["id"]: p.get("role") for p in data["projects"]}
-        assert roles_by_pid.get(p1.id) == "project_admin"
-        assert roles_by_pid.get(p2.id) == "project_member"
+        # projects[] no longer carries a role field per project.
+        for p in data["projects"]:
+            assert "role" not in p
+        # projectAssignments mirrors project_ids as a flat list.
+        pa_ids = sorted(pa["projectId"] for pa in data["projectAssignments"])
+        assert pa_ids == sorted([p1.id, p2.id])
 
     def test_admin_creates_admin_user_no_projects(
         self, client, admin_user, admin_headers, vendor_for_doc44,
     ):
-        # admin orgRole doesn't need project_ids.
+        """Doc 44 round 2: admin tier opened up. An admin caller CAN
+        now create another admin user. Pre-doc-44 this was a 403."""
         body = _create_body(
             vendor_id=vendor_for_doc44.id,
             project_ids=[],
@@ -368,10 +374,8 @@ class TestCreateUserWithOrgRole:
         resp = client.post(
             "/api/v3/users/create", json=body, headers=admin_headers,
         )
-        # admin-creates-admin is forbidden by the caller-vs-target gate
-        # (only super_admin can grant admin post-doc-43).
-        assert resp.status_code == 403, resp.text
-        assert "admin" in resp.json()["error"]["message"].lower()
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["data"]["orgRole"] == "admin"
 
     def test_super_admin_can_create_admin_no_projects(
         self, client, db_session, vendor_for_doc44,

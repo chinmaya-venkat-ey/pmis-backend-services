@@ -28,7 +28,7 @@ Auth middleware hydrates two views per request: the flat union (`request.state.u
 | Role | Tier | What they can do | What they can't |
 |------|------|-----------------|-----------------|
 | `super_admin` (doc 41) | global | Everything `admin` does + `users:grant_superadmin` (the gate to grant `super_admin` itself). | Lockout-protected: last super_admin can't be revoked, deactivated, or deleted. **Post-G2/G3 (doc 43 round 2)**: a super_admin cannot change another super_admin's password or DELETE another super_admin without first revoking the target's super_admin role. |
-| `admin` | global | Every code except `users:grant_superadmin`. Auto-synced. **Demoted in doc 43**: no longer the lockout-protected tier. Admin users can be freely demoted or deactivated by another user. | Cannot grant `super_admin` or `admin` (caller-vs-target). Cannot PATCH / password-change / DELETE a super_admin user (F1 hierarchy gate). Cannot self-deactivate (G1, doc 43 round 2). **Cannot change another admin's password or DELETE another admin** without first revoking the target's admin role (G4/G5, doc 43 round 3). |
+| `admin` | global | Every code except `users:grant_superadmin`. Auto-synced. **Demoted in doc 43**: no longer the lockout-protected tier. **Doc 44 round 2 opened up admin tier**: admins now have peer-grant + peer-edit + peer-delete authority over other admins (the doc 43 round 3 G4/G5 peer-takeover guards were removed). | Cannot grant `super_admin` (caller-vs-target). Cannot PATCH / password-change / DELETE a super_admin user (F1 hierarchy gate). Cannot self-deactivate (G1, doc 43 round 2). |
 | `org_admin` (doc 41) | org (vendor) | Manage user / project memberships within their owning vendor. Caller-vs-target rules limit grants to `project_admin` / `project_member` / `division_member` on projects whose owning vendor matches. | Cannot publish/close/delete projects, cannot edit project content, cannot grant `org_admin` or `super_admin`. |
 | `project_admin` (doc 41) | project | Manage tasks/subtasks + project-membership on the specific project the assignment carries. Can grant `project_member` on that project only. | Cannot create projects, cannot grant `project_admin` (only `project_member`), cannot touch master data or RBAC outside their project. |
 | `project_member` (doc 41) | project | Read project + M/A/T/S, contribute task/subtask updates, comment, upload/download attachments. | Cannot delete project content, cannot grant any role, cannot manage milestones/activities create/delete. |
@@ -42,10 +42,12 @@ Lives in [`app/api/v3/role_assignments/services.py::can_caller_grant`](../app/ap
 
 Symmetric for grant + revoke (post-doc-43): the same matrix gates `POST` and `DELETE` on `/role-assignments`. A caller who can't grant a `(role, scope)` tuple can't revoke it either.
 
+**Doc 44 round 2** opened up the admin tier — admins can now grant the admin role to other users (peer-grant) and run destructive ops (password change, DELETE) on admin peers. Only `super_admin` grant remains restricted to super_admin callers, and only super_admin → super_admin destructive ops are still blocked (G2/G3).
+
 | Caller | Can grant / revoke |
 |---|---|
-| `super_admin` | any role at any scope (only role that can grant or revoke `super_admin` and `admin`) |
-| `admin` | any role **except** `super_admin` and `admin` (post-doc-43 demotion — admin can no longer grant peers) |
+| `super_admin` | any role at any scope (only role that can grant or revoke `super_admin`) |
+| `admin` | any role **except** `super_admin`. Includes peer admin grant + revoke. |
 | `org_admin` of vendor X | `project_admin` / `project_member` / `division_member` on projects in vendor X |
 | `project_admin` of project P | `project_member` on P only |
 | anyone else | nothing |
@@ -161,8 +163,8 @@ Baked into the service layer so they fire regardless of caller. Post-doc-43 the 
 | **G1 self-deactivate** | PATCH `status=inactive` where caller == target (any tier) | 403 "Cannot deactivate your own account." | doc 43 round 2 |
 | **G2 peer-SA password change** | super_admin → another super_admin via `PATCH /users/{id}/password` | 403 "Cannot perform destructive actions … Demote the target first by revoking their super_admin role assignment." | doc 43 round 2 |
 | **G3 peer-SA DELETE** | super_admin → another super_admin via `DELETE /users/{id}` | 403 (same message as G2) | doc 43 round 2 |
-| **G4 peer-admin password change** | admin → another admin via `PATCH /users/{id}/password` (neither holds super_admin) | 403 "Cannot perform destructive actions … on another admin. Demote the target first by revoking their admin role assignment." | doc 43 round 3 |
-| **G5 peer-admin DELETE** | admin → another admin via `DELETE /users/{id}` (neither holds super_admin) | 403 (same message as G4) | doc 43 round 3 |
+| ~~G4 peer-admin password change~~ | ~~admin → another admin~~ | **REMOVED in doc 44 round 2** — admin tier is now peers for destructive ops too. | (history) |
+| ~~G5 peer-admin DELETE~~ | ~~admin → another admin~~ | **REMOVED in doc 44 round 2** — admin tier is now peers for destructive ops too. | (history) |
 | **Self-delete guard** (legacy) | DELETE on caller == target | 403 | pre-doc-41 |
 | **Self-demote-from-admin guard** | PATCH `admin=False` on caller's own row when they hold admin | 403 | pre-doc-41 |
 
@@ -256,7 +258,6 @@ When adding a code, edit both files in the same PR. Diffing the two before pushi
 | 403 + "Insufficient permissions" | Token good, route's required code missing from user's effective set. Check `GET /users/me/permissions` |
 | 403 + "Built-in role '\<name\>' cannot be modified" | Trying to delete / rename / mutate the seeded `admin` or `super_admin` role |
 | 403 + "Cannot perform destructive actions (DELETE / password change) on another super_admin. Demote the target first by revoking their super_admin role assignment." | G2 / G3 peer-takeover guard (doc 43 round 2). Revoke target's `super_admin` role-assignment first, then retry. |
-| 403 + "Cannot perform destructive actions (DELETE / password change) on another admin. Demote the target first by revoking their admin role assignment." | G4 / G5 peer-takeover guard (doc 43 round 3). Revoke target's `admin` role first, then retry. |
 | 403 + "Cannot deactivate your own account." | G1 self-deactivate guard (doc 43 round 2). Have another super_admin or admin (with appropriate hierarchy) deactivate the user instead. |
 | 403 + "Cannot demote yourself from admin." | Pre-doc-41 self-demote guard. |
 | 403 + "Cannot revoke last super_admin" | Last-super_admin role-assignment revoke lockout. Promote another user to super_admin first. |

@@ -581,30 +581,14 @@ class TestAdminProtectionGuards:
         assert result.error_type == "validation_error"
         assert "last active super_admin" in result.error.lower()
 
-    def test_can_delete_admin_after_demoting_target_post_round3(
+    def test_can_delete_admin_when_another_admin_exists(
         self, client, admin_user, second_admin_user, admin_headers, db_session,
     ):
-        """Doc 43 round 3 (G5) blocks admin -> admin DELETE outright;
-        the legitimate path is to demote the target (revoke admin role)
-        first, then DELETE. After demotion the destructive guard
-        doesn't fire and the DELETE succeeds.
-
-        Pre-round-3 this test was just "another admin can DELETE this
-        admin freely" — round 3 makes peer-takeover via DELETE a 403
-        and forces an explicit demotion step."""
-        from app.infrastructure.db.models.role import RoleModel
+        """Doc 44 round 2: admin tier opened up — peer admin DELETE no
+        longer requires demotion. (Doc 43 round 3 added that gate;
+        doc 44 round 2 removed it per the FE spec which treats admin
+        tier as peers for destructive ops too.)"""
         from app.infrastructure.db.models.user import UserModel
-        from app.infrastructure.db.models.user_role import UserRoleModel
-
-        admin_role_id = (
-            db_session.query(RoleModel)
-            .filter(RoleModel.name == "admin").one().id
-        )
-        db_session.query(UserRoleModel).filter(
-            UserRoleModel.user_id == second_admin_user.id,
-            UserRoleModel.role_id == admin_role_id,
-        ).delete()
-        db_session.commit()
 
         resp = client.delete(
             f"/api/v3/users/{second_admin_user.id}", headers=admin_headers,

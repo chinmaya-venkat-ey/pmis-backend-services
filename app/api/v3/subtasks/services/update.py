@@ -97,6 +97,10 @@ def update_subtask(
     current_user_id: Optional[int],
     depends_on: Optional[List[str]] = None,
     status: Optional[str] = None,  # doc 38: status now editable on PATCH
+    # Doc 41 follow-up: assignee. Sentinel ``...`` (Ellipsis) = no change;
+    # ``None`` = unassign; UUID string = assign. Controller flips between
+    # these based on ``data.model_fields_set``.
+    assigned_to: Any = ...,
 ) -> Tuple[Subtask, Optional[SubtaskResource]]:
     repo = SubtaskRepository(db)
     model = repo.get_model(subtask_id)
@@ -296,6 +300,13 @@ def update_subtask(
     if status is not None:
         _gate_subtask_status_against_children(db, subtask_id, status)
 
+    # Doc 41 follow-up: assignee — only validate / write when explicitly
+    # sent (sentinel != ...). UUID -> validate; None -> just clear.
+    if assigned_to is not ...:
+        if assigned_to is not None:
+            from .....shared.assignee import validate_assignable_user_id
+            validate_assignable_user_id(db, assigned_to)
+
     updates: Dict[str, Any] = {}
     if name is not None: updates["name"] = name.strip()
     if description is not None: updates["description"] = description
@@ -306,6 +317,7 @@ def update_subtask(
     if actual_end_date is not None: updates["actual_end_date"] = actual_end_date
     if position is not None: updates["position"] = position
     if status is not None: updates["status"] = status  # doc 38
+    if assigned_to is not ...: updates["assigned_to"] = assigned_to
     if final_mode != model.resource_mode or final_count != model.resource_count:
         updates["resource_mode"] = final_mode
         updates["resource_count"] = final_count

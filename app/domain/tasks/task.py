@@ -42,6 +42,9 @@ class Task:
     resource_count: Optional[int] = None
     # Doc 38: lifecycle status, set via PATCH only.
     status: Optional[str] = None
+    # Doc 41 follow-up: optional single assignee (users.id UUID).
+    # NULL = unassigned. Populated from the ``assigned_to`` column.
+    assigned_to: Optional[str] = None
     # Target task ids this task depends on. Populated by the service from the
     # task_dependencies association table.
     depends_on: List[str] = field(default_factory=list)
@@ -62,6 +65,7 @@ class Task:
             "resource_mode": self.resource_mode,
             "resource_count": self.resource_count,
             "status": self.status,
+            "assigned_to": self.assigned_to,
             "depends_on": list(self.depends_on or []),
             "created_at": iso_ist(self.created_at),
             "updated_at": iso_ist(self.updated_at),

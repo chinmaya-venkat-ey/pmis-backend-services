@@ -32,6 +32,17 @@ class TaskCreateRequest(BaseModel):
     position: Optional[int] = Field(None, ge=0)
     status: Optional[str] = None
     depends_on: Optional[List[str]] = Field(None, alias="dependsOn")
+    # Doc 41 follow-up: optional single assignee. Service-side validation
+    # confirms the user exists, is active, and is not soft-deleted.
+    # Omitted / null on create = unassigned. Picker source: GET /api/v3/users.
+    assigned_to: Optional[str] = Field(
+        None, alias="assignedTo", max_length=36,
+        description=(
+            "Optional. UUID of an active user to assign this task to. "
+            "Validated against the users catalog (must exist, status='active', "
+            "not soft-deleted). Omit for unassigned."
+        ),
+    )
 
     @field_validator("end_date")
     @classmethod
@@ -60,6 +71,18 @@ class TaskUpdateRequest(BaseModel):
     depends_on: Optional[List[str]] = Field(None, alias="dependsOn")
     # Doc 38: lifecycle status, accepted on PATCH only.
     status: Optional[str] = None
+    # Doc 41 follow-up: PATCH assignedTo. Distinguish omitted from null:
+    #   - omitted  -> no change
+    #   - null     -> unassign
+    #   - <uuid>   -> assign
+    # Controller checks ``model_fields_set`` to tell omitted from null.
+    assigned_to: Optional[str] = Field(
+        None, alias="assignedTo", max_length=36,
+        description=(
+            "Optional. UUID of an active user. Omit to leave assignment "
+            "unchanged; send null to unassign; send a UUID to assign."
+        ),
+    )
 
 
 class TaskListQuery(BaseModel):

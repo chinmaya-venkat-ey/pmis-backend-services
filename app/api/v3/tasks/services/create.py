@@ -88,6 +88,8 @@ def create_task(
     type: Optional[str] = None,
     # Unified create/update shape: status is now optional on create.
     status: Optional[str] = None,
+    # Doc 41 follow-up: optional single assignee (active user UUID).
+    assigned_to: Optional[str] = None,
 ) -> Tuple[Task, Optional[TaskResource]]:
     activity = (
         db.query(ActivityModel)
@@ -180,6 +182,13 @@ def create_task(
             project_start_date=project.start_date,
         )
 
+    # Doc 41 follow-up: validate the assignee (if any). Must be a live,
+    # active user from the users catalog. Independent per-level: no
+    # cascade from / to subtasks.
+    if assigned_to is not None:
+        from .....shared.assignee import validate_assignable_user_id
+        validate_assignable_user_id(db, assigned_to)
+
     # Validate dependsOn BEFORE inserting the task row. Accepts UUIDs or
     # labels (e.g. "T1.2.3") — see app/shared/labels.py.
     desired_deps: List[str] = []
@@ -269,6 +278,7 @@ def create_task(
         resource_mode=store_mode,
         resource_count=store_count,
         status=status,
+        assigned_to=assigned_to,
     )
     resource_domain = None
     if type == TASK_TYPE_RESOURCE and resource_mode == RESOURCE_MODE_DETAILS:

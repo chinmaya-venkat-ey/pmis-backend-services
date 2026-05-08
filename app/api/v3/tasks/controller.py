@@ -42,7 +42,7 @@ from .services import (
 _TASK_REQUIRED_STRING_KEYS = ("name",)
 _TASK_OPTIONAL_STRING_KEYS = (
     "description", "startDate", "endDate", "actualStartDate", "actualEndDate",
-    "resourceMode",
+    "resourceMode", "assignedTo",
 )
 _TASK_INT_KEYS = ("position", "resourceCount")
 _TASK_ARRAY_KEYS = ("dependsOn",)
@@ -75,6 +75,8 @@ def format_task_response(
     resource: Optional[Dict[str, Any]] = None,
     label_index: Optional[LabelIndex] = None,
     base_url: str = "/api/v3",
+    *,
+    assigned_to_name: Optional[str] = None,
 ) -> Dict[str, Any]:
     deps = t.get("depends_on") or []
     display_code = (
@@ -105,6 +107,11 @@ def format_task_response(
         "resourceMode": t.get("resource_mode"),
         "resourceCount": t.get("resource_count"),
         "status": t.get("status"),
+        # Doc 41 follow-up: optional single assignee. ``assignedTo`` is
+        # the user UUID; ``assignedToName`` is the resolved display name
+        # (caller-supplied via the kwarg). Both NULL when unassigned.
+        "assignedTo": t.get("assigned_to"),
+        "assignedToName": assigned_to_name,
         "dependsOn": deps,
         "dependsOnDisplay": deps_display,
         "createdAt": t["created_at"],
@@ -114,6 +121,14 @@ def format_task_response(
         "deletedAt": t["deleted_at"],
         "resource": _format_resource(resource),
     }
+
+
+def _resolve_assignee_name(db: Session, user_id: Optional[str]) -> Optional[str]:
+    """Single-user name lookup for the response. NULL when unassigned."""
+    if not user_id:
+        return None
+    from ....shared.assignee import bulk_user_name_lookup
+    return bulk_user_name_lookup(db, [user_id]).get(user_id)
 
 
 class TaskController:
@@ -135,10 +150,12 @@ class TaskController:
             resource=None, current_user_id=cuid,
             depends_on=data.depends_on,
             status=data.status,
+            assigned_to=data.assigned_to,
         )
         idx = build_label_index_for_project(db, t.project_id)
         return BaseController.created(data=format_task_response(
             t.to_dict(), r.to_dict() if r else None, label_index=idx,
+            assigned_to_name=_resolve_assignee_name(db, t.assigned_to),
         ))
 
     @staticmethod
@@ -219,6 +236,7 @@ class TaskController:
             resource=None, current_user_id=cuid,
             depends_on=data.depends_on,
             status=data.status,
+            assigned_to=data.assigned_to,
         )
 
         # ---- 3. Inline comment / standalone attachments ----------------
@@ -249,6 +267,7 @@ class TaskController:
         idx = build_label_index_for_project(db, t.project_id)
         response_data = format_task_response(
             t.to_dict(), r.to_dict() if r else None, label_index=idx,
+            assigned_to_name=_resolve_assignee_name(db, t.assigned_to),
         )
         if comment_payload is not None:
             response_data["comment"] = comment_payload
@@ -264,7 +283,18 @@ class TaskController:
             build_label_index_for_project(db, items_data[0].project_id)
             if items_data else None
         )
-        items = [format_task_response(t.to_dict(), None, label_index=idx) for t in items_data]
+        # Doc 41 follow-up: bulk-resolve assignee names for the page.
+        from ....shared.assignee import bulk_user_name_lookup
+        name_by_uid = bulk_user_name_lookup(
+            db, (t.assigned_to for t in items_data if t.assigned_to),
+        )
+        items = [
+            format_task_response(
+                t.to_dict(), None, label_index=idx,
+                assigned_to_name=name_by_uid.get(t.assigned_to),
+            )
+            for t in items_data
+        ]
         payload = {
             "_type": "Collection",
             "_links": {"self": {"href": f"/api/v3/activities/{activity_id}/tasks?offset={paged.page}&pageSize={paged.page_size}"}},
@@ -280,6 +310,7 @@ class TaskController:
         idx = build_label_index_for_project(db, t.project_id)
         return BaseController.ok(data=format_task_response(
             t.to_dict(), r.to_dict() if r else None, label_index=idx,
+            assigned_to_name=_resolve_assignee_name(db, t.assigned_to),
         ))
 
     @staticmethod
@@ -287,8 +318,9 @@ class TaskController:
         cuid = getattr(request.state, "user_id", None)
         # Doc 38: type / resource_mode / resource_count / resource dropped
         # from the wire. Pass None into the underlying service.
-        t, r = update_task(
-            db,
+        # Doc 41 follow-up: PATCH ``assignedTo`` distinguishes omitted
+        # (no change) from null (unassign). Forward only when present.
+        update_kwargs = dict(
             task_id=task_id,
             name=data.name, description=data.description, type=None,
             start_date=data.start_date, end_date=data.end_date,
@@ -299,9 +331,13 @@ class TaskController:
             depends_on=data.depends_on,
             status=data.status,
         )
+        if "assigned_to" in data.model_fields_set:
+            update_kwargs["assigned_to"] = data.assigned_to
+        t, r = update_task(db, **update_kwargs)
         idx = build_label_index_for_project(db, t.project_id)
         return BaseController.ok(data=format_task_response(
             t.to_dict(), r.to_dict() if r else None, label_index=idx,
+            assigned_to_name=_resolve_assignee_name(db, t.assigned_to),
         ))
 
     @staticmethod
@@ -317,4 +353,5 @@ class TaskController:
         idx = build_label_index_for_project(db, t.project_id)
         return BaseController.ok(data=format_task_response(
             t.to_dict(), label_index=idx,
+            assigned_to_name=_resolve_assignee_name(db, t.assigned_to),
         ))

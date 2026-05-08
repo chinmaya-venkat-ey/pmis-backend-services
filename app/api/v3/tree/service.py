@@ -175,6 +175,20 @@ def build_project_tree(db: Session, project_id: str, include_deleted: bool = Fal
     subtasks = _q(SubtaskModel).order_by(SubtaskModel.position.asc(), SubtaskModel.id.asc()).all()
     sub_resources = _q(SubtaskResourceModel).all()
 
+    # Doc 41 follow-up: bulk-resolve assignee display names across all
+    # tasks + subtasks (top-level + nested) in a single users-table read.
+    # Same pattern as ``vendor_name_by_id`` above. Soft-deleted users
+    # still resolve so legacy rows referencing them don't surface NULL
+    # names; the validator blocks new assignments to deleted users.
+    from ....shared.assignee import bulk_user_name_lookup
+    assignee_uids = (
+        [t.assigned_to for t in tasks if getattr(t, "assigned_to", None)]
+        + [s.assigned_to for s in subtasks if getattr(s, "assigned_to", None)]
+    )
+    assignee_name_by_id: Dict[str, str] = bulk_user_name_lookup(
+        db, assignee_uids,
+    )
+
     # Bulk-load dependency edges scoped to this project (4 queries — one per
     # association table). Store as dicts keyed by source id -> list of target
     # ids so each node render is O(1).
@@ -272,6 +286,13 @@ def build_project_tree(db: Session, project_id: str, include_deleted: bool = Fal
             "parentSubtaskId": getattr(s, "parent_subtask_id", None),
             "name": s.name, "description": s.description, "type": s.type,
             "status": getattr(s, "status", None),
+            # Doc 41 follow-up: optional single assignee. ``assignedTo``
+            # is the user UUID; ``assignedToName`` is the resolved display
+            # name. Both NULL when unassigned.
+            "assignedTo": getattr(s, "assigned_to", None),
+            "assignedToName": assignee_name_by_id.get(
+                getattr(s, "assigned_to", None),
+            ),
             "startDate": _iso(s.start_date), "endDate": _iso(s.end_date),
             "actualStartDate": _iso(s.actual_start_date),
             "actualEndDate": _iso(s.actual_end_date),
@@ -304,6 +325,13 @@ def build_project_tree(db: Session, project_id: str, include_deleted: bool = Fal
             "activityId": t.activity_id, "projectId": t.project_id,
             "name": t.name, "description": t.description, "type": t.type,
             "status": getattr(t, "status", None),
+            # Doc 41 follow-up: optional single assignee. ``assignedTo``
+            # is the user UUID; ``assignedToName`` is the resolved display
+            # name. Both NULL when unassigned.
+            "assignedTo": getattr(t, "assigned_to", None),
+            "assignedToName": assignee_name_by_id.get(
+                getattr(t, "assigned_to", None),
+            ),
             "startDate": _iso(t.start_date), "endDate": _iso(t.end_date),
             "actualStartDate": _iso(t.actual_start_date),
             "actualEndDate": _iso(t.actual_end_date),

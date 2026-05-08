@@ -45,6 +45,14 @@ class TaskModel(Base):
     # PATCHed yet.
     status = Column(String(32), nullable=True, index=True)
 
+    # Doc 41 follow-up: optional single assignee (FE dropdown — picks one
+    # active user from the users catalog). Independent per-level: task's
+    # assignee does NOT cascade to / from its subtasks. NULL = unassigned.
+    # Wire keyword: ``assignedTo``; emitted alongside ``assignedToName``.
+    assigned_to = Column(
+        String(36), ForeignKey("users.id"), nullable=True, index=True,
+    )
+
     created_at = Column(UtcDateTime, default=_utcnow, nullable=False)
     updated_at = Column(UtcDateTime, default=_utcnow, onupdate=_utcnow, nullable=False)
     # Doc 26: users.id flipped to UUID String(36).

@@ -148,6 +148,8 @@ def create_subtask(
     type: Optional[str] = None,
     # Unified create/update shape: status is now optional on create.
     status: Optional[str] = None,
+    # Doc 41 follow-up: optional single assignee (active user UUID).
+    assigned_to: Optional[str] = None,
 ) -> Tuple[Subtask, Optional[SubtaskResource]]:
     task, parent_subtask, new_depth = _resolve_parent(
         db, task_id=task_id, parent_subtask_id=parent_subtask_id,
@@ -230,6 +232,13 @@ def create_subtask(
             actual_offboard=resource.get("actual_offboard_date"),
             project_start_date=project.start_date,
         )
+
+    # Doc 41 follow-up: validate the assignee (if any). Must be a live,
+    # active user. Independent per-level — applies the same to nested
+    # subtasks; parent's assignee has no effect.
+    if assigned_to is not None:
+        from .....shared.assignee import validate_assignable_user_id
+        validate_assignable_user_id(db, assigned_to)
 
     desired_deps: List[str] = []
     if depends_on is not None:
@@ -328,6 +337,7 @@ def create_subtask(
         resource_mode=store_mode,
         resource_count=store_count,
         status=status,
+        assigned_to=assigned_to,
     )
     resource_domain = None
     if type == SUBTASK_TYPE_RESOURCE and resource_mode == RESOURCE_MODE_DETAILS:

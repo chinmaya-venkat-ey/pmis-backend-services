@@ -60,6 +60,7 @@ class TestMilestoneCreateUnifiedShape:
                 "startDate": _iso(2026, 7, 1),
                 "endDate": _iso(2026, 8, 30),
                 "status": "completed",
+                "priority": "p1",
             },
         ).json()["data"]
         assert m1["status"] == "completed"
@@ -75,6 +76,7 @@ class TestMilestoneCreateUnifiedShape:
                 "endDate": _iso(2026, 9, 30),
                 "status": "not_completed",
                 "dependsOn": [m1["id"]],
+                "priority": "p1",
             },
         )
         assert r.status_code == 201, r.text
@@ -95,6 +97,7 @@ class TestMilestoneCreateUnifiedShape:
                 "startDate": _iso(2026, 7, 1),
                 "endDate": _iso(2026, 8, 30),
                 # status defaults to not_completed.
+                "priority": "p1",
             },
         ).json()["data"]
         # M2 depends on M1 (which is not completed) AND M2 sent as completed.
@@ -107,6 +110,7 @@ class TestMilestoneCreateUnifiedShape:
                 "endDate": _iso(2026, 9, 30),
                 "status": "completed",
                 "dependsOn": [m1["id"]],
+                "priority": "p1",
             },
         )
         assert r.status_code == 422
@@ -120,6 +124,7 @@ class TestMilestoneCreateUnifiedShape:
             json={
                 "name": "M1", "startDate": _iso(2026, 7, 1),
                 "endDate": _iso(2026, 8, 30),
+                "priority": "p1",
             },
         )
         assert r.status_code == 201
@@ -138,7 +143,7 @@ class TestActivityCreateUnifiedShape:
         m1 = client.post(
             f"/api/v3/projects/{pid}/milestones/create",
             headers=admin_headers,
-            json={"name": "M1", "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 8, 30)},
+            json={"name": "M1", "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 8, 30), "priority": "p1"},
         ).json()["data"]
 
         a1 = client.post(
@@ -185,7 +190,7 @@ class TestActivityCreateUnifiedShape:
         m1 = client.post(
             f"/api/v3/projects/{pid}/milestones/create",
             headers=admin_headers,
-            json={"name": "M1", "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 8, 30)},
+            json={"name": "M1", "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 8, 30), "priority": "p1"},
         ).json()["data"]
         a1 = client.post(
             f"/api/v3/milestones/{m1['id']}/activities/create",
@@ -227,7 +232,7 @@ def _publishable_setup(client, admin_headers):
     m = client.post(
         f"/api/v3/projects/{pid}/milestones/create",
         headers=admin_headers,
-        json={"name": "M1", "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 8, 30)},
+        json={"name": "M1", "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 8, 30), "priority": "p1"},
     ).json()["data"]
     a = client.post(
         f"/api/v3/milestones/{m['id']}/activities/create",
@@ -259,6 +264,7 @@ class TestTaskCreateUnifiedShape:
                 "actualStartDate": _iso(2026, 7, 2),
                 "actualEndDate": _iso(2026, 7, 9),
                 "status": "completed",
+                "priority": "p1",
             },
         ).json()["data"]
         assert t1["status"] == "completed"
@@ -273,6 +279,7 @@ class TestTaskCreateUnifiedShape:
                 "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 7, 15),
                 "dependsOn": [t1["id"]],
                 "status": "not_completed",
+                "priority": "p1",
             },
         )
         assert r.status_code == 201, r.text
@@ -289,7 +296,7 @@ class TestSubtaskCreateUnifiedShape:
         t = client.post(
             f"/api/v3/activities/{a['id']}/tasks/create",
             headers=admin_headers,
-            json={"name": "T1", "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 7, 15)},
+            json={"name": "T1", "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 7, 15), "priority": "p1"},
         ).json()["data"]
 
         # Top-level subtask with full payload at CREATE.
@@ -302,6 +309,7 @@ class TestSubtaskCreateUnifiedShape:
                 "actualStartDate": _iso(2026, 7, 2),
                 "actualEndDate": _iso(2026, 7, 4),
                 "status": "completed",
+                "priority": "p1",
             },
         ).json()["data"]
         assert s1["status"] == "completed"
@@ -315,6 +323,7 @@ class TestSubtaskCreateUnifiedShape:
                 "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 7, 8),
                 "dependsOn": [s1["id"]],
                 "status": "not_completed",
+                "priority": "p1",
             },
         )
         assert r.status_code == 201, r.text
@@ -331,6 +340,7 @@ class TestSubtaskCreateUnifiedShape:
                 "actualStartDate": _iso(2026, 7, 2),
                 "actualEndDate": _iso(2026, 7, 3),
                 "status": "completed",
+                "priority": "p1",
             },
         )
         assert rn.status_code == 201, rn.text
@@ -346,6 +356,7 @@ class TestSubtaskCreateUnifiedShape:
                 "name": "S1.2 nested",
                 "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 7, 4),
                 "dependsOn": [nested["id"]],
+                "priority": "p1",
             },
         )
         assert rn2.status_code == 201, rn2.text

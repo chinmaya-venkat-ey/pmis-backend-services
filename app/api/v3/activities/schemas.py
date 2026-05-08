@@ -14,6 +14,21 @@ Doc 39:
   (``["tmd1", "others"]``). Backed on disk by the new
   ``concerned_divisions`` JSON column; the legacy single-value
   ``concerned_division`` column is kept untouched for safety.
+
+Doc 39 follow-up (concernedDivision free-text on "others"):
+- ``concernedDivision`` list elements now accept free-text values in
+  addition to the catalog codes. The FE picker shows the catalog
+  (``tmd1`` / ``tmd2`` / ``others``) plus an "Other" option that
+  reveals a text input; the typed value is sent inline as a list
+  element, matching the project-vendors multi-add idiom. Example:
+  ``["tmd1", "other admin"]``.
+- Catalog codes are still normalized to lowercase. Free-text values
+  pass through (whitespace stripped) so FE controls the display
+  casing. Per-entry length 1..64; per-list size 1..20; case-insensitive
+  dedup preserves the first occurrence.
+- ``ownerDivision`` is intentionally NOT relaxed — it's a single value
+  and stays strict against the catalog. Only the multi-value
+  concerned-division list takes free text.
 """
 from typing import List, Optional
 
@@ -25,7 +40,12 @@ from ....domain.priorities.priority import PRIORITY_CHOICES
 from ....domain.resource_types.resource_type import DIVISION_CHOICES
 
 
+_CONCERNED_ENTRY_MAX = 64
+_CONCERNED_LIST_MAX = 20
+
+
 def _validate_division_code(v: str) -> str:
+    """Strict catalog check — used by ``ownerDivision`` (single value)."""
     if isinstance(v, str):
         v = v.strip().lower()
     if v not in DIVISION_CHOICES:
@@ -33,6 +53,48 @@ def _validate_division_code(v: str) -> str:
             f"Division code must be one of: {', '.join(DIVISION_CHOICES)}."
         )
     return v
+
+
+def _validate_concerned_entry(v) -> str:
+    """Loose check — used per-entry inside ``concernedDivision`` list.
+
+    Accepts either a known catalog code (``tmd1`` / ``tmd2`` / ``others``)
+    or a free-text label typed by the user under the "Other" picker
+    branch. Catalog codes are lowercased; free text is passed through
+    after ``.strip()`` so FE controls the display casing.
+    """
+    if not isinstance(v, str):
+        raise ValueError("Each concernedDivision entry must be a string.")
+    s = v.strip()
+    if not s:
+        raise ValueError("concernedDivision entries cannot be blank.")
+    if len(s) > _CONCERNED_ENTRY_MAX:
+        raise ValueError(
+            f"concernedDivision entry must be {_CONCERNED_ENTRY_MAX} "
+            f"characters or fewer."
+        )
+    if s.lower() in DIVISION_CHOICES:
+        return s.lower()
+    return s
+
+
+def _normalize_concerned_list(items: List[str]) -> List[str]:
+    """Apply per-entry validation, dedup case-insensitively, enforce list cap."""
+    cleaned: List[str] = []
+    seen = set()
+    for raw in items:
+        entry = _validate_concerned_entry(raw)
+        key = entry.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        cleaned.append(entry)
+    if len(cleaned) > _CONCERNED_LIST_MAX:
+        raise ValueError(
+            f"concernedDivision accepts at most {_CONCERNED_LIST_MAX} "
+            f"entries."
+        )
+    return cleaned
 
 
 class ActivityCreateRequest(BaseModel):
@@ -77,8 +139,11 @@ class ActivityCreateRequest(BaseModel):
     concerned_divisions: List[str] = Field(
         ..., alias="concernedDivision", min_length=1,
         description=(
-            "List of division codes — at least one required. Each entry "
-            f"must be one of: {', '.join(DIVISION_CHOICES)}."
+            "List of division values — at least one required, at most "
+            f"{_CONCERNED_LIST_MAX}. Each entry is either a catalog code "
+            f"({', '.join(DIVISION_CHOICES)}) or a free-text label (max "
+            f"{_CONCERNED_ENTRY_MAX} chars) typed under the picker's "
+            "\"Other\" branch. Case-insensitive dedup."
         ),
     )
     # Doc 41: priority code — REQUIRED on create. The wire string is
@@ -124,8 +189,8 @@ class ActivityCreateRequest(BaseModel):
     @classmethod
     def _validate_concerned(cls, v):
         if not isinstance(v, list):
-            raise ValueError("concernedDivision must be a list of division codes.")
-        return [_validate_division_code(item) for item in v]
+            raise ValueError("concernedDivision must be a list.")
+        return _normalize_concerned_list(v)
 
     @field_validator("priority", mode="before")
     @classmethod
@@ -193,8 +258,8 @@ class ActivityUpdateRequest(BaseModel):
         if v is None:
             return v
         if not isinstance(v, list):
-            raise ValueError("concernedDivision must be a list of division codes.")
-        return [_validate_division_code(item) for item in v]
+            raise ValueError("concernedDivision must be a list.")
+        return _normalize_concerned_list(v)
 
     @field_validator("priority", mode="before")
     @classmethod

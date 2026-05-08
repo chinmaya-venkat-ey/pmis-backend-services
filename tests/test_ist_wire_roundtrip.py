@@ -82,6 +82,7 @@ class TestMilestoneIstWire:
                 "endDate":   "2026-05-30T23:59:59+05:30",
                 "status": "not_completed",
                 "dependsOn": [],
+                "priority": "p1",
             },
         ).json()["data"]
         # Repro of the exact tester scenario: send +05:30, get +05:30 back.
@@ -111,7 +112,7 @@ class TestActivityIstWire:
         m = client.post(
             f"/api/v3/projects/{pid}/milestones/create",
             headers=admin_headers,
-            json={"name": "M1", "startDate": _iso_ist(2026, 7, 1), "endDate": _iso_ist(2026, 8, 30)},
+            json={"name": "M1", "startDate": _iso_ist(2026, 7, 1), "endDate": _iso_ist(2026, 8, 30), "priority": "p1"},
         ).json()["data"]
         a = client.post(
             f"/api/v3/milestones/{m['id']}/activities/create",
@@ -147,7 +148,7 @@ class TestTaskAndSubtaskIstWire:
         m = client.post(
             f"/api/v3/projects/{pid}/milestones/create",
             headers=admin_headers,
-            json={"name": "M1", "startDate": _iso_ist(2026, 7, 1), "endDate": _iso_ist(2026, 8, 30)},
+            json={"name": "M1", "startDate": _iso_ist(2026, 7, 1), "endDate": _iso_ist(2026, 8, 30), "priority": "p1"},
         ).json()["data"]
         a = client.post(
             f"/api/v3/milestones/{m['id']}/activities/create",
@@ -164,7 +165,7 @@ class TestTaskAndSubtaskIstWire:
         t = client.post(
             f"/api/v3/activities/{a['id']}/tasks/create",
             headers=admin_headers,
-            json={"name": "T1", "startDate": _iso_ist(2026, 7, 1), "endDate": _iso_ist(2026, 7, 15)},
+            json={"name": "T1", "startDate": _iso_ist(2026, 7, 1), "endDate": _iso_ist(2026, 7, 15), "priority": "p1"},
         ).json()["data"]
         for k in ("startDate", "endDate", "createdAt", "updatedAt"):
             _assert_ist(t[k], label=f"task.{k}")
@@ -172,7 +173,7 @@ class TestTaskAndSubtaskIstWire:
         s = client.post(
             f"/api/v3/tasks/{t['id']}/subtasks/create",
             headers=admin_headers,
-            json={"name": "S1", "startDate": _iso_ist(2026, 7, 1), "endDate": _iso_ist(2026, 7, 5)},
+            json={"name": "S1", "startDate": _iso_ist(2026, 7, 1), "endDate": _iso_ist(2026, 7, 5), "priority": "p1"},
         ).json()["data"]
         for k in ("startDate", "endDate", "createdAt", "updatedAt"):
             _assert_ist(s[k], label=f"subtask.{k}")
@@ -180,7 +181,7 @@ class TestTaskAndSubtaskIstWire:
         nested = client.post(
             f"/api/v3/subtasks/{s['id']}/subtasks/create",
             headers=admin_headers,
-            json={"name": "S1.1", "startDate": _iso_ist(2026, 7, 1), "endDate": _iso_ist(2026, 7, 3)},
+            json={"name": "S1.1", "startDate": _iso_ist(2026, 7, 1), "endDate": _iso_ist(2026, 7, 3), "priority": "p1"},
         ).json()["data"]
         for k in ("startDate", "endDate", "createdAt", "updatedAt"):
             _assert_ist(nested[k], label=f"nested-subtask.{k}")

@@ -121,6 +121,7 @@ def _setup_published_activity(client, admin_headers):
         json={
             "name": "M1",
             "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 8, 30),
+            "priority": "p1",
         },
     ).json()["data"]
     a = client.post(
@@ -142,6 +143,7 @@ def _make_task(client, headers, aid, *, assigned_to=None, name="T1"):
     body = {
         "name": name,
         "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 7, 15),
+        "priority": "p1",
     }
     if assigned_to is not None:
         body["assignedTo"] = assigned_to
@@ -154,6 +156,7 @@ def _make_subtask(client, headers, tid, *, assigned_to=None, name="S1"):
     body = {
         "name": name,
         "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 7, 10),
+        "priority": "p1",
     }
     if assigned_to is not None:
         body["assignedTo"] = assigned_to
@@ -166,6 +169,7 @@ def _make_nested(client, headers, sid, *, assigned_to=None, name="S1.1"):
     body = {
         "name": name,
         "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 7, 5),
+        "priority": "p1",
     }
     if assigned_to is not None:
         body["assignedTo"] = assigned_to

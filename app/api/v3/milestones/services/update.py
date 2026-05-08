@@ -123,6 +123,46 @@ def _gate_milestone_status_against_children(
         )
 
 
+def _gate_milestone_revert_against_children(
+    db: Session, milestone_id: str, target_status: str,
+) -> None:
+    """Reverse mirror of the forward children gate: block flipping a
+    milestone back to ``not_completed`` while any of its child
+    activities is still ``completed``.
+
+    Together with the forward gate, this keeps the parent-child status
+    hierarchy internally consistent: complete bottom-up, uncomplete
+    bottom-up. Inconsistent middle states (parent=not_completed but
+    a child still completed) are unreachable via either path.
+    """
+    if target_status != "not_completed":
+        return
+    rows = (
+        db.query(ActivityModel.id, ActivityModel.name, ActivityModel.status)
+        .filter(ActivityModel.milestone_id == milestone_id)
+        .filter(ActivityModel.deleted_at.is_(None))
+        .all()
+    )
+    if not rows:
+        return
+    blockers = [
+        (row[0], row[1], row[2])
+        for row in rows
+        if (row[2] or "") == MILESTONE_STATUS_COMPLETED
+    ]
+    if blockers:
+        names = ", ".join(f"'{b[1]}'" for b in blockers[:3])
+        more = "" if len(blockers) <= 3 else f" (+{len(blockers) - 3} more)"
+        raise ValidationError(
+            f"Cannot revert this milestone to not_completed — the "
+            f"following child activit"
+            f"{'y is' if len(blockers) == 1 else 'ies are'} "
+            f"still completed. Revert "
+            f"{'it' if len(blockers) == 1 else 'them'} first: "
+            f"{names}{more}.",
+        )
+
+
 def update_milestone(
     db: Session,
     *,
@@ -136,6 +176,8 @@ def update_milestone(
     status: Optional[str] = None,
     depends_on: Optional[List[str]] = None,
     vendor_ids: Optional[List[str]] = None,
+    # Doc 41 follow-up: priority code (None = no change).
+    priority: Optional[str] = None,
 ) -> Milestone:
     repo = MilestoneRepository(db)
     model = repo.get_model(milestone_id)
@@ -183,6 +225,22 @@ def update_milestone(
                 f"Milestone status must be one of: {', '.join(valid)}."
             )
 
+    # Doc 41 follow-up: priority — when supplied, must be an active code
+    # in the priorities catalog. None = no change.
+    if priority is not None:
+        from .....infrastructure.db.models.priority import PriorityModel
+        from .....shared.static_catalog import active_codes, is_known_code
+        from .....domain.priorities.priority import PRIORITY_CHOICES
+        if not is_known_code(
+            db, priority, model=PriorityModel, fallback=PRIORITY_CHOICES,
+        ):
+            valid = sorted(active_codes(
+                db, model=PriorityModel, fallback=PRIORITY_CHOICES,
+            ))
+            raise ValidationError(
+                f"Priority must be one of: {', '.join(valid)}."
+            )
+
     # Doc 31 (rule 2c): status-completion gate. Run before any dep-date
     # work below — if the caller is trying to mark this completed but a
     # dep target isn't, fail fast with the dep names.
@@ -193,6 +251,11 @@ def update_milestone(
         # ``completed``. Mirrors the dep-target gate above but checks
         # the parent-child rollup instead of cross-edges.
         _gate_milestone_status_against_children(db, milestone_id, status)
+        # Reverse children gate: block reverting to ``not_completed``
+        # while any child activity is still ``completed`` — the symmetric
+        # mirror of the forward gate. Together they keep the
+        # parent-child status hierarchy internally consistent.
+        _gate_milestone_revert_against_children(db, milestone_id, status)
 
     # Validate depends_on (replace-list semantics) BEFORE writing.
     # Accepts UUIDs or labels (e.g. "M2"); see app/shared/labels.py.
@@ -330,6 +393,8 @@ def update_milestone(
         updates["position"] = position
     if status is not None:
         updates["status"] = status
+    if priority is not None:
+        updates["priority"] = priority
 
     vendor_repo = VendorRepository(db)
     will_replace_vendors = vendor_ids is not None

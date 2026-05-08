@@ -44,6 +44,8 @@ def create_milestone(
     status: Optional[str] = None,
     depends_on: Optional[List[str]] = None,
     vendor_ids: Optional[List[str]] = None,
+    # Doc 41 follow-up: priority code from the priorities catalog.
+    priority: Optional[str] = None,
 ) -> Milestone:
     """
     Create a milestone under the given project.
@@ -99,6 +101,22 @@ def create_milestone(
         raise ValidationError(
             f"Milestone status must be one of: {', '.join(valid)}."
         )
+
+    # Doc 41 follow-up: priority code (when supplied) must reference an
+    # active row in the priorities catalog. Catalog-first with in-code
+    # fallback. Independent per-level (no parent-child constraint).
+    if priority is not None:
+        from .....infrastructure.db.models.priority import PriorityModel
+        from .....domain.priorities.priority import PRIORITY_CHOICES
+        if not is_known_code(
+            db, priority, model=PriorityModel, fallback=PRIORITY_CHOICES,
+        ):
+            valid = sorted(active_codes(
+                db, model=PriorityModel, fallback=PRIORITY_CHOICES,
+            ))
+            raise ValidationError(
+                f"Priority must be one of: {', '.join(valid)}."
+            )
 
     # Validate depends_on targets BEFORE creating the row. Accepts UUIDs
     # or labels (e.g. "M2"); see app/shared/labels.py.
@@ -221,6 +239,7 @@ def create_milestone(
         position=position,
         created_by=current_user_id,
         status=resolved_status,
+        priority=priority,
     )
 
     if desired_deps:

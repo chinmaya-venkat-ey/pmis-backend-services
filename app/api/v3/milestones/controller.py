@@ -41,7 +41,7 @@ from .services import (
 
 # Form-field spec for the multipart create path. Mirrors the keys
 # accepted by MilestoneCreateRequest (using its alias names).
-_REQUIRED_STRING_KEYS = ("name",)
+_REQUIRED_STRING_KEYS = ("name", "priority")
 _OPTIONAL_STRING_KEYS = ("description", "startDate", "endDate", "status")
 _INT_KEYS = ("position",)
 _ARRAY_KEYS = ("dependsOn", "vendors")
@@ -88,6 +88,8 @@ def format_milestone_response(
         "endDate": m["end_date"],
         "position": m["position"],
         "status": m.get("status", "not_completed"),
+        # Doc 41 follow-up: priority code from the priorities catalog.
+        "priority": m.get("priority"),
         "dependsOn": deps,
         "dependsOnDisplay": deps_display,
         "vendors": m.get("vendors", []) or [],
@@ -119,6 +121,7 @@ class MilestoneController:
             # Doc 39: vendors removed from milestone wire surface; service
             # still accepts the kwarg for legacy callers.
             vendor_ids=None,
+            priority=data.priority,
         )
         idx = build_label_index_for_project(db, project_id)
         return BaseController.created(data=format_milestone_response(m.to_dict(), idx))
@@ -228,6 +231,7 @@ class MilestoneController:
             # Doc 39: vendors removed from milestone wire surface; service
             # still accepts the kwarg for legacy callers.
             vendor_ids=None,
+            priority=data.priority,
         )
 
         # ---- 3. Inline comment / attachments (optional) ------------------
@@ -309,6 +313,7 @@ class MilestoneController:
             status=data.status,
             depends_on=data.depends_on,
             vendor_ids=None,  # doc 39: vendors removed from milestone wire surface
+            priority=data.priority,
         )
         idx = build_label_index_for_project(db, m.project_id)
         return BaseController.ok(data=format_milestone_response(m.to_dict(), idx))

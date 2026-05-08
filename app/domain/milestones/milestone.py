@@ -36,6 +36,9 @@ class Milestone:
     updated_by: Optional[int] = None
     deleted_at: Optional[datetime] = None
     status: str = MILESTONE_STATUS_DEFAULT
+    # Doc 41 follow-up: priority code from the ``priorities`` catalog.
+    # Required on the wire on create; backfill assigns existing rows ``p3``.
+    priority: Optional[str] = None
     # Live milestone-dependency target ids (sorted), populated from the
     # milestone_dependencies edge table by the repository on read. The legacy
     # JSON ``depends`` column on the model is no longer surfaced.
@@ -54,6 +57,7 @@ class Milestone:
             "end_date": iso_ist(self.end_date),
             "position": self.position,
             "status": self.status,
+            "priority": self.priority,
             "depends_on": list(self.depends_on),
             "created_at": iso_ist(self.created_at),
             "updated_at": iso_ist(self.updated_at),

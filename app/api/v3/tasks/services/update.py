@@ -93,6 +93,41 @@ def _gate_task_status_against_children(
         )
 
 
+def _gate_task_revert_against_children(
+    db: Session, task_id: str, target_status: str,
+) -> None:
+    """Reverse mirror: block flipping the task to ``not_completed``
+    while any of its top-level subtasks is still ``completed``.
+    Symmetric with the forward children gate."""
+    if target_status != "not_completed":
+        return
+    rows = (
+        db.query(SubtaskModel.id, SubtaskModel.name, SubtaskModel.status)
+        .filter(SubtaskModel.task_id == task_id)
+        .filter(SubtaskModel.parent_subtask_id.is_(None))
+        .filter(SubtaskModel.deleted_at.is_(None))
+        .all()
+    )
+    if not rows:
+        return
+    blockers = [
+        (row[0], row[1], row[2])
+        for row in rows
+        if (row[2] or "") == _TASK_STATUS_COMPLETED
+    ]
+    if blockers:
+        names = ", ".join(f"'{b[1]}'" for b in blockers[:3])
+        more = "" if len(blockers) <= 3 else f" (+{len(blockers) - 3} more)"
+        raise ValidationError(
+            f"Cannot revert this task to not_completed — the "
+            f"following child subtask"
+            f"{' is' if len(blockers) == 1 else 's are'} "
+            f"still completed. Revert "
+            f"{'it' if len(blockers) == 1 else 'them'} first: "
+            f"{names}{more}.",
+        )
+
+
 def update_task(
     db: Session,
     *,
@@ -111,6 +146,8 @@ def update_task(
     current_user_id: Optional[int],
     depends_on: Optional[List[str]] = None,
     status: Optional[str] = None,  # doc 38: status now editable on PATCH
+    # Doc 41 follow-up: priority code (None = no change).
+    priority: Optional[str] = None,
     # Doc 41 follow-up: assignee. Sentinel ``...`` (Ellipsis) = no change;
     # ``None`` = unassign; UUID string = assign. Controller flips between
     # these based on ``data.model_fields_set``.
@@ -316,6 +353,25 @@ def update_task(
     # nested children below it.
     if status is not None:
         _gate_task_status_against_children(db, task_id, status)
+        # Reverse mirror — block reverting to ``not_completed`` while
+        # any child subtask is still ``completed``.
+        _gate_task_revert_against_children(db, task_id, status)
+
+    # Doc 41 follow-up: priority — when supplied, must be an active code
+    # in the priorities catalog. None = no change. Independent per-level.
+    if priority is not None:
+        from .....infrastructure.db.models.priority import PriorityModel
+        from .....shared.static_catalog import is_known_code, active_codes
+        from .....domain.priorities.priority import PRIORITY_CHOICES
+        if not is_known_code(
+            db, priority, model=PriorityModel, fallback=PRIORITY_CHOICES,
+        ):
+            valid = sorted(active_codes(
+                db, model=PriorityModel, fallback=PRIORITY_CHOICES,
+            ))
+            raise ValidationError(
+                f"Priority must be one of: {', '.join(valid)}."
+            )
 
     # Doc 41 follow-up: assignee — only validate / write when the caller
     # explicitly sent the field (sentinel != ...). UUID -> validate;
@@ -335,6 +391,7 @@ def update_task(
     if actual_end_date is not None: updates["actual_end_date"] = actual_end_date
     if position is not None: updates["position"] = position
     if status is not None: updates["status"] = status  # doc 38
+    if priority is not None: updates["priority"] = priority
     if assigned_to is not ...: updates["assigned_to"] = assigned_to
     if final_mode != model.resource_mode or final_count != model.resource_count:
         updates["resource_mode"] = final_mode

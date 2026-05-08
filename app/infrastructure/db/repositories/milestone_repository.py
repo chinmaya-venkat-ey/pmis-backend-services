@@ -40,6 +40,7 @@ class MilestoneRepository:
             updated_by=m.updated_by,
             deleted_at=m.deleted_at,
             status=getattr(m, "status", None) or "not_completed",
+            priority=getattr(m, "priority", None),
         )
         # Live milestone-dependency target ids (sorted) come from the
         # milestone_dependencies edge table. Local import to avoid cycles.
@@ -118,6 +119,8 @@ class MilestoneRepository:
         position: int,
         created_by: Optional[str],
         status: str = "not_completed",
+        # Doc 41 follow-up: priority code from the priorities catalog.
+        priority: Optional[str] = None,
     ) -> Milestone:
         m = MilestoneModel(
             project_id=project_id,
@@ -129,6 +132,7 @@ class MilestoneRepository:
             created_by=created_by,
             updated_by=created_by,
             status=status,
+            priority=priority,
         )
         self.db.add(m)
         self.db.commit()

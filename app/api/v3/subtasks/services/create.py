@@ -148,6 +148,8 @@ def create_subtask(
     type: Optional[str] = None,
     # Unified create/update shape: status is now optional on create.
     status: Optional[str] = None,
+    # Doc 41 follow-up: priority code from the priorities catalog.
+    priority: Optional[str] = None,
     # Doc 41 follow-up: optional single assignee (active user UUID).
     assigned_to: Optional[str] = None,
 ) -> Tuple[Subtask, Optional[SubtaskResource]]:
@@ -232,6 +234,24 @@ def create_subtask(
             actual_offboard=resource.get("actual_offboard_date"),
             project_start_date=project.start_date,
         )
+
+    # Doc 41 follow-up: priority code (when supplied) must reference an
+    # active row in the priorities catalog. Catalog-first with in-code
+    # fallback. Independent per-level — applies equally to nested
+    # subtasks; their parent's priority does not constrain them.
+    if priority is not None:
+        from .....infrastructure.db.models.priority import PriorityModel
+        from .....shared.static_catalog import is_known_code, active_codes
+        from .....domain.priorities.priority import PRIORITY_CHOICES
+        if not is_known_code(
+            db, priority, model=PriorityModel, fallback=PRIORITY_CHOICES,
+        ):
+            valid = sorted(active_codes(
+                db, model=PriorityModel, fallback=PRIORITY_CHOICES,
+            ))
+            raise ValidationError(
+                f"Priority must be one of: {', '.join(valid)}."
+            )
 
     # Doc 41 follow-up: validate the assignee (if any). Must be a live,
     # active user. Independent per-level — applies the same to nested
@@ -337,6 +357,7 @@ def create_subtask(
         resource_mode=store_mode,
         resource_count=store_count,
         status=status,
+        priority=priority,
         assigned_to=assigned_to,
     )
     resource_domain = None

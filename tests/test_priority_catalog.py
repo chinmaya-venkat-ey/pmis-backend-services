@@ -69,7 +69,7 @@ def _setup(client, admin_headers):
     m = client.post(
         f"/api/v3/projects/{pid}/milestones/create",
         headers=admin_headers,
-        json={"name": "M1", "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 8, 30)},
+        json={"name": "M1", "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 8, 30), "priority": "p1"},
     ).json()["data"]
     return pid, vid, m
 

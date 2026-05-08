@@ -74,6 +74,13 @@ class SubtaskModel(Base):
     # Doc 38: lifecycle status, settable via PATCH only (not on create).
     status = Column(String(32), nullable=True, index=True)
 
+    # Doc 41 follow-up: priority code from the ``priorities`` catalog.
+    # Independent per-level — subtask priority is NOT derived from or
+    # constrained by parent task / activity / milestone priorities.
+    # Applies equally to top-level and nested subtasks. Required on
+    # the wire on create; existing rows backfilled to ``p3``.
+    priority = Column(String(16), nullable=True, index=True)
+
     # Doc 41 follow-up: optional single assignee (FE dropdown — picks one
     # active user from the users catalog). Independent per-level for both
     # top-level AND nested subtasks; parent's assignee has no effect.

@@ -36,6 +36,12 @@ class MilestoneModel(Base):
     # (app/domain/milestones/milestone.py). Defaults to 'not_completed'.
     status = Column(String(32), nullable=False, default="not_completed", index=True)
 
+    # Doc 41 follow-up: priority code from the ``priorities`` catalog.
+    # Independent per-level — milestone priority is NOT derived from or
+    # constrained by activity / task / subtask priorities. Required on
+    # the wire on create; existing rows backfilled to ``p3`` (low).
+    priority = Column(String(16), nullable=True, index=True)
+
     # The legacy ``depends`` JSON column was removed in doc 22 (display-label
     # rework). Milestone-to-milestone dependencies now live in the
     # ``milestone_dependencies`` edge table (per doc 21A) and are surfaced

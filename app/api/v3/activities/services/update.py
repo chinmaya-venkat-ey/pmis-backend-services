@@ -159,6 +159,40 @@ def _gate_activity_status_against_children(
         )
 
 
+def _gate_activity_revert_against_children(
+    db: Session, activity_id: str, target_status: str,
+) -> None:
+    """Reverse mirror of the forward children gate: block flipping the
+    activity back to ``not_completed`` while any of its child tasks is
+    still ``completed``. Symmetric with the forward gate."""
+    if target_status != "not_completed":
+        return
+    rows = (
+        db.query(TaskModel.id, TaskModel.name, TaskModel.status)
+        .filter(TaskModel.activity_id == activity_id)
+        .filter(TaskModel.deleted_at.is_(None))
+        .all()
+    )
+    if not rows:
+        return
+    blockers = [
+        (row[0], row[1], row[2])
+        for row in rows
+        if (row[2] or "") == ACTIVITY_STATUS_COMPLETED
+    ]
+    if blockers:
+        names = ", ".join(f"'{b[1]}'" for b in blockers[:3])
+        more = "" if len(blockers) <= 3 else f" (+{len(blockers) - 3} more)"
+        raise ValidationError(
+            f"Cannot revert this activity to not_completed — the "
+            f"following child task"
+            f"{' is' if len(blockers) == 1 else 's are'} "
+            f"still completed. Revert "
+            f"{'it' if len(blockers) == 1 else 'them'} first: "
+            f"{names}{more}.",
+        )
+
+
 def update_activity(
     db: Session,
     *,
@@ -369,6 +403,14 @@ def update_activity(
         # enforces the full descendant rollup.
         _gate_activity_status_against_children(
             db, activity_id, ACTIVITY_STATUS_COMPLETED,
+        )
+
+    # Reverse children gate — fires when reverting to ``not_completed``.
+    # Symmetric mirror of the forward gate: blocks the revert while any
+    # child task is still ``completed``.
+    if status_supplied and status == "not_completed":
+        _gate_activity_revert_against_children(
+            db, activity_id, "not_completed",
         )
 
     # Validate dependsOn targets for replace. Accepts UUIDs or labels

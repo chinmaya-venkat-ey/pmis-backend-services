@@ -60,12 +60,12 @@ def _create_full_tree(client, admin_headers):
     m1 = client.post(
         f"/api/v3/projects/{pid}/milestones/create",
         headers=admin_headers,
-        json={"name": "M1", "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 8, 30)},
+        json={"name": "M1", "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 8, 30), "priority": "p1"},
     ).json()["data"]
     m2 = client.post(
         f"/api/v3/projects/{pid}/milestones/create",
         headers=admin_headers,
-        json={"name": "M2", "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 9, 30)},
+        json={"name": "M2", "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 9, 30), "priority": "p1"},
     ).json()["data"]
     # M2 dependsOn M1 (M2.end > M1.end ✓, M2.start >= M1.start ✓).
     client.patch(
@@ -126,14 +126,14 @@ def _create_full_tree(client, admin_headers):
     t1_resp = client.post(
         f"/api/v3/activities/{a1['id']}/tasks/create",
         headers=admin_headers,
-        json={"name": "T1", "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 7, 10)},
+        json={"name": "T1", "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 7, 10), "priority": "p1"},
     )
     assert t1_resp.status_code == 201, t1_resp.text
     t1 = t1_resp.json()["data"]
     t2 = client.post(
         f"/api/v3/activities/{a1['id']}/tasks/create",
         headers=admin_headers,
-        json={"name": "T2", "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 7, 15)},
+        json={"name": "T2", "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 7, 15), "priority": "p1"},
     ).json()["data"]
     client.patch(
         f"/api/v3/tasks/{t2['id']}",
@@ -150,12 +150,12 @@ def _create_full_tree(client, admin_headers):
     s1 = client.post(
         f"/api/v3/tasks/{t1['id']}/subtasks/create",
         headers=admin_headers,
-        json={"name": "S1", "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 7, 5)},
+        json={"name": "S1", "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 7, 5), "priority": "p1"},
     ).json()["data"]
     s2 = client.post(
         f"/api/v3/tasks/{t1['id']}/subtasks/create",
         headers=admin_headers,
-        json={"name": "S2", "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 7, 8)},
+        json={"name": "S2", "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 7, 8), "priority": "p1"},
     ).json()["data"]
     client.patch(
         f"/api/v3/subtasks/{s2['id']}",
@@ -174,7 +174,7 @@ def _create_full_tree(client, admin_headers):
     nested = client.post(
         f"/api/v3/subtasks/{s1['id']}/subtasks/create",
         headers=admin_headers,
-        json={"name": "S1.1 nested", "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 7, 3)},
+        json={"name": "S1.1 nested", "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 7, 3), "priority": "p1"},
     ).json()["data"]
     client.patch(
         f"/api/v3/subtasks/{nested['id']}",

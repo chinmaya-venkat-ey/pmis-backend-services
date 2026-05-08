@@ -47,7 +47,7 @@ class TestMilestoneChildrenGate:
         m = client.post(
             f"/api/v3/projects/{pid}/milestones/create",
             headers=admin_headers,
-            json={"name": "M1", "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 8, 30)},
+            json={"name": "M1", "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 8, 30), "priority": "p1"},
         ).json()["data"]
         # Two child activities — one completed, one not.
         a1 = client.post(
@@ -95,7 +95,7 @@ class TestMilestoneChildrenGate:
         m = client.post(
             f"/api/v3/projects/{pid}/milestones/create",
             headers=admin_headers,
-            json={"name": "M1", "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 8, 30)},
+            json={"name": "M1", "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 8, 30), "priority": "p1"},
         ).json()["data"]
         for name, end in (("A1", 10), ("A2", 12)):
             client.post(
@@ -126,7 +126,7 @@ class TestMilestoneChildrenGate:
         m = client.post(
             f"/api/v3/projects/{pid}/milestones/create",
             headers=admin_headers,
-            json={"name": "M1", "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 8, 30)},
+            json={"name": "M1", "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 8, 30), "priority": "p1"},
         ).json()["data"]
         r = client.patch(
             f"/api/v3/milestones/{m['id']}",
@@ -148,6 +148,7 @@ class TestMilestoneChildrenGate:
                 "name": "M1",
                 "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 8, 30),
                 "status": "completed",  # empty children -> allowed
+                "priority": "p1",
             },
         ).json()["data"]
         # Add an in-progress activity post-completion.

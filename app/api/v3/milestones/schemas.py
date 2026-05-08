@@ -7,6 +7,7 @@ from ....domain.milestones.milestone import (
     MILESTONE_STATUS_CHOICES,
     MILESTONE_STATUS_DEFAULT,
 )
+from ....domain.priorities.priority import PRIORITY_CHOICES
 from ....shared.datetime import IstCalendarDate
 
 
@@ -33,6 +34,17 @@ class MilestoneCreateRequest(BaseModel):
     status: Optional[str] = None
     # Optional on create. List of milestone UUIDs or display labels (M1, M2, …).
     depends_on: Optional[List[str]] = Field(None, alias="dependsOn")
+    # Doc 41 follow-up: priority code — REQUIRED on create. Independent
+    # per-level — milestone priority is not derived from / constrained by
+    # activity priority.
+    priority: str = Field(
+        ..., min_length=1, max_length=16,
+        description=(
+            "Priority code from the priorities catalog. Built-in codes: "
+            f"{', '.join(PRIORITY_CHOICES)}. Admins can add more via "
+            "POST /api/v3/master/priorities/create."
+        ),
+    )
 
     @field_validator("end_date")
     @classmethod
@@ -53,6 +65,13 @@ class MilestoneCreateRequest(BaseModel):
             raise ValueError(
                 f"Milestone status must be one of: {', '.join(MILESTONE_STATUS_CHOICES)}."
             )
+        return v
+
+    @field_validator("priority", mode="before")
+    @classmethod
+    def _normalize_priority(cls, v):
+        if isinstance(v, str):
+            v = v.strip().lower()
         return v
 
 
@@ -78,6 +97,8 @@ class MilestoneUpdateRequest(BaseModel):
         None,
         alias="dependsOn",
     )
+    # Doc 41 follow-up: priority code — optional on PATCH (None = no change).
+    priority: Optional[str] = Field(None, max_length=16)
 
     @field_validator("status", mode="before")
     @classmethod
@@ -90,6 +111,15 @@ class MilestoneUpdateRequest(BaseModel):
             raise ValueError(
                 f"Milestone status must be one of: {', '.join(MILESTONE_STATUS_CHOICES)}."
             )
+        return v
+
+    @field_validator("priority", mode="before")
+    @classmethod
+    def _normalize_priority(cls, v):
+        if v is None:
+            return v
+        if isinstance(v, str):
+            v = v.strip().lower()
         return v
 
 

@@ -45,6 +45,9 @@ class Subtask:
     resource_count: Optional[int] = None
     # Doc 38: lifecycle status, set via PATCH only.
     status: Optional[str] = None
+    # Doc 41 follow-up: priority code from the ``priorities`` catalog.
+    # Required on the wire on create; backfill assigns existing rows ``p3``.
+    priority: Optional[str] = None
     # Doc 41 follow-up: optional single assignee (users.id UUID).
     # NULL = unassigned. Independent for top-level AND nested subtasks.
     assigned_to: Optional[str] = None
@@ -70,6 +73,7 @@ class Subtask:
             "resource_mode": self.resource_mode,
             "resource_count": self.resource_count,
             "status": self.status,
+            "priority": self.priority,
             "assigned_to": self.assigned_to,
             "depends_on": list(self.depends_on or []),
             "created_at": iso_ist(self.created_at),

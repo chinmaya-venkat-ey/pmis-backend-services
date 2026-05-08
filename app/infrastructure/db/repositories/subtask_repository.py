@@ -37,6 +37,7 @@ class SubtaskRepository:
             resource_mode=s.resource_mode,
             resource_count=s.resource_count,
             status=getattr(s, "status", None),
+            priority=getattr(s, "priority", None),
             assigned_to=getattr(s, "assigned_to", None),
             created_at=s.created_at,
             updated_at=s.updated_at,
@@ -262,6 +263,8 @@ class SubtaskRepository:
         resource_count: Optional[int] = None,
         parent_subtask_id: Optional[str] = None,
         status: Optional[str] = None,
+        # Doc 41 follow-up: priority code from the priorities catalog.
+        priority: Optional[str] = None,
         # Doc 41 follow-up: optional assignee user UUID.
         assigned_to: Optional[str] = None,
     ) -> Subtask:
@@ -280,6 +283,7 @@ class SubtaskRepository:
             resource_mode=resource_mode,
             resource_count=resource_count,
             status=status,
+            priority=priority,
             assigned_to=assigned_to,
             created_by=created_by,
             updated_by=created_by,

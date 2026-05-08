@@ -39,7 +39,7 @@ from .services import (
 # activity. ``resourceMode`` / ``resourceCount`` / ``resource`` are
 # only meaningful when the parent's type is 'resource'; the service
 # layer rejects them otherwise.
-_TASK_REQUIRED_STRING_KEYS = ("name",)
+_TASK_REQUIRED_STRING_KEYS = ("name", "priority")
 _TASK_OPTIONAL_STRING_KEYS = (
     "description", "startDate", "endDate", "actualStartDate", "actualEndDate",
     "resourceMode", "assignedTo",
@@ -107,6 +107,8 @@ def format_task_response(
         "resourceMode": t.get("resource_mode"),
         "resourceCount": t.get("resource_count"),
         "status": t.get("status"),
+        # Doc 41 follow-up: priority code from the priorities catalog.
+        "priority": t.get("priority"),
         # Doc 41 follow-up: optional single assignee. ``assignedTo`` is
         # the user UUID; ``assignedToName`` is the resolved display name
         # (caller-supplied via the kwarg). Both NULL when unassigned.
@@ -150,6 +152,7 @@ class TaskController:
             resource=None, current_user_id=cuid,
             depends_on=data.depends_on,
             status=data.status,
+            priority=data.priority,
             assigned_to=data.assigned_to,
         )
         idx = build_label_index_for_project(db, t.project_id)
@@ -236,6 +239,7 @@ class TaskController:
             resource=None, current_user_id=cuid,
             depends_on=data.depends_on,
             status=data.status,
+            priority=data.priority,
             assigned_to=data.assigned_to,
         )
 
@@ -330,6 +334,7 @@ class TaskController:
             resource=None, current_user_id=cuid,
             depends_on=data.depends_on,
             status=data.status,
+            priority=data.priority,
         )
         if "assigned_to" in data.model_fields_set:
             update_kwargs["assigned_to"] = data.assigned_to

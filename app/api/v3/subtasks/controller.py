@@ -37,7 +37,7 @@ from .services import (
 
 # Doc 30 form-field spec — same shape as tasks; subtasks inherit type
 # from the parent task (which inherits from the parent activity).
-_SUBTASK_REQUIRED_STRING_KEYS = ("name",)
+_SUBTASK_REQUIRED_STRING_KEYS = ("name", "priority")
 _SUBTASK_OPTIONAL_STRING_KEYS = (
     "description", "startDate", "endDate", "actualStartDate", "actualEndDate",
     "resourceMode", "assignedTo",
@@ -212,6 +212,8 @@ def format_subtask_response(
         "resourceMode": s.get("resource_mode"),
         "resourceCount": s.get("resource_count"),
         "status": s.get("status"),
+        # Doc 41 follow-up: priority code from the priorities catalog.
+        "priority": s.get("priority"),
         # Doc 41 follow-up: optional single assignee. ``assignedTo`` is
         # the user UUID; ``assignedToName`` is the resolved display name.
         # Both NULL when unassigned.
@@ -257,6 +259,7 @@ class SubtaskController:
             resource=None, current_user_id=cuid,
             depends_on=data.depends_on,
             status=data.status,
+            priority=data.priority,
             assigned_to=data.assigned_to,
         )
         idx = build_label_index_for_project(db, s.project_id)
@@ -292,6 +295,7 @@ class SubtaskController:
             resource=None, current_user_id=cuid,
             depends_on=data.depends_on,
             status=data.status,
+            priority=data.priority,
             assigned_to=data.assigned_to,
         )
         idx = build_label_index_for_project(db, s.project_id)
@@ -332,6 +336,7 @@ class SubtaskController:
             resource=None, current_user_id=cuid,
             depends_on=data.depends_on,
             status=data.status,
+            priority=data.priority,
             assigned_to=data.assigned_to,
         )
         return _persist_subtask_inline(request, db, s, r, body, files)
@@ -372,6 +377,7 @@ class SubtaskController:
             resource=None, current_user_id=cuid,
             depends_on=data.depends_on,
             status=data.status,
+            priority=data.priority,
             assigned_to=data.assigned_to,
         )
         return _persist_subtask_inline(request, db, s, r, body, files)
@@ -480,6 +486,7 @@ class SubtaskController:
             resource=None, current_user_id=cuid,
             depends_on=data.depends_on,
             status=data.status,
+            priority=data.priority,
         )
         if "assigned_to" in data.model_fields_set:
             update_kwargs["assigned_to"] = data.assigned_to

@@ -1,6 +1,6 @@
 {
   "info": {
-    "_postman_id": "010171ff-0d05-4aea-a25f-f6f99ff3c0f9",
+    "_postman_id": "48293a22-7841-492e-a06e-d2de80eeabee",
     "name": "PMIS User Service",
     "description": "PMIS user-management + authentication microservice.\n\nAuto-generated from FastAPI OpenAPI by scripts/generate_postman_collection.py. Re-run that script after API changes.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
@@ -1767,7 +1767,7 @@
             "description": "Body: ``{ userId, roleId }``. Always project-scoped \u2014 the project_id comes from the path. Caller-vs-target rules apply.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"role_id\": 0,\n  \"organization_id\": \"\",\n  \"project_id\": \"\",\n  \"user_id\": \"\"\n}",
+              "raw": "{\n  \"role_id\": 0,\n  \"organization_id\": \"\",\n  \"project_id\": \"\",\n  \"project_ids\": [\n    \"\"\n  ],\n  \"user_id\": \"\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1813,10 +1813,10 @@
                 }
               ]
             },
-            "description": "Body: ``{ roleId, projectId? | organizationId? }``. Caller-vs-target rules apply (super_admin grants any; admin grants any except super_admin; org_admin grants project-level roles on projects in their vendor; project_admin grants project_member on their project).",
+            "description": "Body: ``{ roleId, projectId? | projectIds? | organizationId? }``. Use ``projectIds`` (list) to grant the role on multiple projects in one call \u2014 returns ``{items: [...], total: N}`` instead of a single object. Caller-vs-target rules apply per assignment (super_admin grants any; admin grants any except super_admin / admin; org_admin grants project-level roles on projects in their vendor; project_admin grants project_member on their project). Batch is all-or-nothing \u2014 if any single project fails the caller-vs-target gate the whole request is refused.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"role_id\": 0,\n  \"organization_id\": \"\",\n  \"project_id\": \"\",\n  \"user_id\": \"\"\n}",
+              "raw": "{\n  \"role_id\": 0,\n  \"organization_id\": \"\",\n  \"project_id\": \"\",\n  \"project_ids\": [\n    \"\"\n  ],\n  \"user_id\": \"\"\n}",
               "options": {
                 "raw": {
                   "language": "json"

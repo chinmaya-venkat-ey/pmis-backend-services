@@ -410,6 +410,117 @@ class TestUserRoleAssignmentsEndpoint:
         # 403 (RBAC_ASSIGN gate fails for member role).
         assert resp.status_code == 403, resp.text
 
+    def test_admin_can_batch_grant_project_member_via_projectIds(
+        self, client, admin_headers, db_session, admin_user, member_user,
+    ):
+        """projectIds list grants the role on every project in one call.
+        Response shape switches to {items: [...], total: N}."""
+        proj1 = _make_project(db_session)
+        proj2 = _make_project(db_session)
+        proj3 = _make_project(db_session)
+        body = {
+            "roleId": _role_id(db_session, PROJECT_MEMBER_ROLE_NAME),
+            "projectIds": [proj1.id, proj2.id, proj3.id],
+        }
+        resp = client.post(
+            f"/api/v3/users/{member_user.id}/role-assignments",
+            json=body, headers=admin_headers,
+        )
+        assert resp.status_code == 201, resp.text
+        data = resp.json()["data"]
+        assert data["total"] == 3
+        ids_in_response = {row["projectId"] for row in data["items"]}
+        assert ids_in_response == {proj1.id, proj2.id, proj3.id}
+        for row in data["items"]:
+            assert row["userId"] == member_user.id
+            assert row["roleName"] == PROJECT_MEMBER_ROLE_NAME
+            assert row["scope"] == "project"
+
+    def test_batch_grant_is_idempotent(
+        self, client, admin_headers, db_session, admin_user, member_user,
+    ):
+        """Re-running the same batch returns the same rows (the
+        underlying assign_scoped_role is idempotent on the (user, role,
+        scope) tuple). No duplicates created."""
+        proj1 = _make_project(db_session)
+        proj2 = _make_project(db_session)
+        role_id = _role_id(db_session, PROJECT_MEMBER_ROLE_NAME)
+
+        first = client.post(
+            f"/api/v3/users/{member_user.id}/role-assignments",
+            json={"roleId": role_id, "projectIds": [proj1.id, proj2.id]},
+            headers=admin_headers,
+        )
+        assert first.status_code == 201, first.text
+        first_ids = sorted(r["id"] for r in first.json()["data"]["items"])
+
+        second = client.post(
+            f"/api/v3/users/{member_user.id}/role-assignments",
+            json={"roleId": role_id, "projectIds": [proj1.id, proj2.id]},
+            headers=admin_headers,
+        )
+        assert second.status_code == 201, second.text
+        second_ids = sorted(r["id"] for r in second.json()["data"]["items"])
+        assert first_ids == second_ids  # same rows returned
+
+    def test_batch_grant_rejects_empty_list(
+        self, client, admin_headers, db_session, member_user,
+    ):
+        body = {
+            "roleId": _role_id(db_session, PROJECT_MEMBER_ROLE_NAME),
+            "projectIds": [],
+        }
+        resp = client.post(
+            f"/api/v3/users/{member_user.id}/role-assignments",
+            json=body, headers=admin_headers,
+        )
+        assert resp.status_code == 422, resp.text
+
+    def test_batch_grant_rejects_duplicates(
+        self, client, admin_headers, db_session, member_user,
+    ):
+        proj = _make_project(db_session)
+        body = {
+            "roleId": _role_id(db_session, PROJECT_MEMBER_ROLE_NAME),
+            "projectIds": [proj.id, proj.id],
+        }
+        resp = client.post(
+            f"/api/v3/users/{member_user.id}/role-assignments",
+            json=body, headers=admin_headers,
+        )
+        assert resp.status_code == 422, resp.text
+
+    def test_batch_grant_rejects_when_projectId_and_projectIds_both_set(
+        self, client, admin_headers, db_session, member_user,
+    ):
+        proj1 = _make_project(db_session)
+        proj2 = _make_project(db_session)
+        body = {
+            "roleId": _role_id(db_session, PROJECT_MEMBER_ROLE_NAME),
+            "projectId": proj1.id,
+            "projectIds": [proj2.id],
+        }
+        resp = client.post(
+            f"/api/v3/users/{member_user.id}/role-assignments",
+            json=body, headers=admin_headers,
+        )
+        assert resp.status_code == 422, resp.text
+
+    def test_batch_grant_rejects_when_projectIds_with_organizationId(
+        self, client, admin_headers, db_session, member_user,
+    ):
+        proj = _make_project(db_session)
+        body = {
+            "roleId": _role_id(db_session, PROJECT_MEMBER_ROLE_NAME),
+            "organizationId": "00000000-0000-0000-0000-000000000000",
+            "projectIds": [proj.id],
+        }
+        resp = client.post(
+            f"/api/v3/users/{member_user.id}/role-assignments",
+            json=body, headers=admin_headers,
+        )
+        assert resp.status_code == 422, resp.text
+
     def test_list_returns_scoped_assignments(
         self, client, admin_headers, db_session, admin_user, member_user,
     ):

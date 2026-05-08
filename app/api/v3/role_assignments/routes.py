@@ -100,11 +100,15 @@ def list_user_role_assignments(
     dependencies=[require_permission(RBAC_ASSIGN)],
     summary="Grant a scoped role to a user",
     description=(
-        "Body: ``{ roleId, projectId? | organizationId? }``. Caller-vs-"
-        "target rules apply (super_admin grants any; admin grants any "
-        "except super_admin; org_admin grants project-level roles on "
-        "projects in their vendor; project_admin grants project_member "
-        "on their project)."
+        "Body: ``{ roleId, projectId? | projectIds? | organizationId? }``. "
+        "Use ``projectIds`` (list) to grant the role on multiple projects "
+        "in one call — returns ``{items: [...], total: N}`` instead of a "
+        "single object. Caller-vs-target rules apply per assignment "
+        "(super_admin grants any; admin grants any except super_admin / "
+        "admin; org_admin grants project-level roles on projects in their "
+        "vendor; project_admin grants project_member on their project). "
+        "Batch is all-or-nothing — if any single project fails the "
+        "caller-vs-target gate the whole request is refused."
     ),
     status_code=201,
 )
@@ -115,12 +119,23 @@ def create_user_role_assignment(
     db: Session = Depends(get_db),
     caller_id: str = Depends(get_current_user_id),
 ) -> Dict[str, Any]:
+    project_ids = data.project_id_list()
+    # Batch path — one row per project, returns a list response.
+    if data.projectIds is not None:
+        return _create_assignments_batch(
+            db,
+            target_user_id=user_id,
+            role_id=data.roleId,
+            project_ids=project_ids,
+            caller_id=caller_id,
+        )
+    # Single-grant path (singular projectId, organizationId, or global).
     return _create_assignment(
         db,
         target_user_id=user_id,
         role_id=data.roleId,
         organization_id=data.organizationId,
-        project_id=data.projectId,
+        project_id=project_ids[0] if project_ids else None,
         caller_id=caller_id,
     )
 
@@ -523,3 +538,85 @@ def _create_assignment(
 
     db.commit()
     return BaseController.created(data=serialize_assignment(db, row))
+
+
+def _create_assignments_batch(
+    db: Session,
+    *,
+    target_user_id: str,
+    role_id: int,
+    project_ids: List[str],
+    caller_id: str,
+) -> Dict[str, Any]:
+    """Project-scoped batch grant: one row per project, all-or-nothing.
+
+    Validates target user, role, and the caller-vs-target gate for
+    EVERY project before any write happens. If any project fails the
+    gate, the whole request is rejected with details about which one(s)
+    blocked it. Otherwise the rows are written + committed in a single
+    transaction.
+    """
+    target = (
+        db.query(UserModel)
+        .filter(UserModel.id == target_user_id, UserModel.deleted_at.is_(None))
+        .first()
+    )
+    if target is None:
+        return BaseController.error(
+            format_error_response("not_found", f"User {target_user_id} not found."),
+            status=404,
+        )
+
+    repo = RbacRepository(db)
+    role = repo.get_role(role_id)
+    if role is None:
+        return BaseController.error(
+            format_error_response("not_found", f"Role {role_id} not found."),
+            status=404,
+        )
+
+    # Pre-validate: caller-vs-target gate must pass for every project.
+    blocked: List[Dict[str, str]] = []
+    for pid in project_ids:
+        allowed, reason = can_caller_grant(
+            db, caller_id,
+            target_role_name=role.name,
+            target_organization_id=None,
+            target_project_id=pid,
+        )
+        if not allowed:
+            blocked.append({"projectId": pid, "reason": reason})
+    if blocked:
+        return BaseController.error(
+            format_error_response(
+                "forbidden",
+                "Caller is not authorized to grant on at least one project; no rows written.",
+                details={"blocked": blocked},
+            ),
+            status=403,
+        )
+
+    # All gates passed — write each row. ``assign_scoped_role`` is
+    # idempotent on (user, role, scope) tuple, so re-running the batch
+    # returns the existing rows for projects already granted.
+    created_rows = []
+    try:
+        for pid in project_ids:
+            row = repo.assign_scoped_role(
+                user_id=target_user_id,
+                role_id=role_id,
+                organization_id=None,
+                project_id=pid,
+                actor_id=caller_id,
+            )
+            created_rows.append(row)
+    except ValueError as exc:
+        db.rollback()
+        return BaseController.error(
+            format_error_response("validation_error", str(exc)),
+            status=422,
+        )
+
+    db.commit()
+    items = [serialize_assignment(db, r) for r in created_rows]
+    return BaseController.created(data={"items": items, "total": len(items)})

@@ -17,19 +17,18 @@ A user holds a set of **string permission codes** (`projects:create`, `master_da
 
 Auth middleware hydrates two views per request: the flat union (`request.state.user_permissions: Set[str]`) and the per-scope view (`request.state.scoped_permissions: Dict[(scope_kind, scope_id), Set[str]]`). Routes use `require_permission(code)` for global gates, `require_project_permission(code)` / `require_org_permission(code)` for scoped gates. 401 if no token, 403 if the code is missing at the required scope.
 
-**Nine seeded roles** as of doc 41: legacy four (`admin`, `member`, `viewer`, `vendor`) plus scoped five (`super_admin`, `org_admin`, `project_admin`, `project_member`, `division_member`). `super_admin` is auto-synced to hold every registered code on every boot; `admin` is auto-synced to hold every code **except** `users:grant_superadmin` (post-doc-43 demotion). Both `admin` and `super_admin` role rows are **protected** from delete / rename / permission-set mutation through the API.
+**Six seeded roles** as of doc 43 round 4: `admin`, `super_admin`, `org_admin`, `project_admin`, `project_member`, `division_member`. Pre-doc-43-round-4 there were three more legacy roles (`member`, `viewer`, `vendor`) — those are retired and a boot-time cleanup deletes any drifted rows. `super_admin` is auto-synced to hold every registered code on every boot; `admin` is auto-synced to hold every code **except** `users:grant_superadmin` (post-doc-43 demotion). Both `admin` and `super_admin` role rows are **protected** from delete / rename / permission-set mutation through the API.
 
 ---
 
-## 2. The nine seeded roles
+## 2. The six seeded roles
+
+(Doc 43 round 4 retired `member`, `viewer`, and `vendor` — see § 6 / common errors below if you encounter a stale reference.)
 
 | Role | Tier | What they can do | What they can't |
 |------|------|-----------------|-----------------|
 | `super_admin` (doc 41) | global | Everything `admin` does + `users:grant_superadmin` (the gate to grant `super_admin` itself). | Lockout-protected: last super_admin can't be revoked, deactivated, or deleted. **Post-G2/G3 (doc 43 round 2)**: a super_admin cannot change another super_admin's password or DELETE another super_admin without first revoking the target's super_admin role. |
 | `admin` | global | Every code except `users:grant_superadmin`. Auto-synced. **Demoted in doc 43**: no longer the lockout-protected tier. Admin users can be freely demoted or deactivated by another user. | Cannot grant `super_admin` or `admin` (caller-vs-target). Cannot PATCH / password-change / DELETE a super_admin user (F1 hierarchy gate). Cannot self-deactivate (G1, doc 43 round 2). **Cannot change another admin's password or DELETE another admin** without first revoking the target's admin role (G4/G5, doc 43 round 3). |
-| `member` | global | Default contributor: read/update self, full CRUD on M/A/T/S, read on master data + vendor catalog. | Cannot publish/close/delete projects, no RBAC management, no master_data writes, no `*_all` (admin-tier) flavors. |
-| `viewer` | global | Read-only across projects + master data. Can download attachments. | No mutations. |
-| `vendor` | global | External collaborator: full CRUD on M/A/T/S + comments + attachments + own-user update. | Cannot create/publish/close/delete projects, no RBAC management, no master_data writes, no meeting writes, no work_packages access. |
 | `org_admin` (doc 41) | org (vendor) | Manage user / project memberships within their owning vendor. Caller-vs-target rules limit grants to `project_admin` / `project_member` / `division_member` on projects whose owning vendor matches. | Cannot publish/close/delete projects, cannot edit project content, cannot grant `org_admin` or `super_admin`. |
 | `project_admin` (doc 41) | project | Manage tasks/subtasks + project-membership on the specific project the assignment carries. Can grant `project_member` on that project only. | Cannot create projects, cannot grant `project_admin` (only `project_member`), cannot touch master data or RBAC outside their project. |
 | `project_member` (doc 41) | project | Read project + M/A/T/S, contribute task/subtask updates, comment, upload/download attachments. | Cannot delete project content, cannot grant any role, cannot manage milestones/activities create/delete. |

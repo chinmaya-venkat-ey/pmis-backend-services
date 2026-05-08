@@ -1,8 +1,8 @@
 {
   "info": {
-    "_postman_id": "pmis-user-service-2026",
-    "name": "PMIS User Service (port 8001)",
-    "description": "Postman collection for PMIS-user-management — the authentication + RBAC microservice running on port 8001.\n\n**Endpoints covered** (user-mgmt slice only):\n- `POST /api/v3/users/login` (single-stage + 2FA branch)\n- `POST /api/v3/users/login/send-otp`, `/login/verify-otp`\n- `POST /api/v3/users/forgot-password`, `/reset-password`\n- `POST /api/v3/users/refresh`, `/introspect`, `/logout`\n- User CRUD: `/users/create`, `/users/{id}`, etc.\n- RBAC user-side: `/users/{id}/roles/{role_id}`, `/users/{id}/permissions/{code}`\n- Legacy /api/v3/roles, /api/v3/permissions (deprecated; use master/*)\n- `/api/v3/master/roles`, `/api/v3/master/permissions`\n- `/health`\n\n**`/api/v3/master/notification_templates/*` is no longer here.** Per, that slice moved to notification-service (port 8002) — see `PMIS_Notification_Service.postman_collection.json` in the notification-service repo.\n\n**Project-management endpoints (projects, M/A/T/S, vendors, divisions, etc.) are NOT in this collection.** Call them at the monolith on port 8000 — see `PMIS_API_Collection.postman_collection.json` in the monolith repo.\n\n**Two ways to use this collection:**\n1. **Direct (port 8001)** — set `baseUrl` to `http://10.1.131.199:8001`. Hits user-mgmt directly.\n2. **Through monolith proxy** — set `baseUrl` to `http://10.1.131.199:8000` AND ensure the monolith has `USER_SERVICE_PROXY_ENABLED=true`. Same URLs work — the monolith's `UserServiceProxyMiddleware` forwards them to user-mgmt transparently.\n\nBoth paths give the same result; option 1 is one fewer hop and useful for direct user-mgmt debugging.",
+    "_postman_id": "010171ff-0d05-4aea-a25f-f6f99ff3c0f9",
+    "name": "PMIS User Service",
+    "description": "PMIS user-management + authentication microservice.\n\nAuto-generated from FastAPI OpenAPI by scripts/generate_postman_collection.py. Re-run that script after API changes.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
@@ -10,7 +10,7 @@
       "name": "Authentication & Users",
       "item": [
         {
-          "name": "Assign a role to a user",
+          "name": "Assign a role to a user (DEPRECATED \u2014 use POST /api/v3/users/{id}/role-assignments for scoped assignments)",
           "request": {
             "method": "POST",
             "header": [
@@ -46,7 +46,7 @@
                 }
               ]
             },
-            "description": "Assign a role to a user"
+            "description": "**Deprecated**. Writes a global-scope grant to the legacy `user_roles` table. The newer scoped role assignments table (`user_role_assignments`, with org / project scope) is NOT written by this endpoint.\n\n**Use instead**: `POST /api/v3/users/{id}/role-assignments` with body `{ roleId, organizationId?, projectId? }`. Both scope fields omitted \u21d2 global (equivalent to this endpoint's effect). Caller-vs-target gate enforced server-side."
           },
           "response": []
         },
@@ -73,7 +73,7 @@
                 "login"
               ]
             },
-            "description": "Authenticate user and receive a JWT token. change 3: when 2FA is required for the user (per-user flag + global ``REQUIRE_2FA``), this endpoint returns ``{requires_otp: true, ephemeral_token, channels_available}`` instead of an access_token. The client then calls ``/login/send-otp`` and ``/login/verify-otp``.",
+            "description": "Authenticate user and receive a JWT token. Doc 33 change 3: when 2FA is required for the user (per-user flag + global ``REQUIRE_2FA``), this endpoint returns ``{requires_otp: true, ephemeral_token, channels_available}`` instead of an access_token. The client then calls ``/login/send-otp`` and ``/login/verify-otp``.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"login\": \"\",\n  \"password\": \"\"\n}",
@@ -198,12 +198,12 @@
                 }
               ]
             },
-            "description": "Delete user by ID. Path param accepts integer ``id`` or ``US-...`` code."
+            "description": "Delete user by ID. Path param accepts integer ``id`` or ``US-...`` code.\n\nHierarchy boundary: an admin caller cannot delete a user who currently holds super_admin \u2014 only super_admin can. Returns 403. Plus existing self-delete guard (403) and last-super_admin lockout (422)."
           },
           "response": []
         },
         {
-          "name": "Effective permissions for a user (role-derived ∪ direct)",
+          "name": "Effective permissions for a user (role-derived \u222a direct)",
           "request": {
             "method": "GET",
             "header": [
@@ -233,7 +233,7 @@
                 }
               ]
             },
-            "description": "Effective permissions for a user (role-derived ∪ direct)"
+            "description": "Effective permissions for a user (role-derived \u222a direct)"
           },
           "response": []
         },
@@ -261,7 +261,7 @@
                 "permissions"
               ]
             },
-            "description": "Returns the caller's effective permission set + admin flag.\n\nUsed by the FE to decide which UI actions to show. Requires only\nauthentication — no separate permission to read your own grants."
+            "description": "Returns the caller's effective permission set + admin flag.\n\nUsed by the FE to decide which UI actions to show. Requires only\nauthentication \u2014 no separate permission to read your own grants."
           },
           "response": []
         },
@@ -322,7 +322,7 @@
                 }
               ]
             },
-            "description": "Get user by ID. The path param accepts EITHER the integer ``id`` OR the human-readable ``userCode`` (``US-XXXX-YYMMDDHHMMSS`` — see). The dispatcher auto-detects via the ``US-`` prefix."
+            "description": "Get user by ID. The path param accepts EITHER the integer ``id`` OR the human-readable ``userCode`` (``US-XXXX-YYMMDDHHMMSS`` \u2014 see doc 25). The dispatcher auto-detects via the ``US-`` prefix."
           },
           "response": []
         },
@@ -363,7 +363,7 @@
                 }
               ]
             },
-            "description": "Grant a direct permission to a user"
+            "description": "Grant a permission directly to a user (additive on top of role-derived). The reserved permission ``users:grant_superadmin`` cannot be granted via this path to anyone \u2014 only the seeded ``super_admin`` role holds it. Returns 403 if attempted."
           },
           "response": []
         },
@@ -390,7 +390,7 @@
                 "introspect"
               ]
             },
-            "description": "Public token introspection. Returns metadata (active, exp, iat, jti, sub, userId, role, isAdmin) for the supplied access_token and/or refresh_token. NEVER rotates — use POST /users/refresh to mint a fresh access + refresh pair from a valid refresh token. When both tokens are supplied, the response shape becomes {access: {...}, refresh: {...}}.",
+            "description": "Public token introspection. Returns metadata (active, exp, iat, jti, sub, userId, role, isAdmin) for the supplied access_token and/or refresh_token. NEVER rotates \u2014 use POST /users/refresh to mint a fresh access + refresh pair from a valid refresh token. When both tokens are supplied, the response shape becomes {access: {...}, refresh: {...}}.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"access_token\": \"\",\n  \"refresh_token\": \"\"\n}",
@@ -404,7 +404,7 @@
           "response": []
         },
         {
-          "name": "List a user's roles",
+          "name": "List a user's roles (DEPRECATED \u2014 use GET /api/v3/users/{id}/role-assignments for the scoped view; this endpoint returns only legacy global roles from user_roles)",
           "request": {
             "method": "GET",
             "header": [
@@ -434,7 +434,7 @@
                 }
               ]
             },
-            "description": "List a user's roles"
+            "description": "**Deprecated**. Returns only the legacy global roles a user holds (rows in `user_roles`). Scoped role assignments stored in `user_role_assignments` (org / project scope) are NOT surfaced by this endpoint.\n\n**Use instead**: `GET /api/v3/users/{id}/role-assignments`. That endpoint returns global, org-scoped, and project-scoped grants in one list with their scope key per row.\n\nThe response carries `Deprecation: true` and `Link: </api/v3/users/{id}/role-assignments>; rel=\"successor-version\"` so DevTools / API clients can highlight migration targets."
           },
           "response": []
         },
@@ -523,11 +523,6 @@
             "method": "POST",
             "header": [
               {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}",
-                "type": "text"
-              },
-              {
                 "key": "Content-Type",
                 "value": "application/json",
                 "type": "text"
@@ -545,7 +540,7 @@
                 "refresh"
               ]
             },
-            "description": "Validates the supplied refresh token and issues a fresh access + refresh pair. The user row's stored refresh_token_jti is rotated atomically — concurrent refreshes with the same token can only succeed once. Response includes accessTokenExpiresAt + refreshTokenExpiresAt so the client can schedule the next preemptive refresh.",
+            "description": "Validates the supplied refresh token and issues a fresh access + refresh pair. The user row's stored refresh_token_jti is rotated atomically \u2014 concurrent refreshes with the same token can only succeed once. Response includes accessTokenExpiresAt + refreshTokenExpiresAt so the client can schedule the next preemptive refresh.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"refresh_token\": \"\"\n}",
@@ -630,7 +625,7 @@
                 }
               ]
             },
-            "description": "Clears deletedAt/deletedBy and sets status='active' on a soft-deleted user. Idempotent on already-active users — returns the current snapshot rather than 409. All project mappings, vendor association, and division values are preserved on disk during soft-delete and re-surface automatically. Mirrors POST /api/v3/vendors/{id}/restore. Path param accepts integer ``id`` or ``US-...`` code."
+            "description": "Clears deletedAt/deletedBy and sets status='active' on a soft-deleted user. Idempotent on already-active users \u2014 returns the current snapshot rather than 409. All project mappings, vendor association, and division values are preserved on disk during soft-delete and re-surface automatically. Mirrors POST /api/v3/vendors/{id}/restore. Path param accepts integer ``id`` or ``US-...`` code (doc 25)."
           },
           "response": []
         },
@@ -718,7 +713,7 @@
           "response": []
         },
         {
-          "name": "Unassign a role from a user (lockout-protected for 'admin')",
+          "name": "Unassign a role from a user (DEPRECATED \u2014 use DELETE /api/v3/users/{id}/role-assignments/{aid}; lockout-protected for 'admin')",
           "request": {
             "method": "DELETE",
             "header": [
@@ -754,7 +749,7 @@
                 }
               ]
             },
-            "description": "Unassign a role from a user (lockout-protected for 'admin')"
+            "description": "**Deprecated**. Revokes the legacy global `user_roles` grant. Scoped `user_role_assignments` rows (org / project scope) are NOT affected by this endpoint \u2014 only the legacy table.\n\n**Use instead**: `DELETE /api/v3/users/{id}/role-assignments/{assignment_id}`. That path covers both legacy-equivalent (global) grants and the new org/project-scoped grants and carries the same lockout protection (last super_admin / admin cannot be revoked)."
           },
           "response": []
         },
@@ -793,7 +788,7 @@
                 }
               ]
             },
-            "description": "Update user details. Path param accepts integer ``id`` or ``US-...`` code.",
+            "description": "Update user details. Path param accepts integer ``id`` or ``US-...`` code.\n\nHierarchy boundary: an admin caller cannot modify a user who currently holds super_admin \u2014 only super_admin can. Returns 403.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"email\": \"user@example.com\",\n  \"firstName\": \"\",\n  \"lastName\": \"\",\n  \"admin\": false,\n  \"status\": \"\",\n  \"vendor_id\": \"\",\n  \"division\": \"\",\n  \"division_other\": \"\",\n  \"phone_number\": \"\"\n}",
@@ -842,7 +837,7 @@
                 }
               ]
             },
-            "description": "Update user password. Path param accepts integer ``id`` or ``US-...`` code.",
+            "description": "Update user password. Path param accepts integer ``id`` or ``US-...`` code.\n\nHierarchy boundary: an admin caller cannot reset a super_admin's password \u2014 only super_admin can. Returns 403. (Stops admin from taking over a super_admin account by overwriting the password.)",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"password\": \"\"\n}",
@@ -903,7 +898,7 @@
       "name": "Health & Root",
       "item": [
         {
-          "name": "Health Check",
+          "name": "Health",
           "request": {
             "method": "GET",
             "header": [],
@@ -916,14 +911,14 @@
                 "health"
               ]
             },
-            "description": "Health check endpoint.\n\nReports the status of subsystems the app depends on. Currently:\n - the API process itself (\"status\")\n - file-storage backend reachability (NFS mount in prod, local\n folder in dev) — surfaced separately so ops can distinguish a\n fully-healthy app from one that's serving but can't accept\n attachment uploads.\n - notification client config + reachability — diagnostic for the\n 2FA / forgot-password flow. Exposes which backend is selected\n (``mock`` or ``http``), the configured service URL, and a quick\n reachability probe so ops can tell at a glance whether the BE\n will actually dispatch OTP emails or silently sink them in\n the audit table.\n\nThe NFS server / export are reported back from settings (informational\n— the app doesn't connect to them directly; the OS mount does). They\nlet ops verify which file store this instance is wired to."
+            "description": "Liveness probe + SECRET_KEY hash prefix for ops verification.\n\nThe hash prefix lets ops confirm this service shares the same\nSECRET_KEY as pmis-backend without ever exposing the secret itself."
           },
           "response": []
         }
       ]
     },
     {
-      "name": "Master Data (user-mgmt slice)",
+      "name": "Master Data",
       "item": [
         {
           "name": "Create a custom permission (delegates)",
@@ -968,7 +963,7 @@
           "response": []
         },
         {
-          "name": "Create a role (delegates to POST /api/v3/roles/create)",
+          "name": "Create a role (delegates)",
           "request": {
             "method": "POST",
             "header": [
@@ -996,7 +991,7 @@
                 "create"
               ]
             },
-            "description": "Create a role (delegates to POST /api/v3/roles/create)",
+            "description": "Create a role (delegates)",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"name\": \"\",\n  \"description\": \"\",\n  \"permissions\": [\n    \"\"\n  ],\n  \"builtin\": false\n}",
@@ -1010,7 +1005,7 @@
           "response": []
         },
         {
-          "name": "Delete a permission (built-ins protected)",
+          "name": "Delete a permission (built-ins protected; delegates)",
           "request": {
             "method": "DELETE",
             "header": [
@@ -1040,12 +1035,12 @@
                 }
               ]
             },
-            "description": "Delete a permission (built-ins protected)"
+            "description": "Delete a permission (built-ins protected; delegates)"
           },
           "response": []
         },
         {
-          "name": "Delete a role (delegates; built-in 'admin' role protected)",
+          "name": "Delete a role (admin role protected; delegates)",
           "request": {
             "method": "DELETE",
             "header": [
@@ -1075,7 +1070,7 @@
                 }
               ]
             },
-            "description": "Delete a role (delegates; built-in 'admin' role protected)"
+            "description": "Delete a role (admin role protected; delegates)"
           },
           "response": []
         },
@@ -1164,7 +1159,7 @@
           "response": []
         },
         {
-          "name": "Get a role (delegates to GET /api/v3/roles/{id})",
+          "name": "Get a role (delegates)",
           "request": {
             "method": "GET",
             "header": [
@@ -1194,7 +1189,7 @@
                 }
               ]
             },
-            "description": "Get a role (delegates to GET /api/v3/roles/{id})"
+            "description": "Get a role (delegates)"
           },
           "response": []
         },
@@ -1382,7 +1377,7 @@
                 "by-module"
               ]
             },
-            "description": "Returns the full permission catalog bucketed by module — the leading segment of each ``module:action`` code. The FE uses this to render a permission picker tree without parsing codes client-side. Admin-defined modules (created via ``POST /master/permissions/create`` with codes like ``custom_module:my_action``) appear in the same response."
+            "description": "List the permission catalog grouped by module"
           },
           "response": []
         },
@@ -1479,7 +1474,7 @@
           "response": []
         },
         {
-          "name": "Update a role (delegates to PATCH /api/v3/roles/{id})",
+          "name": "Update a role (delegates)",
           "request": {
             "method": "PATCH",
             "header": [
@@ -1514,7 +1509,7 @@
                 }
               ]
             },
-            "description": "Update a role (delegates to PATCH /api/v3/roles/{id})",
+            "description": "Update a role (delegates)",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"name\": \"\",\n  \"description\": \"\",\n  \"permissions\": [\n    \"\"\n  ]\n}",
@@ -1527,14 +1522,13 @@
           },
           "response": []
         }
-      ],
-      "description": "User-management owns two slices of /api/v3/master/*: roles and permissions. /api/v3/master/notification_templates moved to notification-service (port 8002) per — see PMIS_Notification_Service.postman_collection.json. Other master-data slices (divisions, vendors, project_categories, activity_types, milestone_statuses, activity_statuses, project_status_transitions, resource_types) live on the monolith — call them at the monolith's port (8000), not 8001."
+      ]
     },
     {
       "name": "Permissions",
       "item": [
         {
-          "name": "Create a custom permission (DEPRECATED — use POST /api/v3/master/permissions/create)",
+          "name": "Create a custom permission (DEPRECATED \u2014 use POST /api/v3/master/permissions/create)",
           "request": {
             "method": "POST",
             "header": [
@@ -1560,7 +1554,7 @@
                 "permissions"
               ]
             },
-            "description": "Create a custom permission (DEPRECATED — use POST /api/v3/master/permissions/create)",
+            "description": "Create a custom permission (DEPRECATED \u2014 use POST /api/v3/master/permissions/create)",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"code\": \"\",\n  \"name\": \"\",\n  \"description\": \"\"\n}",
@@ -1574,7 +1568,7 @@
           "response": []
         },
         {
-          "name": "Delete a permission (DEPRECATED — use DELETE /api/v3/master/permissions/{code})",
+          "name": "Delete a permission (DEPRECATED \u2014 use DELETE /api/v3/master/permissions/{code})",
           "request": {
             "method": "DELETE",
             "header": [
@@ -1603,12 +1597,12 @@
                 }
               ]
             },
-            "description": "Delete a permission (DEPRECATED — use DELETE /api/v3/master/permissions/{code})"
+            "description": "Delete a permission (DEPRECATED \u2014 use DELETE /api/v3/master/permissions/{code})"
           },
           "response": []
         },
         {
-          "name": "Edit name/description of a permission (DEPRECATED — use PATCH /api/v3/master/permissions/{code})",
+          "name": "Edit name/description of a permission (DEPRECATED \u2014 use PATCH /api/v3/master/permissions/{code})",
           "request": {
             "method": "PATCH",
             "header": [
@@ -1642,7 +1636,7 @@
                 }
               ]
             },
-            "description": "Edit name/description of a permission (DEPRECATED — use PATCH /api/v3/master/permissions/{code})",
+            "description": "Edit name/description of a permission (DEPRECATED \u2014 use PATCH /api/v3/master/permissions/{code})",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"name\": \"\",\n  \"description\": \"\"\n}",
@@ -1656,7 +1650,7 @@
           "response": []
         },
         {
-          "name": "Get a permission row (DEPRECATED — use GET /api/v3/master/permissions/{code})",
+          "name": "Get a permission row (DEPRECATED \u2014 use GET /api/v3/master/permissions/{code})",
           "request": {
             "method": "GET",
             "header": [
@@ -1685,12 +1679,12 @@
                 }
               ]
             },
-            "description": "Get a permission row (DEPRECATED — use GET /api/v3/master/permissions/{code})"
+            "description": "Get a permission row (DEPRECATED \u2014 use GET /api/v3/master/permissions/{code})"
           },
           "response": []
         },
         {
-          "name": "List permission catalog (DEPRECATED — use GET /api/v3/master/permissions)",
+          "name": "List permission catalog (DEPRECATED \u2014 use GET /api/v3/master/permissions)",
           "request": {
             "method": "GET",
             "header": [
@@ -1725,7 +1719,340 @@
                 }
               ]
             },
-            "description": "List permission catalog (DEPRECATED — use GET /api/v3/master/permissions)"
+            "description": "List permission catalog (DEPRECATED \u2014 use GET /api/v3/master/permissions)"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Role Assignments",
+      "item": [
+        {
+          "name": "Grant a project-scoped role to a user",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/projects/{project_uuid}/role-assignments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "projects",
+                ":project_uuid",
+                "role-assignments"
+              ],
+              "variable": [
+                {
+                  "key": "project_uuid",
+                  "value": "",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Body: ``{ userId, roleId }``. Always project-scoped \u2014 the project_id comes from the path. Caller-vs-target rules apply.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"role_id\": 0,\n  \"organization_id\": \"\",\n  \"project_id\": \"\",\n  \"user_id\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Grant a scoped role to a user",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/users/{user_id}/role-assignments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "users",
+                ":user_id",
+                "role-assignments"
+              ],
+              "variable": [
+                {
+                  "key": "user_id",
+                  "value": "",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Body: ``{ roleId, projectId? | organizationId? }``. Caller-vs-target rules apply (super_admin grants any; admin grants any except super_admin; org_admin grants project-level roles on projects in their vendor; project_admin grants project_member on their project).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"role_id\": 0,\n  \"organization_id\": \"\",\n  \"project_id\": \"\",\n  \"user_id\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List a user's role assignments",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/users/{user_id}/role-assignments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "users",
+                ":user_id",
+                "role-assignments"
+              ],
+              "variable": [
+                {
+                  "key": "user_id",
+                  "value": "",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Returns every scoped role assignment held by ``user_id`` (global, org, project). The user themselves can read their own list (USERS_READ); admins can read anyone's (USERS_READ_ALL)."
+          },
+          "response": []
+        },
+        {
+          "name": "Per-project role assignments grouped by role",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/projects/{project_uuid}/role-assignments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "projects",
+                ":project_uuid",
+                "role-assignments"
+              ],
+              "variable": [
+                {
+                  "key": "project_uuid",
+                  "value": "",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Returns the table that powers the FE Project-Mapping mock: for the given project, the users in each role bucket. Used by both User-Mgmt and Org-Mgmt menus."
+          },
+          "response": []
+        },
+        {
+          "name": "Projects a user is assigned to, with their roles",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/users/{user_id}/projects",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "users",
+                ":user_id",
+                "projects"
+              ],
+              "variable": [
+                {
+                  "key": "user_id",
+                  "value": "",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Returns every project that has at least one row in ``user_role_assignments`` for ``user_id``, plus the role names the user holds on that project. Powers the User-Mgmt landing view."
+          },
+          "response": []
+        },
+        {
+          "name": "Projects mapped to a vendor (= organization), with role assignments",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/vendors/{vendor_id}/projects",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "vendors",
+                ":vendor_id",
+                "projects"
+              ],
+              "variable": [
+                {
+                  "key": "vendor_id",
+                  "value": "",
+                  "description": ""
+                }
+              ],
+              "query": [
+                {
+                  "key": "expand",
+                  "value": "",
+                  "description": "'role-assignments' to inline buckets.",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Returns the projects owned by ``vendor_id`` via ``project_vendors``. When ``expand=role-assignments`` is set, each project carries the same per-role bucket shape returned by GET /projects/{id}/role-assignments. Powers the Org-Mgmt landing view."
+          },
+          "response": []
+        },
+        {
+          "name": "Revoke a project-scoped role assignment",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/projects/{project_uuid}/role-assignments/{assignment_id}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "projects",
+                ":project_uuid",
+                "role-assignments",
+                ":assignment_id"
+              ],
+              "variable": [
+                {
+                  "key": "project_uuid",
+                  "value": "",
+                  "description": ""
+                },
+                {
+                  "key": "assignment_id",
+                  "value": "0",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Revoke a project-scoped role assignment"
+          },
+          "response": []
+        },
+        {
+          "name": "Revoke a scoped role assignment from a user",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/users/{user_id}/role-assignments/{assignment_id}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "users",
+                ":user_id",
+                "role-assignments",
+                ":assignment_id"
+              ],
+              "variable": [
+                {
+                  "key": "user_id",
+                  "value": "",
+                  "description": ""
+                },
+                {
+                  "key": "assignment_id",
+                  "value": "0",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Revoke a scoped role assignment from a user"
           },
           "response": []
         }
@@ -1735,7 +2062,7 @@
       "name": "Roles",
       "item": [
         {
-          "name": "Create role (DEPRECATED — use POST /api/v3/master/roles/create)",
+          "name": "Create role (DEPRECATED \u2014 use POST /api/v3/master/roles/create)",
           "request": {
             "method": "POST",
             "header": [
@@ -1762,7 +2089,7 @@
                 "create"
               ]
             },
-            "description": "Create role (DEPRECATED — use POST /api/v3/master/roles/create)",
+            "description": "Create role (DEPRECATED \u2014 use POST /api/v3/master/roles/create)",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"name\": \"\",\n  \"description\": \"\",\n  \"permissions\": [\n    \"\"\n  ],\n  \"builtin\": false\n}",
@@ -1776,7 +2103,7 @@
           "response": []
         },
         {
-          "name": "Delete role (DEPRECATED — use DELETE /api/v3/master/roles/{id})",
+          "name": "Delete role (DEPRECATED \u2014 use DELETE /api/v3/master/roles/{id})",
           "request": {
             "method": "DELETE",
             "header": [
@@ -1805,12 +2132,12 @@
                 }
               ]
             },
-            "description": "Delete role (DEPRECATED — use DELETE /api/v3/master/roles/{id})"
+            "description": "Delete role (DEPRECATED \u2014 use DELETE /api/v3/master/roles/{id})"
           },
           "response": []
         },
         {
-          "name": "Get role (DEPRECATED — use GET /api/v3/master/roles/{id})",
+          "name": "Get role (DEPRECATED \u2014 use GET /api/v3/master/roles/{id})",
           "request": {
             "method": "GET",
             "header": [
@@ -1839,12 +2166,12 @@
                 }
               ]
             },
-            "description": "Get role (DEPRECATED — use GET /api/v3/master/roles/{id})"
+            "description": "Get role (DEPRECATED \u2014 use GET /api/v3/master/roles/{id})"
           },
           "response": []
         },
         {
-          "name": "Grant a single permission to a role (DEPRECATED — use POST /api/v3/master/roles/{id}/permissions/{code})",
+          "name": "Grant a single permission to a role (DEPRECATED \u2014 use POST /api/v3/master/roles/{id}/permissions/{code})",
           "request": {
             "method": "POST",
             "header": [
@@ -1880,12 +2207,12 @@
                 }
               ]
             },
-            "description": "Grant a single permission to a role (DEPRECATED — use POST /api/v3/master/roles/{id}/permissions/{code})"
+            "description": "Grant a single permission to a role (DEPRECATED \u2014 use POST /api/v3/master/roles/{id}/permissions/{code})"
           },
           "response": []
         },
         {
-          "name": "List a role's permissions (DEPRECATED — use GET /api/v3/master/roles/{id}/permissions)",
+          "name": "List a role's permissions (DEPRECATED \u2014 use GET /api/v3/master/roles/{id}/permissions)",
           "request": {
             "method": "GET",
             "header": [
@@ -1915,12 +2242,12 @@
                 }
               ]
             },
-            "description": "List a role's permissions (DEPRECATED — use GET /api/v3/master/roles/{id}/permissions)"
+            "description": "List a role's permissions (DEPRECATED \u2014 use GET /api/v3/master/roles/{id}/permissions)"
           },
           "response": []
         },
         {
-          "name": "List roles (DEPRECATED — use GET /api/v3/master/roles)",
+          "name": "List roles (DEPRECATED \u2014 use GET /api/v3/master/roles)",
           "request": {
             "method": "GET",
             "header": [
@@ -1955,12 +2282,12 @@
                 }
               ]
             },
-            "description": "List roles (DEPRECATED — use GET /api/v3/master/roles)"
+            "description": "List roles (DEPRECATED \u2014 use GET /api/v3/master/roles)"
           },
           "response": []
         },
         {
-          "name": "Replace a role's permission set (DEPRECATED — use PUT /api/v3/master/roles/{id}/permissions)",
+          "name": "Replace a role's permission set (DEPRECATED \u2014 use PUT /api/v3/master/roles/{id}/permissions)",
           "request": {
             "method": "PUT",
             "header": [
@@ -1995,7 +2322,7 @@
                 }
               ]
             },
-            "description": "Replace a role's permission set (DEPRECATED — use PUT /api/v3/master/roles/{id}/permissions)",
+            "description": "Replace a role's permission set (DEPRECATED \u2014 use PUT /api/v3/master/roles/{id}/permissions)",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"permissions\": [\n    \"\"\n  ]\n}",
@@ -2009,7 +2336,7 @@
           "response": []
         },
         {
-          "name": "Revoke a single permission from a role (DEPRECATED — use DELETE /api/v3/master/roles/{id}/permissions/{code})",
+          "name": "Revoke a single permission from a role (DEPRECATED \u2014 use DELETE /api/v3/master/roles/{id}/permissions/{code})",
           "request": {
             "method": "DELETE",
             "header": [
@@ -2045,12 +2372,12 @@
                 }
               ]
             },
-            "description": "Revoke a single permission from a role (DEPRECATED — use DELETE /api/v3/master/roles/{id}/permissions/{code})"
+            "description": "Revoke a single permission from a role (DEPRECATED \u2014 use DELETE /api/v3/master/roles/{id}/permissions/{code})"
           },
           "response": []
         },
         {
-          "name": "Update role (DEPRECATED — use PATCH /api/v3/master/roles/{id})",
+          "name": "Update role (DEPRECATED \u2014 use PATCH /api/v3/master/roles/{id})",
           "request": {
             "method": "PATCH",
             "header": [
@@ -2084,7 +2411,7 @@
                 }
               ]
             },
-            "description": "Update role (DEPRECATED — use PATCH /api/v3/master/roles/{id})",
+            "description": "Update role (DEPRECATED \u2014 use PATCH /api/v3/master/roles/{id})",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"name\": \"\",\n  \"description\": \"\",\n  \"permissions\": [\n    \"\"\n  ]\n}",
@@ -2114,277 +2441,11 @@
               ],
               "path": []
             },
-            "description": "Root endpoint.\n\nReturns:\n API information"
+            "description": "Root"
           },
           "response": []
         }
       ]
-    },
-    {
-      "name": "Role Assignments",
-      "item": [
-        {
-          "name": "List a user's role assignments ( — global / org / project)",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "type": "text",
-                "value": "Bearer {{accessToken}}"
-              }
-            ],
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v3",
-                "users",
-                ":userId",
-                "role-assignments"
-              ],
-              "raw": "{{baseUrl}}/api/v3/users/:userId/role-assignments"
-            },
-            "description": "GET /api/v3/users/{id}/role-assignments — Returns every scoped role-assignment row for the user (global, org-scoped, project-scoped) in one list. Replaces the legacy GET /api/v3/users/{id}/roles which only surfaced global user_roles entries. Auth: USERS_READ on self, USERS_READ_ALL on others."
-          },
-          "response": []
-        },
-        {
-          "name": "Grant a scoped role to a user",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Authorization",
-                "type": "text",
-                "value": "Bearer {{accessToken}}"
-              },
-              {
-                "key": "Content-Type",
-                "type": "text",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v3",
-                "users",
-                ":userId",
-                "role-assignments"
-              ],
-              "raw": "{{baseUrl}}/api/v3/users/:userId/role-assignments"
-            },
-            "description": "POST /api/v3/users/{id}/role-assignments — Body: roleId (int) + exactly one of organizationId / projectId (or both omitted for global). Caller-vs-target gate enforced server-side: super_admin grants any; admin grants any except super_admin; org_admin grants project-tier roles within its vendor; project_admin grants project_member only on its project. Auth: rbac:assign + the caller-vs-target rule.",
-            "body": {
-              "mode": "raw",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              },
-              "raw": "{\n  \"roleId\": 0,\n  \"organizationId\": null,\n  \"projectId\": null\n}"
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "Revoke a scoped role assignment",
-          "request": {
-            "method": "DELETE",
-            "header": [
-              {
-                "key": "Authorization",
-                "type": "text",
-                "value": "Bearer {{accessToken}}"
-              }
-            ],
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v3",
-                "users",
-                ":userId",
-                "role-assignments",
-                ":assignmentId"
-              ],
-              "raw": "{{baseUrl}}/api/v3/users/:userId/role-assignments/:assignmentId"
-            },
-            "description": "DELETE /api/v3/users/{id}/role-assignments/{aid} — Revokes a single (user, role, scope) row. Last-super_admin lockout: the only global super_admin row cannot be revoked. Auth: rbac:assign + caller-vs-target."
-          },
-          "response": []
-        },
-        {
-          "name": "User's project map (User Mgmt landing)",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "type": "text",
-                "value": "Bearer {{accessToken}}"
-              }
-            ],
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v3",
-                "users",
-                ":userId",
-                "projects"
-              ],
-              "raw": "{{baseUrl}}/api/v3/users/:userId/projects"
-            },
-            "description": "GET /api/v3/users/{id}/projects — Every project the user is assigned to + the role names they hold on each. Powers the User Mgmt menu landing view. Auth: USERS_READ on self / USERS_READ_ALL on others."
-          },
-          "response": []
-        },
-        {
-          "name": "Per-project role-assignment buckets — :8001 only",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "type": "text",
-                "value": "Bearer {{accessToken}}"
-              }
-            ],
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v3",
-                "projects",
-                ":projectUuid",
-                "role-assignments"
-              ],
-              "raw": "{{baseUrl}}/api/v3/projects/:projectUuid/role-assignments"
-            },
-            "description": "GET /api/v3/projects/{id}/role-assignments — Returns the per-project drill-down: every assignment on the project grouped by role bucket. Powers the FE Project-Mapping mock. NOT proxied through monolith :8000 — set baseUrl to user-mgmt :8001 to call this. Auth: project_members:read."
-          },
-          "response": []
-        },
-        {
-          "name": "Grant a project-scoped role — :8001 only",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Authorization",
-                "type": "text",
-                "value": "Bearer {{accessToken}}"
-              },
-              {
-                "key": "Content-Type",
-                "type": "text",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v3",
-                "projects",
-                ":projectUuid",
-                "role-assignments"
-              ],
-              "raw": "{{baseUrl}}/api/v3/projects/:projectUuid/role-assignments"
-            },
-            "description": "POST /api/v3/projects/{id}/role-assignments — Body must include userId; project_id comes from the path. Always creates a project-scoped row. NOT proxied through monolith :8000. Auth: rbac:assign + caller-vs-target.",
-            "body": {
-              "mode": "raw",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              },
-              "raw": "{\n  \"userId\": \"\",\n  \"roleId\": 0\n}"
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "Revoke a project-scoped role assignment — :8001 only",
-          "request": {
-            "method": "DELETE",
-            "header": [
-              {
-                "key": "Authorization",
-                "type": "text",
-                "value": "Bearer {{accessToken}}"
-              }
-            ],
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v3",
-                "projects",
-                ":projectUuid",
-                "role-assignments",
-                ":assignmentId"
-              ],
-              "raw": "{{baseUrl}}/api/v3/projects/:projectUuid/role-assignments/:assignmentId"
-            },
-            "description": "DELETE /api/v3/projects/{id}/role-assignments/{aid}. NOT proxied through monolith :8000. Auth: rbac:assign + caller-vs-target."
-          },
-          "response": []
-        },
-        {
-          "name": "Vendor's project map (Org Mgmt landing) — :8001 only",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "type": "text",
-                "value": "Bearer {{accessToken}}"
-              }
-            ],
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "v3",
-                "vendors",
-                ":vendorId",
-                "projects"
-              ],
-              "raw": "{{baseUrl}}/api/v3/vendors/:vendorId/projects?expand=role-assignments",
-              "query": [
-                {
-                  "key": "expand",
-                  "value": "role-assignments"
-                }
-              ]
-            },
-            "description": "GET /api/v3/vendors/{id}/projects?expand=role-assignments — Every project owned by the vendor with optional inlined per-role assignment buckets. NOT proxied through monolith :8000 (monolith has its own /vendors/{id}/projects with a different shape). Auth: PROJECTS_READ_ALL OR org_admin of the vendor."
-          },
-          "response": []
-        }
-      ],
-      "description": "— scoped role assignments + project-mapping views.\n\nThree scopes per row in `user_role_assignments`: global (both scope cols NULL), org (`organization_id` set), project (`project_id` set). Caller-vs-target gate enforced by `app/api/v3/role_assignments/services.can_caller_grant`.\n\nAll eight endpoints here are user-mgmt-owned and reachable directly on port 8001. Set baseUrl to `http://127.0.0.1:8001` (or the deploy host's :8001) when running this collection.\n\nSee `C:/Programming/PMIS/DOC_41_FLOWS.md` for the full flow narrative."
     }
   ],
   "variable": [
@@ -2392,37 +2453,13 @@
       "key": "baseUrl",
       "value": "http://127.0.0.1:8001",
       "type": "string",
-      "description": "Base URL of the user-management service. Defaults to localhost for dev. Set to http://10.1.131.199:8001 for the live deploy, OR to http://10.1.131.199:8000 to go through the monolith proxy (requires USER_SERVICE_PROXY_ENABLED=true on the monolith)."
+      "description": "Root URL of the user-management service. Override per environment."
     },
     {
       "key": "accessToken",
       "value": "",
       "type": "string",
-      "description": "Access token from POST /api/v3/users/login. Auto-set by the test script on the login request, used as Bearer {{accessToken}} on protected requests."
-    },
-    {
-      "key": "refreshToken",
-      "value": "",
-      "type": "string",
-      "description": "Refresh token from /login or /refresh."
-    },
-    {
-      "key": "ephemeralToken",
-      "value": "",
-      "type": "string",
-      "description": "Ephemeral token from /login when 2FA is required. Used in /login/send-otp + /login/verify-otp bodies."
-    },
-    {
-      "key": "userId",
-      "value": "",
-      "type": "string",
-      "description": "UUID of a user — set after creating one for follow-up calls."
-    },
-    {
-      "key": "roleId",
-      "value": "",
-      "type": "string",
-      "description": "Integer id of a role."
+      "description": "Bearer token. Set after calling Login."
     }
   ]
 }

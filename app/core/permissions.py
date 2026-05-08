@@ -235,16 +235,14 @@ BUILTIN_PERMISSIONS: List[PermissionDef] = [
 # ---------------------------------------------------------------------------
 
 ADMIN_ROLE_NAME = "admin"
-MEMBER_ROLE_NAME = "member"
-VIEWER_ROLE_NAME = "viewer"
-# Doc 33: ``vendor`` is a new seeded role — vendors edit M/A/T/S
-# directly on the project (versioning was removed) but cannot create
-# new projects, change status, or touch RBAC / master data.
-VENDOR_ROLE_NAME = "vendor"
+
+# Doc 43 round 4: legacy ``member`` / ``viewer`` / ``vendor`` roles
+# retired. They were superseded by the doc-41 scoped tiers. The
+# constants and permission lists are gone; the seed loop in
+# ``rbac_repository.py`` deletes any existing rows on boot.
 
 # Doc 41 scoped-RBAC seed roles. Permission sets defined further down
-# the file. Naming convention: snake_case, no spaces — matches the
-# legacy ``admin`` / ``member`` / ``viewer`` / ``vendor`` rows.
+# the file. Naming convention: snake_case, no spaces.
 SUPER_ADMIN_ROLE_NAME = "super_admin"
 ORG_ADMIN_ROLE_NAME = "org_admin"
 PROJECT_ADMIN_ROLE_NAME = "project_admin"
@@ -254,64 +252,6 @@ DIVISION_MEMBER_ROLE_NAME = "division_member"
 # The admin role holds EVERY permission in BUILTIN_PERMISSIONS — synced on
 # startup. Listed here for clarity / tests.
 ADMIN_ROLE_PERMISSIONS: List[str] = [p.code for p in BUILTIN_PERMISSIONS]
-
-MEMBER_ROLE_PERMISSIONS: List[str] = [
-    USERS_READ, USERS_UPDATE,
-    PROJECTS_READ, PROJECTS_CREATE, PROJECTS_UPDATE,
-    VENDORS_READ, RESOURCE_TYPES_READ, MASTER_DATA_VIEW,
-    PROJECT_MEMBERS_READ, PROJECT_MEMBERS_ADD, PROJECT_MEMBERS_UPDATE,
-    WORK_PACKAGES_VIEW, WORK_PACKAGES_CREATE, WORK_PACKAGES_UPDATE, WORK_PACKAGES_DELETE,
-    WORK_PACKAGE_TYPES_VIEW,
-    MEETINGS_VIEW, MEETINGS_CREATE, MEETINGS_UPDATE, MEETINGS_DELETE,
-    MILESTONES_CREATE, MILESTONES_READ, MILESTONES_UPDATE, MILESTONES_DELETE,
-    ACTIVITIES_CREATE, ACTIVITIES_READ, ACTIVITIES_UPDATE, ACTIVITIES_DELETE,
-    TASKS_CREATE, TASKS_READ, TASKS_UPDATE, TASKS_DELETE,
-    SUBTASKS_CREATE, SUBTASKS_READ, SUBTASKS_UPDATE, SUBTASKS_DELETE,
-    COMMENTS_CREATE, COMMENTS_READ, COMMENTS_DELETE,
-    ATTACHMENTS_CREATE, ATTACHMENTS_DOWNLOAD, ATTACHMENTS_DELETE,
-]
-
-VIEWER_ROLE_PERMISSIONS: List[str] = [
-    USERS_READ, PROJECTS_READ, VENDORS_READ, RESOURCE_TYPES_READ,
-    MASTER_DATA_VIEW,
-    PROJECT_MEMBERS_READ, WORK_PACKAGES_VIEW, MEETINGS_VIEW,
-    MILESTONES_READ, ACTIVITIES_READ, TASKS_READ, SUBTASKS_READ,
-    COMMENTS_READ, ATTACHMENTS_DOWNLOAD,
-]
-
-# Doc 33: vendor role.
-#
-# Vendors interact with the project content (M/A/T/S, comments, files)
-# but not with project lifecycle (create / publish / close / delete) or
-# RBAC / master data.
-#
-# Excluded relative to MEMBER_ROLE_PERMISSIONS:
-#   - PROJECTS_CREATE       (cannot create new projects)
-#   - PROJECTS_PUBLISH/CLOSE (lifecycle is admin-only)
-#   - PROJECTS_DELETE/_ALL   (no destructive project actions)
-#   - WORK_PACKAGES_*        (admin-tier module)
-#   - MEETINGS_CREATE/UPDATE/DELETE (admin/member-driven)
-#
-# Included:
-#   - own-user read/update (so vendors can edit their profile)
-#   - read-only on master data + vendor catalog + project-members
-#   - full M/A/T/S CRUD on assigned projects
-#   - comments + attachments full
-#   - meetings view-only
-VENDOR_ROLE_PERMISSIONS: List[str] = [
-    USERS_READ, USERS_UPDATE,
-    PROJECTS_READ, PROJECTS_UPDATE,
-    VENDORS_READ, RESOURCE_TYPES_READ, MASTER_DATA_VIEW,
-    PROJECT_MEMBERS_READ,
-    MEETINGS_VIEW,
-    MILESTONES_CREATE, MILESTONES_READ, MILESTONES_UPDATE, MILESTONES_DELETE,
-    ACTIVITIES_CREATE, ACTIVITIES_READ, ACTIVITIES_UPDATE, ACTIVITIES_DELETE,
-    TASKS_CREATE, TASKS_READ, TASKS_UPDATE, TASKS_DELETE,
-    SUBTASKS_CREATE, SUBTASKS_READ, SUBTASKS_UPDATE, SUBTASKS_DELETE,
-    COMMENTS_CREATE, COMMENTS_READ, COMMENTS_DELETE,
-    ATTACHMENTS_CREATE, ATTACHMENTS_DOWNLOAD, ATTACHMENTS_DELETE,
-]
-
 
 # ---------------------------------------------------------------------------
 # Doc 41 — scoped-RBAC seed permission sets.

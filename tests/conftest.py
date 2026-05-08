@@ -154,6 +154,35 @@ def _assign_role(db: Session, user_id: int, role_name: str):
         db.commit()
 
 
+# Doc 43 round 4: legacy 'member' role retired. The ``member_user``
+# fixture no longer attaches to a seeded role bundle — instead we
+# grant a small baseline of direct user_permissions so the tests
+# that depended on a non-admin user with ``projects:create`` and
+# task perms keep passing without resurrecting the legacy seed.
+_TEST_MEMBER_DIRECT_PERMISSIONS: tuple[str, ...] = (
+    "projects:read", "projects:create", "projects:update",
+    "milestones:read", "activities:read",
+    "tasks:read", "tasks:create", "tasks:update",
+    "subtasks:read", "comments:read", "attachments:download",
+)
+
+
+def _grant_direct_permissions(db: Session, user_id: str, codes: tuple[str, ...]):
+    from app.infrastructure.db.models.user_permission import UserPermissionModel
+    for code in codes:
+        existing = (
+            db.query(UserPermissionModel)
+            .filter(
+                UserPermissionModel.user_id == user_id,
+                UserPermissionModel.permission_code == code,
+            )
+            .first()
+        )
+        if existing is None:
+            db.add(UserPermissionModel(user_id=user_id, permission_code=code))
+    db.commit()
+
+
 @pytest.fixture(scope="function")
 def admin_user(db_session: Session):
     """Create an admin user (assigned to the seeded ``admin`` role).
@@ -183,7 +212,10 @@ def admin_user(db_session: Session):
 
 @pytest.fixture(scope="function")
 def member_user(db_session: Session):
-    """Create a non-admin member user (assigned to the seeded ``member`` role)."""
+    """Create a non-admin user with a baseline of project / task / comment
+    permissions granted directly (post-doc-43-round-4 the 'member' role
+    bundle is gone — direct grants reproduce the same surface for tests
+    without resurrecting the legacy seed)."""
     _ensure_rbac_seed(db_session)
     user = UserModel(
         login="member",
@@ -197,7 +229,9 @@ def member_user(db_session: Session):
     db_session.add(user)
     db_session.commit()
     db_session.refresh(user)
-    _assign_role(db_session, user.id, "member")
+    _grant_direct_permissions(
+        db_session, user.id, _TEST_MEMBER_DIRECT_PERMISSIONS,
+    )
     return user
 
 

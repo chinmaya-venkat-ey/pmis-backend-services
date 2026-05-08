@@ -166,14 +166,19 @@ class TestReservedSuperadminGrantPermission:
     def test_replace_role_perms_with_reserved_code_blocked(
         self, client, admin_user, admin_headers, db_session,
     ):
-        # Take the seeded `member` role and try to replace its perms
-        # with one that includes users:grant_superadmin.
-        member_role_id = (
-            db_session.query(RoleModel).filter(RoleModel.name == "member")
-            .one().id
+        # Create a custom role and try to replace its perms with one
+        # that includes users:grant_superadmin. (Pre-doc-43-round-4
+        # this used the seeded 'member' role; that role is retired.)
+        create = client.post(
+            "/api/v3/master/roles/create",
+            json={"name": "test_reserved_replace_role",
+                  "description": "test role"},
+            headers=admin_headers,
         )
+        assert create.status_code == 201, create.text
+        role_id = create.json()["data"]["id"]
         resp = client.put(
-            f"/api/v3/roles/{member_role_id}/permissions",
+            f"/api/v3/roles/{role_id}/permissions",
             json={"permissions": [USERS_GRANT_SUPERADMIN]},
             headers=admin_headers,
         )
@@ -183,12 +188,16 @@ class TestReservedSuperadminGrantPermission:
     def test_grant_single_perm_to_role_with_reserved_code_blocked(
         self, client, admin_user, admin_headers, db_session,
     ):
-        member_role_id = (
-            db_session.query(RoleModel).filter(RoleModel.name == "member")
-            .one().id
+        create = client.post(
+            "/api/v3/master/roles/create",
+            json={"name": "test_reserved_grant_role",
+                  "description": "test role"},
+            headers=admin_headers,
         )
+        assert create.status_code == 201, create.text
+        role_id = create.json()["data"]["id"]
         resp = client.post(
-            f"/api/v3/roles/{member_role_id}/permissions/{USERS_GRANT_SUPERADMIN}",
+            f"/api/v3/roles/{role_id}/permissions/{USERS_GRANT_SUPERADMIN}",
             headers=admin_headers,
         )
         assert resp.status_code == 403, resp.text

@@ -134,8 +134,15 @@ class TestScopedAssignmentRepo:
         assert first.id == second.id  # same row returned
 
     def test_effective_permissions_by_scope(self, db_session, member_user):
-        """Project-scoped permissions land in the project bucket; legacy
-        user_roles rows land in the global bucket."""
+        """Project-scoped permissions land in the project bucket;
+        global-scope grants (legacy user_roles rows OR direct
+        user_permissions) land in the global bucket.
+
+        Post-doc-43-round-4: ``member_user`` no longer holds a legacy
+        role row (the 'member' role is retired). It instead carries a
+        baseline set as direct user_permissions, which still flow into
+        the ``("global", None)`` bucket — so this test's invariant
+        holds."""
         repo = RbacRepository(db_session)
         proj = _make_project(db_session)
         repo.assign_scoped_role(
@@ -146,13 +153,13 @@ class TestScopedAssignmentRepo:
         db_session.commit()
 
         scoped = repo.effective_permissions_by_scope(member_user.id)
-        # member_user has the legacy 'member' role assigned via user_roles
+        # member_user has direct user_permissions (post-round-4 fixture)
         assert ("global", None) in scoped
         # plus the new project-scoped row
         assert ("project", proj.id) in scoped
-        # and the union still contains everything the role grants
+        # and the union contains the baseline permissions
         flat = repo.effective_permissions_for_user(member_user.id)
-        assert "tasks:read" in flat  # member role grants this
+        assert "tasks:read" in flat  # baseline direct grant
 
     def test_revoke_round_trip(self, db_session, admin_user):
         repo = RbacRepository(db_session)

@@ -68,7 +68,12 @@ class TestMePermissions:
             "admin must NOT hold users:grant_superadmin"
         )
 
-    def test_member_sees_member_set_only(self, client, member_user, member_headers):
+    def test_member_sees_baseline_set_only(self, client, member_user, member_headers):
+        """Post-doc-43-round-4 the 'member' role is gone; the
+        ``member_user`` fixture grants a baseline set as direct
+        user_permissions instead. The /me/permissions surface still
+        unions direct grants with role-derived perms, so this test
+        verifies the baseline is visible and admin-only codes are not."""
         resp = client.get(
             "/api/v3/users/me/permissions", headers=member_headers,
         )
@@ -76,7 +81,7 @@ class TestMePermissions:
         body = resp.json()["data"]
         assert body["isAdmin"] is False
         assert "projects:create" in body["permissions"]
-        # Admin-only management permissions are NOT in member set.
+        # Admin-only management permissions are NOT in baseline set.
         assert "permissions:manage" not in body["permissions"]
         assert "rbac:assign" not in body["permissions"]
 
@@ -168,17 +173,23 @@ class TestRolePermissionManagement:
         )
         assert resp.status_code == 403, resp.text
 
-    def test_can_replace_member_role_permissions(
+    def test_can_replace_custom_role_permissions(
         self, client, admin_user, admin_headers, db_session,
     ):
-        member_role_id = (
-            db_session.query(RoleModel)
-            .filter(RoleModel.name == "member")
-            .one()
-            .id
+        """Replace the entire permission set on a custom (non-builtin)
+        role — admin / super_admin role rows are locked, so we make
+        a custom role first."""
+        create = client.post(
+            "/api/v3/master/roles/create",
+            json={"name": "test_replaceable_role",
+                  "description": "test role"},
+            headers=admin_headers,
         )
+        assert create.status_code == 201, create.text
+        role_id = create.json()["data"]["id"]
+
         resp = client.put(
-            f"/api/v3/roles/{member_role_id}/permissions",
+            f"/api/v3/roles/{role_id}/permissions",
             json={"permissions": ["projects:read", "projects:create"]},
             headers=admin_headers,
         )
@@ -191,14 +202,16 @@ class TestRolePermissionManagement:
     def test_replace_with_unknown_code_rejected(
         self, client, admin_user, admin_headers, db_session,
     ):
-        member_role_id = (
-            db_session.query(RoleModel)
-            .filter(RoleModel.name == "member")
-            .one()
-            .id
+        create = client.post(
+            "/api/v3/master/roles/create",
+            json={"name": "test_unknown_code_role",
+                  "description": "test role"},
+            headers=admin_headers,
         )
+        assert create.status_code == 201, create.text
+        role_id = create.json()["data"]["id"]
         resp = client.put(
-            f"/api/v3/roles/{member_role_id}/permissions",
+            f"/api/v3/roles/{role_id}/permissions",
             json={"permissions": ["bogus:nope"]},
             headers=admin_headers,
         )
@@ -224,17 +237,22 @@ class TestRoleProtection:
         )
         assert resp.status_code == 403
 
-    def test_member_role_can_be_deleted(
+    def test_custom_role_can_be_deleted(
         self, client, admin_user, admin_headers, db_session,
     ):
-        member_role_id = (
-            db_session.query(RoleModel)
-            .filter(RoleModel.name == "member")
-            .one()
-            .id
+        """Custom (non-builtin) roles can be deleted via the master
+        endpoint. Contrast with the admin / super_admin role rows
+        which are locked."""
+        create = client.post(
+            "/api/v3/master/roles/create",
+            json={"name": "test_deletable_role",
+                  "description": "test role"},
+            headers=admin_headers,
         )
+        assert create.status_code == 201, create.text
+        role_id = create.json()["data"]["id"]
         resp = client.delete(
-            f"/api/v3/roles/{member_role_id}", headers=admin_headers,
+            f"/api/v3/roles/{role_id}", headers=admin_headers,
         )
         assert resp.status_code == 204
 
@@ -247,19 +265,24 @@ class TestUserRoleAssignment:
     def test_assign_role_to_user(
         self, client, admin_user, member_user, admin_headers, db_session,
     ):
-        viewer_role_id = (
-            db_session.query(RoleModel)
-            .filter(RoleModel.name == "viewer")
-            .one()
-            .id
+        """Assign a custom test role to a user via the legacy
+        per-user-role endpoint. (The seeded 'viewer' role this test
+        used pre-doc-43-round-4 is gone; create a custom one.)"""
+        create = client.post(
+            "/api/v3/master/roles/create",
+            json={"name": "test_assignable_role",
+                  "description": "test role"},
+            headers=admin_headers,
         )
+        assert create.status_code == 201, create.text
+        role_id = create.json()["data"]["id"]
         resp = client.post(
-            f"/api/v3/users/{member_user.id}/roles/{viewer_role_id}",
+            f"/api/v3/users/{member_user.id}/roles/{role_id}",
             headers=admin_headers,
         )
         assert resp.status_code == 200, resp.text
         names = [r["name"] for r in resp.json()["data"]["roles"]]
-        assert "viewer" in names
+        assert "test_assignable_role" in names
 
     def test_admin_caller_cannot_remove_admin_role_post_doc42b(
         self, client, admin_user, admin_headers, db_session,

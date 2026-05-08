@@ -228,6 +228,42 @@ def admin_headers(admin_token):
 
 
 @pytest.fixture(scope="function")
+def second_admin_user(db_session):
+    """A second admin so peer / lockout tests don't have to bootstrap
+    one inline. Active, not deleted, holds the seeded ``admin`` role."""
+    from app.core.security import hash_password as _hp
+
+    u = UserModel(
+        login="admin2",
+        email="admin2@example.com",
+        hashed_password=_hp("admin123"),
+        first_name="Admin",
+        last_name="Two",
+        status="active",
+        two_factor_enabled=False,
+    )
+    db_session.add(u)
+    db_session.commit()
+    db_session.refresh(u)
+    admin_role = (
+        db_session.query(RoleModel).filter(RoleModel.name == "admin").first()
+    )
+    if admin_role is not None:
+        db_session.add(UserRoleModel(user_id=u.id, role_id=admin_role.id))
+        db_session.commit()
+    return u
+
+
+@pytest.fixture(scope="function")
+def second_admin_headers(second_admin_user):
+    return {"Authorization": f"Bearer " + create_access_token({
+        "sub": second_admin_user.login,
+        "user_id": second_admin_user.id,
+        "email": second_admin_user.email,
+    })}
+
+
+@pytest.fixture(scope="function")
 def member_headers(member_token):
     """Authorization headers for member user."""
     return {"Authorization": f"Bearer {member_token}"}

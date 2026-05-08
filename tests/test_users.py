@@ -481,35 +481,8 @@ class TestDeleteUser:
 # ADMIN-PROTECTION GUARDS (last-active-admin + self-action lockout)
 # ===========================================================================
 
-@pytest.fixture(scope="function")
-def second_admin_user(db_session):
-    """A second admin so the last-active-admin guards don't block test
-    operations on ``admin_user``. Status active, not deleted."""
-    from app.core.security import hash_password
-    from app.infrastructure.db.models.role import RoleModel
-    from app.infrastructure.db.models.user import UserModel
-    from app.infrastructure.db.models.user_role import UserRoleModel
-
-    u = UserModel(
-        login="admin2",
-        email="admin2@example.com",
-        hashed_password=hash_password("admin123"),
-        first_name="Admin",
-        last_name="Two",
-        status="active",
-        two_factor_enabled=False,
-    )
-    db_session.add(u)
-    db_session.commit()
-    db_session.refresh(u)
-    # Doc 21 part B: admin status comes from the seeded ``admin`` role.
-    admin_role = (
-        db_session.query(RoleModel).filter(RoleModel.name == "admin").first()
-    )
-    if admin_role is not None:
-        db_session.add(UserRoleModel(user_id=u.id, role_id=admin_role.id))
-        db_session.commit()
-    return u
+# second_admin_user fixture moved to conftest.py so doc-43 tests can
+# also use it (admin peer-takeover round-3 tests).
 
 
 class TestAdminProtectionGuards:
@@ -608,11 +581,30 @@ class TestAdminProtectionGuards:
         assert result.error_type == "validation_error"
         assert "last active super_admin" in result.error.lower()
 
-    def test_can_delete_admin_when_another_admin_exists(
+    def test_can_delete_admin_after_demoting_target_post_round3(
         self, client, admin_user, second_admin_user, admin_headers, db_session,
     ):
-        """Sanity: cross-admin delete still works when not the last admin."""
+        """Doc 43 round 3 (G5) blocks admin -> admin DELETE outright;
+        the legitimate path is to demote the target (revoke admin role)
+        first, then DELETE. After demotion the destructive guard
+        doesn't fire and the DELETE succeeds.
+
+        Pre-round-3 this test was just "another admin can DELETE this
+        admin freely" — round 3 makes peer-takeover via DELETE a 403
+        and forces an explicit demotion step."""
+        from app.infrastructure.db.models.role import RoleModel
         from app.infrastructure.db.models.user import UserModel
+        from app.infrastructure.db.models.user_role import UserRoleModel
+
+        admin_role_id = (
+            db_session.query(RoleModel)
+            .filter(RoleModel.name == "admin").one().id
+        )
+        db_session.query(UserRoleModel).filter(
+            UserRoleModel.user_id == second_admin_user.id,
+            UserRoleModel.role_id == admin_role_id,
+        ).delete()
+        db_session.commit()
 
         resp = client.delete(
             f"/api/v3/users/{second_admin_user.id}", headers=admin_headers,

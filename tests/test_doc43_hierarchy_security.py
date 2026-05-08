@@ -391,6 +391,110 @@ class TestPeerTakeoverDelete:
         assert resp.status_code in (200, 204), resp.text
 
 
+# ---------------------------------------------------------------------------
+# Round 3 — admin peer-takeover (G4 password / G5 DELETE)
+# ---------------------------------------------------------------------------
+
+class TestAdminPeerTakeoverPasswordChange:
+    """G4: an admin caller cannot change ANOTHER admin's password.
+    Mirrors G2 for the admin tier. Escape hatch: revoke target's
+    admin role first."""
+
+    def test_admin_cannot_change_peer_admin_password(
+        self, client, admin_user, admin_headers, second_admin_user,
+    ):
+        resp = client.patch(
+            f"/api/v3/users/{second_admin_user.id}/password",
+            json={"password": "PeerHijack!"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 403, resp.text
+        assert "another admin" in resp.json()["error"]["message"].lower()
+
+    def test_admin_can_change_own_password(
+        self, client, admin_user, admin_headers,
+    ):
+        resp = client.patch(
+            f"/api/v3/users/{admin_user.id}/password",
+            json={"password": "NewSelfPwd!"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.text
+
+    def test_admin_can_change_lower_tier_password(
+        self, client, admin_user, admin_headers, member_user,
+    ):
+        resp = client.patch(
+            f"/api/v3/users/{member_user.id}/password",
+            json={"password": "NewLowerPwd!"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.text
+
+    def test_super_admin_can_change_admin_peer_password_post_g4(
+        self, client, db_session, admin_user,
+    ):
+        # Sanity: G4 only applies when caller is admin (not super_admin).
+        # super_admin remains free to manage admin tier.
+        sa, headers = _bootstrap_super_admin(db_session)
+        resp = client.patch(
+            f"/api/v3/users/{admin_user.id}/password",
+            json={"password": "SaSetsAdminPwd!"},
+            headers=headers,
+        )
+        assert resp.status_code == 200, resp.text
+
+
+class TestAdminPeerTakeoverDelete:
+    """G5: an admin caller cannot DELETE another admin without first
+    demoting (revoking the admin role)."""
+
+    def test_admin_cannot_delete_peer_admin(
+        self, client, admin_user, admin_headers, second_admin_user,
+    ):
+        resp = client.delete(
+            f"/api/v3/users/{second_admin_user.id}", headers=admin_headers,
+        )
+        assert resp.status_code == 403, resp.text
+        assert "another admin" in resp.json()["error"]["message"].lower()
+
+    def test_admin_can_delete_after_demoting_target(
+        self, client, db_session, admin_user, admin_headers,
+        second_admin_user,
+    ):
+        # Demote second_admin_user (revoke admin role membership) and
+        # try DELETE again. After demotion the destructive guard
+        # doesn't fire and the DELETE proceeds.
+        from app.infrastructure.db.models.user_role import UserRoleModel
+        admin_role_id = (
+            db_session.query(RoleModel)
+            .filter(RoleModel.name == ADMIN_ROLE_NAME).one().id
+        )
+        db_session.query(UserRoleModel).filter(
+            UserRoleModel.user_id == second_admin_user.id,
+            UserRoleModel.role_id == admin_role_id,
+        ).delete()
+        db_session.commit()
+        resp = client.delete(
+            f"/api/v3/users/{second_admin_user.id}", headers=admin_headers,
+        )
+        assert resp.status_code in (200, 204), resp.text
+
+    def test_super_admin_can_delete_admin_post_g5(
+        self, client, db_session, admin_user,
+    ):
+        # Sanity: G5 only applies when caller is admin (not super_admin).
+        sa, headers = _bootstrap_super_admin(db_session)
+        resp = client.delete(
+            f"/api/v3/users/{admin_user.id}", headers=headers,
+        )
+        assert resp.status_code in (200, 204), resp.text
+
+
+# ---------------------------------------------------------------------------
+# F4 — universal-OTP startup warning (positioning anchor)
+# ---------------------------------------------------------------------------
+
 class TestUniversalOtpStartupWarning:
     def test_warning_string_present_in_main(self):
         """Sanity: app/main.py contains the universal-OTP warning

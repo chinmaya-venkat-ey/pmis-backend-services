@@ -17,7 +17,7 @@ A user holds a set of **string permission codes** (`projects:create`, `master_da
 
 Auth middleware hydrates two views per request: the flat union (`request.state.user_permissions: Set[str]`) and the per-scope view (`request.state.scoped_permissions: Dict[(scope_kind, scope_id), Set[str]]`). Routes use `require_permission(code)` for global gates, `require_project_permission(code)` / `require_org_permission(code)` for scoped gates. 401 if no token, 403 if the code is missing at the required scope.
 
-**Nine seeded roles** as of doc 41: legacy four (`admin`, `member`, `viewer`, `vendor`) plus scoped five (`super_admin`, `org_admin`, `project_admin`, `project_member`, `division_member`). `admin` and `super_admin` are auto-synced to hold every registered code on every boot, and `admin` is **protected** from delete / rename / permission-set mutation through the API.
+**Nine seeded roles** as of doc 41: legacy four (`admin`, `member`, `viewer`, `vendor`) plus scoped five (`super_admin`, `org_admin`, `project_admin`, `project_member`, `division_member`). `super_admin` is auto-synced to hold every registered code on every boot; `admin` is auto-synced to hold every code **except** `users:grant_superadmin` (post-doc-43 demotion). Both `admin` and `super_admin` role rows are **protected** from delete / rename / permission-set mutation through the API.
 
 ---
 
@@ -25,8 +25,8 @@ Auth middleware hydrates two views per request: the flat union (`request.state.u
 
 | Role | Tier | What they can do | What they can't |
 |------|------|-----------------|-----------------|
-| `super_admin` (doc 41) | global | Everything `admin` does + `users:grant_superadmin` (the gate to grant `super_admin` itself). | Nothing inside RBAC — but lockout-protected: last super_admin can't be revoked. |
-| `admin` | global | Everything except granting `super_admin`. Auto-synced. | Cannot grant `super_admin`. Lockout-protected (legacy last-admin guards still apply). |
+| `super_admin` (doc 41) | global | Everything `admin` does + `users:grant_superadmin` (the gate to grant `super_admin` itself). | Lockout-protected: last super_admin can't be revoked, deactivated, or deleted. **Post-G2/G3 (doc 43 round 2)**: a super_admin cannot change another super_admin's password or DELETE another super_admin without first revoking the target's super_admin role. |
+| `admin` | global | Every code except `users:grant_superadmin`. Auto-synced. **Demoted in doc 43**: no longer the lockout-protected tier. Admin users can be freely demoted, deactivated (by another user), or deleted as long as a super_admin remains. | Cannot grant `super_admin` or `admin` (caller-vs-target). Cannot PATCH / password-change / DELETE a super_admin user (F1 hierarchy gate). Cannot self-deactivate (G1, doc 43 round 2). |
 | `member` | global | Default contributor: read/update self, full CRUD on M/A/T/S, read on master data + vendor catalog. | Cannot publish/close/delete projects, no RBAC management, no master_data writes, no `*_all` (admin-tier) flavors. |
 | `viewer` | global | Read-only across projects + master data. Can download attachments. | No mutations. |
 | `vendor` | global | External collaborator: full CRUD on M/A/T/S + comments + attachments + own-user update. | Cannot create/publish/close/delete projects, no RBAC management, no master_data writes, no meeting writes, no work_packages access. |
@@ -41,10 +41,12 @@ Seeded permission lists live in [`app/core/permissions.py`](../app/core/permissi
 
 Lives in [`app/api/v3/role_assignments/services.py::can_caller_grant`](../app/api/v3/role_assignments/services.py).
 
-| Caller | Can grant |
+Symmetric for grant + revoke (post-doc-43): the same matrix gates `POST` and `DELETE` on `/role-assignments`. A caller who can't grant a `(role, scope)` tuple can't revoke it either.
+
+| Caller | Can grant / revoke |
 |---|---|
-| `super_admin` | any role at any scope (only one who can grant `super_admin`) |
-| `admin` | any role except `super_admin` |
+| `super_admin` | any role at any scope (only role that can grant or revoke `super_admin` and `admin`) |
+| `admin` | any role **except** `super_admin` and `admin` (post-doc-43 demotion — admin can no longer grant peers) |
 | `org_admin` of vendor X | `project_admin` / `project_member` / `division_member` on projects in vendor X |
 | `project_admin` of project P | `project_member` on P only |
 | anyone else | nothing |
@@ -145,19 +147,27 @@ Route handler
 
 ---
 
-## 6. Lockout protections
+## 6. Lockout protections + hierarchy guards
 
-Baked into the service layer (not into route decorators) so they fire regardless of who triggers them — including admins:
+Baked into the service layer so they fire regardless of caller. Post-doc-43 the protected tier is `super_admin`, not `admin`. Round 2 (G1/G2/G3) added the self-deactivate symmetric guard and peer-takeover blocks on destructive ops.
 
-| Guard | Trigger | Response |
-|---|---|---|
-| Last-admin removal | `DELETE /users/{id}/roles/{admin_role_id}` on the only admin holder; soft-delete that user; status flip to inactive | 403 / 422 |
-| Admin role mutation | DELETE / rename / change description / replace permissions / grant or revoke a code on the seeded `admin` role | 403 |
-| Self-demote on sole admin | Sole admin demoting themselves | 422 |
+| Guard | Trigger | Response | Source |
+|---|---|---|---|
+| **Last-super_admin role-revoke** | `DELETE /users/{id}/role-assignments/{aid}` on the only global super_admin assignment | 403 | doc 43 round 1 |
+| **Last-super_admin user-DELETE** | DELETE on the only live super_admin user | 422 | doc 43 round 1 |
+| **Last-super_admin deactivate** | PATCH `status=inactive` on the only live super_admin (service-layer defence-in-depth — preempted at route by G1 / F1) | 422 | doc 43 round 1 |
+| **F1 hierarchy gate** | admin caller PATCH / password-change / DELETE on a super_admin user | 403 | doc 43 round 1 |
+| **F2 reserved permission** | grant of `users:grant_superadmin` to anyone but the super_admin role; direct user-permission grant of the same code | 403 | doc 43 round 1 |
+| **L1 / L2 role-row lock** | DELETE / PATCH / permission-set mutation on the seeded `admin` or `super_admin` role row | 403 | doc 43 round 1 |
+| **G1 self-deactivate** | PATCH `status=inactive` where caller == target (any tier) | 403 "Cannot deactivate your own account." | doc 43 round 2 |
+| **G2 peer-SA password change** | super_admin → another super_admin via `PATCH /users/{id}/password` | 403 "Cannot perform destructive actions … Demote the target first by revoking their super_admin role assignment." | doc 43 round 2 |
+| **G3 peer-SA DELETE** | super_admin → another super_admin via `DELETE /users/{id}` | 403 (same message as G2) | doc 43 round 2 |
+| **Self-delete guard** (legacy) | DELETE on caller == target | 403 | pre-doc-41 |
+| **Self-demote-from-admin guard** | PATCH `admin=False` on caller's own row when they hold admin | 403 | pre-doc-41 |
 
-Goal: `admin` is always reachable. Even an admin with `rbac:assign` can't paint themselves into a corner.
+Pre-doc-43 "last admin" guards have been removed. Admin is no longer protected — the only system-required identity is super_admin.
 
-The bootstrap admin is forced `two_factor_enabled=True` on every boot (doc 35 monolith parity). If notification dispatch is misconfigured, the universal-OTP break-glass (`UNIVERSAL_OTP_ENABLED=true` + `UNIVERSAL_OTP_CODE`) provides reachability without disabling 2FA.
+The bootstrap super_admin (`super_admin / superadmin123` by default) is created on first boot via `app/infrastructure/db/session.py`. Pre-doc-43 the system created an `admin / admin123` account on every boot — that auto-create is **gone**. A fresh deploy starts with super_admin only; the operator promotes others via `POST /users/{id}/role-assignments` once logged in. The bootstrap admin is forced `two_factor_enabled=True` on existing DBs that already had one (doc 35 monolith parity); the universal-OTP break-glass (`UNIVERSAL_OTP_ENABLED=true` + `UNIVERSAL_OTP_CODE`) provides reachability without disabling 2FA, and emits a `SECURITY: ...` `WARNING` line at startup so deploy logs flag the backdoor.
 
 ---
 
@@ -243,6 +253,10 @@ When adding a code, edit both files in the same PR. Diffing the two before pushi
 | 401 + "Authentication required" | Token missing or expired |
 | 401 + "Invalid token" | Wrong signature, malformed, blacklisted (revoked), or pre-doc-26 integer-id |
 | 403 + "Insufficient permissions" | Token good, route's required code missing from user's effective set. Check `GET /users/me/permissions` |
-| 403 + "Built-in role 'admin' cannot be modified" | Trying to delete / rename / mutate the seeded admin role |
-| 403 + "Cannot remove last admin" | Last-admin lockout. Add another admin first |
-| 422 + "Sole admin cannot be deactivated" | Same as above on user soft-delete / status flip |
+| 403 + "Built-in role '\<name\>' cannot be modified" | Trying to delete / rename / mutate the seeded `admin` or `super_admin` role |
+| 403 + "Cannot perform destructive actions (DELETE / password change) on another super_admin. Demote the target first by revoking their super_admin role assignment." | G2 / G3 peer-takeover guard (doc 43 round 2). Revoke target's `super_admin` role-assignment first, then retry. |
+| 403 + "Cannot deactivate your own account." | G1 self-deactivate guard (doc 43 round 2). Have another super_admin or admin (with appropriate hierarchy) deactivate the user instead. |
+| 403 + "Cannot demote yourself from admin." | Pre-doc-41 self-demote guard. |
+| 403 + "Cannot revoke last super_admin" | Last-super_admin role-assignment revoke lockout. Promote another user to super_admin first. |
+| 422 + "Cannot deactivate the last active super_admin." | Last-super_admin deactivation lockout (defence-in-depth — typically preempted by F1 / G1 at route). |
+| 403 + "users:grant_superadmin can only be held by the super_admin role." | F2 reserved-permission guard (doc 43 round 1). |

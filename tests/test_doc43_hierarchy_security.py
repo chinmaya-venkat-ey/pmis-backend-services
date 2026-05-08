@@ -235,11 +235,31 @@ class TestLastSuperAdminLockoutOnUserDelete:
     def test_can_delete_super_admin_when_others_exist(
         self, client, db_session,
     ):
+        # Doc 43 round-2 (G3) blocks super_admin → super_admin DELETE
+        # outright, so to isolate the F3 lockout path we first demote
+        # sa1 (revoke their super_admin assignment). After that, the
+        # remaining live super_admin (sa2) means the lockout MUST NOT
+        # fire and the DELETE succeeds. User-delete endpoint returns
+        # 200 with the soft-deleted snapshot (per BaseController.ok),
+        # not 204.
         sa1, _ = _bootstrap_super_admin(db_session)
         sa2, headers2 = _bootstrap_super_admin(db_session)
-        # sa2 deletes sa1; sa2 itself remains as super_admin.
-        # User-delete endpoint returns 200 with the soft-deleted
-        # snapshot (per BaseController.ok), not 204.
+        from app.infrastructure.db.repositories.rbac_repository import (
+            RbacRepository,
+        )
+        repo = RbacRepository(db_session)
+        sa_role_id = (
+            db_session.query(RoleModel)
+            .filter(RoleModel.name == SUPER_ADMIN_ROLE_NAME).one().id
+        )
+        for row in repo.list_scoped_assignments_for_user(sa1.id):
+            if (
+                row.role_id == sa_role_id
+                and row.organization_id is None
+                and row.project_id is None
+            ):
+                repo.revoke_scoped_assignment(row.id)
+        db_session.commit()
         resp = client.delete(
             f"/api/v3/users/{sa1.id}", headers=headers2,
         )
@@ -249,6 +269,127 @@ class TestLastSuperAdminLockoutOnUserDelete:
 # ---------------------------------------------------------------------------
 # F4 — universal-OTP warning fires at startup
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# G-series — round-2 hardening (peer-takeover + self-deactivate)
+# ---------------------------------------------------------------------------
+
+class TestSelfDeactivateBlocked:
+    """G1: a user cannot deactivate their own account, regardless of
+    tier. Symmetric with the existing self-delete guard. Without
+    this, a super_admin could disable themselves and lose login."""
+
+    def test_super_admin_cannot_self_deactivate_when_others_exist(
+        self, client, db_session,
+    ):
+        # Bootstrap two super_admins so the lockout (last super_admin)
+        # would NOT fire — only G1 self-guard catches this.
+        sa1, h1 = _bootstrap_super_admin(db_session)
+        _bootstrap_super_admin(db_session)
+        resp = client.patch(
+            f"/api/v3/users/{sa1.id}",
+            json={"status": "inactive"},
+            headers=h1,
+        )
+        assert resp.status_code == 403, resp.text
+        assert "deactivate your own account" in resp.text.lower()
+
+    def test_admin_cannot_self_deactivate(
+        self, client, admin_user, admin_headers,
+    ):
+        resp = client.patch(
+            f"/api/v3/users/{admin_user.id}",
+            json={"status": "inactive"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 403, resp.text
+        assert "deactivate your own account" in resp.text.lower()
+
+
+class TestPeerTakeoverPasswordChange:
+    """G2: super_admin caller cannot change ANOTHER super_admin's
+    password (peer-takeover prevention). Self-change works as before."""
+
+    def test_super_admin_cannot_change_peer_super_admin_password(
+        self, client, db_session,
+    ):
+        sa1, _ = _bootstrap_super_admin(db_session)
+        sa2, h2 = _bootstrap_super_admin(db_session)
+        resp = client.patch(
+            f"/api/v3/users/{sa1.id}/password",
+            json={"password": "PeerHijack!"},
+            headers=h2,
+        )
+        assert resp.status_code == 403, resp.text
+        assert "another super_admin" in resp.json()["error"]["message"].lower()
+
+    def test_super_admin_can_change_own_password(
+        self, client, db_session,
+    ):
+        sa, headers = _bootstrap_super_admin(db_session)
+        resp = client.patch(
+            f"/api/v3/users/{sa.id}/password",
+            json={"password": "NewSelfPwd!"},
+            headers=headers,
+        )
+        assert resp.status_code == 200, resp.text
+
+    def test_super_admin_can_change_admin_password(
+        self, client, db_session, admin_user,
+    ):
+        # Lower-tier target — super_admin keeps the privilege.
+        sa, headers = _bootstrap_super_admin(db_session)
+        resp = client.patch(
+            f"/api/v3/users/{admin_user.id}/password",
+            json={"password": "NewLowerPwd!"},
+            headers=headers,
+        )
+        assert resp.status_code == 200, resp.text
+
+
+class TestPeerTakeoverDelete:
+    """G3: super_admin caller cannot DELETE another super_admin without
+    first demoting them (revoking the super_admin role assignment).
+    Self-DELETE blocked by existing guard."""
+
+    def test_super_admin_cannot_delete_peer_super_admin(
+        self, client, db_session,
+    ):
+        sa1, _ = _bootstrap_super_admin(db_session)
+        sa2, h2 = _bootstrap_super_admin(db_session)
+        resp = client.delete(
+            f"/api/v3/users/{sa1.id}", headers=h2,
+        )
+        assert resp.status_code == 403, resp.text
+        assert "another super_admin" in resp.json()["error"]["message"].lower()
+
+    def test_super_admin_can_delete_after_demoting_target(
+        self, client, db_session,
+    ):
+        sa1, _ = _bootstrap_super_admin(db_session)
+        sa2, h2 = _bootstrap_super_admin(db_session)
+        # sa2 first revokes sa1's super_admin assignment, then DELETEs
+        # them — should succeed.
+        from app.infrastructure.db.repositories.rbac_repository import (
+            RbacRepository,
+        )
+        repo = RbacRepository(db_session)
+        sa_role_id = (
+            db_session.query(RoleModel)
+            .filter(RoleModel.name == SUPER_ADMIN_ROLE_NAME).one().id
+        )
+        # Revoke sa1's super_admin row.
+        rows = repo.list_scoped_assignments_for_user(sa1.id)
+        for row in rows:
+            if row.role_id == sa_role_id and row.organization_id is None and row.project_id is None:
+                repo.revoke_scoped_assignment(row.id)
+        db_session.commit()
+        # Now DELETE should pass.
+        resp = client.delete(
+            f"/api/v3/users/{sa1.id}", headers=h2,
+        )
+        assert resp.status_code in (200, 204), resp.text
+
 
 class TestUniversalOtpStartupWarning:
     def test_warning_string_present_in_main(self):

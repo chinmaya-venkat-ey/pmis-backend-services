@@ -347,7 +347,12 @@ def update_user_password(
     target = _get_user_or_404(db, user_id)
     if target is not None:
         from ..role_assignments.services import can_caller_modify_user
-        allowed, reason = can_caller_modify_user(db, actor_id, target.id)
+        # Password change is destructive — invokes the doc-43 G2 peer-
+        # takeover prevention rule (super_admin can't change another
+        # super_admin's password without first demoting the target).
+        allowed, reason = can_caller_modify_user(
+            db, actor_id, target.id, op="destructive",
+        )
         if not allowed:
             return BaseController.error(
                 format_error_response("forbidden", reason), status=403,
@@ -382,7 +387,12 @@ def delete_user(
     target = _get_user_or_404(db, user_id)
     if target is not None:
         from ..role_assignments.services import can_caller_modify_user
-        allowed, reason = can_caller_modify_user(db, actor_id, target.id)
+        # DELETE is destructive — invokes the doc-43 G3 peer-takeover
+        # prevention rule (super_admin can't DELETE another super_admin
+        # without first demoting the target).
+        allowed, reason = can_caller_modify_user(
+            db, actor_id, target.id, op="destructive",
+        )
         if not allowed:
             return BaseController.error(
                 format_error_response("forbidden", reason), status=403,

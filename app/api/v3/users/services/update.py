@@ -82,6 +82,18 @@ def update_user(
     # These complement the delete-service guards so the API surface
     # cannot lock the system out of itself via demotion / deactivation.
 
+    # Guard 0 (doc 43 round-2 / G1): Self-deactivate is forbidden.
+    # Symmetric with the existing self-delete guard in delete_user —
+    # both block a user from locking themselves out of their own
+    # session. Applies to every tier; super_admin lockout (no
+    # OTHER active super_admin remains) is a separate guard further
+    # down that fires regardless of self-vs-peer.
+    if status == "inactive" and is_self:
+        return ServiceResult.fail(
+            error="Cannot deactivate your own account.",
+            error_type="authorization_error",
+        )
+
     # Guard 1: A super_admin cannot demote themselves from admin
     # (well, irrelevant — admin and super_admin are separate roles
     # post-doc-42b). What we still want: an admin cannot demote

@@ -544,37 +544,46 @@ class TestAdminProtectionGuards:
         assert resp.status_code == 403, resp.text
         assert "demote yourself" in resp.text.lower()
 
-    def test_admin_can_be_deactivated_post_doc42b(
-        self, client, admin_user, admin_headers, db_session,
+    def test_admin_can_deactivate_another_admin_post_doc42b(
+        self, client, admin_user, second_admin_user, admin_headers, db_session,
     ):
         """Doc 42b: admin is no longer the lockout-protected tier. An
-        admin user CAN be deactivated freely (the only protected tier
-        is super_admin — covered by
-        test_cannot_deactivate_last_active_super_admin below)."""
+        admin user CAN be deactivated freely (target = second_admin_user;
+        actor = admin_user). Self-deactivate is blocked separately by
+        the G1 guard — see TestSelfDeactivateBlocked in test_doc43_*."""
         from app.infrastructure.db.models.user import UserModel
 
         resp = client.patch(
-            f"/api/v3/users/{admin_user.id}",
+            f"/api/v3/users/{second_admin_user.id}",
             json={"status": "inactive"},
             headers=admin_headers,
         )
         assert resp.status_code == 200, resp.text
 
         db_session.expire_all()
-        row = db_session.query(UserModel).filter_by(id=admin_user.id).one()
+        row = db_session.query(UserModel).filter_by(id=second_admin_user.id).one()
         assert row.status == "inactive"
 
-    def test_cannot_deactivate_last_active_super_admin(
-        self, client, admin_user, admin_headers, db_session,
+    def test_lockout_blocks_last_active_super_admin_at_service_layer(
+        self, db_session, admin_user,
     ):
-        """Doc 42b lockout pivot: deactivating the only active
-        super_admin is refused. Make admin_user a super_admin, then
-        try to flip them to inactive."""
-        from app.infrastructure.db.models.user import UserModel
+        """Doc 42b lockout pivot — defense-in-depth.
+
+        Note: route-level callers can no longer REACH this branch:
+          - self-deactivate is preempted by G1 (403);
+          - admin-deactivating-super_admin is preempted by F1 hierarchy
+            gate (403);
+          - super_admin-deactivating-another-super_admin can't trigger
+            it because then a second active SA exists by definition.
+        The lockout remains as a safety net for any future caller that
+        bypasses the API gates (cron, fixtures, scripts), so we exercise
+        it directly against the service function."""
+        from app.api.v3.users.services.update import update_user
         from app.infrastructure.db.models.role import RoleModel
         from app.infrastructure.db.models.user_role_assignment import (
             UserRoleAssignmentModel,
         )
+
         sa_role_id = (
             db_session.query(RoleModel)
             .filter(RoleModel.name == "super_admin")
@@ -586,17 +595,18 @@ class TestAdminProtectionGuards:
         ))
         db_session.commit()
 
-        resp = client.patch(
-            f"/api/v3/users/{admin_user.id}",
-            json={"status": "inactive"},
-            headers=admin_headers,
+        # is_admin=True, requesting_user_id != target → bypass G1 self-guard
+        # and F1 hierarchy gate; reach the lockout branch directly.
+        result = update_user(
+            db=db_session,
+            user_id=admin_user.id,
+            status="inactive",
+            requesting_user_id="ghost-super-admin",
+            is_admin=True,
         )
-        assert resp.status_code == 422, resp.text
-        assert "last active super_admin" in resp.text.lower()
-
-        db_session.expire_all()
-        row = db_session.query(UserModel).filter_by(id=admin_user.id).one()
-        assert row.status == "active"
+        assert not result.success
+        assert result.error_type == "validation_error"
+        assert "last active super_admin" in result.error.lower()
 
     def test_can_delete_admin_when_another_admin_exists(
         self, client, admin_user, second_admin_user, admin_headers, db_session,

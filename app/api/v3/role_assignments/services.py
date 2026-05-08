@@ -212,52 +212,18 @@ def serialize_assignment(
     }
 
 
-def can_caller_modify_user(
-    db: Session,
-    caller_id: Optional[str],
-    target_user_id: str,
-) -> Tuple[bool, str]:
-    """Hierarchy boundary check for user-mutation endpoints (PATCH /
-    DELETE /password-update). Returns ``(allowed, reason)``.
-
-    Rules:
-      * super_admin can modify any user (subject to per-action self-
-        guards like self-delete forbidden, last-super_admin lockout).
-      * admin can modify any user EXCEPT a user who currently holds
-        super_admin globally — to stop admin from taking over a
-        super_admin account via password reset, status flip, or
-        delete-attrition.
-      * Self-mutations (caller modifying their own row) bypass this
-        gate; per-action self-guards in the service layer (no
-        self-delete, no self-demote, etc.) cover those.
-      * Non-admin callers fall through unmodified — the route's own
-        `require_permission(USERS_UPDATE)` decorator already enforces
-        the basic auth requirement.
-
-    The check looks at the TARGET user's super_admin grant via the
-    ``user_role_assignments`` table (where doc-41 super_admin lives),
-    not the legacy ``user_roles`` table.
-    """
-    repo = RbacRepository(db)
-    if caller_id is None:
-        return True, ""  # let the auth middleware handle anonymous
-    if caller_id == target_user_id:
-        return True, ""  # self-actions handled by per-action guards
-    # super_admin caller: full power.
-    if repo.user_has_super_admin_role(caller_id):
-        return True, ""
-    # Non-super_admin caller: refuse if target is super_admin.
-    # We check super_admin via user_role_assignments globally (the
-    # doc-41 table), NOT via user_roles (legacy admin role).
+def _user_holds_super_admin(db: Session, user_id: str) -> bool:
+    """Return True iff user_id holds super_admin globally (doc-41
+    user_role_assignments table)."""
     from ....infrastructure.db.models.role import RoleModel as _Role
     from ....infrastructure.db.models.user_role_assignment import (
         UserRoleAssignmentModel as _URA,
     )
-    target_is_super_admin = (
+    return (
         db.query(_URA)
         .join(_Role, _Role.id == _URA.role_id)
         .filter(
-            _URA.user_id == target_user_id,
+            _URA.user_id == user_id,
             _Role.name == SUPER_ADMIN_ROLE_NAME,
             _URA.organization_id.is_(None),
             _URA.project_id.is_(None),
@@ -265,6 +231,68 @@ def can_caller_modify_user(
         .first()
         is not None
     )
+
+
+def can_caller_modify_user(
+    db: Session,
+    caller_id: Optional[str],
+    target_user_id: str,
+    *,
+    op: str = "patch",
+) -> Tuple[bool, str]:
+    """Hierarchy boundary check for user-mutation endpoints. Returns
+    ``(allowed, reason)``.
+
+    The ``op`` kw distinguishes:
+      * ``op="patch"`` (default) — non-destructive PATCH on profile
+        fields like firstName / email / vendor / division / status.
+      * ``op="destructive"`` — DELETE the user, or change their
+        password. Both are takeover vectors when used between peers
+        of the same tier.
+
+    Rules:
+      * Self-mutations bypass the gate; per-action self-guards in
+        the service layer (no self-delete, no self-deactivate, no
+        self-demote) cover those.
+      * **Non-destructive (op="patch"):**
+          - super_admin caller: allowed on any target.
+          - non-super_admin caller: refused if target holds super_admin.
+      * **Destructive (op="destructive"):**
+          - super_admin caller: ALSO refused if the TARGET also holds
+            super_admin (peer-takeover prevention, doc-43 G2/G3).
+            Operator must demote target's super_admin role assignment
+            first, then perform the destructive action.
+          - non-super_admin caller: refused if target holds super_admin.
+
+    The check looks at the TARGET user's super_admin grant via the
+    ``user_role_assignments`` table (where doc-41 super_admin lives),
+    not the legacy ``user_roles`` table.
+    """
+    repo = RbacRepository(db)
+    if caller_id is None:
+        return True, ""  # auth middleware handles anonymous
+    if caller_id == target_user_id:
+        return True, ""  # self-action — per-action guards apply
+    target_is_super_admin = _user_holds_super_admin(db, target_user_id)
+    caller_is_super_admin = repo.user_has_super_admin_role(caller_id)
+
+    # Destructive ops (DELETE, password change): also block
+    # super_admin -> super_admin (peer takeover prevention, doc 43
+    # G2/G3). Operator must demote target's super_admin role
+    # assignment first, THEN perform the destructive action.
+    if op == "destructive" and target_is_super_admin and caller_is_super_admin:
+        return False, (
+            "Cannot perform destructive actions (DELETE / password "
+            "change) on another super_admin. Demote the target first "
+            "by revoking their super_admin role assignment."
+        )
+
+    # super_admin caller: allowed for non-destructive ops on any
+    # target, AND destructive ops on non-super_admin targets.
+    if caller_is_super_admin:
+        return True, ""
+
+    # Non-super_admin caller: refuse if target holds super_admin.
     if target_is_super_admin:
         return False, (
             "Only super_admin can modify a super_admin user."

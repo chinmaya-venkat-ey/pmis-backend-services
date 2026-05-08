@@ -132,13 +132,19 @@ def can_caller_grant(
     if SUPER_ADMIN_ROLE_NAME in global_roles:
         return True, ""
 
-    # Granting super_admin requires super_admin (already gated above).
+    # Granting super_admin or admin requires super_admin (already gated
+    # above). admin is the next tier down and per spec only super_admin
+    # can promote others to it; admin can hand out the lower tiers.
     if target_role_name == SUPER_ADMIN_ROLE_NAME:
         return False, (
             "Only super_admin can grant the super_admin role."
         )
+    if target_role_name == ADMIN_ROLE_NAME:
+        return False, (
+            "Only super_admin can grant the admin role."
+        )
 
-    # admin can grant anything except super_admin.
+    # admin can grant anything except super_admin / admin.
     if ADMIN_ROLE_NAME in global_roles:
         return True, ""
 
@@ -206,23 +212,113 @@ def serialize_assignment(
     }
 
 
+def can_caller_modify_user(
+    db: Session,
+    caller_id: Optional[str],
+    target_user_id: str,
+) -> Tuple[bool, str]:
+    """Hierarchy boundary check for user-mutation endpoints (PATCH /
+    DELETE /password-update). Returns ``(allowed, reason)``.
+
+    Rules:
+      * super_admin can modify any user (subject to per-action self-
+        guards like self-delete forbidden, last-super_admin lockout).
+      * admin can modify any user EXCEPT a user who currently holds
+        super_admin globally — to stop admin from taking over a
+        super_admin account via password reset, status flip, or
+        delete-attrition.
+      * Self-mutations (caller modifying their own row) bypass this
+        gate; per-action self-guards in the service layer (no
+        self-delete, no self-demote, etc.) cover those.
+      * Non-admin callers fall through unmodified — the route's own
+        `require_permission(USERS_UPDATE)` decorator already enforces
+        the basic auth requirement.
+
+    The check looks at the TARGET user's super_admin grant via the
+    ``user_role_assignments`` table (where doc-41 super_admin lives),
+    not the legacy ``user_roles`` table.
+    """
+    repo = RbacRepository(db)
+    if caller_id is None:
+        return True, ""  # let the auth middleware handle anonymous
+    if caller_id == target_user_id:
+        return True, ""  # self-actions handled by per-action guards
+    # super_admin caller: full power.
+    if repo.user_has_super_admin_role(caller_id):
+        return True, ""
+    # Non-super_admin caller: refuse if target is super_admin.
+    # We check super_admin via user_role_assignments globally (the
+    # doc-41 table), NOT via user_roles (legacy admin role).
+    from ....infrastructure.db.models.role import RoleModel as _Role
+    from ....infrastructure.db.models.user_role_assignment import (
+        UserRoleAssignmentModel as _URA,
+    )
+    target_is_super_admin = (
+        db.query(_URA)
+        .join(_Role, _Role.id == _URA.role_id)
+        .filter(
+            _URA.user_id == target_user_id,
+            _Role.name == SUPER_ADMIN_ROLE_NAME,
+            _URA.organization_id.is_(None),
+            _URA.project_id.is_(None),
+        )
+        .first()
+        is not None
+    )
+    if target_is_super_admin:
+        return False, (
+            "Only super_admin can modify a super_admin user."
+        )
+    return True, ""
+
+
 def revoke_with_lockout_check(
     db: Session, assignment_id: int, *, caller_id: Optional[str],
 ) -> Tuple[bool, str, int]:
-    """Revoke an assignment with the last-super_admin guard.
+    """Revoke an assignment with the caller-vs-target gate +
+    last-super_admin lockout guard.
 
     Returns (success, message, status_code). ``status_code`` is the
     HTTP status the route should surface.
+
+    Authorization model (mirrors ``can_caller_grant`` — same
+    capability needed to add a (user, role, scope) tuple is needed
+    to remove it):
+
+      * super_admin can revoke any assignment.
+      * admin can revoke any assignment EXCEPT super_admin or admin
+        peers — only super_admin can touch those.
+      * org_admin (X) can revoke project-tier roles on projects in X.
+      * project_admin (P) can revoke project_member on P only.
+      * everyone else: nothing.
+
+    Plus the lockout: even super_admin cannot revoke the LAST global
+    super_admin row.
     """
     repo = RbacRepository(db)
     row = repo.get_scoped_assignment(assignment_id)
     if row is None:
         return False, "Assignment not found.", 404
 
-    # If the assignment we're about to revoke is the LAST global
-    # super_admin row, refuse — would lock everyone out of granting
-    # the role again.
     role = db.query(RoleModel).filter(RoleModel.id == row.role_id).first()
+    target_role_name = role.name if role else ""
+
+    # Caller-vs-target gate (doc 42b). Same matrix as grant — symmetric
+    # because a caller who can grant a (role, scope) tuple should also
+    # be the one allowed to revoke it. admin trying to revoke
+    # super_admin (or admin peers) lands here as 403.
+    allowed, reason = can_caller_grant(
+        db, caller_id,
+        target_role_name=target_role_name,
+        target_organization_id=row.organization_id,
+        target_project_id=row.project_id,
+    )
+    if not allowed:
+        return False, reason, 403
+
+    # Lockout: refuse revoking the LAST global super_admin row even if
+    # the caller is super_admin — would leave nobody able to grant the
+    # role again.
     if (
         role is not None
         and role.name == SUPER_ADMIN_ROLE_NAME

@@ -33,6 +33,7 @@ from ....core.permissions import (
     SUPER_ADMIN_ROLE_NAME,
     SUPER_ADMIN_ROLE_PERMISSIONS,
     ADMIN_FULL_ROLE_PERMISSIONS,
+    USERS_GRANT_SUPERADMIN,
     ORG_ADMIN_ROLE_NAME,
     ORG_ADMIN_ROLE_PERMISSIONS,
     PROJECT_ADMIN_ROLE_NAME,
@@ -673,24 +674,32 @@ class RbacRepository:
                     row.is_builtin = True
         self.db.flush()
 
-        # Ensure seed roles exist (legacy + doc 41).
-        for role_name, role_desc in (
-            (ADMIN_ROLE_NAME, "Built-in superadmin role. Holds every permission. Cannot be deleted."),
+        # Ensure seed roles exist. Descriptions are REFRESHED on every
+        # boot so seed-string updates propagate to the live row without
+        # DB surgery. Descriptions are FE-visible (returned via /master/
+        # roles) so they read as user-facing prose — NO internal doc /
+        # commit references.
+        seed_roles = (
+            (ADMIN_ROLE_NAME, "Built-in admin role. Holds every permission except the ability to grant super_admin. Cannot grant the admin or super_admin roles to other users — only super_admin can. Cannot be deleted."),
             (MEMBER_ROLE_NAME, "Default role for project contributors."),
             (VIEWER_ROLE_NAME, "Read-only role."),
-            (VENDOR_ROLE_NAME, "Vendor role (doc 33). Edits M/A/T/S on assigned projects, no lifecycle / RBAC / master-data access."),
-            # Doc 41 — scoped roles.
-            (SUPER_ADMIN_ROLE_NAME, "Doc 41 super_admin. Holds every permission including USERS_GRANT_SUPERADMIN."),
-            (ORG_ADMIN_ROLE_NAME, "Doc 41 org_admin. Manages users + projects within their vendor (organization)."),
-            (PROJECT_ADMIN_ROLE_NAME, "Doc 41 project_admin. Manages task content + members on a single project."),
-            (PROJECT_MEMBER_ROLE_NAME, "Doc 41 project_member. Read project, contribute task updates, comment + attach."),
-            (DIVISION_MEMBER_ROLE_NAME, "Doc 41 division_member. Read-only on assigned projects (workbox / approval surface lands later)."),
-        ):
+            (VENDOR_ROLE_NAME, "External vendor collaborator. Edits milestones / activities / tasks / subtasks on assigned projects; no project lifecycle, no RBAC management, no master-data writes."),
+            (SUPER_ADMIN_ROLE_NAME, "Built-in super_admin role. Holds every permission. The only role that can grant the super_admin or admin roles to other users."),
+            (ORG_ADMIN_ROLE_NAME, "Manages users and project memberships within a vendor (organization). Cannot edit project content directly. Can grant project-tier roles only on projects in their vendor."),
+            (PROJECT_ADMIN_ROLE_NAME, "Manages tasks, subtasks, and project memberships on a single project. Can grant project_member on that project. Cannot edit milestones / activities or grant project_admin / higher roles."),
+            (PROJECT_MEMBER_ROLE_NAME, "Reads project content and contributes task / subtask updates, comments, and attachments. Cannot grant any role."),
+            (DIVISION_MEMBER_ROLE_NAME, "Read-only on assigned projects. Workbox / approval workflow not yet enabled."),
+        )
+        for role_name, role_desc in seed_roles:
             existing = self.get_role_by_name(role_name)
             if existing is None:
                 self.db.add(RoleModel(
                     name=role_name, description=role_desc, builtin=True,
                 ))
+            elif existing.description != role_desc and existing.builtin:
+                # Refresh built-in description so seed string changes
+                # propagate to the live row.
+                existing.description = role_desc
         self.db.flush()
 
         admin_role = self.get_role_by_name(ADMIN_ROLE_NAME)
@@ -703,17 +712,20 @@ class RbacRepository:
         project_member_role = self.get_role_by_name(PROJECT_MEMBER_ROLE_NAME)
         division_member_role = self.get_role_by_name(DIVISION_MEMBER_ROLE_NAME)
 
-        # super_admin holds everything (replaces what 'admin' used to be).
-        # The legacy 'admin' role keeps the same superset for backwards
-        # compat — see doc 41 decision log E.
+        # super_admin holds everything (the new top-tier introduced in
+        # doc 41).
         self.grant_permissions_to_role(super_admin_role.id, SUPER_ADMIN_ROLE_PERMISSIONS)
-        # Legacy 'admin' role: same as super_admin for back-compat. (We
-        # do NOT downgrade it to ADMIN_FULL_ROLE_PERMISSIONS — pre-doc-41
-        # users with the 'admin' role expect the full power; doc 41
-        # introduces 'super_admin' as the new top-tier and 'admin' is
-        # left untouched for compat. Future doc may swap admin to
-        # ADMIN_FULL_ROLE_PERMISSIONS once the FE is migrated.)
-        added = self.grant_permissions_to_role(admin_role.id, ADMIN_ROLE_PERMISSIONS)
+        # 'admin' role: doc-42b demotion. Used to be granted
+        # ADMIN_ROLE_PERMISSIONS (every code) — that meant admin and
+        # super_admin were functionally identical, against doc-41 spec.
+        # Now seeded with ADMIN_FULL_ROLE_PERMISSIONS (every code
+        # EXCEPT users:grant_superadmin). The unconditional revoke
+        # below self-heals any drift on existing deploys.
+        added = self.grant_permissions_to_role(admin_role.id, ADMIN_FULL_ROLE_PERMISSIONS)
+        # Self-heal: revoke users:grant_superadmin from admin role on
+        # every boot, even if a prior boot (or a manual edit) added it.
+        # Idempotent — no-op when the row doesn't exist.
+        self.revoke_permission_from_role(admin_role.id, USERS_GRANT_SUPERADMIN)
 
         # Member / viewer / vendor (legacy) — seed only if empty.
         if not self.list_role_permissions(member_role.id):

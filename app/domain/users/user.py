@@ -56,6 +56,13 @@ class User:
     # and FK target — ``user_code`` is purely a display / lookup convenience.
     user_code: Optional[str] = None
 
+    # Doc 42b: separate flag for the new top-tier super_admin role.
+    # Used by lockout guards (last-active super_admin protection) so
+    # the admin role can be freely demoted/deactivated as long as a
+    # super_admin remains. Defaults False so dataclass instantiation
+    # in tests / serializers that pre-date this field stays valid.
+    is_super_admin: bool = False
+
     # Mapped projects — populated by the repo on explicit calls (list +
     # get-by-id paths). Each entry is a slim project dict the response
     # builder embeds. Closed/completed/soft-deleted projects are

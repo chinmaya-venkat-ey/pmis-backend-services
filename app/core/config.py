@@ -90,6 +90,16 @@ class Settings(BaseSettings):
     BOOTSTRAP_ADMIN_EMAIL: str = "admin@example.com"
     BOOTSTRAP_ADMIN_PASSWORD: str = "admin123"
 
+    # ---- Bootstrap super_admin (doc 42b) ----
+    # Separate login from `admin` so the everyday admin account does
+    # NOT carry super_admin privilege by default. This account is the
+    # only one that can grant super_admin / admin to others on a fresh
+    # deploy. Password should be rotated immediately on first login
+    # via PATCH /api/v3/users/{id}/password.
+    BOOTSTRAP_SUPERADMIN_LOGIN: str = "super_admin"
+    BOOTSTRAP_SUPERADMIN_EMAIL: str = "super_admin@example.com"
+    BOOTSTRAP_SUPERADMIN_PASSWORD: str = "superadmin123"
+
     # ---- Pagination defaults ----
     DEFAULT_PAGE_SIZE: int = 20
     MAX_PAGE_SIZE: int = 100

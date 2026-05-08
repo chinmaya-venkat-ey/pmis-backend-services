@@ -7,7 +7,9 @@ from sqlalchemy.orm import Session
 
 from ....core.base_controller import BaseController
 from ....core.middleware.rbac import require_permission, require_authenticated
-from ....core.permissions import ADMIN_ROLE_NAME, RBAC_ASSIGN
+from ....core.permissions import (
+    ADMIN_ROLE_NAME, SUPER_ADMIN_ROLE_NAME, RBAC_ASSIGN,
+)
 from ....core.response import format_error_response
 from ....infrastructure.db.repositories.rbac_repository import RbacRepository
 from ....infrastructure.db.session import get_db
@@ -126,14 +128,23 @@ def delete_role(
 # Role-permission management (doc 21 part B)
 # ---------------------------------------------------------------------------
 
+_LOCKED_ROLE_NAMES = frozenset({ADMIN_ROLE_NAME, SUPER_ADMIN_ROLE_NAME})
+
+
 def _admin_role_guard(role) -> Dict[str, Any]:
-    """Returns an error payload + status when the role is the admin role,
-    else None."""
-    if role is not None and role.name == ADMIN_ROLE_NAME:
+    """Returns an error payload when the role is one of the locked
+    built-in roles (admin / super_admin), else None.
+
+    Both roles' permission sets are auto-managed by the startup sync —
+    admin holds everything except users:grant_superadmin; super_admin
+    holds everything. Manual mutation via the API would race the seed
+    loop on next boot anyway, so it's refused outright.
+    """
+    if role is not None and role.name in _LOCKED_ROLE_NAMES:
         return format_error_response(
             "forbidden",
-            "The built-in 'admin' role's permission set is auto-managed "
-            "and cannot be modified.",
+            f"The built-in '{role.name}' role's permission set is "
+            "auto-managed and cannot be modified.",
         )
     return None
 
@@ -205,6 +216,28 @@ def replace_role_permissions(
             BaseController.error(err, status=403),
             successor=f"/api/v3/master/roles/{role_id}/permissions",
         )
+    # Reserved-permission guard: users:grant_superadmin can only be
+    # held by the seeded super_admin role. Refuse to plant it on any
+    # other role's permission set (which would create an alternate
+    # path to the role-grant gate).
+    from ....core.permissions import (
+        SUPER_ADMIN_ROLE_NAME, USERS_GRANT_SUPERADMIN,
+    )
+    if (
+        role.name != SUPER_ADMIN_ROLE_NAME
+        and USERS_GRANT_SUPERADMIN in data.permissions
+    ):
+        return _stamp(
+            BaseController.error(
+                format_error_response(
+                    "forbidden",
+                    "users:grant_superadmin is reserved for the "
+                    "super_admin role and cannot be granted to other roles.",
+                ),
+                status=403,
+            ),
+            successor=f"/api/v3/master/roles/{role_id}/permissions",
+        )
     bogus = [c for c in data.permissions if repo.get_permission(c) is None]
     if bogus:
         return _stamp(
@@ -254,6 +287,23 @@ def grant_role_permission(
     err = _admin_role_guard(role)
     if err is not None:
         return _stamp(BaseController.error(err, status=403), successor=successor)
+    # Reserved-permission guard: users:grant_superadmin can only be
+    # held by the seeded super_admin role.
+    from ....core.permissions import (
+        SUPER_ADMIN_ROLE_NAME, USERS_GRANT_SUPERADMIN,
+    )
+    if code == USERS_GRANT_SUPERADMIN and role.name != SUPER_ADMIN_ROLE_NAME:
+        return _stamp(
+            BaseController.error(
+                format_error_response(
+                    "forbidden",
+                    "users:grant_superadmin is reserved for the "
+                    "super_admin role and cannot be granted to other roles.",
+                ),
+                status=403,
+            ),
+            successor=successor,
+        )
     if repo.get_permission(code) is None:
         return _stamp(
             BaseController.error(

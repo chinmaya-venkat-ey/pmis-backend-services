@@ -39,6 +39,7 @@ def _utcnow() -> datetime:
 _HIDDEN_PROJECT_STATUSES = ("closed",)
 
 _ADMIN_ROLE_NAME = "admin"
+_SUPER_ADMIN_ROLE_NAME = "super_admin"
 
 
 def _user_holds_admin_role(db: Session, user_id: str) -> bool:
@@ -55,6 +56,30 @@ def _user_holds_admin_role(db: Session, user_id: str) -> bool:
                 UserRoleModel.user_id == user_id,
                 UserRoleModel.role_id == RoleModel.id,
                 RoleModel.name == _ADMIN_ROLE_NAME,
+            )
+        )
+    ).scalar() or False
+
+
+def _user_holds_super_admin_role(db: Session, user_id: str) -> bool:
+    """Check whether ``user_id`` is assigned the doc-41 ``super_admin``
+    role at GLOBAL scope (both org_id and project_id NULL).
+
+    Doc 42b: super_admin replaces admin as the lockout-protected tier.
+    Stored in ``user_role_assignments`` (the doc-41 table), not the
+    legacy ``user_roles`` table — bootstrap also writes there.
+    """
+    # Local import to avoid surprises during model-load order; this
+    # repository file is imported very early in startup.
+    from ..models.user_role_assignment import UserRoleAssignmentModel
+    return db.query(
+        exists().where(
+            and_(
+                UserRoleAssignmentModel.user_id == user_id,
+                UserRoleAssignmentModel.role_id == RoleModel.id,
+                UserRoleAssignmentModel.organization_id.is_(None),
+                UserRoleAssignmentModel.project_id.is_(None),
+                RoleModel.name == _SUPER_ADMIN_ROLE_NAME,
             )
         )
     ).scalar() or False
@@ -81,6 +106,7 @@ class UserRepository:
             first_name=model.first_name,
             last_name=model.last_name,
             admin=_user_holds_admin_role(self.db, model.id),
+            is_super_admin=_user_holds_super_admin_role(self.db, model.id),
             status=model.status,
             created_at=model.created_at,
             updated_at=model.updated_at,
@@ -385,14 +411,46 @@ class UserRepository:
         """True if at least one OTHER live user holds the ``admin`` role.
 
         Doc 21 part B: derived from the user_roles join (replaces the
-        ``users.admin`` column). Used by delete / update services to
-        refuse operations that would leave zero active admins.
+        ``users.admin`` column).
+
+        Note (doc 42b): the user-lifecycle lockouts now use
+        :meth:`has_other_active_super_admin` instead — admin is no
+        longer the protected tier. This method is kept for any caller
+        that genuinely needs admin-role-membership counting (e.g.
+        analytics or one-off scripts).
         """
         return (
             self.db.query(UserModel.id)
             .join(UserRoleModel, UserRoleModel.user_id == UserModel.id)
             .join(RoleModel, RoleModel.id == UserRoleModel.role_id)
             .filter(RoleModel.name == _ADMIN_ROLE_NAME)
+            .filter(UserModel.deleted_at.is_(None))
+            .filter(UserModel.id != exclude_user_id)
+            .first()
+            is not None
+        )
+
+    def has_other_active_super_admin(self, exclude_user_id: str) -> bool:
+        """True if at least one OTHER live user holds super_admin globally.
+
+        Doc 42b lockout pivot: super_admin replaces admin as the
+        protected tier. Used by the user delete + status-flip services
+        to refuse operations that would leave zero live super_admins.
+        super_admin lives in ``user_role_assignments`` (the doc-41
+        table), so this query joins there — NOT the legacy
+        ``user_roles`` table.
+        """
+        from ..models.user_role_assignment import UserRoleAssignmentModel
+        return (
+            self.db.query(UserModel.id)
+            .join(
+                UserRoleAssignmentModel,
+                UserRoleAssignmentModel.user_id == UserModel.id,
+            )
+            .join(RoleModel, RoleModel.id == UserRoleAssignmentModel.role_id)
+            .filter(RoleModel.name == _SUPER_ADMIN_ROLE_NAME)
+            .filter(UserRoleAssignmentModel.organization_id.is_(None))
+            .filter(UserRoleAssignmentModel.project_id.is_(None))
             .filter(UserModel.deleted_at.is_(None))
             .filter(UserModel.id != exclude_user_id)
             .first()

@@ -45,15 +45,28 @@ def _bare_user(db, login):
 # ---------------------------------------------------------------------------
 
 class TestMePermissions:
-    def test_admin_sees_full_set(self, client, admin_user, admin_headers):
+    def test_admin_sees_full_set_minus_grant_superadmin(
+        self, client, admin_user, admin_headers,
+    ):
+        """admin holds every built-in permission EXCEPT
+        users:grant_superadmin (post-doc-42b demotion). The exclusion
+        is what stops admin from promoting users to super_admin."""
         resp = client.get("/api/v3/users/me/permissions", headers=admin_headers)
         assert resp.status_code == 200, resp.text
         body = resp.json()["data"]
         assert body["isAdmin"] is True
-        # Should hold every built-in permission code.
-        from app.core.permissions import BUILTIN_PERMISSIONS
-        codes = {p.code for p in BUILTIN_PERMISSIONS}
-        assert codes.issubset(set(body["permissions"]))
+        from app.core.permissions import (
+            BUILTIN_PERMISSIONS, USERS_GRANT_SUPERADMIN,
+        )
+        all_codes = {p.code for p in BUILTIN_PERMISSIONS}
+        expected = all_codes - {USERS_GRANT_SUPERADMIN}
+        actual = set(body["permissions"])
+        assert expected.issubset(actual), (
+            f"admin missing codes: {expected - actual}"
+        )
+        assert USERS_GRANT_SUPERADMIN not in actual, (
+            "admin must NOT hold users:grant_superadmin"
+        )
 
     def test_member_sees_member_set_only(self, client, member_user, member_headers):
         resp = client.get(
@@ -248,9 +261,15 @@ class TestUserRoleAssignment:
         names = [r["name"] for r in resp.json()["data"]["roles"]]
         assert "viewer" in names
 
-    def test_cannot_remove_last_admin(
+    def test_admin_caller_cannot_remove_admin_role_post_doc42b(
         self, client, admin_user, admin_headers, db_session,
     ):
+        """Doc 42b caller-vs-target: an admin-tier caller is NOT
+        authorized to revoke the admin role from anyone (themselves
+        included). Only super_admin can. The 'last admin' lockout
+        that used to gate this is gone — replaced by the symmetric
+        caller-vs-target gate which fires earlier and harder.
+        """
         admin_role_id = (
             db_session.query(RoleModel)
             .filter(RoleModel.name == "admin")
@@ -262,27 +281,48 @@ class TestUserRoleAssignment:
             headers=admin_headers,
         )
         assert resp.status_code == 403, resp.text
-        assert "last user" in resp.json()["error"]["message"].lower()
+        # New gate message — references super_admin as the only role
+        # that can grant/revoke admin.
+        assert "super_admin" in resp.json()["error"]["message"].lower()
 
-    def test_can_remove_admin_role_when_other_admin_exists(
-        self, client, admin_user, admin_headers, db_session,
+    def test_super_admin_caller_can_remove_admin_role(
+        self, client, admin_user, db_session,
     ):
-        # Create a SECOND admin first.
-        u, _ = _bare_user(db_session, "admin2")
+        """Symmetric to the demotion: a super_admin caller can freely
+        revoke the admin role from any user — admin is no longer the
+        protected tier, super_admin is. We don't test the 'last admin'
+        case anymore because admin has no lockout post-doc-42b."""
+        from app.core.security import create_access_token
+        from app.infrastructure.db.models.user_role_assignment import (
+            UserRoleAssignmentModel,
+        )
+        # Create a super_admin caller via the doc-41 assignments table.
+        sa_user, _ = _bare_user(db_session, "sa-caller")
+        sa_role_id = (
+            db_session.query(RoleModel)
+            .filter(RoleModel.name == "super_admin")
+            .one()
+            .id
+        )
+        db_session.add(UserRoleAssignmentModel(
+            user_id=sa_user.id, role_id=sa_role_id,
+        ))
+        db_session.commit()
+        sa_headers = {"Authorization": f"Bearer " + create_access_token({
+            "sub": sa_user.login, "user_id": sa_user.id, "email": sa_user.email,
+        })}
+
         admin_role_id = (
             db_session.query(RoleModel)
             .filter(RoleModel.name == "admin")
             .one()
             .id
         )
-        db_session.add(UserRoleModel(user_id=u.id, role_id=admin_role_id))
-        db_session.commit()
-        # Now the original admin can be unassigned.
         resp = client.delete(
             f"/api/v3/users/{admin_user.id}/roles/{admin_role_id}",
-            headers=admin_headers,
+            headers=sa_headers,
         )
-        assert resp.status_code == 204
+        assert resp.status_code == 204, resp.text
 
 
 # ---------------------------------------------------------------------------

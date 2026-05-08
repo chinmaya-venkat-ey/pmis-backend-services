@@ -1,18 +1,24 @@
 """Role update service.
 
-Doc 21 part B: only the seeded ``admin`` role is fully locked (cannot be
-renamed and cannot have its permission list changed via the management
-endpoints — its permission set is auto-maintained by the startup sync).
-Other built-in roles can be renamed and edited freely.
+The seeded ``admin`` and ``super_admin`` roles are fully locked
+(cannot be renamed and cannot have their permission lists changed
+via the management endpoints — their permission sets are
+auto-maintained by the startup sync). Other built-in roles can be
+renamed and edited freely.
 """
 from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
-from .....core.permissions import ADMIN_ROLE_NAME
+from .....core.permissions import (
+    ADMIN_ROLE_NAME, SUPER_ADMIN_ROLE_NAME,
+)
 from .....domain.roles.role import Role
 from .....infrastructure.db.repositories.role_repository import RoleRepository
 from .....shared.service_result import ServiceResult
+
+
+_LOCKED_ROLES = frozenset({ADMIN_ROLE_NAME, SUPER_ADMIN_ROLE_NAME})
 
 
 def update_role(
@@ -31,9 +37,9 @@ def update_role(
             error_type="not_found",
         )
 
-    if role.name == ADMIN_ROLE_NAME:
+    if role.name in _LOCKED_ROLES:
         return ServiceResult.fail(
-            error="The built-in 'admin' role cannot be modified.",
+            error=f"The built-in '{role.name}' role cannot be modified.",
             error_type="forbidden",
         )
 
@@ -43,9 +49,9 @@ def update_role(
                 error="Role name must be a non-empty string ≤ 255 chars",
                 error_type="validation_error",
             )
-        if name == ADMIN_ROLE_NAME:
+        if name in _LOCKED_ROLES:
             return ServiceResult.fail(
-                error="Cannot rename a role to 'admin' (reserved).",
+                error=f"Cannot rename a role to '{name}' (reserved).",
                 error_type="forbidden",
             )
         existing = repository.get_by_name(name)

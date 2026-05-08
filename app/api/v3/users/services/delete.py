@@ -6,17 +6,18 @@ project_members mapping rows are intentionally NOT removed — undelete
 (via PATCH status='active') restores the user with their full mapping
 history. Closed/completed projects are filtered out at response time.
 
-Two admin-protection guards are enforced here so the API surface can
+Two protection guards are enforced here so the API surface can
 never lock the system out of itself:
 
-  - **Self-delete is forbidden.** A logged-in admin cannot delete
+  - **Self-delete is forbidden.** A logged-in user cannot delete
     their own account (would also revoke their session). Returns
     ``authorization_error`` (403).
-  - **Last active admin is protected.** Deleting an admin row is
-    refused if no OTHER active admin would remain. Returns
-    ``validation_error`` (422) with a message telling the caller to
-    promote another user first. Recovery from a fully-locked-out
-    state requires direct DB access — see ``DEPLOYMENT_NOTES.md``.
+  - **Last active super_admin is protected** (doc 42b). Deleting a
+    super_admin row is refused if no OTHER active super_admin would
+    remain. Returns ``validation_error`` (422) with a message telling
+    the caller to promote another user to super_admin first. The
+    admin role is NOT lockout-protected anymore — admin is no longer
+    the top tier; super_admin is.
 """
 from typing import Optional
 
@@ -51,15 +52,17 @@ def delete_user(
             error_type="authorization_error",
         )
 
-    # Guard 2: Last-active-admin protection. Only fires when the target
-    # is an active admin — re-deleting an already-deleted admin is a
-    # no-op (idempotent), so we skip the check on tombstoned rows.
-    if user.admin and not user.is_deleted():
-        if not repository.has_other_active_admin(exclude_user_id=user_id):
+    # Guard 2 (doc 42b): Last-active-super_admin protection. Only fires
+    # when the target is an active super_admin — re-deleting an
+    # already-deleted user is a no-op (idempotent), so we skip the
+    # check on tombstoned rows. admin is no longer the protected tier
+    # — admin can be freely deleted as long as a super_admin remains.
+    if user.is_super_admin and not user.is_deleted():
+        if not repository.has_other_active_super_admin(exclude_user_id=user_id):
             return ServiceResult.fail(
                 error=(
-                    "Cannot delete the last active admin. Promote "
-                    "another user to admin first."
+                    "Cannot delete the last active super_admin. Promote "
+                    "another user to super_admin first."
                 ),
                 error_type="validation_error",
             )

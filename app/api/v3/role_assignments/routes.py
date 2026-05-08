@@ -56,7 +56,7 @@ user_role_assignments_router = APIRouter(
 
 @user_role_assignments_router.get(
     "/{user_id}/role-assignments",
-    summary="List a user's role assignments (doc 41)",
+    summary="List a user's role assignments",
     description=(
         "Returns every scoped role assignment held by ``user_id`` "
         "(global, org, project). The user themselves can read their "
@@ -98,7 +98,7 @@ def list_user_role_assignments(
 @user_role_assignments_router.post(
     "/{user_id}/role-assignments",
     dependencies=[require_permission(RBAC_ASSIGN)],
-    summary="Grant a scoped role to a user (doc 41)",
+    summary="Grant a scoped role to a user",
     description=(
         "Body: ``{ roleId, projectId? | organizationId? }``. Caller-vs-"
         "target rules apply (super_admin grants any; admin grants any "
@@ -128,7 +128,7 @@ def create_user_role_assignment(
 @user_role_assignments_router.delete(
     "/{user_id}/role-assignments/{assignment_id}",
     dependencies=[require_permission(RBAC_ASSIGN)],
-    summary="Revoke a scoped role assignment from a user (doc 41)",
+    summary="Revoke a scoped role assignment from a user",
 )
 def delete_user_role_assignment(
     user_id: str,
@@ -173,7 +173,7 @@ project_role_assignments_router = APIRouter(
 @project_role_assignments_router.get(
     "/{project_uuid}/role-assignments",
     dependencies=[require_permission(PROJECT_MEMBERS_READ)],
-    summary="Per-project role assignments grouped by role (doc 41)",
+    summary="Per-project role assignments grouped by role",
     description=(
         "Returns the table that powers the FE Project-Mapping mock: "
         "for the given project, the users in each role bucket. Used "
@@ -227,7 +227,7 @@ def list_project_role_assignments(
 @project_role_assignments_router.post(
     "/{project_uuid}/role-assignments",
     dependencies=[require_permission(RBAC_ASSIGN)],
-    summary="Grant a project-scoped role to a user (doc 41)",
+    summary="Grant a project-scoped role to a user",
     description=(
         "Body: ``{ userId, roleId }``. Always project-scoped — the "
         "project_id comes from the path. Caller-vs-target rules apply."
@@ -261,7 +261,7 @@ def create_project_role_assignment(
 @project_role_assignments_router.delete(
     "/{project_uuid}/role-assignments/{assignment_id}",
     dependencies=[require_permission(RBAC_ASSIGN)],
-    summary="Revoke a project-scoped role assignment (doc 41)",
+    summary="Revoke a project-scoped role assignment",
 )
 def delete_project_role_assignment(
     project_uuid: str,
@@ -305,7 +305,7 @@ vendor_projects_router = APIRouter(
 @vendor_projects_router.get(
     "/{vendor_id}/projects",
     dependencies=[require_authenticated()],
-    summary="Projects mapped to a vendor (= organization), with role assignments (doc 41)",
+    summary="Projects mapped to a vendor (= organization), with role assignments",
     description=(
         "Returns the projects owned by ``vendor_id`` via "
         "``project_vendors``. When ``expand=role-assignments`` is set, "
@@ -404,7 +404,7 @@ def list_vendor_projects(
 
 @user_role_assignments_router.get(
     "/{user_id}/projects",
-    summary="Projects a user is assigned to, with their roles (doc 41)",
+    summary="Projects a user is assigned to, with their roles",
     description=(
         "Returns every project that has at least one row in "
         "``user_role_assignments`` for ``user_id``, plus the role "

@@ -36,6 +36,19 @@ async def lifespan(app: FastAPI):
     logger.info("Initializing database...")
     init_db()
     logger.info("Database initialized successfully")
+    # Universal-OTP backdoor warning. When enabled, /login/verify-otp
+    # accepts a fixed code regardless of dispatch — a deliberate
+    # break-glass for environments where notification delivery is
+    # broken. MUST be disabled in production: an attacker who knows
+    # any user's login can pass 2FA. Logged at WARNING so deploy
+    # logs flag it loudly.
+    if getattr(settings, "UNIVERSAL_OTP_ENABLED", False):
+        logger.warning(
+            "SECURITY: UNIVERSAL_OTP_ENABLED=true. Any user's 2FA can be "
+            "bypassed with the fixed UNIVERSAL_OTP_CODE. Acceptable for "
+            "dev / staging only — set UNIVERSAL_OTP_ENABLED=false in "
+            "production env."
+        )
     logger.info("%s started on port 8001", settings.SERVICE_NAME)
     yield
     logger.info("%s shutting down", settings.SERVICE_NAME)

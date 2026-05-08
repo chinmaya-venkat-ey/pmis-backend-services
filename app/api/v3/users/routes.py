@@ -286,7 +286,9 @@ def get_user(
     summary="Update user",
     description=(
         "Update user details. Path param accepts integer ``id`` or "
-        "``US-...`` code (doc 25)."
+        "``US-...`` code.\n\nHierarchy boundary: an admin caller "
+        "cannot modify a user who currently holds super_admin — "
+        "only super_admin can. Returns 403."
     ),
 )
 def update_user(
@@ -300,8 +302,18 @@ def update_user(
 
     Requires: USERS_UPDATE permission
     - Members can update themselves (excluding admin flag and status)
-    - Admins can update all users
+    - Admins can update all users EXCEPT super_admin users
+    - super_admin can update anyone
     """
+    actor_id = getattr(request.state, "user_id", None)
+    target = _get_user_or_404(db, user_id)
+    if target is not None:
+        from ..role_assignments.services import can_caller_modify_user
+        allowed, reason = can_caller_modify_user(db, actor_id, target.id)
+        if not allowed:
+            return BaseController.error(
+                format_error_response("forbidden", reason), status=403,
+            )
     return UserController.update(request, user_id, data, db)
 
 
@@ -311,7 +323,10 @@ def update_user(
     summary="Update user password",
     description=(
         "Update user password. Path param accepts integer ``id`` or "
-        "``US-...`` code (doc 25)."
+        "``US-...`` code.\n\nHierarchy boundary: an admin caller "
+        "cannot reset a super_admin's password — only super_admin "
+        "can. Returns 403. (Stops admin from taking over a "
+        "super_admin account by overwriting the password.)"
     ),
 )
 def update_user_password(
@@ -325,8 +340,18 @@ def update_user_password(
 
     Requires: USERS_UPDATE permission
     - Members can update their own password
-    - Admins can update any user's password
+    - Admins can update any user's password EXCEPT super_admin's
+    - super_admin can update any password
     """
+    actor_id = getattr(request.state, "user_id", None)
+    target = _get_user_or_404(db, user_id)
+    if target is not None:
+        from ..role_assignments.services import can_caller_modify_user
+        allowed, reason = can_caller_modify_user(db, actor_id, target.id)
+        if not allowed:
+            return BaseController.error(
+                format_error_response("forbidden", reason), status=403,
+            )
     return UserController.update_password(request, user_id, data, db)
 
 
@@ -336,7 +361,10 @@ def update_user_password(
     summary="Delete user",
     description=(
         "Delete user by ID. Path param accepts integer ``id`` or "
-        "``US-...`` code (doc 25)."
+        "``US-...`` code.\n\nHierarchy boundary: an admin caller "
+        "cannot delete a user who currently holds super_admin — only "
+        "super_admin can. Returns 403. Plus existing self-delete "
+        "guard (403) and last-super_admin lockout (422)."
     ),
 )
 def delete_user(
@@ -347,8 +375,18 @@ def delete_user(
     """
     Delete user by ID.
 
-    Requires: USERS_DELETE_ALL permission (admin only)
+    Requires: USERS_DELETE_ALL permission. Plus hierarchy boundary
+    (admin can't delete super_admin) and last-super_admin lockout.
     """
+    actor_id = getattr(request.state, "user_id", None)
+    target = _get_user_or_404(db, user_id)
+    if target is not None:
+        from ..role_assignments.services import can_caller_modify_user
+        allowed, reason = can_caller_modify_user(db, actor_id, target.id)
+        if not allowed:
+            return BaseController.error(
+                format_error_response("forbidden", reason), status=403,
+            )
     return UserController.delete(request, user_id, db)
 
 
@@ -474,11 +512,33 @@ def get_user_permissions(
     "/{user_id}/permissions/{code}",
     dependencies=[require_permission(RBAC_ASSIGN)],
     summary="Grant a direct permission to a user",
+    description=(
+        "Grant a permission directly to a user (additive on top of "
+        "role-derived). The reserved permission "
+        "``users:grant_superadmin`` cannot be granted via this path "
+        "to anyone — only the seeded ``super_admin`` role holds it. "
+        "Returns 403 if attempted."
+    ),
 )
 def grant_user_permission(
     request: Request, user_id: str, code: str,
     db: Session = Depends(get_db),
 ):
+    # Reserved-permission guard. users:grant_superadmin must only flow
+    # via membership in the seeded super_admin role; granting it as a
+    # direct user_permission would create an alternate path to elevate
+    # without the role-name-based caller-vs-target gate noticing.
+    from ....core.permissions import USERS_GRANT_SUPERADMIN
+    if code == USERS_GRANT_SUPERADMIN:
+        return BaseController.error(
+            format_error_response(
+                "forbidden",
+                "users:grant_superadmin is a reserved permission that "
+                "can only be held via the super_admin role. Direct "
+                "grants are not allowed.",
+            ),
+            status=403,
+        )
     user = _get_user_or_404(db, user_id)
     if user is None:
         return BaseController.error(
@@ -529,13 +589,14 @@ def revoke_user_permission(
     summary=(
         "List a user's roles "
         "(DEPRECATED — use GET /api/v3/users/{id}/role-assignments for "
-        "the doc-41 scoped view; this endpoint returns only legacy global "
+        "the scoped view; this endpoint returns only legacy global "
         "roles from user_roles)"
     ),
     description=(
         "**Deprecated**. Returns only the legacy global roles a user holds "
-        "(rows in `user_roles`). Doc 41 introduced scoped role assignments "
-        "in `user_role_assignments`, which this endpoint does not surface.\n\n"
+        "(rows in `user_roles`). Scoped role assignments stored in "
+        "`user_role_assignments` (org / project scope) are NOT surfaced "
+        "by this endpoint.\n\n"
         "**Use instead**: `GET /api/v3/users/{id}/role-assignments`. That "
         "endpoint returns global, org-scoped, and project-scoped grants "
         "in one list with their scope key per row.\n\n"
@@ -577,9 +638,9 @@ def list_user_roles(
     ),
     description=(
         "**Deprecated**. Writes a global-scope grant to the legacy "
-        "`user_roles` table. Doc 41 introduced scope (org / project) on "
-        "role assignments via `user_role_assignments` — this endpoint "
-        "predates that and cannot express scope.\n\n"
+        "`user_roles` table. The newer scoped role assignments table "
+        "(`user_role_assignments`, with org / project scope) is NOT "
+        "written by this endpoint.\n\n"
         "**Use instead**: `POST /api/v3/users/{id}/role-assignments` with "
         "body `{ roleId, organizationId?, projectId? }`. Both scope "
         "fields omitted ⇒ global (equivalent to this endpoint's effect). "
@@ -601,7 +662,8 @@ def assign_user_role(
         )
     canonical_id = user.id
     repo = RbacRepository(db)
-    if repo.get_role(role_id) is None:
+    role_obj = repo.get_role(role_id)
+    if role_obj is None:
         return BaseController.stamp_deprecation(
             BaseController.error(
                 format_error_response("not_found", f"Role {role_id} not found."),
@@ -610,6 +672,24 @@ def assign_user_role(
             successor_path=f"/api/v3/users/{canonical_id}/role-assignments",
         )
     actor_id = getattr(request.state, "user_id", None)
+    # Doc 42b: caller-vs-target gate (same matrix as the new
+    # /role-assignments endpoint). Stops admin from granting
+    # admin / super_admin via the legacy path.
+    from ..role_assignments.services import can_caller_grant
+    allowed, reason = can_caller_grant(
+        db, actor_id,
+        target_role_name=role_obj.name,
+        target_organization_id=None,
+        target_project_id=None,
+    )
+    if not allowed:
+        return BaseController.stamp_deprecation(
+            BaseController.error(
+                format_error_response("forbidden", reason),
+                status=403,
+            ),
+            successor_path=f"/api/v3/users/{canonical_id}/role-assignments",
+        )
     repo.assign_role_to_user(canonical_id, role_id, actor_id=actor_id)
     db.commit()
     return BaseController.stamp_deprecation(
@@ -630,8 +710,8 @@ def assign_user_role(
     ),
     description=(
         "**Deprecated**. Revokes the legacy global `user_roles` grant. "
-        "Doc 41's `user_role_assignments` rows are NOT affected by this "
-        "endpoint — only the legacy table.\n\n"
+        "Scoped `user_role_assignments` rows (org / project scope) are "
+        "NOT affected by this endpoint — only the legacy table.\n\n"
         "**Use instead**: `DELETE /api/v3/users/{id}/role-assignments/"
         "{assignment_id}`. That path covers both legacy-equivalent "
         "(global) grants and the new org/project-scoped grants and "
@@ -661,22 +741,31 @@ def unassign_user_role(
             ),
             successor_path=successor,
         )
-    # Lockout: removing the last live admin is rejected.
-    if role.name == ADMIN_ROLE_NAME:
-        currently_holding = repo.user_has_admin_role(canonical_id)
-        if currently_holding and repo.count_users_with_role(role_id) <= 1:
-            return BaseController.stamp_deprecation(
-                BaseController.error(
-                    format_error_response(
-                        "forbidden",
-                        "Cannot remove the last user holding the 'admin' role. "
-                        "Assign 'admin' to another user before removing it from "
-                        "this one.",
-                    ),
-                    status=403,
-                ),
-                successor_path=successor,
-            )
+    # Doc 42b: caller-vs-target gate (mirror of grant). Stops admin
+    # from revoking admin / super_admin via the legacy path.
+    actor_id = getattr(request.state, "user_id", None)
+    from ..role_assignments.services import can_caller_grant
+    allowed, reason = can_caller_grant(
+        db, actor_id,
+        target_role_name=role.name,
+        target_organization_id=None,
+        target_project_id=None,
+    )
+    if not allowed:
+        return BaseController.stamp_deprecation(
+            BaseController.error(
+                format_error_response("forbidden", reason),
+                status=403,
+            ),
+            successor_path=successor,
+        )
+
+    # Doc 42b: the old "last admin" lockout was removed because admin
+    # is no longer the protected tier. The new top-tier (super_admin)
+    # lives in user_role_assignments — a different table — and is
+    # lockout-protected by the /role-assignments DELETE handler, not
+    # this legacy endpoint.
+
     repo.unassign_role_from_user(canonical_id, role_id)
     db.commit()
     return BaseController.stamp_deprecation(

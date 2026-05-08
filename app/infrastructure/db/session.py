@@ -112,75 +112,85 @@ def init_db() -> None:
     finally:
         db.close()
 
-    # ---- 3. Bootstrap admin -------------------------------------------
+    # ---- 3. Bootstrap admin removed (doc 42b) -------------------------
+    # Pre-doc-42b an `admin` user was auto-created here on every boot.
+    # Post-doc-42b the only system-bootstrapped user is `super_admin`
+    # (below). `admin` is now created on-demand by the operator via
+    # the API — POST /api/v3/users/create as super_admin, then
+    # POST /api/v3/users/{id}/role-assignments granting the admin role.
+    # This makes admin "just another user" with no special bootstrap
+    # treatment.
     from ...core.security import hash_password
     from .models.user import UserModel
     from .models.role import RoleModel
     from .models.user_role import UserRoleModel
 
-    # Doc 35 (monolith) parity: force two_factor_enabled=True on every
-    # boot. The original doc-33 hotfix forced False to keep the
-    # always-reachable account single-stage when notification dispatch
-    # was broken. With the live HttpNotificationClient (doc 33
-    # follow-up) AND the universal-OTP break-glass (UNIVERSAL_OTP_ENABLED
-    # + UNIVERSAL_OTP_CODE) BOTH available, the bootstrap admin can
-    # safely run with 2FA on. Idempotent — fresh create or existing
-    # False value both end up at True.
+    # ---- 4. Bootstrap super_admin (doc 42b) ---------------------------
+    # Separate account from the legacy `admin` login. After doc 42b's
+    # demotion, `admin` cannot grant super_admin or admin — only
+    # super_admin can. Without bootstrapping a super_admin user, no
+    # one would ever be able to grant super_admin (chicken-and-egg).
+    # Idempotent: skips if the user already exists; only ensures the
+    # global super_admin assignment is present.
+    from .models.user_role_assignment import UserRoleAssignmentModel
+
     db = SessionLocal()
     try:
-        admin_user = (
+        sa_user = (
             db.query(UserModel)
-            .filter(UserModel.login == settings.BOOTSTRAP_ADMIN_LOGIN)
+            .filter(UserModel.login == settings.BOOTSTRAP_SUPERADMIN_LOGIN)
             .first()
         )
-        if admin_user is None:
-            admin_user = UserModel(
-                login=settings.BOOTSTRAP_ADMIN_LOGIN,
-                email=settings.BOOTSTRAP_ADMIN_EMAIL,
-                hashed_password=hash_password(settings.BOOTSTRAP_ADMIN_PASSWORD),
-                first_name="Administrator",
-                last_name="System",
+        if sa_user is None:
+            sa_user = UserModel(
+                login=settings.BOOTSTRAP_SUPERADMIN_LOGIN,
+                email=settings.BOOTSTRAP_SUPERADMIN_EMAIL,
+                hashed_password=hash_password(
+                    settings.BOOTSTRAP_SUPERADMIN_PASSWORD
+                ),
+                first_name="Super",
+                last_name="Admin",
                 status="active",
-                # Doc 35 parity: 2FA on by default. Universal-OTP
-                # break-glass remains available if dispatch breaks.
+                # 2FA on by default; universal-OTP break-glass available.
                 two_factor_enabled=True,
             )
-            db.add(admin_user)
+            db.add(sa_user)
             db.flush()
-            logging.info("Bootstrap admin '%s' created.", settings.BOOTSTRAP_ADMIN_LOGIN)
-        elif admin_user.two_factor_enabled is not True:
-            # Reverse the doc-33 hotfix: restore 2FA on the bootstrap
-            # admin row. Idempotent — once True, this branch is a no-op.
-            admin_user.two_factor_enabled = True
             logging.info(
-                "Forcing bootstrap admin two_factor_enabled=True (doc 35 parity).",
+                "Bootstrap super_admin '%s' created.",
+                settings.BOOTSTRAP_SUPERADMIN_LOGIN,
             )
 
-        # Ensure the admin user has the 'admin' role.
-        admin_role = (
+        sa_role = (
             db.query(RoleModel)
-            .filter(RoleModel.name == "admin")
+            .filter(RoleModel.name == "super_admin")
             .first()
         )
-        if admin_role is not None:
-            assigned = (
-                db.query(UserRoleModel)
+        if sa_role is not None:
+            existing = (
+                db.query(UserRoleAssignmentModel)
                 .filter(
-                    UserRoleModel.user_id == admin_user.id,
-                    UserRoleModel.role_id == admin_role.id,
+                    UserRoleAssignmentModel.user_id == sa_user.id,
+                    UserRoleAssignmentModel.role_id == sa_role.id,
+                    UserRoleAssignmentModel.organization_id.is_(None),
+                    UserRoleAssignmentModel.project_id.is_(None),
                 )
                 .first()
             )
-            if assigned is None:
-                db.add(UserRoleModel(
-                    user_id=admin_user.id,
-                    role_id=admin_role.id,
+            if existing is None:
+                db.add(UserRoleAssignmentModel(
+                    user_id=sa_user.id,
+                    role_id=sa_role.id,
                 ))
+                logging.info(
+                    "Granted super_admin role to bootstrap user '%s'.",
+                    settings.BOOTSTRAP_SUPERADMIN_LOGIN,
+                )
 
         db.commit()
     except Exception as e:
         db.rollback()
-        logging.error("Bootstrap admin seed failed: %s", e)
+        logging.error("Bootstrap super_admin seed failed: %s", e)
     finally:
         db.close()
 

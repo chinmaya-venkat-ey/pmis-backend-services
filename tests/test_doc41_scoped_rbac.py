@@ -197,9 +197,12 @@ class TestCallerVsTargetGate:
     grant decisions match the doc 41 rule table.
     """
 
-    def test_admin_can_grant_anything_except_super_admin(
+    def test_admin_can_grant_lower_tier_roles_only(
         self, db_session, admin_user,
     ):
+        """admin can grant org_admin / project_admin / project_member /
+        division_member, but NOT admin (peers) or super_admin (higher).
+        Only super_admin can grant admin or super_admin."""
         from app.api.v3.role_assignments.services import can_caller_grant
         # admin_user holds the legacy 'admin' role.
         for target in (
@@ -214,7 +217,7 @@ class TestCallerVsTargetGate:
             )
             assert allowed, f"admin should be able to grant {target}"
 
-        # super_admin granting requires super_admin
+        # super_admin grant requires super_admin
         allowed, reason = can_caller_grant(
             db_session, admin_user.id,
             target_role_name=SUPER_ADMIN_ROLE_NAME,
@@ -222,6 +225,33 @@ class TestCallerVsTargetGate:
             target_project_id=None,
         )
         assert not allowed and "super_admin" in reason
+
+        # admin grant requires super_admin too (doc 42b spec alignment)
+        allowed, reason = can_caller_grant(
+            db_session, admin_user.id,
+            target_role_name=ADMIN_ROLE_NAME,
+            target_organization_id=None,
+            target_project_id=None,
+        )
+        assert not allowed, "admin should NOT be able to grant admin"
+        assert "admin" in reason
+
+    def test_admin_role_does_not_hold_grant_superadmin_permission(
+        self, db_session, admin_user,
+    ):
+        """admin's seeded permission set excludes users:grant_superadmin
+        (the doc-42b demotion). Self-heal revoke ensures any drift is
+        cleaned on every boot. The admin_user fixture triggers
+        sync_builtin_permissions via the seed bootstrap."""
+        from app.core.permissions import USERS_GRANT_SUPERADMIN
+        repo = RbacRepository(db_session)
+        admin_role = repo.get_role_by_name(ADMIN_ROLE_NAME)
+        assert admin_role is not None
+        codes = repo.list_role_permissions(admin_role.id)
+        assert USERS_GRANT_SUPERADMIN not in codes, (
+            f"admin role still holds {USERS_GRANT_SUPERADMIN}; "
+            "seed loop or self-heal revoke is broken."
+        )
 
     def test_super_admin_can_grant_super_admin(
         self, db_session, admin_user,

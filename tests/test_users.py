@@ -544,11 +544,13 @@ class TestAdminProtectionGuards:
         assert resp.status_code == 403, resp.text
         assert "demote yourself" in resp.text.lower()
 
-    def test_cannot_deactivate_last_active_admin(
+    def test_admin_can_be_deactivated_post_doc42b(
         self, client, admin_user, admin_headers, db_session,
     ):
-        """Sole admin cannot set their own status='inactive' — would lock
-        the system out, since soft-deleted/inactive admins can't log in."""
+        """Doc 42b: admin is no longer the lockout-protected tier. An
+        admin user CAN be deactivated freely (the only protected tier
+        is super_admin — covered by
+        test_cannot_deactivate_last_active_super_admin below)."""
         from app.infrastructure.db.models.user import UserModel
 
         resp = client.patch(
@@ -556,14 +558,45 @@ class TestAdminProtectionGuards:
             json={"status": "inactive"},
             headers=admin_headers,
         )
-        assert resp.status_code == 422, resp.text
-        assert "last active admin" in resp.text.lower()
+        assert resp.status_code == 200, resp.text
 
-        # Verify state didn't change
+        db_session.expire_all()
+        row = db_session.query(UserModel).filter_by(id=admin_user.id).one()
+        assert row.status == "inactive"
+
+    def test_cannot_deactivate_last_active_super_admin(
+        self, client, admin_user, admin_headers, db_session,
+    ):
+        """Doc 42b lockout pivot: deactivating the only active
+        super_admin is refused. Make admin_user a super_admin, then
+        try to flip them to inactive."""
+        from app.infrastructure.db.models.user import UserModel
+        from app.infrastructure.db.models.role import RoleModel
+        from app.infrastructure.db.models.user_role_assignment import (
+            UserRoleAssignmentModel,
+        )
+        sa_role_id = (
+            db_session.query(RoleModel)
+            .filter(RoleModel.name == "super_admin")
+            .one()
+            .id
+        )
+        db_session.add(UserRoleAssignmentModel(
+            user_id=admin_user.id, role_id=sa_role_id,
+        ))
+        db_session.commit()
+
+        resp = client.patch(
+            f"/api/v3/users/{admin_user.id}",
+            json={"status": "inactive"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422, resp.text
+        assert "last active super_admin" in resp.text.lower()
+
         db_session.expire_all()
         row = db_session.query(UserModel).filter_by(id=admin_user.id).one()
         assert row.status == "active"
-        assert row.deleted_at is None
 
     def test_can_delete_admin_when_another_admin_exists(
         self, client, admin_user, second_admin_user, admin_headers, db_session,

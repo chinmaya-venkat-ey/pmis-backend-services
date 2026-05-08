@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "pmis-user-service-2026",
     "name": "PMIS User Service (port 8001)",
-    "description": "Postman collection for PMIS-user-management — the authentication + RBAC microservice running on port 8001.\n\n**Endpoints covered** (user-mgmt slice only):\n- `POST /api/v3/users/login` (single-stage + 2FA branch)\n- `POST /api/v3/users/login/send-otp`, `/login/verify-otp`\n- `POST /api/v3/users/forgot-password`, `/reset-password`\n- `POST /api/v3/users/refresh`, `/introspect`, `/logout`\n- User CRUD: `/users/create`, `/users/{id}`, etc.\n- RBAC user-side: `/users/{id}/roles/{role_id}`, `/users/{id}/permissions/{code}`\n- Legacy /api/v3/roles, /api/v3/permissions (deprecated; use master/*)\n- `/api/v3/master/roles`, `/api/v3/master/permissions`\n- `/health`\n\n**`/api/v3/master/notification_templates/*` is no longer here.** Per doc 38, that slice moved to notification-service (port 8002) — see `PMIS_Notification_Service.postman_collection.json` in the notification-service repo.\n\n**Project-management endpoints (projects, M/A/T/S, vendors, divisions, etc.) are NOT in this collection.** Call them at the monolith on port 8000 — see `PMIS_API_Collection.postman_collection.json` in the monolith repo.\n\n**Two ways to use this collection:**\n1. **Direct (port 8001)** — set `baseUrl` to `http://10.1.131.199:8001`. Hits user-mgmt directly.\n2. **Through monolith proxy** — set `baseUrl` to `http://10.1.131.199:8000` AND ensure the monolith has `USER_SERVICE_PROXY_ENABLED=true`. Same URLs work — the monolith's `UserServiceProxyMiddleware` forwards them to user-mgmt transparently.\n\nBoth paths give the same result; option 1 is one fewer hop and useful for direct user-mgmt debugging.",
+    "description": "Postman collection for PMIS-user-management — the authentication + RBAC microservice running on port 8001.\n\n**Endpoints covered** (user-mgmt slice only):\n- `POST /api/v3/users/login` (single-stage + 2FA branch)\n- `POST /api/v3/users/login/send-otp`, `/login/verify-otp`\n- `POST /api/v3/users/forgot-password`, `/reset-password`\n- `POST /api/v3/users/refresh`, `/introspect`, `/logout`\n- User CRUD: `/users/create`, `/users/{id}`, etc.\n- RBAC user-side: `/users/{id}/roles/{role_id}`, `/users/{id}/permissions/{code}`\n- Legacy /api/v3/roles, /api/v3/permissions (deprecated; use master/*)\n- `/api/v3/master/roles`, `/api/v3/master/permissions`\n- `/health`\n\n**`/api/v3/master/notification_templates/*` is no longer here.** Per, that slice moved to notification-service (port 8002) — see `PMIS_Notification_Service.postman_collection.json` in the notification-service repo.\n\n**Project-management endpoints (projects, M/A/T/S, vendors, divisions, etc.) are NOT in this collection.** Call them at the monolith on port 8000 — see `PMIS_API_Collection.postman_collection.json` in the monolith repo.\n\n**Two ways to use this collection:**\n1. **Direct (port 8001)** — set `baseUrl` to `http://10.1.131.199:8001`. Hits user-mgmt directly.\n2. **Through monolith proxy** — set `baseUrl` to `http://10.1.131.199:8000` AND ensure the monolith has `USER_SERVICE_PROXY_ENABLED=true`. Same URLs work — the monolith's `UserServiceProxyMiddleware` forwards them to user-mgmt transparently.\n\nBoth paths give the same result; option 1 is one fewer hop and useful for direct user-mgmt debugging.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
@@ -73,7 +73,7 @@
                 "login"
               ]
             },
-            "description": "Authenticate user and receive a JWT token. Doc 33 change 3: when 2FA is required for the user (per-user flag + global ``REQUIRE_2FA``), this endpoint returns ``{requires_otp: true, ephemeral_token, channels_available}`` instead of an access_token. The client then calls ``/login/send-otp`` and ``/login/verify-otp``.",
+            "description": "Authenticate user and receive a JWT token. change 3: when 2FA is required for the user (per-user flag + global ``REQUIRE_2FA``), this endpoint returns ``{requires_otp: true, ephemeral_token, channels_available}`` instead of an access_token. The client then calls ``/login/send-otp`` and ``/login/verify-otp``.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"login\": \"\",\n  \"password\": \"\"\n}",
@@ -87,7 +87,7 @@
           "response": []
         },
         {
-          "name": "Complete a password reset (doc 33 change 3)",
+          "name": "Complete a password reset",
           "request": {
             "method": "POST",
             "header": [
@@ -198,7 +198,7 @@
                 }
               ]
             },
-            "description": "Delete user by ID. Path param accepts integer ``id`` or ``US-...`` code (doc 25)."
+            "description": "Delete user by ID. Path param accepts integer ``id`` or ``US-...`` code."
           },
           "response": []
         },
@@ -322,7 +322,7 @@
                 }
               ]
             },
-            "description": "Get user by ID. The path param accepts EITHER the integer ``id`` OR the human-readable ``userCode`` (``US-XXXX-YYMMDDHHMMSS`` — see doc 25). The dispatcher auto-detects via the ``US-`` prefix."
+            "description": "Get user by ID. The path param accepts EITHER the integer ``id`` OR the human-readable ``userCode`` (``US-XXXX-YYMMDDHHMMSS`` — see). The dispatcher auto-detects via the ``US-`` prefix."
           },
           "response": []
         },
@@ -559,7 +559,7 @@
           "response": []
         },
         {
-          "name": "Request a password-reset link or code (doc 33 change 3)",
+          "name": "Request a password-reset link or code",
           "request": {
             "method": "POST",
             "header": [
@@ -630,7 +630,7 @@
                 }
               ]
             },
-            "description": "Clears deletedAt/deletedBy and sets status='active' on a soft-deleted user. Idempotent on already-active users — returns the current snapshot rather than 409. All project mappings, vendor association, and division values are preserved on disk during soft-delete and re-surface automatically. Mirrors POST /api/v3/vendors/{id}/restore. Path param accepts integer ``id`` or ``US-...`` code (doc 25)."
+            "description": "Clears deletedAt/deletedBy and sets status='active' on a soft-deleted user. Idempotent on already-active users — returns the current snapshot rather than 409. All project mappings, vendor association, and division values are preserved on disk during soft-delete and re-surface automatically. Mirrors POST /api/v3/vendors/{id}/restore. Path param accepts integer ``id`` or ``US-...`` code."
           },
           "response": []
         },
@@ -676,7 +676,7 @@
           "response": []
         },
         {
-          "name": "Send OTP for 2FA login (doc 33 change 3)",
+          "name": "Send OTP for 2FA login",
           "request": {
             "method": "POST",
             "header": [
@@ -793,7 +793,7 @@
                 }
               ]
             },
-            "description": "Update user details. Path param accepts integer ``id`` or ``US-...`` code (doc 25).",
+            "description": "Update user details. Path param accepts integer ``id`` or ``US-...`` code.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"email\": \"user@example.com\",\n  \"firstName\": \"\",\n  \"lastName\": \"\",\n  \"admin\": false,\n  \"status\": \"\",\n  \"vendor_id\": \"\",\n  \"division\": \"\",\n  \"division_other\": \"\",\n  \"phone_number\": \"\"\n}",
@@ -842,7 +842,7 @@
                 }
               ]
             },
-            "description": "Update user password. Path param accepts integer ``id`` or ``US-...`` code (doc 25).",
+            "description": "Update user password. Path param accepts integer ``id`` or ``US-...`` code.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"password\": \"\"\n}",
@@ -856,7 +856,7 @@
           "response": []
         },
         {
-          "name": "Verify OTP and complete login (doc 33 change 3)",
+          "name": "Verify OTP and complete login",
           "request": {
             "method": "POST",
             "header": [
@@ -916,7 +916,7 @@
                 "health"
               ]
             },
-            "description": "Health check endpoint.\n\nReports the status of subsystems the app depends on. Currently:\n  - the API process itself (\"status\")\n  - file-storage backend reachability (NFS mount in prod, local\n    folder in dev) — surfaced separately so ops can distinguish a\n    fully-healthy app from one that's serving but can't accept\n    attachment uploads.\n  - notification client config + reachability — diagnostic for the\n    2FA / forgot-password flow. Exposes which backend is selected\n    (``mock`` or ``http``), the configured service URL, and a quick\n    reachability probe so ops can tell at a glance whether the BE\n    will actually dispatch OTP emails or silently sink them in\n    the audit table.\n\nThe NFS server / export are reported back from settings (informational\n— the app doesn't connect to them directly; the OS mount does). They\nlet ops verify which file store this instance is wired to."
+            "description": "Health check endpoint.\n\nReports the status of subsystems the app depends on. Currently:\n - the API process itself (\"status\")\n - file-storage backend reachability (NFS mount in prod, local\n folder in dev) — surfaced separately so ops can distinguish a\n fully-healthy app from one that's serving but can't accept\n attachment uploads.\n - notification client config + reachability — diagnostic for the\n 2FA / forgot-password flow. Exposes which backend is selected\n (``mock`` or ``http``), the configured service URL, and a quick\n reachability probe so ops can tell at a glance whether the BE\n will actually dispatch OTP emails or silently sink them in\n the audit table.\n\nThe NFS server / export are reported back from settings (informational\n— the app doesn't connect to them directly; the OS mount does). They\nlet ops verify which file store this instance is wired to."
           },
           "response": []
         }
@@ -1359,7 +1359,7 @@
           "response": []
         },
         {
-          "name": "List the permission catalog grouped by module (doc 33 change 2)",
+          "name": "List the permission catalog grouped by module",
           "request": {
             "method": "GET",
             "header": [
@@ -1528,7 +1528,7 @@
           "response": []
         }
       ],
-      "description": "User-management owns two slices of /api/v3/master/*: roles and permissions. /api/v3/master/notification_templates moved to notification-service (port 8002) per doc 38 — see PMIS_Notification_Service.postman_collection.json. Other master-data slices (divisions, vendors, project_categories, activity_types, milestone_statuses, activity_statuses, project_status_transitions, resource_types) live on the monolith — call them at the monolith's port (8000), not 8001."
+      "description": "User-management owns two slices of /api/v3/master/*: roles and permissions. /api/v3/master/notification_templates moved to notification-service (port 8002) per — see PMIS_Notification_Service.postman_collection.json. Other master-data slices (divisions, vendors, project_categories, activity_types, milestone_statuses, activity_statuses, project_status_transitions, resource_types) live on the monolith — call them at the monolith's port (8000), not 8001."
     },
     {
       "name": "Permissions",
@@ -2114,17 +2114,17 @@
               ],
               "path": []
             },
-            "description": "Root endpoint.\n\nReturns:\n    API information"
+            "description": "Root endpoint.\n\nReturns:\n API information"
           },
           "response": []
         }
       ]
     },
     {
-      "name": "Role Assignments (doc 41)",
+      "name": "Role Assignments",
       "item": [
         {
-          "name": "List a user's role assignments (doc 41 — global / org / project)",
+          "name": "List a user's role assignments ( — global / org / project)",
           "request": {
             "method": "GET",
             "header": [
@@ -2152,7 +2152,7 @@
           "response": []
         },
         {
-          "name": "Grant a scoped role to a user (doc 41)",
+          "name": "Grant a scoped role to a user",
           "request": {
             "method": "POST",
             "header": [
@@ -2194,7 +2194,7 @@
           "response": []
         },
         {
-          "name": "Revoke a scoped role assignment (doc 41)",
+          "name": "Revoke a scoped role assignment",
           "request": {
             "method": "DELETE",
             "header": [
@@ -2223,7 +2223,7 @@
           "response": []
         },
         {
-          "name": "User's project map (User Mgmt landing) (doc 41)",
+          "name": "User's project map (User Mgmt landing)",
           "request": {
             "method": "GET",
             "header": [
@@ -2251,7 +2251,7 @@
           "response": []
         },
         {
-          "name": "Per-project role-assignment buckets (doc 41) — :8001 only",
+          "name": "Per-project role-assignment buckets — :8001 only",
           "request": {
             "method": "GET",
             "header": [
@@ -2279,7 +2279,7 @@
           "response": []
         },
         {
-          "name": "Grant a project-scoped role (doc 41) — :8001 only",
+          "name": "Grant a project-scoped role — :8001 only",
           "request": {
             "method": "POST",
             "header": [
@@ -2321,7 +2321,7 @@
           "response": []
         },
         {
-          "name": "Revoke a project-scoped role assignment (doc 41) — :8001 only",
+          "name": "Revoke a project-scoped role assignment — :8001 only",
           "request": {
             "method": "DELETE",
             "header": [
@@ -2350,7 +2350,7 @@
           "response": []
         },
         {
-          "name": "Vendor's project map (Org Mgmt landing) (doc 41) — :8001 only",
+          "name": "Vendor's project map (Org Mgmt landing) — :8001 only",
           "request": {
             "method": "GET",
             "header": [
@@ -2384,7 +2384,7 @@
           "response": []
         }
       ],
-      "description": "Doc 41 — scoped role assignments + project-mapping views.\n\nThree scopes per row in `user_role_assignments`: global (both scope cols NULL), org (`organization_id` set), project (`project_id` set). Caller-vs-target gate enforced by `app/api/v3/role_assignments/services.can_caller_grant`.\n\nAll eight endpoints here are user-mgmt-owned and reachable directly on port 8001. Set baseUrl to `http://127.0.0.1:8001` (or the deploy host's :8001) when running this collection.\n\nSee `C:/Programming/PMIS/DOC_41_FLOWS.md` for the full flow narrative."
+      "description": "— scoped role assignments + project-mapping views.\n\nThree scopes per row in `user_role_assignments`: global (both scope cols NULL), org (`organization_id` set), project (`project_id` set). Caller-vs-target gate enforced by `app/api/v3/role_assignments/services.can_caller_grant`.\n\nAll eight endpoints here are user-mgmt-owned and reachable directly on port 8001. Set baseUrl to `http://127.0.0.1:8001` (or the deploy host's :8001) when running this collection.\n\nSee `C:/Programming/PMIS/DOC_41_FLOWS.md` for the full flow narrative."
     }
   ],
   "variable": [

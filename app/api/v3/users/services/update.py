@@ -82,27 +82,33 @@ def update_user(
     # These complement the delete-service guards so the API surface
     # cannot lock the system out of itself via demotion / deactivation.
 
-    # Guard 1: An admin cannot demote themselves from admin.
-    # (Would also drop their own permission to undo the change.)
+    # Guard 1: A super_admin cannot demote themselves from admin
+    # (well, irrelevant — admin and super_admin are separate roles
+    # post-doc-42b). What we still want: an admin cannot demote
+    # themselves from admin via this legacy admin=False flag if it
+    # would also lose them their session-equivalent. Keep the guard
+    # — this surface predates RBAC roles and the FE may still use it.
     if admin is False and is_self and user.admin:
         return ServiceResult.fail(
             error="Cannot demote yourself from admin.",
             error_type="authorization_error",
         )
 
-    # Guard 2 + 3: Last-active-admin protection on demotion + deactivation.
-    # Demoting (admin=False) or deactivating (status='inactive') an
-    # active admin is refused if no OTHER active admin would remain.
-    if user.admin and not user.is_deleted():
-        removing_admin_flag = admin is False
+    # Guard 2 + 3 (doc 42b): Last-active-super_admin protection on
+    # deactivation. Deactivating (status='inactive') an active
+    # super_admin is refused if no OTHER active super_admin would
+    # remain. The legacy admin=False demotion path here mutates the
+    # admin role membership only (not super_admin), so it doesn't
+    # affect the super_admin lockout count. admin is no longer the
+    # protected tier and can be demoted freely.
+    if user.is_super_admin and not user.is_deleted():
         deactivating_status = status == "inactive"
-        if removing_admin_flag or deactivating_status:
-            if not repository.has_other_active_admin(exclude_user_id=user_id):
-                action = "demote" if removing_admin_flag else "deactivate"
+        if deactivating_status:
+            if not repository.has_other_active_super_admin(exclude_user_id=user_id):
                 return ServiceResult.fail(
                     error=(
-                        f"Cannot {action} the last active admin. "
-                        "Promote another user to admin first."
+                        "Cannot deactivate the last active super_admin. "
+                        "Promote another user to super_admin first."
                     ),
                     error_type="validation_error",
                 )

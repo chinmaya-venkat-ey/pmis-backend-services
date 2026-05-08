@@ -1,19 +1,3 @@
-# ================================================================
-# PMIS User Management Service – docker-compose.yml
-# ================================================================
-# This compose file runs ONLY the user-management service.
-# PostgreSQL is already running as 'pmis-postgres' on the host.
-#
-# network_mode: host  →  container shares host's network stack,
-# so DATABASE_URL points to localhost:5432 (the exposed postgres).
-#
-# Usage:
-#   docker compose up -d          # start
-#   docker compose logs -f        # follow logs
-#   docker compose down           # stop
-#   docker compose up -d --build  # rebuild + restart
-# ================================================================
-
 name: pmis-usermanagement
 
 services:
@@ -21,15 +5,12 @@ services:
     image: ritamhudait/pmis-usermanagement:${IMAGE_TAG:-latest}
     container_name: pmis-usermanagement
     restart: unless-stopped
-
-    # Shares host network — lets the container reach
-    # pmis-postgres at localhost:5432 without extra network config.
-    network_mode: host
-
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     env_file:
       - /home/uidaiadmin/pmis-usermanagement/.env
-
-    # Healthcheck hits the /health endpoint
+    ports:
+      - "8001:8001"
     healthcheck:
       test: ["CMD", "python", "-c",
              "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]

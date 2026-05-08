@@ -400,6 +400,9 @@ def build_project_tree(db: Session, project_id: str, include_deleted: bool = Fal
             "projectId": m.project_id,
             "name": m.name, "description": m.description,
             "startDate": _iso(m.start_date), "endDate": _iso(m.end_date),
+            # Tester report: actuals on the wire so FE can render them.
+            "actualStartDate": _iso(getattr(m, "actual_start_date", None)),
+            "actualEndDate": _iso(getattr(m, "actual_end_date", None)),
             "position": m.position,
             "status": getattr(m, "status", None),
             # Doc 41 follow-up: priority code from the priorities catalog.

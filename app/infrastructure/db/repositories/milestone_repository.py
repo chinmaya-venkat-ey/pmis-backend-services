@@ -33,6 +33,8 @@ class MilestoneRepository:
             description=m.description,
             start_date=m.start_date,
             end_date=m.end_date,
+            actual_start_date=getattr(m, "actual_start_date", None),
+            actual_end_date=getattr(m, "actual_end_date", None),
             position=m.position,
             created_at=m.created_at,
             updated_at=m.updated_at,
@@ -121,6 +123,10 @@ class MilestoneRepository:
         status: str = "not_completed",
         # Doc 41 follow-up: priority code from the priorities catalog.
         priority: Optional[str] = None,
+        # Tester report: optional actual dates (set when work actually
+        # starts / finishes; nullable both at create and update time).
+        actual_start_date: Optional[datetime] = None,
+        actual_end_date: Optional[datetime] = None,
     ) -> Milestone:
         m = MilestoneModel(
             project_id=project_id,
@@ -128,6 +134,8 @@ class MilestoneRepository:
             description=description,
             start_date=start_date,
             end_date=end_date,
+            actual_start_date=actual_start_date,
+            actual_end_date=actual_end_date,
             position=position,
             created_by=created_by,
             updated_by=created_by,

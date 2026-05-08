@@ -29,6 +29,12 @@ class MilestoneCreateRequest(BaseModel):
     # encoding mismatches.
     start_date: IstCalendarDate = Field(..., alias="startDate")
     end_date: IstCalendarDate = Field(..., alias="endDate")
+    # Tester report: actual dates added so the FE can render them on
+    # the edit form, matching the activity / task / subtask shape.
+    # Optional at create — usually populated later via PATCH when work
+    # actually starts / finishes.
+    actual_start_date: Optional[IstCalendarDate] = Field(None, alias="actualStartDate")
+    actual_end_date: Optional[IstCalendarDate] = Field(None, alias="actualEndDate")
     position: Optional[int] = Field(None, ge=0)
     # Optional on create; if omitted the service defaults to ``not_completed``.
     status: Optional[str] = None
@@ -91,6 +97,10 @@ class MilestoneUpdateRequest(BaseModel):
     # Doc 29: IstCalendarDate normalization (see MilestoneCreateRequest).
     start_date: Optional[IstCalendarDate] = Field(None, alias="startDate")
     end_date: Optional[IstCalendarDate] = Field(None, alias="endDate")
+    # Tester report: actual dates editable on PATCH. Optional —
+    # None on PATCH means "no change" (consistent with other fields).
+    actual_start_date: Optional[IstCalendarDate] = Field(None, alias="actualStartDate")
+    actual_end_date: Optional[IstCalendarDate] = Field(None, alias="actualEndDate")
     position: Optional[int] = Field(None, ge=0)
     status: Optional[str] = None
     depends_on: Optional[List[str]] = Field(

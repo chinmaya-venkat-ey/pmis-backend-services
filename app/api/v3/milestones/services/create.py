@@ -46,6 +46,10 @@ def create_milestone(
     vendor_ids: Optional[List[str]] = None,
     # Doc 41 follow-up: priority code from the priorities catalog.
     priority: Optional[str] = None,
+    # Tester report: optional actual dates (set when work actually
+    # starts / finishes; None at create-time is the common path).
+    actual_start_date: Optional[datetime] = None,
+    actual_end_date: Optional[datetime] = None,
 ) -> Milestone:
     """
     Create a milestone under the given project.
@@ -75,8 +79,8 @@ def create_milestone(
     validate_entity_dates(
         entity_start=start_date,
         entity_end=end_date,
-        actual_start=None,
-        actual_end=None,
+        actual_start=actual_start_date,
+        actual_end=actual_end_date,
         parent_start_date=project.start_date,
         project_start_date=project.start_date,
         entity_label="milestone",
@@ -240,6 +244,8 @@ def create_milestone(
         created_by=current_user_id,
         status=resolved_status,
         priority=priority,
+        actual_start_date=actual_start_date,
+        actual_end_date=actual_end_date,
     )
 
     if desired_deps:

@@ -274,8 +274,7 @@ def create_vendor(
     # has the same name, restore it instead of creating a duplicate.
     if repo.get_by_name(data.name, include_deleted=True) is not None:
         raise AlreadyExistsError(
-            f"A vendor named '{data.name}' already exists "
-            "(it may be soft-deleted; restore it via POST /vendors/{id}/restore)."
+            f"A vendor named '{data.name}' already exists."
         )
     # Validate projectIds BEFORE inserting the vendor row so we don't
     # leave a half-committed vendor when an id is bad. ValidationError

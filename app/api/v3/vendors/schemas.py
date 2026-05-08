@@ -1,6 +1,8 @@
 """Vendor request/response schemas."""
 from typing import List, Optional
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+
+from ....shared.phone import validate_phone_number
 
 
 class VendorCreateRequest(BaseModel):
@@ -35,12 +37,18 @@ class VendorCreateRequest(BaseModel):
         min_length=1,
         max_length=50,
         description=(
-            "Required on create. Free-form phone number — no regex "
-            "check (international formats vary; FE may apply its own "
-            "client-side mask). Mirrors the user schema's "
-            "``phoneNumber`` field exactly."
+            "Required on create. Accepts an optional leading ``+`` "
+            "country-code prefix; ``[7..15]`` digits total after "
+            "stripping spaces / hyphens / parens / dots. Mirrors the "
+            "user schema's ``phoneNumber`` field exactly."
         ),
     )
+
+    @field_validator("phoneNumber", mode="before")
+    @classmethod
+    def _validate_phone(cls, v):
+        return validate_phone_number(v)
+
     projectIds: Optional[List[str]] = Field(
         None,
         alias="project_ids",
@@ -75,6 +83,15 @@ class VendorUpdateRequest(BaseModel):
     phoneNumber: Optional[str] = Field(
         None, alias="phone_number", max_length=50,
     )
+
+    @field_validator("phoneNumber", mode="before")
+    @classmethod
+    def _validate_phone(cls, v):
+        # Optional on PATCH — None / unset means "no change".
+        if v is None:
+            return v
+        return validate_phone_number(v)
+
     projectIds: Optional[List[str]] = Field(
         None, alias="project_ids",
     )

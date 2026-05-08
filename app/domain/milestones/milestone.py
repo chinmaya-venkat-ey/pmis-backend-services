@@ -21,7 +21,9 @@ class Milestone:
     """
     Milestone domain entity.
 
-    Milestones have NO type column and NO actual_* dates.
+    Milestones have NO type column. ``actual_start_date`` /
+    ``actual_end_date`` were added post-Doc-41 so the FE can render
+    them on the edit form, matching activity / task / subtask.
     """
     id: str
     project_id: str
@@ -36,6 +38,10 @@ class Milestone:
     updated_by: Optional[int] = None
     deleted_at: Optional[datetime] = None
     status: str = MILESTONE_STATUS_DEFAULT
+    # Tester report: actual dates added — both nullable, set when work
+    # actually starts / finishes.
+    actual_start_date: Optional[datetime] = None
+    actual_end_date: Optional[datetime] = None
     # Doc 41 follow-up: priority code from the ``priorities`` catalog.
     # Required on the wire on create; backfill assigns existing rows ``p3``.
     priority: Optional[str] = None
@@ -55,6 +61,8 @@ class Milestone:
             "description": self.description,
             "start_date": iso_ist(self.start_date),
             "end_date": iso_ist(self.end_date),
+            "actual_start_date": iso_ist(self.actual_start_date),
+            "actual_end_date": iso_ist(self.actual_end_date),
             "position": self.position,
             "status": self.status,
             "priority": self.priority,

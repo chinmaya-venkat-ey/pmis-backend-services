@@ -178,6 +178,10 @@ def update_milestone(
     vendor_ids: Optional[List[str]] = None,
     # Doc 41 follow-up: priority code (None = no change).
     priority: Optional[str] = None,
+    # Tester report: actual dates editable on PATCH. None means
+    # "no change" (consistent with the rest of this surface).
+    actual_start_date: Optional[datetime] = None,
+    actual_end_date: Optional[datetime] = None,
 ) -> Milestone:
     repo = MilestoneRepository(db)
     model = repo.get_model(milestone_id)
@@ -194,12 +198,22 @@ def update_milestone(
 
     new_start = start_date if start_date is not None else model.start_date
     new_end = end_date if end_date is not None else model.end_date
+    # Tester report: include actual dates in the validate call so the
+    # shared rule (actual within entity window) covers milestones too.
+    new_actual_start = (
+        actual_start_date if actual_start_date is not None
+        else model.actual_start_date
+    )
+    new_actual_end = (
+        actual_end_date if actual_end_date is not None
+        else model.actual_end_date
+    )
 
     validate_entity_dates(
         entity_start=new_start,
         entity_end=new_end,
-        actual_start=None,
-        actual_end=None,
+        actual_start=new_actual_start,
+        actual_end=new_actual_end,
         parent_start_date=project.start_date,
         project_start_date=project.start_date,
         entity_label="milestone",
@@ -389,6 +403,10 @@ def update_milestone(
         updates["start_date"] = start_date
     if end_date is not None:
         updates["end_date"] = end_date
+    if actual_start_date is not None:
+        updates["actual_start_date"] = actual_start_date
+    if actual_end_date is not None:
+        updates["actual_end_date"] = actual_end_date
     if position is not None:
         updates["position"] = position
     if status is not None:

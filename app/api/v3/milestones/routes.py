@@ -68,6 +68,24 @@ milestones_router = APIRouter(prefix="/milestones", tags=["milestones"])
                                 "description": "ISO 8601, e.g. 2026-05-04T00:00:00+05:30",
                             },
                             "endDate": {"type": "string", "format": "date-time"},
+                            # Tester report: actual dates added so the edit
+                            # form has the full superset on the multipart
+                            # path too — JSON path already exposes them via
+                            # the auto-generated Pydantic schema above.
+                            "actualStartDate": {
+                                "type": "string", "format": "date-time",
+                                "description": (
+                                    "Optional. ISO 8601, same format as "
+                                    "startDate. Set when work actually starts."
+                                ),
+                            },
+                            "actualEndDate": {
+                                "type": "string", "format": "date-time",
+                                "description": (
+                                    "Optional. ISO 8601, same format as "
+                                    "endDate. Set when work actually finishes."
+                                ),
+                            },
                             "position": {"type": "integer", "minimum": 0},
                             "status": {
                                 "type": "string",

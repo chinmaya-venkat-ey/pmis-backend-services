@@ -42,7 +42,10 @@ from .services import (
 # Form-field spec for the multipart create path. Mirrors the keys
 # accepted by MilestoneCreateRequest (using its alias names).
 _REQUIRED_STRING_KEYS = ("name", "priority")
-_OPTIONAL_STRING_KEYS = ("description", "startDate", "endDate", "status")
+_OPTIONAL_STRING_KEYS = (
+    "description", "startDate", "endDate", "actualStartDate", "actualEndDate",
+    "status",
+)
 _INT_KEYS = ("position",)
 _ARRAY_KEYS = ("dependsOn", "vendors")
 
@@ -86,6 +89,10 @@ def format_milestone_response(
         "description": m["description"],
         "startDate": m["start_date"],
         "endDate": m["end_date"],
+        # Tester report: actuals on the wire so FE can render them on
+        # edit. Both nullable.
+        "actualStartDate": m.get("actual_start_date"),
+        "actualEndDate": m.get("actual_end_date"),
         "position": m["position"],
         "status": m.get("status", "not_completed"),
         # Doc 41 follow-up: priority code from the priorities catalog.
@@ -122,6 +129,8 @@ class MilestoneController:
             # still accepts the kwarg for legacy callers.
             vendor_ids=None,
             priority=data.priority,
+            actual_start_date=data.actual_start_date,
+            actual_end_date=data.actual_end_date,
         )
         idx = build_label_index_for_project(db, project_id)
         return BaseController.created(data=format_milestone_response(m.to_dict(), idx))
@@ -232,6 +241,8 @@ class MilestoneController:
             # still accepts the kwarg for legacy callers.
             vendor_ids=None,
             priority=data.priority,
+            actual_start_date=data.actual_start_date,
+            actual_end_date=data.actual_end_date,
         )
 
         # ---- 3. Inline comment / attachments (optional) ------------------
@@ -314,6 +325,8 @@ class MilestoneController:
             depends_on=data.depends_on,
             vendor_ids=None,  # doc 39: vendors removed from milestone wire surface
             priority=data.priority,
+            actual_start_date=data.actual_start_date,
+            actual_end_date=data.actual_end_date,
         )
         idx = build_label_index_for_project(db, m.project_id)
         return BaseController.ok(data=format_milestone_response(m.to_dict(), idx))

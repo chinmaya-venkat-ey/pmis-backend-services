@@ -14,7 +14,13 @@ def _utcnow():
 
 
 class MilestoneModel(Base):
-    """Milestones under a project. No type, no actual_* dates."""
+    """Milestones under a project. No type column.
+
+    Tester report (post-Doc 41 follow-up): ``actual_start_date`` and
+    ``actual_end_date`` were added so the FE can render them on the
+    milestone edit form, matching the existing
+    activity / task / subtask pattern.
+    """
     __tablename__ = "milestones"
 
     # UUID primary key.
@@ -29,6 +35,12 @@ class MilestoneModel(Base):
 
     start_date = Column(UtcDateTime, nullable=False)
     end_date = Column(UtcDateTime, nullable=False)
+    # Tester report: actual dates added so the FE can render them on
+    # the milestone edit form, matching activity / task / subtask.
+    # Both nullable — populated when work actually starts / finishes;
+    # never required at create or update time.
+    actual_start_date = Column(UtcDateTime, nullable=True)
+    actual_end_date = Column(UtcDateTime, nullable=True)
 
     position = Column(Integer, nullable=False, default=0)
 

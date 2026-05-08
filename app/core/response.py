@@ -20,13 +20,21 @@ class HalResponse(BaseModel):
 
 def format_user_response(
     user_data: Dict[str, Any],
-    base_url: str = "/api/v3"
+    base_url: str = "/api/v3",
+    db: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """Format a single user response in HAL+JSON format.
 
     Embeds the slim vendor object (when present), the division enum +
     its free-text override (when 'others'), and the user's mapped
     projects (filtered for live + non-closed by the repository).
+
+    Doc 44: when ``db`` is supplied, the response also carries the
+    FE-friendly role projection — ``orgRole`` (the user's highest tier
+    among the 5 FE-known roles), ``vendorId`` (flat alias of
+    ``vendor.id``), and a ``role`` field on each project entry.
+    Callers that don't have a session handy (legacy code, tests)
+    omit ``db`` and the projection is silently skipped.
     """
     user_id = user_data.get("id")
 
@@ -39,16 +47,32 @@ def format_user_response(
             "name": user_data.get("vendor_name"),
         }
 
-    # Mapped projects (slim).
-    projects_block = [
-        {
+    # Doc 44 role projection: precompute the per-project role map so
+    # we can surface it on each project entry below. Skipped if no db
+    # session was passed (legacy callers).
+    project_role_map: Dict[str, str] = {}
+    org_role: Optional[str] = None
+    if db is not None and user_id:
+        from ..infrastructure.db.repositories.rbac_repository import (
+            RbacRepository,
+        )
+        repo = RbacRepository(db)
+        org_role = repo.derive_org_role(user_id)
+        project_role_map = repo.get_project_role_map(user_id)
+
+    # Mapped projects (slim). Doc 44 attaches the user's role on each
+    # project when the role projection is available.
+    projects_block = []
+    for p in (user_data.get("projects") or []):
+        entry = {
             "id": p.get("id"),
             "projectCode": p.get("project_code"),
             "name": p.get("name"),
             "status": p.get("status"),
         }
-        for p in (user_data.get("projects") or [])
-    ]
+        if project_role_map:
+            entry["role"] = project_role_map.get(p.get("id"))
+        projects_block.append(entry)
 
     response = {
         "_type": "User",
@@ -70,10 +94,18 @@ def format_user_response(
         "admin": user_data.get("admin", False),
         "status": user_data.get("status", "active"),
         "vendor": vendor_block,
+        # Doc 44: flat alias of vendor.id so the FE can read it without
+        # destructuring the embedded vendor object. Always emitted
+        # (None when the user has no vendor mapping).
+        "vendorId": vendor_id,
         "division": user_data.get("division"),
         "divisionOther": user_data.get("division_other"),
         "phoneNumber": user_data.get("phone_number"),
         "projects": projects_block,
+        # Doc 44: single FE-friendly role label. None when the user
+        # holds no role known to the FE (e.g. only division_member,
+        # or no role at all).
+        "orgRole": org_role,
         "createdAt": user_data.get("created_at"),
         "updatedAt": user_data.get("updated_at"),
         "deletedAt": user_data.get("deleted_at"),
@@ -227,6 +259,31 @@ def format_project_response(
     return response
 
 
+# Doc 44 — display labels for the FE role-name dropdown. Keys are the
+# canonical (snake_case) role names; values are the human-readable
+# Title Case forms the FE expects to surface in pickers and to read
+# back in projectAssignments[].role.
+_ROLE_DISPLAY_NAMES: Dict[str, str] = {
+    "super_admin":      "Super Admin",
+    "admin":            "Admin",
+    "org_admin":        "Organization Admin",
+    "project_admin":    "Project Admin",
+    "project_member":   "Project Member",
+    "division_member":  "Division Member",
+}
+
+
+def _role_display_name(name: Optional[str]) -> Optional[str]:
+    """Title-case display label for built-in roles; falls back to a
+    naive Title Case for custom roles so the FE always has something
+    presentable in dropdowns."""
+    if not name:
+        return None
+    if name in _ROLE_DISPLAY_NAMES:
+        return _ROLE_DISPLAY_NAMES[name]
+    return name.replace("_", " ").replace("-", " ").title()
+
+
 def format_role_response(
     role_data: Dict[str, Any],
     base_url: str = "/api/v3"
@@ -242,17 +299,21 @@ def format_role_response(
         HAL+JSON formatted response
     """
     role_id = role_data.get("id")
+    name = role_data.get("name")
 
     response = {
         "_type": "Role",
         "_links": {
             "self": {
                 "href": f"{base_url}/roles/{role_id}",
-                "title": role_data.get("name")
+                "title": name,
             }
         },
         "id": role_id,
-        "name": role_data.get("name"),
+        "name": name,
+        # Doc 44: human-readable label the FE renders in dropdowns +
+        # echoes back in projectAssignments[].role.
+        "displayName": _role_display_name(name),
         "description": role_data.get("description"),
         "permissions": role_data.get("permissions", []),
         "builtin": role_data.get("builtin", False),

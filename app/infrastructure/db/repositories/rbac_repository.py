@@ -621,6 +621,113 @@ class RbacRepository:
             .all()
         )
 
+    # ------------------------------------------------------------------
+    # FE-friendly role projection (doc 44)
+    #
+    # The FE thinks of a user as having ONE primary "orgRole" plus a
+    # list of per-project roles. The BE actually supports multiple role
+    # rows per user (a single user can hold admin globally AND
+    # project_admin on project X). To bridge, we project the multi-row
+    # state onto a single label by picking the highest tier the user
+    # holds anywhere.
+    #
+    # Priority order (highest first):
+    #   super_admin > admin > org_admin > project_admin > project_member
+    #
+    # ``division_member`` is intentionally excluded — the FE's enum
+    # doesn't include it (the workbox / approval workflow is a future
+    # surface). Users holding ONLY ``division_member`` get
+    # ``orgRole = None``; their project-side perms still surface via
+    # the per-project projection below.
+    # ------------------------------------------------------------------
+
+    _ORG_ROLE_PRIORITY: tuple[str, ...] = (
+        SUPER_ADMIN_ROLE_NAME,
+        ADMIN_ROLE_NAME,
+        ORG_ADMIN_ROLE_NAME,
+        PROJECT_ADMIN_ROLE_NAME,
+        PROJECT_MEMBER_ROLE_NAME,
+    )
+
+    def derive_org_role(self, user_id: Optional[str]) -> Optional[str]:
+        """Return the user's highest-tier role name (FE's ``orgRole``),
+        or None if the user holds no role known to the FE."""
+        if not user_id:
+            return None
+        # Collect every role name the user holds via either the legacy
+        # user_roles table or the doc-41 user_role_assignments table.
+        legacy_names = set(
+            n for (n,) in (
+                self.db.query(RoleModel.name)
+                .join(UserRoleModel, UserRoleModel.role_id == RoleModel.id)
+                .filter(UserRoleModel.user_id == user_id)
+                .distinct()
+                .all()
+            )
+        )
+        scoped_names = set(
+            n for (n,) in (
+                self.db.query(RoleModel.name)
+                .join(
+                    UserRoleAssignmentModel,
+                    UserRoleAssignmentModel.role_id == RoleModel.id,
+                )
+                .filter(UserRoleAssignmentModel.user_id == user_id)
+                .distinct()
+                .all()
+            )
+        )
+        held = legacy_names | scoped_names
+        for tier in self._ORG_ROLE_PRIORITY:
+            if tier in held:
+                return tier
+        return None
+
+    def get_project_role_map(
+        self, user_id: Optional[str],
+    ) -> Dict[str, str]:
+        """Return ``{project_id: role_name}`` for every project the user
+        holds a doc-41 project-scoped role on. When the user holds
+        multiple roles on the same project (rare but allowed by the
+        schema), the highest-tier per the priority order wins."""
+        if not user_id:
+            return {}
+        rows = (
+            self.db.query(
+                UserRoleAssignmentModel.project_id,
+                RoleModel.name,
+            )
+            .join(
+                RoleModel,
+                RoleModel.id == UserRoleAssignmentModel.role_id,
+            )
+            .filter(
+                UserRoleAssignmentModel.user_id == user_id,
+                UserRoleAssignmentModel.project_id.isnot(None),
+            )
+            .all()
+        )
+        out: Dict[str, str] = {}
+        for project_id, role_name in rows:
+            current = out.get(project_id)
+            if current is None:
+                out[project_id] = role_name
+                continue
+            # Resolve to the higher tier. Roles outside the priority
+            # list (e.g. ``division_member``) sort to the bottom; if
+            # both are off-priority, keep whichever was seen first.
+            try:
+                cur_idx = self._ORG_ROLE_PRIORITY.index(current)
+            except ValueError:
+                cur_idx = len(self._ORG_ROLE_PRIORITY)
+            try:
+                new_idx = self._ORG_ROLE_PRIORITY.index(role_name)
+            except ValueError:
+                new_idx = len(self._ORG_ROLE_PRIORITY)
+            if new_idx < cur_idx:
+                out[project_id] = role_name
+        return out
+
     def count_global_super_admins(self) -> int:
         """Count users holding super_admin globally (legacy + scoped).
 

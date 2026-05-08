@@ -1,6 +1,7 @@
 """
 User controller - orchestrates requests and responses.
 """
+from typing import Any, Dict, List
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
@@ -66,6 +67,21 @@ class UserController:
         Returns:
             JSONResponse
         """
+        # Doc 44: pass caller_id so the create service can run the
+        # caller-vs-target gate when orgRole is requested. Combine
+        # the two FE arrays (projectAssignments + assignments) into
+        # a single list of dicts before handing off to the service.
+        caller_id = get_current_user_id(request)
+        merged_assignments: List[Dict[str, Any]] = []
+        for entry in (data.projectAssignments or []):
+            merged_assignments.append({
+                "projectId": entry.projectId, "role": entry.role,
+            })
+        for entry in (data.assignments or []):
+            merged_assignments.append({
+                "projectId": entry.projectId, "role": entry.role,
+            })
+
         result = create_user(
             db=db,
             login=data.login,
@@ -79,10 +95,13 @@ class UserController:
             division_other=data.divisionOther,
             project_ids=data.projectIds,
             phone_number=data.phoneNumber,
+            org_role=data.orgRole,
+            project_assignments=merged_assignments or None,
+            caller_id=caller_id,
         )
 
         if result.is_success():
-            payload = format_user_response(result.data.to_dict())
+            payload = format_user_response(result.data.to_dict(), db=db)
             resp = BaseController.created(payload)
             return resp
         else:
@@ -91,7 +110,16 @@ class UserController:
                 message=result.error,
                 details=result.details
             )
-            status_code = 422 if result.error_type == "validation_error" else 409
+            # Status mapping: validation → 422, authorization → 403,
+            # not_found → 404, default (already_exists / internal) → 409.
+            if result.error_type == "validation_error":
+                status_code = 422
+            elif result.error_type == "authorization_error":
+                status_code = 403
+            elif result.error_type == "not_found":
+                status_code = 404
+            else:
+                status_code = 409
             resp = BaseController.error(error_payload, status=status_code)
             return resp
 
@@ -135,7 +163,7 @@ class UserController:
         )
 
         if result.is_success():
-            payload = format_user_response(result.data.to_dict())
+            payload = format_user_response(result.data.to_dict(), db=db)
             return BaseController.ok(payload)
         else:
             error_payload = format_error_response(
@@ -212,7 +240,7 @@ class UserController:
         )
 
         if result.is_success():
-            payload = format_user_response(result.data.to_dict())
+            payload = format_user_response(result.data.to_dict(), db=db)
             resp = BaseController.ok(payload)
             return resp
         else:
@@ -325,7 +353,7 @@ class UserController:
         )
 
         if result.is_success():
-            payload = format_user_response(result.data.to_dict())
+            payload = format_user_response(result.data.to_dict(), db=db)
             resp = BaseController.ok(payload)
             return resp
         else:
@@ -507,7 +535,7 @@ class UserController:
         )
 
         if result.is_success():
-            payload = format_user_response(result.data.to_dict())
+            payload = format_user_response(result.data.to_dict(), db=db)
             return BaseController.ok(payload)
         else:
             error_payload = format_error_response(
@@ -597,7 +625,7 @@ class UserController:
                     int(access_meta["exp"] - access_meta["iat"])
                     if access_meta.get("exp") and access_meta.get("iat") else None
                 ),
-                "user": format_user_response(token_data["user"].to_dict()),
+                "user": format_user_response(token_data["user"].to_dict(), db=db),
             }
             # Opt-in envelope using BaseController helper which calls `api_response()` internally.
             resp = BaseController.ok(response_payload)
@@ -706,7 +734,7 @@ class UserController:
                 int(access_meta["exp"] - access_meta["iat"])
                 if access_meta.get("exp") and access_meta.get("iat") else None
             ),
-            "user": format_user_response(token_data["user"].to_dict()),
+            "user": format_user_response(token_data["user"].to_dict(), db=db),
         }
         return BaseController.ok(payload)
 
@@ -809,5 +837,5 @@ class UserController:
             "refreshTokenExpiresAt": payload.get("refreshTokenExpiresAt"),
             "refreshTokenIssuedAt": payload.get("refreshTokenIssuedAt"),
             "expiresInSeconds": payload.get("expiresInSeconds"),
-            "user": format_user_response(payload["user"].to_dict()),
+            "user": format_user_response(payload["user"].to_dict(), db=db),
         })

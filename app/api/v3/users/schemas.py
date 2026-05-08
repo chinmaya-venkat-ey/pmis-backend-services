@@ -15,13 +15,42 @@ from ....domain.resource_types.resource_type import (
 _USER_STATUS_CHOICES = ("active", "inactive", "locked", "registered")
 
 
+class ProjectAssignmentEntry(BaseModel):
+    """One element of ``projectAssignments`` / ``assignments`` arrays
+    (doc 44). Carries the project UUID + the role label. The role
+    string is the FE-friendly display label (e.g. ``"Project Admin"``)
+    rather than the canonical role name (``"project_admin"``); the
+    service layer normalizes either form. Empty role string is
+    accepted and means "no per-project role" — used by org_admin
+    grants where the role is org-wide."""
+    model_config = ConfigDict(populate_by_name=True)
+    projectId: str = Field(..., alias="projectId")
+    role: str = Field("", description="Role label or canonical name. Empty for org-scoped assignments.")
+
+
 class UserCreateRequest(BaseModel):
     """Request schema for creating a user.
 
     Per product spec, every new user must have:
       - a vendor (single, FK to vendors)
       - a division (one of DIVISION_CHOICES; 'others' requires divisionOther)
-      - at least one project mapping (project_ids)
+      - at least one project mapping (project_ids) **unless** ``orgRole``
+        is one of the global tiers (``super_admin`` / ``admin``) which
+        do not need to be tied to a specific project at create time.
+
+    Doc 44 — role-aware create:
+      - ``orgRole`` (optional) sets the user's primary role at create
+        time. One of: super_admin, admin, org_admin, project_admin,
+        project_member. Validated against the caller's authority via
+        the same caller-vs-target gate used by /role-assignments.
+      - ``projectAssignments`` carries per-project role labels for
+        ``project_admin`` flows (``[{projectId, role}]``). When omitted,
+        each ``project_id`` gets a role assignment derived from
+        ``orgRole`` directly (the org-wide role applied per project).
+      - ``assignments`` is a frontend duplicate of ``projectAssignments``
+        (same shape, kept for compatibility with the FE form). The
+        service merges the two — anything in ``assignments`` not also
+        in ``projectAssignments`` is honoured.
 
     The bootstrap admin path (init_db seed) bypasses this validation.
     """
@@ -55,12 +84,13 @@ class UserCreateRequest(BaseModel):
         ),
     )
     projectIds: List[str] = Field(
-        ...,
+        default_factory=list,
         alias="project_ids",
-        min_length=1,
         description=(
-            "List of project UUIDs to map this user to. At least one is "
-            "required. Each id must reference a non-deleted project."
+            "List of project UUIDs to map this user to. Required for "
+            "the project-tier orgRoles (project_admin / project_member) "
+            "and for org_admin (the projects the org_admin will manage). "
+            "May be empty when orgRole is super_admin / admin."
         ),
     )
     phoneNumber: str = Field(
@@ -73,6 +103,34 @@ class UserCreateRequest(BaseModel):
             "string (no regex check — international formats vary; FE may "
             "apply its own client-side mask). Mirrors the vendor schema's "
             "``phoneNumber`` field exactly."
+        ),
+    )
+    # Doc 44 — role-aware create.
+    orgRole: Optional[str] = Field(
+        None, alias="orgRole",
+        description=(
+            "Primary role to grant to the user at create time. One of: "
+            "super_admin, admin, org_admin, project_admin, project_member. "
+            "Subject to caller-vs-target rules: super_admin can set any; "
+            "admin can set any except super_admin/admin; org_admin can set "
+            "project_admin / project_member only; project_admin can set "
+            "project_member only; project_member cannot create users."
+        ),
+    )
+    projectAssignments: Optional[List[ProjectAssignmentEntry]] = Field(
+        None,
+        description=(
+            "Per-project role labels (doc 44). Used by the project_admin "
+            "form path where each mapped project carries its own role. "
+            "Each entry's projectId must also appear in project_ids."
+        ),
+    )
+    assignments: Optional[List[ProjectAssignmentEntry]] = Field(
+        None,
+        description=(
+            "Frontend duplicate of projectAssignments — same shape, merged "
+            "with it server-side. Either field may be used; usually both "
+            "are sent for project_admin and only assignments for org_admin."
         ),
     )
 

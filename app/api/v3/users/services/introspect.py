@@ -46,12 +46,26 @@ def _claims_to_response(
     iat = payload.get("iat")
     user_id = payload.get("user_id")
     is_admin = payload.get("is_admin", False)
+    org_role: Optional[str] = None
+    vendor_id: Optional[str] = None
+    project_role_map: Dict[str, str] = {}
     if db is not None and user_id is not None:
         # Local import to avoid module-load cycles.
         from .....infrastructure.db.repositories.rbac_repository import (
             RbacRepository,
         )
-        is_admin = RbacRepository(db).user_has_admin_role(user_id)
+        rbac = RbacRepository(db)
+        is_admin = rbac.user_has_admin_role(user_id)
+        # Doc 44 — surface the FE-friendly role projection on introspect
+        # too, so the session manager can refresh role context without
+        # a full /me round-trip.
+        org_role = rbac.derive_org_role(user_id)
+        project_role_map = rbac.get_project_role_map(user_id)
+        # Vendor id lives on the user row (1:1 mapping). Cheap lookup.
+        user_repo = UserRepository(db)
+        user_row = user_repo.get_by_id(user_id, include_deleted=True)
+        if user_row is not None:
+            vendor_id = getattr(user_row, "vendor_id", None)
     return {
         "active": True,
         "tokenType": token_type,
@@ -75,6 +89,13 @@ def _claims_to_response(
         # /users/me/permissions endpoint for the authoritative answer.
         "role": payload.get("role"),
         "isAdmin": bool(is_admin),
+        # Doc 44 role projection.
+        "orgRole": org_role,
+        "vendorId": vendor_id,
+        "projects": [
+            {"projectId": pid, "role": role}
+            for pid, role in sorted(project_role_map.items())
+        ],
     }
 
 

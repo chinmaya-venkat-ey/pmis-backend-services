@@ -1,6 +1,6 @@
 {
   "info": {
-    "_postman_id": "48293a22-7841-492e-a06e-d2de80eeabee",
+    "_postman_id": "04301ed6-75fd-4e24-a59e-8b18618c838c",
     "name": "PMIS User Service",
     "description": "PMIS user-management + authentication microservice.\n\nAuto-generated from FastAPI OpenAPI by scripts/generate_postman_collection.py. Re-run that script after API changes.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
@@ -158,7 +158,7 @@
             "description": "Create a new user",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"login\": \"\",\n  \"email\": \"user@example.com\",\n  \"password\": \"\",\n  \"firstName\": \"\",\n  \"lastName\": \"\",\n  \"admin\": false,\n  \"vendor_id\": \"\",\n  \"division\": \"\",\n  \"division_other\": \"\",\n  \"project_ids\": [\n    \"\"\n  ],\n  \"phone_number\": \"\"\n}",
+              "raw": "{\n  \"login\": \"\",\n  \"email\": \"user@example.com\",\n  \"password\": \"\",\n  \"firstName\": \"\",\n  \"lastName\": \"\",\n  \"admin\": false,\n  \"vendor_id\": \"\",\n  \"division\": \"\",\n  \"division_other\": \"\",\n  \"project_ids\": [\n    \"\"\n  ],\n  \"phone_number\": \"\",\n  \"orgRole\": \"\",\n  \"projectAssignments\": [\n    {\n      \"projectId\": \"\",\n      \"role\": \"\"\n    }\n  ],\n  \"assignments\": [\n    {\n      \"projectId\": \"\",\n      \"role\": \"\"\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"

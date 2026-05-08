@@ -214,9 +214,6 @@ def create_user(
 
     # ---- Project mapping ------------------------------------------------
     project_ids = list(dict.fromkeys(project_ids or []))  # de-dupe, preserve order
-    # Doc 44: project_ids requirement is conditional on the orgRole.
-    # super_admin / admin / project_member with no projects can be
-    # legitimate; other tiers still need at least one project.
     normalized_org_role = _normalize_role_name(org_role)
     if org_role is not None and normalized_org_role is None:
         return ServiceResult.fail(
@@ -226,25 +223,16 @@ def create_user(
             ),
             error_type="validation_error",
         )
-    # Project-mapping requirement:
-    # - No orgRole → keep the legacy "at least one project" rule
-    #   (preserves the existing schema-level contract for callers
-    #   that haven't migrated to orgRole yet).
-    # - orgRole in {super_admin, admin, project_member} → projects
-    #   may be empty (per FE Part C examples C5 / C6).
-    # - All other orgRoles (org_admin, project_admin, division_member)
-    #   require at least one project.
-    needs_projects = normalized_org_role not in {
-        "super_admin", "admin", "project_member",
-    }
-    if needs_projects and not project_ids:
-        return ServiceResult.fail(
-            error=(
-                "At least one project mapping is required (project_ids) "
-                f"for orgRole '{normalized_org_role}'."
-            ),
-            error_type="validation_error",
-        )
+    # Doc 44 round 3: project mapping is optional for ALL orgRoles
+    # (and for the legacy no-orgRole path). The FE form shows project
+    # mapping for every role but doesn't require it — operators can
+    # create a user and assign projects later via /role-assignments.
+    # Empty project_ids → no project_members rows AND no project-scoped
+    # role-assignment rows. The user's orgRole projection in the
+    # response will reflect whatever role rows did get written (e.g.
+    # for org_admin the org-scoped row is still written; for project-
+    # tier orgRoles with no projects, no row is written and the
+    # response's orgRole comes back null until projects are assigned).
     if project_ids:
         found_ids = {
             pid

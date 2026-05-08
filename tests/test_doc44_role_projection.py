@@ -405,6 +405,53 @@ class TestCreateUserWithOrgRole:
         )
         assert resp.status_code == 403, resp.text
 
+    def test_project_admin_with_empty_projects_accepted(
+        self, client, admin_user, admin_headers, vendor_for_doc44,
+    ):
+        """Doc 44 round 3: project mapping is optional for ALL orgRoles,
+        including the project-tier ones. Creating a project_admin with
+        no project_ids must succeed (the user can be assigned to
+        projects later via /role-assignments). Pre-round-3 this was
+        a 422.
+
+        Side-effect note: when no projects are provided for a
+        project-tier orgRole, no role-assignment rows are written, so
+        derive_org_role returns None — the response's ``orgRole`` is
+        null until the user is assigned to at least one project."""
+        body = _create_body(
+            vendor_id=vendor_for_doc44.id,
+            project_ids=[],
+            org_role="project_admin",
+            project_assignments=[],
+            assignments=[],
+        )
+        resp = client.post(
+            "/api/v3/users/create", json=body, headers=admin_headers,
+        )
+        assert resp.status_code == 201, resp.text
+        data = resp.json()["data"]
+        assert data["projects"] == []
+        assert data["projectAssignments"] == []
+
+    def test_org_admin_with_empty_projects_accepted(
+        self, client, admin_user, admin_headers, vendor_for_doc44,
+    ):
+        """Doc 44 round 3: org_admin can also be created without project
+        mapping — the org-scope assignment row is still written (bound
+        to the user's vendor), so orgRole comes back as 'org_admin'."""
+        body = _create_body(
+            vendor_id=vendor_for_doc44.id,
+            project_ids=[],
+            org_role="org_admin",
+        )
+        resp = client.post(
+            "/api/v3/users/create", json=body, headers=admin_headers,
+        )
+        assert resp.status_code == 201, resp.text
+        data = resp.json()["data"]
+        assert data["orgRole"] == "org_admin"
+        assert data["projects"] == []
+
     def test_unknown_org_role_rejected(
         self, client, admin_user, admin_headers, vendor_for_doc44,
         project_for_doc44,

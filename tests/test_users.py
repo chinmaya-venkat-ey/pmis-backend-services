@@ -120,14 +120,22 @@ class TestCreateUser:
         assert d["division"] == "others"
         assert d["divisionOther"] == "Custom Division"
 
-    def test_create_user_rejects_missing_project_mapping(
+    def test_create_user_accepts_empty_project_mapping_post_doc44_round3(
         self, client, admin_user, admin_headers, sample_vendor,
     ):
+        """Doc 44 round 3: project mapping is optional. Empty
+        project_ids no longer rejects the create — operators can
+        assign projects later via /role-assignments. (Pre-doc-44-round-3
+        this test asserted 422; the FE form now shows project mapping
+        for every role but doesn't enforce it.)"""
         body = _create_body(
             vendor_id=sample_vendor.id, project_ids=[],
         )
         resp = client.post("/api/v3/users/create", json=body, headers=admin_headers)
-        assert resp.status_code == 422
+        assert resp.status_code == 201, resp.text
+        data = resp.json()["data"]
+        assert data["projects"] == []
+        assert data["projectAssignments"] == []
 
     def test_create_user_rejects_missing_vendor(
         self, client, admin_user, admin_headers, sample_project_for_user,

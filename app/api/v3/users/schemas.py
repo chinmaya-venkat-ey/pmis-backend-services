@@ -87,10 +87,12 @@ class UserCreateRequest(BaseModel):
         default_factory=list,
         alias="project_ids",
         description=(
-            "List of project UUIDs to map this user to. Required for "
-            "the project-tier orgRoles (project_admin / project_member) "
-            "and for org_admin (the projects the org_admin will manage). "
-            "May be empty when orgRole is super_admin / admin."
+            "List of project UUIDs to map this user to. Optional — may "
+            "be empty for any orgRole. When project-tier orgRoles "
+            "(project_admin / project_member / division_member) are "
+            "supplied with no project_ids, no project-scoped role rows "
+            "are written; assign projects later via "
+            "POST /api/v3/users/{id}/role-assignments."
         ),
     )
     phoneNumber: str = Field(

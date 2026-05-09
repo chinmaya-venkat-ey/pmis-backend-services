@@ -93,38 +93,39 @@ def _gate_task_status_against_children(
         )
 
 
-def _gate_task_revert_against_children(
+def _gate_task_revert_against_parent(
     db: Session, task_id: str, target_status: str,
 ) -> None:
-    """Reverse mirror: block flipping the task to ``not_completed``
-    while any of its top-level subtasks is still ``completed``.
-    Symmetric with the forward children gate."""
+    """Top-down strict revert: block flipping this task back to
+    ``not_completed`` while its parent activity is still ``completed``.
+
+    Pairs with the forward children gate (complete bottom-up). Together
+    they make inconsistent states (parent=completed, child=not_completed)
+    unreachable through the API. The user must first revert ancestors in
+    top-down order: M → A → T → S."""
     if target_status != "not_completed":
         return
-    rows = (
-        db.query(SubtaskModel.id, SubtaskModel.name, SubtaskModel.status)
-        .filter(SubtaskModel.task_id == task_id)
-        .filter(SubtaskModel.parent_subtask_id.is_(None))
-        .filter(SubtaskModel.deleted_at.is_(None))
-        .all()
+    task_row = (
+        db.query(TaskModel.activity_id)
+        .filter(TaskModel.id == task_id)
+        .first()
     )
-    if not rows:
+    if task_row is None or task_row[0] is None:
         return
-    blockers = [
-        (row[0], row[1], row[2])
-        for row in rows
-        if (row[2] or "") == _TASK_STATUS_COMPLETED
-    ]
-    if blockers:
-        names = ", ".join(f"'{b[1]}'" for b in blockers[:3])
-        more = "" if len(blockers) <= 3 else f" (+{len(blockers) - 3} more)"
+    parent = (
+        db.query(ActivityModel.id, ActivityModel.name, ActivityModel.status)
+        .filter(ActivityModel.id == task_row[0])
+        .filter(ActivityModel.deleted_at.is_(None))
+        .first()
+    )
+    if parent is None:
+        return
+    _aid, aname, astatus = parent
+    if (astatus or "") == _TASK_STATUS_COMPLETED:
         raise ValidationError(
-            f"Cannot revert this task to not_completed — the "
-            f"following child subtask"
-            f"{' is' if len(blockers) == 1 else 's are'} "
-            f"still completed. Revert "
-            f"{'it' if len(blockers) == 1 else 'them'} first: "
-            f"{names}{more}.",
+            f"Cannot revert this task to not_completed — its parent "
+            f"activity '{aname}' is still completed. Revert the parent "
+            f"activity first."
         )
 
 
@@ -353,9 +354,11 @@ def update_task(
     # nested children below it.
     if status is not None:
         _gate_task_status_against_children(db, task_id, status)
-        # Reverse mirror — block reverting to ``not_completed`` while
-        # any child subtask is still ``completed``.
-        _gate_task_revert_against_children(db, task_id, status)
+        # Top-down strict revert — block reverting to ``not_completed``
+        # while the parent activity is still ``completed``. Forces the
+        # user to walk M → A → T order on revert so middle-state
+        # inconsistencies are unreachable.
+        _gate_task_revert_against_parent(db, task_id, status)
 
     # Doc 41 follow-up: priority — when supplied, must be an active code
     # in the priorities catalog. None = no change. Independent per-level.

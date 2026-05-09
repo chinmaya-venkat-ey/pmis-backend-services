@@ -123,46 +123,6 @@ def _gate_milestone_status_against_children(
         )
 
 
-def _gate_milestone_revert_against_children(
-    db: Session, milestone_id: str, target_status: str,
-) -> None:
-    """Reverse mirror of the forward children gate: block flipping a
-    milestone back to ``not_completed`` while any of its child
-    activities is still ``completed``.
-
-    Together with the forward gate, this keeps the parent-child status
-    hierarchy internally consistent: complete bottom-up, uncomplete
-    bottom-up. Inconsistent middle states (parent=not_completed but
-    a child still completed) are unreachable via either path.
-    """
-    if target_status != "not_completed":
-        return
-    rows = (
-        db.query(ActivityModel.id, ActivityModel.name, ActivityModel.status)
-        .filter(ActivityModel.milestone_id == milestone_id)
-        .filter(ActivityModel.deleted_at.is_(None))
-        .all()
-    )
-    if not rows:
-        return
-    blockers = [
-        (row[0], row[1], row[2])
-        for row in rows
-        if (row[2] or "") == MILESTONE_STATUS_COMPLETED
-    ]
-    if blockers:
-        names = ", ".join(f"'{b[1]}'" for b in blockers[:3])
-        more = "" if len(blockers) <= 3 else f" (+{len(blockers) - 3} more)"
-        raise ValidationError(
-            f"Cannot revert this milestone to not_completed — the "
-            f"following child activit"
-            f"{'y is' if len(blockers) == 1 else 'ies are'} "
-            f"still completed. Revert "
-            f"{'it' if len(blockers) == 1 else 'them'} first: "
-            f"{names}{more}.",
-        )
-
-
 def update_milestone(
     db: Session,
     *,
@@ -265,11 +225,12 @@ def update_milestone(
         # ``completed``. Mirrors the dep-target gate above but checks
         # the parent-child rollup instead of cross-edges.
         _gate_milestone_status_against_children(db, milestone_id, status)
-        # Reverse children gate: block reverting to ``not_completed``
-        # while any child activity is still ``completed`` — the symmetric
-        # mirror of the forward gate. Together they keep the
-        # parent-child status hierarchy internally consistent.
-        _gate_milestone_revert_against_children(db, milestone_id, status)
+        # Reverse direction is intentionally unguarded at the milestone
+        # level: a milestone has no completion-relevant parent (the
+        # project lifecycle status is unrelated), so revert is always
+        # allowed. The strict "parent must be not_completed before child"
+        # rule is enforced one layer down at A/T/S — see their update
+        # services.
 
     # Validate depends_on (replace-list semantics) BEFORE writing.
     # Accepts UUIDs or labels (e.g. "M2"); see app/shared/labels.py.

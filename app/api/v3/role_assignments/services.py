@@ -128,18 +128,27 @@ def can_caller_grant(
         db, caller_id,
     )
 
-    # super_admin can grant anything anywhere.
+    # Doc 44 round 7 — top-tier closure. super_admin still has the
+    # widest authority (granting anything except super_admin itself),
+    # but ``Cannot create or manage Super Admin`` per spec means the
+    # super_admin role is now ungrant-able through the API on every
+    # path. Bootstrap super_admin lives in init_db (DB-level write at
+    # startup); operational additions need the same DB write — there
+    # is no API path that mints another super_admin.
+    if target_role_name == SUPER_ADMIN_ROLE_NAME:
+        return False, (
+            "The super_admin role cannot be granted through the API. "
+            "Bootstrap super_admin via the init_db seed only."
+        )
+
+    # super_admin can grant any other role anywhere.
     if SUPER_ADMIN_ROLE_NAME in global_roles:
         return True, ""
 
     # Doc 44 round 5 — admin tier re-locked at the top.
-    # super_admin grant requires super_admin. admin grant ALSO requires
-    # super_admin (reverts the round-2 peer-grant relaxation per spec
-    # update: admin must not be able to create another admin).
-    if target_role_name == SUPER_ADMIN_ROLE_NAME:
-        return False, (
-            "Only super_admin can grant the super_admin role."
-        )
+    # admin grant requires super_admin (reverts the round-2 peer-grant
+    # relaxation per spec update: admin must not be able to create
+    # another admin).
     if target_role_name == ADMIN_ROLE_NAME:
         return False, (
             "Only super_admin can grant the admin role."
@@ -324,18 +333,17 @@ def can_caller_modify_user(
             "by revoking their super_admin role assignment."
         )
 
-    # Doc 44 round 5 — admin peer-takeover guard (G4/G5) RESTORED.
-    # Spec update: admin must not be able to DELETE / password-change
-    # another admin even via the demote-then-remove path. With Rule 1
-    # (admin can't grant/revoke admin) blocking the demote step, this
-    # check covers the direct-DELETE side.
-    if op == "destructive" and not caller_is_super_admin and not target_is_super_admin:
+    # Doc 44 round 7 — admin peer-management guard (extends round 5
+    # G4/G5 from destructive-only to ALL mutations on a peer admin).
+    # Spec: admin "Can add and manage all users except Super Admin or
+    # PMIS Admin" — i.e. admin → admin is fully off-limits, not just
+    # destructive. PATCH / password-change / DELETE all blocked.
+    if not caller_is_super_admin and not target_is_super_admin:
         caller_is_admin = _user_holds_admin_role(db, caller_id)
         target_is_admin = _user_holds_admin_role(db, target_user_id)
         if caller_is_admin and target_is_admin:
             return False, (
-                "Only super_admin can perform destructive actions "
-                "(DELETE / password change) on another admin."
+                "Only super_admin can manage another admin."
             )
 
     # super_admin caller: allowed for non-destructive ops on any

@@ -15,6 +15,7 @@ def list_users(
     status: Optional[str] = None,
     is_admin: bool = False,
     include_deleted: bool = False,
+    vendor_id_filter: Optional[str] = None,
 ) -> ServiceResult[PaginatedResult]:
     """List users with pagination, newest first.
 
@@ -55,6 +56,7 @@ def list_users(
             limit=page_size,
             status=status,
             include_deleted=include_deleted,
+            vendor_id=vendor_id_filter,
         )
         return ServiceResult.ok(PaginatedResult(
             items=users, total=total, page=page, page_size=page_size,

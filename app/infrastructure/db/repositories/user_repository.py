@@ -368,13 +368,22 @@ class UserRepository:
         status: Optional[str] = None,
         *,
         include_deleted: bool = False,
+        vendor_id: Optional[str] = None,
     ) -> Tuple[List[User], int]:
-        """List users — newest first, soft-deleted hidden by default."""
+        """List users — newest first, soft-deleted hidden by default.
+
+        Doc 44 round 7: optional ``vendor_id`` filter — when supplied,
+        only users with that ``users.vendor_id`` are returned. Used by
+        the route layer to scope org_admin / project_admin's listing
+        to their own vendor.
+        """
         query = self.db.query(UserModel)
         if not include_deleted:
             query = query.filter(UserModel.deleted_at.is_(None))
         if status:
             query = query.filter(UserModel.status == status)
+        if vendor_id is not None:
+            query = query.filter(UserModel.vendor_id == vendor_id)
 
         total = query.count()
 

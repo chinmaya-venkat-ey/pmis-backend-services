@@ -525,13 +525,12 @@ class TestAdminProtectionGuards:
         assert resp.status_code == 403, resp.text
         assert "demote yourself" in resp.text.lower()
 
-    def test_admin_can_deactivate_another_admin_post_doc42b(
+    def test_admin_cannot_deactivate_another_admin_post_round7(
         self, client, admin_user, second_admin_user, admin_headers, db_session,
     ):
-        """Doc 42b: admin is no longer the lockout-protected tier. An
-        admin user CAN be deactivated freely (target = second_admin_user;
-        actor = admin_user). Self-deactivate is blocked separately by
-        the G1 guard — see TestSelfDeactivateBlocked in test_doc43_*."""
+        """Doc 44 round 7 #2: admin → admin PATCH is blocked (extends the
+        G4/G5 destructive-only guard to ALL mutations on a peer admin,
+        including status flips). Only super_admin can manage another admin."""
         from app.infrastructure.db.models.user import UserModel
 
         resp = client.patch(
@@ -539,11 +538,12 @@ class TestAdminProtectionGuards:
             json={"status": "inactive"},
             headers=admin_headers,
         )
-        assert resp.status_code == 200, resp.text
+        assert resp.status_code == 403, resp.text
+        assert "another admin" in resp.json()["error"]["message"].lower()
 
         db_session.expire_all()
         row = db_session.query(UserModel).filter_by(id=second_admin_user.id).one()
-        assert row.status == "inactive"
+        assert row.status == "active"
 
     def test_lockout_blocks_last_active_super_admin_at_service_layer(
         self, db_session, admin_user,
@@ -600,11 +600,29 @@ class TestAdminProtectionGuards:
         assert resp.status_code == 403, resp.text
         assert "another admin" in resp.json()["error"]["message"].lower()
 
-    def test_can_deactivate_admin_when_another_admin_exists(
-        self, client, admin_user, second_admin_user, admin_headers,
+    def test_super_admin_can_deactivate_admin_when_another_admin_exists(
+        self, client, admin_user, second_admin_user, admin_headers, db_session,
     ):
-        """Sanity: deactivating an admin via PATCH succeeds when another
-        admin remains. Also verifies non-self deactivation isn't over-blocked."""
+        """Doc 44 round 7 #2: admin → admin PATCH is blocked, but
+        super_admin → admin PATCH still works. Verifies the lockout
+        guard isn't over-blocking when another admin remains."""
+        from app.infrastructure.db.models.role import RoleModel
+        from app.infrastructure.db.models.user_role_assignment import (
+            UserRoleAssignmentModel,
+        )
+
+        # Promote admin_user to super_admin so the call is SA → admin.
+        sa_role_id = (
+            db_session.query(RoleModel)
+            .filter(RoleModel.name == "super_admin")
+            .one()
+            .id
+        )
+        db_session.add(UserRoleAssignmentModel(
+            user_id=admin_user.id, role_id=sa_role_id,
+        ))
+        db_session.commit()
+
         resp = client.patch(
             f"/api/v3/users/{second_admin_user.id}",
             json={"status": "inactive"},

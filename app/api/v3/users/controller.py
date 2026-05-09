@@ -1,7 +1,7 @@
 """
 User controller - orchestrates requests and responses.
 """
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
@@ -270,6 +270,26 @@ class UserController:
             JSONResponse
         """
         is_admin = getattr(request.state, "is_admin", False)
+        # Doc 44 round 7 — vendor scope for non-admin callers.
+        # admin / super_admin (request.state.is_admin == True) see
+        # every user. Lower tiers (org_admin / project_admin) see
+        # only users in their own vendor (users.vendor_id == caller's
+        # vendor_id). project_member doesn't have users:read at all
+        # so they can't reach this route.
+        vendor_id_filter: Optional[str] = None
+        if not is_admin:
+            caller_id = get_current_user_id(request)
+            caller = (
+                UserRepository(db).get_by_id(caller_id)
+                if caller_id else None
+            )
+            if caller is not None and getattr(caller, "vendor_id", None):
+                vendor_id_filter = caller.vendor_id
+            else:
+                # Non-admin caller without a vendor mapping → empty
+                # listing (rather than the everyone-cross-vendor view
+                # we returned pre-round-7).
+                vendor_id_filter = "__no_vendor_assigned__"
 
         result = list_users(
             db=db,
@@ -278,6 +298,7 @@ class UserController:
             status=query.status,
             is_admin=is_admin,
             include_deleted=getattr(query, "includeDeleted", False),
+            vendor_id_filter=vendor_id_filter,
         )
 
         if result.is_success():
@@ -289,7 +310,8 @@ class UserController:
                 total=paginated.total,
                 page=paginated.page,
                 page_size=paginated.page_size,
-                collection_type="users"
+                collection_type="users",
+                db=db,
             )
             resp = BaseController.ok(payload)
             return resp

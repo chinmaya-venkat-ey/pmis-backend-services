@@ -311,8 +311,12 @@ ORG_ADMIN_ROLE_PERMISSIONS: List[str] = [
     VENDORS_READ, MASTER_DATA_VIEW,
     MILESTONES_READ,
     ACTIVITIES_READ,
-    TASKS_CREATE, TASKS_READ, TASKS_UPDATE, TASKS_RESTORE,
-    SUBTASKS_CREATE, SUBTASKS_READ, SUBTASKS_UPDATE, SUBTASKS_RESTORE,
+    # Doc 44 round 7: org_admin gets full task/subtask CRUD (incl.
+    # delete) for "fully manage tasks and sub-tasks". Scope is
+    # enforced via require_project_permission walking project →
+    # vendor (round 5 option a).
+    TASKS_CREATE, TASKS_READ, TASKS_UPDATE, TASKS_DELETE, TASKS_RESTORE,
+    SUBTASKS_CREATE, SUBTASKS_READ, SUBTASKS_UPDATE, SUBTASKS_DELETE, SUBTASKS_RESTORE,
     COMMENTS_CREATE, COMMENTS_READ,
     ATTACHMENTS_CREATE, ATTACHMENTS_DOWNLOAD,
     RBAC_ASSIGN,
@@ -344,17 +348,18 @@ PROJECT_ADMIN_ROLE_PERMISSIONS: List[str] = [
     RBAC_ASSIGN,
 ]
 
-# project_member: scoped to a single project. Doc 44 round 5 spec:
-# can create / edit tasks + subtasks on their project (no delete).
-# User Management and Vendor Management are NOT visible — no
-# users:read, no vendors:read.
+# project_member: scoped to a single project. Doc 44 round 7
+# alignment: full task/subtask CRUD (including delete) per spec —
+# "Only add/edit/delete task and sub tasks on the projects assigned
+# to them". User Management and Vendor Management are NOT visible —
+# no users:read, no vendors:read.
 PROJECT_MEMBER_ROLE_PERMISSIONS: List[str] = [
     PROJECTS_READ,
     PROJECT_MEMBERS_READ,
     MILESTONES_READ,
     ACTIVITIES_READ,
-    TASKS_CREATE, TASKS_READ, TASKS_UPDATE, TASKS_RESTORE,
-    SUBTASKS_CREATE, SUBTASKS_READ, SUBTASKS_UPDATE, SUBTASKS_RESTORE,
+    TASKS_CREATE, TASKS_READ, TASKS_UPDATE, TASKS_DELETE, TASKS_RESTORE,
+    SUBTASKS_CREATE, SUBTASKS_READ, SUBTASKS_UPDATE, SUBTASKS_DELETE, SUBTASKS_RESTORE,
     COMMENTS_CREATE, COMMENTS_READ,
     ATTACHMENTS_CREATE, ATTACHMENTS_DOWNLOAD,
 ]

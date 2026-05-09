@@ -260,22 +260,62 @@ class TestCallerVsTargetGate:
             "seed loop or self-heal revoke is broken."
         )
 
-    def test_super_admin_can_grant_super_admin(
+    def test_super_admin_cannot_grant_super_admin_post_round7(
         self, db_session, admin_user,
     ):
+        """Doc 44 round 7: super_admin role is ungrant-able through
+        the API on every path (spec: 'Cannot create or manage Super
+        Admin'). Bootstrap the role via init_db only."""
         from app.api.v3.role_assignments.services import can_caller_grant
-        # Promote admin to super_admin via scoped-global assignment.
         RbacRepository(db_session).assign_scoped_role(
             user_id=admin_user.id,
             role_id=_role_id(db_session, SUPER_ADMIN_ROLE_NAME),
             organization_id=None, project_id=None,
         )
         db_session.commit()
-        allowed, _ = can_caller_grant(
+        allowed, reason = can_caller_grant(
             db_session, admin_user.id,
             target_role_name=SUPER_ADMIN_ROLE_NAME,
             target_organization_id=None,
             target_project_id=None,
+        )
+        assert not allowed
+        assert "cannot be granted" in reason.lower() or "init_db" in reason.lower()
+
+    def test_admin_cannot_modify_peer_admin_non_destructively_post_round7(
+        self, db_session, admin_user, second_admin_user,
+    ):
+        """Doc 44 round 7 #2: ``can_caller_modify_user`` blocks admin →
+        admin even on non-destructive ops (op="patch"), not just
+        destructive ones. Round 5 only blocked destructive (G4/G5);
+        round 7 extends to all mutations on a peer admin."""
+        from app.api.v3.role_assignments.services import can_caller_modify_user
+
+        allowed, reason = can_caller_modify_user(
+            db_session,
+            caller_id=admin_user.id,
+            target_user_id=second_admin_user.id,
+            op="patch",
+        )
+        assert not allowed
+        assert "another admin" in reason.lower()
+
+        # Symmetric: destructive remains blocked too.
+        allowed, reason = can_caller_modify_user(
+            db_session,
+            caller_id=admin_user.id,
+            target_user_id=second_admin_user.id,
+            op="destructive",
+        )
+        assert not allowed
+        assert "another admin" in reason.lower()
+
+        # Self-mutations still bypass — per-action self-guards apply.
+        allowed, _ = can_caller_modify_user(
+            db_session,
+            caller_id=admin_user.id,
+            target_user_id=admin_user.id,
+            op="patch",
         )
         assert allowed
 

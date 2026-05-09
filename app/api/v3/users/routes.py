@@ -323,6 +323,33 @@ def update_user(
                 format_error_response("forbidden", reason), status=403,
             )
 
+    # Doc 44 round 7 — vendor-scope check on the target. A non-admin
+    # caller (org_admin / project_admin) can only PATCH a user whose
+    # ``users.vendor_id`` matches their own. admin / super_admin
+    # bypass (the legacy is_admin flag covers both).
+    is_admin_caller = getattr(request.state, "is_admin", False)
+    if (
+        target is not None
+        and not is_admin_caller
+        and actor_id is not None
+        and actor_id != target.id  # self-action bypasses the scope check
+    ):
+        caller = _get_user_or_404(db, actor_id)
+        caller_vendor = getattr(caller, "vendor_id", None) if caller else None
+        target_vendor = getattr(target, "vendor_id", None)
+        if caller_vendor is None or caller_vendor != target_vendor:
+            return BaseController.error(
+                format_error_response(
+                    "forbidden",
+                    (
+                        "Cannot modify a user outside your own organization. "
+                        "org_admin / project_admin scope is bound to their "
+                        "vendor."
+                    ),
+                ),
+                status=403,
+            )
+
     # Doc 44 round 5: deactivate-only callers can submit status changes
     # but nothing else. Reject any non-status field they try to set.
     held = getattr(request.state, "user_permissions", set()) or set()

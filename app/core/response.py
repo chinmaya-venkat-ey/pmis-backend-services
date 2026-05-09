@@ -126,7 +126,8 @@ def format_collection_response(
     page: int,
     page_size: int,
     base_url: str = "/api/v3",
-    collection_type: str = "users"
+    collection_type: str = "users",
+    db: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """
     Format a collection response in HAL+JSON format with pagination.
@@ -170,7 +171,11 @@ def format_collection_response(
 
     # Format embedded items based on collection type
     if collection_type == "users":
-        formatted_items = [format_user_response(item, base_url) for item in items]
+        # Pass db so each item carries the FE-friendly orgRole projection
+        # (doc 44 round 7 — list response now mirrors the GET-by-id shape).
+        formatted_items = [
+            format_user_response(item, base_url, db=db) for item in items
+        ]
     elif collection_type == "projects":
         formatted_items = [format_project_response(item, base_url) for item in items]
     elif collection_type == "roles":

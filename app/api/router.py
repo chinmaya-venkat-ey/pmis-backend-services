@@ -32,6 +32,9 @@ from .v3.tasks import (
 from .v3.tree import router as tree_router
 from .v3.vendors import router as vendors_router
 
+# Dashboard (admin-only aggregations across projects / vendors / M / A)
+from .v3.dashboard import router as dashboard_router
+
 api_v3_router = APIRouter(prefix="/api/v3")
 
 # Project lifecycle
@@ -61,3 +64,6 @@ api_v3_router.include_router(master_data_router)
 # Comments + attachments (polymorphic across M/A/T/S targets)
 api_v3_router.include_router(comments_router)
 api_v3_router.include_router(attachments_router)
+
+# Dashboard (admin / super_admin only — read-only aggregations)
+api_v3_router.include_router(dashboard_router)

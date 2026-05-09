@@ -1,6 +1,6 @@
 {
   "info": {
-    "_postman_id": "8edd9b40-2b47-4aa8-a085-a6a4b6bd908f",
+    "_postman_id": "9f4f4809-ef6b-4ed0-906a-e0b157138e69",
     "name": "PMIS User Service",
     "description": "PMIS user-management + authentication microservice.\n\nAuto-generated from FastAPI OpenAPI by scripts/generate_postman_collection.py. Re-run that script after API changes.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
@@ -788,7 +788,7 @@
                 }
               ]
             },
-            "description": "Update user details. Path param accepts integer ``id`` or ``US-...`` code.\n\nHierarchy boundary: an admin caller cannot modify a user who currently holds super_admin \u2014 only super_admin can. Returns 403.",
+            "description": "Update user details. Path param accepts integer ``id`` or ``US-...`` code.\n\nGate (doc 44 round 5): callers need EITHER ``users:update`` (full edit \u2014 name / email / vendor / division / etc.) OR ``users:deactivate`` (status flip only \u2014 body must be limited to the ``status`` field). super_admin / admin hold both; org_admin / project_admin hold only ``users:deactivate`` so their PATCH calls are restricted to the status field.\n\nHierarchy boundary: an admin caller cannot modify a user who currently holds super_admin \u2014 only super_admin can. Returns 403.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"email\": \"user@example.com\",\n  \"firstName\": \"\",\n  \"lastName\": \"\",\n  \"admin\": false,\n  \"status\": \"\",\n  \"vendor_id\": \"\",\n  \"division\": \"\",\n  \"division_other\": \"\",\n  \"phone_number\": \"\"\n}",
@@ -2053,6 +2053,40 @@
               ]
             },
             "description": "Revoke a scoped role assignment from a user"
+          },
+          "response": []
+        },
+        {
+          "name": "Roles a given tier can grant",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v3/role-grants/{role_name}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "role-grants",
+                ":role_name"
+              ],
+              "variable": [
+                {
+                  "key": "role_name",
+                  "value": "",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Returns the list of role names a caller holding ``role_name`` can grant via the role-assignment API. Mirrors the matrix in ``can_caller_grant`` \u2014 useful for FE forms (create-user role dropdown, project-mapping role chooser). Per round 7, super_admin never appears (bootstrap via init_db only); a leaf tier (project_member / division_member) gets an empty list."
           },
           "response": []
         }

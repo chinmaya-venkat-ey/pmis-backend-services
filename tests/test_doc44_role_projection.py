@@ -361,11 +361,11 @@ class TestCreateUserWithOrgRole:
         pa_ids = sorted(pa["projectId"] for pa in data["projectAssignments"])
         assert pa_ids == sorted([p1.id, p2.id])
 
-    def test_admin_creates_admin_user_no_projects(
+    def test_admin_cannot_create_admin_user_post_round5(
         self, client, admin_user, admin_headers, vendor_for_doc44,
     ):
-        """Doc 44 round 2: admin tier opened up. An admin caller CAN
-        now create another admin user. Pre-doc-44 this was a 403."""
+        """Doc 44 round 5 reversal: admin-creates-admin is forbidden
+        again. Only super_admin can grant the admin role."""
         body = _create_body(
             vendor_id=vendor_for_doc44.id,
             project_ids=[],
@@ -374,8 +374,8 @@ class TestCreateUserWithOrgRole:
         resp = client.post(
             "/api/v3/users/create", json=body, headers=admin_headers,
         )
-        assert resp.status_code == 201, resp.text
-        assert resp.json()["data"]["orgRole"] == "admin"
+        assert resp.status_code == 403, resp.text
+        assert "super_admin" in resp.json()["error"]["message"].lower()
 
     def test_super_admin_can_create_admin_no_projects(
         self, client, db_session, vendor_for_doc44,

@@ -589,24 +589,16 @@ class TestAdminProtectionGuards:
         assert result.error_type == "validation_error"
         assert "last active super_admin" in result.error.lower()
 
-    def test_can_delete_admin_when_another_admin_exists(
-        self, client, admin_user, second_admin_user, admin_headers, db_session,
+    def test_admin_cannot_delete_peer_admin_post_round5(
+        self, client, admin_user, second_admin_user, admin_headers,
     ):
-        """Doc 44 round 2: admin tier opened up — peer admin DELETE no
-        longer requires demotion. (Doc 43 round 3 added that gate;
-        doc 44 round 2 removed it per the FE spec which treats admin
-        tier as peers for destructive ops too.)"""
-        from app.infrastructure.db.models.user import UserModel
-
+        """Doc 44 round 5 reversal: admin → admin DELETE blocked again.
+        Only super_admin can DELETE another admin."""
         resp = client.delete(
             f"/api/v3/users/{second_admin_user.id}", headers=admin_headers,
         )
-        assert resp.status_code == 200, resp.text
-
-        db_session.expire_all()
-        row = db_session.query(UserModel).filter_by(id=second_admin_user.id).one()
-        assert row.deleted_at is not None
-        assert row.status == "inactive"
+        assert resp.status_code == 403, resp.text
+        assert "another admin" in resp.json()["error"]["message"].lower()
 
     def test_can_deactivate_admin_when_another_admin_exists(
         self, client, admin_user, second_admin_user, admin_headers,

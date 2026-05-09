@@ -25,9 +25,14 @@ from .permissions import (
     USERS_READ,
     USERS_READ_ALL,
     USERS_UPDATE,
+    USERS_DEACTIVATE,
     USERS_DELETE_ALL
 )
-from ....core.middleware.rbac import require_permission, require_authenticated
+from ....core.middleware.rbac import (
+    require_any_permission,
+    require_authenticated,
+    require_permission,
+)
 from ....infrastructure.db.session import get_db
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -282,13 +287,18 @@ def get_user(
 
 @router.patch(
     "/{user_id}",
-    dependencies=[require_permission(USERS_UPDATE)],
+    dependencies=[require_any_permission(USERS_UPDATE, USERS_DEACTIVATE)],
     summary="Update user",
     description=(
         "Update user details. Path param accepts integer ``id`` or "
-        "``US-...`` code.\n\nHierarchy boundary: an admin caller "
-        "cannot modify a user who currently holds super_admin — "
-        "only super_admin can. Returns 403."
+        "``US-...`` code.\n\nGate (doc 44 round 5): callers need EITHER "
+        "``users:update`` (full edit — name / email / vendor / division / "
+        "etc.) OR ``users:deactivate`` (status flip only — body must be "
+        "limited to the ``status`` field). super_admin / admin hold both; "
+        "org_admin / project_admin hold only ``users:deactivate`` so their "
+        "PATCH calls are restricted to the status field.\n\nHierarchy "
+        "boundary: an admin caller cannot modify a user who currently "
+        "holds super_admin — only super_admin can. Returns 403."
     ),
 )
 def update_user(
@@ -300,10 +310,8 @@ def update_user(
     """
     Update user details.
 
-    Requires: USERS_UPDATE permission
-    - Members can update themselves (excluding admin flag and status)
-    - Admins can update all users EXCEPT super_admin users
-    - super_admin can update anyone
+    Doc 44 round 5: callers with USERS_UPDATE can edit any field;
+    callers with only USERS_DEACTIVATE may only flip ``status``.
     """
     actor_id = getattr(request.state, "user_id", None)
     target = _get_user_or_404(db, user_id)
@@ -314,6 +322,29 @@ def update_user(
             return BaseController.error(
                 format_error_response("forbidden", reason), status=403,
             )
+
+    # Doc 44 round 5: deactivate-only callers can submit status changes
+    # but nothing else. Reject any non-status field they try to set.
+    held = getattr(request.state, "user_permissions", set()) or set()
+    if USERS_UPDATE not in held and USERS_DEACTIVATE in held:
+        forbidden_fields = []
+        for field, value in (data.model_dump(exclude_unset=True) or {}).items():
+            if field == "status":
+                continue
+            forbidden_fields.append(field)
+        if forbidden_fields:
+            return BaseController.error(
+                format_error_response(
+                    "forbidden",
+                    (
+                        "Callers with only users:deactivate may PATCH "
+                        "the status field only. Disallowed fields in "
+                        "this request: " + ", ".join(sorted(forbidden_fields))
+                    ),
+                ),
+                status=403,
+            )
+
     return UserController.update(request, user_id, data, db)
 
 

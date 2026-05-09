@@ -284,15 +284,13 @@ class TestUserRoleAssignment:
         names = [r["name"] for r in resp.json()["data"]["roles"]]
         assert "test_assignable_role" in names
 
-    def test_admin_caller_can_remove_admin_role_post_doc44(
+    def test_admin_caller_cannot_remove_admin_role_post_round5(
         self, client, admin_user, admin_headers, db_session,
         second_admin_user,
     ):
-        """Doc 44 round 2: admin tier opened up. Symmetric grant +
-        revoke matrix means an admin caller CAN now revoke the admin
-        role from another admin. (Pre-doc-44 only super_admin could.)
-        Self-revoke is still blocked by the existing self-demote
-        guard, so we revoke from a different admin user."""
+        """Doc 44 round 5 reversal: admin tier re-locked. Symmetric
+        grant + revoke means an admin caller CANNOT revoke the admin
+        role from another admin — only super_admin can."""
         admin_role_id = (
             db_session.query(RoleModel)
             .filter(RoleModel.name == "admin")
@@ -303,7 +301,8 @@ class TestUserRoleAssignment:
             f"/api/v3/users/{second_admin_user.id}/roles/{admin_role_id}",
             headers=admin_headers,
         )
-        assert resp.status_code == 204, resp.text
+        assert resp.status_code == 403, resp.text
+        assert "super_admin" in resp.json()["error"]["message"].lower()
 
     def test_super_admin_caller_can_remove_admin_role(
         self, client, admin_user, db_session,

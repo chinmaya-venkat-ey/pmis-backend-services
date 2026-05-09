@@ -407,11 +407,13 @@ class TestPeerTakeoverDelete:
 # treats admin tier as peers for destructive ops too.
 # ---------------------------------------------------------------------------
 
-class TestAdminPeerOpsAllowed:
-    """Doc 44 round 2: admin-peer destructive ops are allowed.
+class TestAdminPeerDestructiveBlocked:
+    """Doc 44 round 5: admin-peer destructive ops are BLOCKED again
+    (revert of round 2). Only super_admin can password-change /
+    DELETE another admin. Self-ops + lower-tier ops still allowed.
     super_admin → super_admin destructive remains blocked (G2/G3)."""
 
-    def test_admin_can_change_peer_admin_password(
+    def test_admin_cannot_change_peer_admin_password(
         self, client, admin_user, admin_headers, second_admin_user,
     ):
         resp = client.patch(
@@ -419,7 +421,8 @@ class TestAdminPeerOpsAllowed:
             json={"password": "PeerSetsPwd@1"},
             headers=admin_headers,
         )
-        assert resp.status_code == 200, resp.text
+        assert resp.status_code == 403, resp.text
+        assert "another admin" in resp.json()["error"]["message"].lower()
 
     def test_admin_can_change_own_password(
         self, client, admin_user, admin_headers,
@@ -452,13 +455,13 @@ class TestAdminPeerOpsAllowed:
         )
         assert resp.status_code == 200, resp.text
 
-    def test_admin_can_delete_peer_admin(
+    def test_admin_cannot_delete_peer_admin(
         self, client, admin_user, admin_headers, second_admin_user,
     ):
         resp = client.delete(
             f"/api/v3/users/{second_admin_user.id}", headers=admin_headers,
         )
-        assert resp.status_code in (200, 204), resp.text
+        assert resp.status_code == 403, resp.text
 
     def test_super_admin_can_delete_admin(
         self, client, db_session, admin_user,

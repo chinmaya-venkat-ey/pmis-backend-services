@@ -60,6 +60,28 @@ def require_permission(permission: Union[str, "object"]):
     return Depends(check_permission)
 
 
+def require_any_permission(*permissions: Union[str, "object"]):
+    """Dependency factory: allow the caller if they hold AT LEAST ONE
+    of the listed permission codes. Used where a route accepts callers
+    in two distinct authority bands — e.g. PATCH /users/{id} accepts
+    both USERS_UPDATE (full edit) and USERS_DEACTIVATE (status-only)
+    callers; the service layer narrows what fields each can change.
+    """
+    codes = [getattr(p, "value", p) for p in permissions]
+
+    def check(request: Request) -> None:
+        if _user_id(request) is None:
+            raise AuthenticationError("Authentication required")
+        held = _user_permissions(request)
+        if not any(c in held for c in codes):
+            raise AuthorizationError(
+                "Insufficient permissions. Required (any of): "
+                + ", ".join(codes)
+            )
+
+    return Depends(check)
+
+
 def require_authenticated():
     """Dependency: require an authenticated (non-anonymous) caller."""
 

@@ -204,15 +204,13 @@ class TestCallerVsTargetGate:
     grant decisions match the doc 41 rule table.
     """
 
-    def test_admin_can_grant_any_role_except_super_admin(
+    def test_admin_can_grant_lower_tiers_only(
         self, db_session, admin_user,
     ):
-        """Doc 44 round 2: admin tier opened up. admin can grant
-        org_admin / project_admin / project_member / division_member
-        AND admin (peer) — only super_admin grant remains restricted
-        to super_admin callers."""
+        """Doc 44 round 5 reversal: admin can grant the lower scoped
+        tiers but NOT admin or super_admin. Only super_admin can
+        grant admin or super_admin."""
         from app.api.v3.role_assignments.services import can_caller_grant
-        # admin_user holds the legacy 'admin' role.
         for target in (
             ORG_ADMIN_ROLE_NAME, PROJECT_ADMIN_ROLE_NAME,
             PROJECT_MEMBER_ROLE_NAME, DIVISION_MEMBER_ROLE_NAME,
@@ -225,7 +223,7 @@ class TestCallerVsTargetGate:
             )
             assert allowed, f"admin should be able to grant {target}"
 
-        # super_admin grant still requires super_admin
+        # super_admin grant requires super_admin
         allowed, reason = can_caller_grant(
             db_session, admin_user.id,
             target_role_name=SUPER_ADMIN_ROLE_NAME,
@@ -234,14 +232,16 @@ class TestCallerVsTargetGate:
         )
         assert not allowed and "super_admin" in reason
 
-        # Doc 44: admin CAN now grant admin (peer-grant authority).
-        allowed, _ = can_caller_grant(
+        # Round 5: admin grant ALSO requires super_admin (revert of
+        # the round-2 peer-grant relaxation).
+        allowed, reason = can_caller_grant(
             db_session, admin_user.id,
             target_role_name=ADMIN_ROLE_NAME,
             target_organization_id=None,
             target_project_id=None,
         )
-        assert allowed, "admin should now be able to grant admin (doc 44)"
+        assert not allowed
+        assert "super_admin" in reason.lower()
 
     def test_admin_role_does_not_hold_grant_superadmin_permission(
         self, db_session, admin_user,

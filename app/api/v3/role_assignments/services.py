@@ -132,17 +132,20 @@ def can_caller_grant(
     if SUPER_ADMIN_ROLE_NAME in global_roles:
         return True, ""
 
-    # Granting super_admin requires super_admin (already gated above).
-    # Doc 44 round 2 — admin tier opened up: admins can now grant the
-    # admin role to other users (peer-grant). Previously (doc 43 round 1)
-    # only super_admin could promote to admin; the FE spec reverses
-    # that and treats admins as peers for grant + edit purposes.
+    # Doc 44 round 5 — admin tier re-locked at the top.
+    # super_admin grant requires super_admin. admin grant ALSO requires
+    # super_admin (reverts the round-2 peer-grant relaxation per spec
+    # update: admin must not be able to create another admin).
     if target_role_name == SUPER_ADMIN_ROLE_NAME:
         return False, (
             "Only super_admin can grant the super_admin role."
         )
+    if target_role_name == ADMIN_ROLE_NAME:
+        return False, (
+            "Only super_admin can grant the admin role."
+        )
 
-    # admin can grant anything except super_admin (incl. peer admin).
+    # admin can grant anything except super_admin / admin.
     if ADMIN_ROLE_NAME in global_roles:
         return True, ""
 
@@ -208,6 +211,38 @@ def serialize_assignment(
         ),
         "createdBy": assignment.created_by,
     }
+
+
+def _user_holds_admin_role(db: Session, user_id: str) -> bool:
+    """Return True iff user_id holds the ``admin`` role specifically
+    (NOT super_admin). Checks both the legacy ``user_roles`` table
+    and the doc-41 ``user_role_assignments`` global rows. Used by
+    the doc-44-round-5 admin-peer destructive guard."""
+    from ....infrastructure.db.models.role import RoleModel as _Role
+    from ....infrastructure.db.models.user_role import UserRoleModel as _UR
+    from ....infrastructure.db.models.user_role_assignment import (
+        UserRoleAssignmentModel as _URA,
+    )
+    legacy = (
+        db.query(_UR)
+        .join(_Role, _Role.id == _UR.role_id)
+        .filter(_UR.user_id == user_id, _Role.name == ADMIN_ROLE_NAME)
+        .first()
+    )
+    if legacy is not None:
+        return True
+    scoped = (
+        db.query(_URA)
+        .join(_Role, _Role.id == _URA.role_id)
+        .filter(
+            _URA.user_id == user_id,
+            _Role.name == ADMIN_ROLE_NAME,
+            _URA.organization_id.is_(None),
+            _URA.project_id.is_(None),
+        )
+        .first()
+    )
+    return scoped is not None
 
 
 def _user_holds_super_admin(db: Session, user_id: str) -> bool:
@@ -289,11 +324,19 @@ def can_caller_modify_user(
             "by revoking their super_admin role assignment."
         )
 
-    # Doc 44 round 2 — admin peer-takeover guard (G4/G5) REMOVED.
-    # Spec change: admin tier is now treated as a peer set for
-    # destructive ops too. An admin can DELETE / password-change
-    # another admin user. super_admin → super_admin destructive is
-    # still blocked above (G2/G3 retained).
+    # Doc 44 round 5 — admin peer-takeover guard (G4/G5) RESTORED.
+    # Spec update: admin must not be able to DELETE / password-change
+    # another admin even via the demote-then-remove path. With Rule 1
+    # (admin can't grant/revoke admin) blocking the demote step, this
+    # check covers the direct-DELETE side.
+    if op == "destructive" and not caller_is_super_admin and not target_is_super_admin:
+        caller_is_admin = _user_holds_admin_role(db, caller_id)
+        target_is_admin = _user_holds_admin_role(db, target_user_id)
+        if caller_is_admin and target_is_admin:
+            return False, (
+                "Only super_admin can perform destructive actions "
+                "(DELETE / password change) on another admin."
+            )
 
     # super_admin caller: allowed for non-destructive ops on any
     # target, AND destructive ops on non-super_admin targets.

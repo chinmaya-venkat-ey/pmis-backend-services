@@ -33,6 +33,7 @@ class Permission(str, Enum):
     USERS_UPDATE_ALL = "users:update_all"
     USERS_DELETE = "users:delete"
     USERS_DELETE_ALL = "users:delete_all"
+    USERS_DEACTIVATE = "users:deactivate"
     
     # Project permissions
     PROJECTS_CREATE = "projects:create"

@@ -46,6 +46,7 @@ def update_user(
     phone_number: Optional[str] = None,
     requesting_user_id: Optional[str] = None,
     is_admin: bool = False,
+    can_change_status: Optional[bool] = None,
 ) -> ServiceResult[User]:
     """Update a user's mutable fields."""
     repository = UserRepository(db)
@@ -67,12 +68,33 @@ def update_user(
             error="Only admin users can modify admin flag",
             error_type="authorization_error",
         )
-    if status is not None and not is_admin:
+    # Doc 44 round 5: status changes are allowed when the caller is
+    # admin / super_admin (legacy is_admin flag) OR when the caller
+    # holds the dedicated ``users:deactivate`` perm (granted to
+    # org_admin / project_admin). ``can_change_status=None`` means
+    # the caller didn't pass it explicitly — fall back to is_admin
+    # so script callers keep working.
+    status_change_allowed = (
+        can_change_status if can_change_status is not None else is_admin
+    )
+    if status is not None and not status_change_allowed:
         return ServiceResult.fail(
             error="Only admin users can modify user status",
             error_type="authorization_error",
         )
-    if not is_admin and not is_self:
+    # Doc 44 round 5: allow non-admin callers with users:deactivate
+    # authority to PATCH another user's status (route-layer field
+    # restriction enforces that they only sent ``status``). Other
+    # non-self / non-admin patches stay rejected.
+    is_status_only_deactivate = (
+        status is not None
+        and not is_admin
+        and can_change_status
+        and email is None and first_name is None and last_name is None
+        and admin is None and vendor_id is None and division is None
+        and division_other is None and phone_number is None
+    )
+    if not is_admin and not is_self and not is_status_only_deactivate:
         return ServiceResult.fail(
             error="You can only update your own profile",
             error_type="authorization_error",

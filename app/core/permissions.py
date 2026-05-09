@@ -40,6 +40,11 @@ USERS_UPDATE = "users:update"
 USERS_UPDATE_ALL = "users:update_all"
 USERS_DELETE = "users:delete"
 USERS_DELETE_ALL = "users:delete_all"
+# Doc 44 round 5 — narrow status-flip permission. Granted to
+# org_admin / project_admin so they can deactivate (or reactivate)
+# users in their org / project without needing the broader
+# USERS_UPDATE which lets them edit name / email / vendor / etc.
+USERS_DEACTIVATE = "users:deactivate"
 
 # Projects
 PROJECTS_CREATE = "projects:create"
@@ -146,6 +151,11 @@ BUILTIN_PERMISSIONS: List[PermissionDef] = [
     PermissionDef(USERS_UPDATE_ALL, "Update any user", "Edit any user record."),
     PermissionDef(USERS_DELETE, "Delete own user", "Soft-delete own user record."),
     PermissionDef(USERS_DELETE_ALL, "Delete any user", "Soft-delete any user record."),
+    PermissionDef(
+        USERS_DEACTIVATE,
+        "Deactivate user",
+        "Toggle a user's active/inactive status without editing other fields.",
+    ),
 
     PermissionDef(PROJECTS_CREATE, "Create project", "Create a new project."),
     PermissionDef(PROJECTS_READ, "View own project", "View projects the user is a member of."),
@@ -279,50 +289,72 @@ ADMIN_FULL_ROLE_PERMISSIONS: List[str] = [
     p.code for p in BUILTIN_PERMISSIONS if p.code != USERS_GRANT_SUPERADMIN
 ]
 
-# org_admin: scoped to a vendor (= organization). Can manage project
-# membership and read project data within the org, but not edit project
-# content or do RBAC outside their org. The service-layer caller-vs-
-# target check enforces "scope = caller's vendor only."
+# org_admin: scoped to a vendor (= organization). Doc 44 round 5 spec:
+# manages users (create + edit, NOT delete) within their org and the
+# task/subtask content of every project owned by that vendor. Project
+# lifecycle (create / publish / close / delete) and milestone/activity
+# editing remain off-limits.
+#
+# The route gate `require_project_permission` (option a, round 5)
+# walks project → vendor and treats org-scoped perms as applicable to
+# projects owned by that vendor — so giving org_admin TASKS_CREATE here
+# only lets them act on projects within their vendor, not cross-vendor.
 ORG_ADMIN_ROLE_PERMISSIONS: List[str] = [
-    USERS_READ, USERS_READ_ALL, USERS_UPDATE_ALL,
+    # Doc 44 round 5 spec: only super_admin / admin can create / edit /
+    # delete users. org_admin can VIEW users in their org, change their
+    # roles (rbac:assign), do project mapping (project_members:*), and
+    # toggle active/inactive (users:deactivate).
+    USERS_READ, USERS_READ_ALL, USERS_DEACTIVATE,
     PROJECTS_READ, PROJECTS_READ_ALL,
     PROJECT_MEMBERS_READ, PROJECT_MEMBERS_ADD,
     PROJECT_MEMBERS_UPDATE, PROJECT_MEMBERS_DELETE,
     VENDORS_READ, MASTER_DATA_VIEW,
+    MILESTONES_READ,
+    ACTIVITIES_READ,
+    TASKS_CREATE, TASKS_READ, TASKS_UPDATE, TASKS_RESTORE,
+    SUBTASKS_CREATE, SUBTASKS_READ, SUBTASKS_UPDATE, SUBTASKS_RESTORE,
+    COMMENTS_CREATE, COMMENTS_READ,
+    ATTACHMENTS_CREATE, ATTACHMENTS_DOWNLOAD,
     RBAC_ASSIGN,
 ]
 
-# project_admin: scoped to a single project. Manages membership +
-# task-level content but cannot publish / close / delete the project,
-# touch master-data, or grant project_admin itself (only project_member).
-#
-# Spec ("manage task and sub-task and add project member") — milestones
-# and activities are READ-ONLY for project_admin: they're navigational
-# anchors above task/subtask, not directly editable. Trimming
-# MILESTONES_UPDATE / ACTIVITIES_UPDATE here keeps the role aligned
-# with the lead's brief.
+# project_admin: scoped to a single project. Doc 44 round 5 spec:
+# manages users (create + edit, NOT delete) for project_member tier
+# only, plus task / subtask content (full CRUD including delete) on
+# the project. Cannot publish / close / delete the project itself,
+# cannot touch master-data, cannot grant project_admin to others
+# (only project_member). Vendor visibility is read-only AND scoped
+# to their own org via the list-scope filter.
 PROJECT_ADMIN_ROLE_PERMISSIONS: List[str] = [
-    USERS_READ, PROJECTS_READ,
+    # Doc 44 round 5: project_admin can VIEW users, change their
+    # role (rbac:assign), do project mapping, and toggle active —
+    # but cannot create / edit / delete user fields. Only super_admin
+    # / admin do that.
+    USERS_READ, USERS_DEACTIVATE,
+    PROJECTS_READ,
     PROJECT_MEMBERS_READ, PROJECT_MEMBERS_ADD,
     PROJECT_MEMBERS_UPDATE, PROJECT_MEMBERS_DELETE,
+    VENDORS_READ,
     MILESTONES_READ,
     ACTIVITIES_READ,
-    TASKS_CREATE, TASKS_READ, TASKS_UPDATE, TASKS_DELETE,
-    SUBTASKS_CREATE, SUBTASKS_READ, SUBTASKS_UPDATE, SUBTASKS_DELETE,
+    TASKS_CREATE, TASKS_READ, TASKS_UPDATE, TASKS_DELETE, TASKS_RESTORE,
+    SUBTASKS_CREATE, SUBTASKS_READ, SUBTASKS_UPDATE, SUBTASKS_DELETE, SUBTASKS_RESTORE,
     COMMENTS_CREATE, COMMENTS_READ, COMMENTS_DELETE,
     ATTACHMENTS_CREATE, ATTACHMENTS_DOWNLOAD, ATTACHMENTS_DELETE,
     RBAC_ASSIGN,
 ]
 
-# project_member: scoped to a single project. Read everything in their
-# project, contribute updates on tasks they own, comment, attach.
+# project_member: scoped to a single project. Doc 44 round 5 spec:
+# can create / edit tasks + subtasks on their project (no delete).
+# User Management and Vendor Management are NOT visible — no
+# users:read, no vendors:read.
 PROJECT_MEMBER_ROLE_PERMISSIONS: List[str] = [
-    USERS_READ, PROJECTS_READ,
+    PROJECTS_READ,
     PROJECT_MEMBERS_READ,
     MILESTONES_READ,
     ACTIVITIES_READ,
-    TASKS_READ, TASKS_UPDATE,
-    SUBTASKS_READ, SUBTASKS_UPDATE,
+    TASKS_CREATE, TASKS_READ, TASKS_UPDATE, TASKS_RESTORE,
+    SUBTASKS_CREATE, SUBTASKS_READ, SUBTASKS_UPDATE, SUBTASKS_RESTORE,
     COMMENTS_CREATE, COMMENTS_READ,
     ATTACHMENTS_CREATE, ATTACHMENTS_DOWNLOAD,
 ]

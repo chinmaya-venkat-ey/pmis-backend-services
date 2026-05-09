@@ -325,6 +325,11 @@ class UserController:
         """
         requesting_user_id = get_current_user_id(request)
         is_admin = getattr(request.state, "is_admin", False)
+        # Doc 44 round 5 — status-flip authority can come from either
+        # is_admin (legacy: admin / super_admin) OR a dedicated
+        # ``users:deactivate`` perm held by org_admin / project_admin.
+        held_perms = getattr(request.state, "user_permissions", set()) or set()
+        can_change_status = is_admin or "users:deactivate" in held_perms
 
         canonical_id = _resolve_user_id(db, user_id)
         if canonical_id is None:
@@ -349,7 +354,8 @@ class UserController:
             division_other=data.divisionOther,
             phone_number=data.phoneNumber,
             requesting_user_id=requesting_user_id,
-            is_admin=is_admin
+            is_admin=is_admin,
+            can_change_status=can_change_status,
         )
 
         if result.is_success():

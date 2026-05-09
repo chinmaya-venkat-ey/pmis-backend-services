@@ -1,6 +1,6 @@
 {
   "info": {
-    "_postman_id": "9f4f4809-ef6b-4ed0-906a-e0b157138e69",
+    "_postman_id": "384cf22c-7c3f-46b8-a02e-432809beddbc",
     "name": "PMIS User Service",
     "description": "PMIS user-management + authentication microservice.\n\nAuto-generated from FastAPI OpenAPI by scripts/generate_postman_collection.py. Re-run that script after API changes.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"

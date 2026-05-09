@@ -1,6 +1,6 @@
 # RBAC Guide — pmis-user-service
 
-**Last refresh**: 2026-05-08 (post-doc 41 deploy — scoped RBAC live).
+**Last refresh**: 2026-05-09 (post-doc-44 round 8 — alignment-audit BE fixes shipped). The mental model + role bundles + lockout protections are kept in lockstep with the monolith via the shared `app/core/permissions.py` registry; for the canonical narrative, see the monolith's `RBAC_GUIDE.md` and `planned_changes/44.*`. This file mirrors what's relevant to user-mgmt.
 
 This service is the authoritative RBAC source for PMIS. The monolith reads from the same `roles` / `permissions` / `role_permissions` / `user_roles` / `user_permissions` / `user_role_assignments` tables (shared DB) but doesn't write to RBAC — every assignment, grant, role mutation, and permission catalog edit lands here. (Monolith does mutate `user_role_assignments` on the alembic migration backfill path during deploy, but at runtime all RBAC writes flow through user-mgmt.)
 
@@ -28,10 +28,10 @@ Auth middleware hydrates two views per request: the flat union (`request.state.u
 | Role | Tier | What they can do | What they can't |
 |------|------|-----------------|-----------------|
 | `super_admin` (doc 41) | global | Everything `admin` does + `users:grant_superadmin` (the gate to grant `super_admin` itself). | Lockout-protected: last super_admin can't be revoked, deactivated, or deleted. **Post-G2/G3 (doc 43 round 2)**: a super_admin cannot change another super_admin's password or DELETE another super_admin without first revoking the target's super_admin role. |
-| `admin` | global | Every code except `users:grant_superadmin`. Auto-synced. **Demoted in doc 43**: no longer the lockout-protected tier. **Doc 44 round 2 opened up admin tier**: admins now have peer-grant + peer-edit + peer-delete authority over other admins (the doc 43 round 3 G4/G5 peer-takeover guards were removed). | Cannot grant `super_admin` (caller-vs-target). Cannot PATCH / password-change / DELETE a super_admin user (F1 hierarchy gate). Cannot self-deactivate (G1, doc 43 round 2). |
-| `org_admin` (doc 41) | org (vendor) | Manage user / project memberships within their owning vendor. Caller-vs-target rules limit grants to `project_admin` / `project_member` / `division_member` on projects whose owning vendor matches. | Cannot publish/close/delete projects, cannot edit project content, cannot grant `org_admin` or `super_admin`. |
-| `project_admin` (doc 41) | project | Manage tasks/subtasks + project-membership on the specific project the assignment carries. Can grant `project_member` on that project only. | Cannot create projects, cannot grant `project_admin` (only `project_member`), cannot touch master data or RBAC outside their project. |
-| `project_member` (doc 41) | project | Read project + M/A/T/S, contribute task/subtask updates, comment, upload/download attachments. | Cannot delete project content, cannot grant any role, cannot manage milestones/activities create/delete. |
+| `admin` | global | Every code except `users:grant_superadmin`. Auto-synced. **Demoted in doc 43**: no longer the lockout-protected tier. **Round 5 re-locked admin tier**: admin can no longer grant peer admin (only super_admin can). **Round 7**: admin → admin mutations (PATCH any field / password / DELETE) all blocked — only super_admin can manage another admin. | Cannot grant `super_admin` (round 7 — API-ungrantable on every path; `init_db` only). Cannot grant or modify another admin (round 5 + round 7). Cannot PATCH / password-change / DELETE a super_admin user (F1 hierarchy gate). Cannot self-deactivate (G1). |
+| `org_admin` (doc 41) | org (vendor) | Manage user / project memberships within their owning vendor. Caller-vs-target rules limit grants to `project_admin` / `project_member` / `division_member` on projects whose owning vendor matches. **Round 7**: full task / subtask CRUD on projects in their vendor (gained `tasks:delete`, `subtasks:delete`). **Round 8**: `master_data:view` stripped from seed; `PATCH /vendors/{id}` accepts `user_assignments`-only bodies via `rbac:assign` carve-out (any non-assignment field still requires `vendors:manage`); `GET /vendors/{id}` is now scope-checked (own vendor only). | Cannot create / edit / delete vendor identity fields. Cannot create / update / delete user records. Cannot publish / close / delete projects. Cannot grant `org_admin` / `admin` / `super_admin`. Cannot read `master_data:*`. |
+| `project_admin` (doc 41) | project | Manage tasks/subtasks + project-membership on the specific project the assignment carries. Can grant `project_member` on that project only. **Round 7**: cannot self-unassign from `project_members`. **Round 8**: gained `users:read_all` so the FE can render the Users list with their vendor's roster (round-7 vendor-scope filter still caps to own-vendor). | Cannot create projects, cannot grant `project_admin` (round 7 spec: "cannot change roles"), cannot touch master data or RBAC outside their project, cannot self-unassign. |
+| `project_member` (doc 41) | project | Read project + M/A/T/S, contribute task/subtask updates, comment, upload/download attachments. **Round 7**: full task / subtask CRUD (gained `tasks:delete`, `subtasks:delete`). | No `users:read` / `vendors:read` (User Mgmt + Vendor Mgmt menus invisible). Cannot grant any role, cannot manage milestones/activities create/delete. |
 | `division_member` (doc 41) | project | Read-only at this stage — workbox / approval workflow lands later. | Anything that mutates state. (Scoped to projects so the upcoming inbox can filter by membership.) |
 
 Seeded permission lists live in [`app/core/permissions.py`](../app/core/permissions.py). The seed loop in `RbacRepository.sync_builtin_permissions` upserts them on every boot.
@@ -42,14 +42,14 @@ Lives in [`app/api/v3/role_assignments/services.py::can_caller_grant`](../app/ap
 
 Symmetric for grant + revoke (post-doc-43): the same matrix gates `POST` and `DELETE` on `/role-assignments`. A caller who can't grant a `(role, scope)` tuple can't revoke it either.
 
-**Doc 44 round 2** opened up the admin tier — admins can now grant the admin role to other users (peer-grant) and run destructive ops (password change, DELETE) on admin peers. Only `super_admin` grant remains restricted to super_admin callers, and only super_admin → super_admin destructive ops are still blocked (G2/G3).
+**Doc 44 round 5 + 7** locked the admin tier back down: admin can no longer grant peer admin (round 5 reverted round-2 relaxation), and admin → admin mutations (PATCH any field / password / DELETE) are blocked on ALL ops (round 7 extended the round-5 destructive-only block). **Round 7 top-tier closure**: `super_admin` is API-ungrantable on every path — bootstrap is `init_db` only. **Round 7** also added the matrix lookup endpoint `GET /api/v3/role-grants/{role_name}` so the FE can scope role-picker dropdowns to the caller's tier without hard-coding the matrix.
 
 | Caller | Can grant / revoke |
 |---|---|
-| `super_admin` | any role at any scope (only role that can grant or revoke `super_admin`) |
-| `admin` | any role **except** `super_admin`. Includes peer admin grant + revoke. |
+| `super_admin` | every role tier **except** `super_admin` itself (round 7 — `super_admin` is `init_db`-only). |
+| `admin` | any role **except** `super_admin` and `admin` (round 5). |
 | `org_admin` of vendor X | `project_admin` / `project_member` / `division_member` on projects in vendor X |
-| `project_admin` of project P | `project_member` on P only |
+| `project_admin` of project P | `project_member` on P only. **Cannot grant `project_admin`** (round 7 spec). |
 | anyone else | nothing |
 
 ---

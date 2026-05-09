@@ -18,6 +18,7 @@ from .v3.master_data import router as master_data_router
 from .v3.permissions import permissions_router
 from .v3.role_assignments import (
     project_role_assignments_router,
+    role_grants_router,
     user_role_assignments_router,
     vendor_projects_router,
 )
@@ -37,6 +38,7 @@ api_v3_router.include_router(master_data_router)
 api_v3_router.include_router(user_role_assignments_router)
 api_v3_router.include_router(project_role_assignments_router)
 api_v3_router.include_router(vendor_projects_router)
+api_v3_router.include_router(role_grants_router)
 
 # ---- DEPRECATED routers (kept for back-compat; superseded by /api/v3/master/*)
 # Both stamp ``Deprecation: true`` + ``Link: rel="successor-version"``

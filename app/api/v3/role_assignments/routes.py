@@ -39,6 +39,7 @@ from ....infrastructure.db.session import get_db
 from .schemas import RoleAssignmentCreateRequest
 from .services import (
     can_caller_grant,
+    grantable_roles_for,
     revoke_with_lockout_check,
     serialize_assignment,
 )
@@ -467,6 +468,36 @@ def list_user_projects(
         "userId": user_id,
         "userLogin": user.login if user else None,
         "projects": list(projects.values()),
+    })
+
+
+# ---------------------------------------------------------------------------
+# /role-grants/{role_name} — static grant-matrix lookup
+# ---------------------------------------------------------------------------
+
+role_grants_router = APIRouter(
+    prefix="/role-grants",
+    tags=["role-assignments"],
+)
+
+
+@role_grants_router.get(
+    "/{role_name}",
+    dependencies=[require_authenticated()],
+    summary="Roles a given tier can grant",
+    description=(
+        "Returns the list of role names a caller holding ``role_name`` "
+        "can grant via the role-assignment API. Mirrors the matrix in "
+        "``can_caller_grant`` — useful for FE forms (create-user role "
+        "dropdown, project-mapping role chooser). Per round 7, "
+        "super_admin never appears (bootstrap via init_db only); a leaf "
+        "tier (project_member / division_member) gets an empty list."
+    ),
+)
+def list_grantable_roles_for_role(role_name: str) -> Dict[str, Any]:
+    return BaseController.ok(data={
+        "roleName": role_name,
+        "grantableRoles": grantable_roles_for(role_name),
     })
 
 

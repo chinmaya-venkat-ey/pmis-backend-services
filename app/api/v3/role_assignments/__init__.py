@@ -12,10 +12,12 @@ from .routes import (
     user_role_assignments_router,
     project_role_assignments_router,
     vendor_projects_router,
+    role_grants_router,
 )
 
 __all__ = [
     "user_role_assignments_router",
     "project_role_assignments_router",
     "vendor_projects_router",
+    "role_grants_router",
 ]

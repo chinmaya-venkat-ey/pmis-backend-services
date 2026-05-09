@@ -61,6 +61,44 @@ _DOC41_PROJECT_ADMIN_GRANTABLE = (PROJECT_MEMBER_ROLE_NAME,)
 
 
 # ---------------------------------------------------------------------------
+# Static grant-matrix lookup — exposes the same rule table the caller-vs-
+# target gate enforces, in a form the FE can read up-front (e.g. to scope
+# the role dropdown on the create-user form).
+#
+# Per round 7, super_admin is ungrant-able through the API on every path,
+# so it never appears in any returned list.
+# ---------------------------------------------------------------------------
+
+def grantable_roles_for(role_name: str) -> List[str]:
+    """Return role names that a caller holding ``role_name`` can grant.
+
+    Static matrix mirroring :func:`can_caller_grant`. Unknown role names
+    yield an empty list (project_member, division_member, etc. — none of
+    the leaf tiers can grant anything).
+    """
+    if role_name == SUPER_ADMIN_ROLE_NAME:
+        return [
+            ADMIN_ROLE_NAME,
+            ORG_ADMIN_ROLE_NAME,
+            PROJECT_ADMIN_ROLE_NAME,
+            PROJECT_MEMBER_ROLE_NAME,
+            DIVISION_MEMBER_ROLE_NAME,
+        ]
+    if role_name == ADMIN_ROLE_NAME:
+        return [
+            ORG_ADMIN_ROLE_NAME,
+            PROJECT_ADMIN_ROLE_NAME,
+            PROJECT_MEMBER_ROLE_NAME,
+            DIVISION_MEMBER_ROLE_NAME,
+        ]
+    if role_name == ORG_ADMIN_ROLE_NAME:
+        return list(_DOC41_ORG_GRANTABLE)
+    if role_name == PROJECT_ADMIN_ROLE_NAME:
+        return list(_DOC41_PROJECT_ADMIN_GRANTABLE)
+    return []
+
+
+# ---------------------------------------------------------------------------
 # Caller capability detection — derived from the caller's existing scoped
 # assignments. We don't trust the union (too coarse) — we look at the
 # specific role rows.

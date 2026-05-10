@@ -37,7 +37,12 @@ class Settings(BaseSettings):
         description="HS256 signing key — MUST be identical to the monolith's SECRET_KEY.",
     )
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
+    # Round 11 hotfix — bumped from 15 → 60 while the FE refresh-token
+    # rotation is being investigated. Tester reports session drops mid-
+    # flow; longer access-token TTL is a temporary stop-gap so users
+    # don't hit the silent 401s. Revert once the refresh path is
+    # solid (or drop further to a sensible 15 if rotation is fixed).
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     REFRESH_TOKEN_GRACE_SECONDS: int = 120
 

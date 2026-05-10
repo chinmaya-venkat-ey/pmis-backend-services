@@ -98,6 +98,20 @@ class UserModel(Base):
     # leave the existing value alone unless the caller sends one.
     phone_number = Column(String(50), nullable=True)
 
+    # Doc 45 round 9b: stored copy of the user's intended orgRole tier
+    # (FE label — one of super_admin / admin / org_admin / project_admin
+    # / project_member / division_member, or NULL for legacy / unset).
+    # Set on create when the caller supplies ``orgRole``, regardless of
+    # whether project_ids accompany it. ``derive_org_role`` falls back
+    # to this column when no row in ``user_role_assignments`` matches —
+    # closes the previous gap where a project-tier user created without
+    # ``project_ids`` had ``orgRole=null`` on subsequent GETs because
+    # no role row was written. Authorization is still driven entirely
+    # by ``user_role_assignments`` / ``user_roles`` (this column does
+    # not grant any permissions), so an unmapped project_admin holds
+    # no project perms until a project assignment is added.
+    org_role = Column(String(50), nullable=True)
+
     # Doc 33 change 3: per-user 2FA opt-in. Default True (mandatory by
     # default per Q3a.4); admins can flip individual users to False via
     # PATCH /users/{id} when ``REQUIRE_2FA=true`` globally would be too

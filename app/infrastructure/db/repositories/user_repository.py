@@ -179,6 +179,7 @@ class UserRepository:
         division: Optional[str] = None,
         division_other: Optional[str] = None,
         phone_number: Optional[str] = None,
+        org_role: Optional[str] = None,
     ) -> User:
         """Create a new user. Caller is responsible for committing.
 
@@ -228,6 +229,7 @@ class UserRepository:
             division=division,
             division_other=division_other,
             phone_number=(phone_number.strip() if phone_number else None),
+            org_role=org_role,
             user_code=code,
             created_at=now,
             updated_at=now,

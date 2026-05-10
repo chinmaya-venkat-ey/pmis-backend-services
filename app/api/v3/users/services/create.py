@@ -356,6 +356,12 @@ def create_user(
             division=division,
             division_other=division_other,
             phone_number=phone_number,
+            # Doc 45 round 9b: persist the FE's intended orgRole tier on
+            # the user row. ``derive_org_role`` falls back to this column
+            # when no role-assignment row exists — closes the
+            # project-tier + empty-project_ids gap where the previous
+            # behaviour silently dropped the orgRole label.
+            org_role=normalized_org_role,
         )
 
         # Wire up project_members rows.

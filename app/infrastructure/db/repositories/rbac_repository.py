@@ -684,7 +684,21 @@ class RbacRepository:
 
     def derive_org_role(self, user_id: Optional[str]) -> Optional[str]:
         """Return the user's highest-tier role name (FE's ``orgRole``),
-        or None if the user holds no role known to the FE."""
+        or None if the user holds no role known to the FE.
+
+        Doc 45 round 9b: falls back to the ``users.org_role`` column
+        when the user has no rows in ``user_roles`` or
+        ``user_role_assignments`` matching a known FE tier. This closes
+        the gap where a project-tier user (project_admin /
+        project_member / division_member) created without
+        ``project_ids`` had ``orgRole=null`` on subsequent reads —
+        the create service writes the column so the tier label survives
+        even when no role-assignment row was attached.
+
+        Authorization is unaffected: permissions are still sourced
+        exclusively from role-assignment rows; the column is a label
+        only.
+        """
         if not user_id:
             return None
         # Collect every role name the user holds via either the legacy
@@ -714,6 +728,15 @@ class RbacRepository:
         for tier in self._ORG_ROLE_PRIORITY:
             if tier in held:
                 return tier
+        # Fallback — tier from the persisted users.org_role column.
+        from ..models.user import UserModel  # local import to avoid cycle
+        row = (
+            self.db.query(UserModel.org_role)
+            .filter(UserModel.id == user_id)
+            .first()
+        )
+        if row is not None and row[0] in self._ORG_ROLE_PRIORITY:
+            return row[0]
         return None
 
     def get_project_role_map(

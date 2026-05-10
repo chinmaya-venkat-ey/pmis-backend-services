@@ -273,7 +273,7 @@ class LoginResponse(BaseModel):
 class UserListQuery(BaseModel):
     """Query parameters for listing users."""
     offset: int = Field(1, ge=1, description="Page number (1-indexed)")
-    pageSize: int = Field(20, ge=1, le=100, description="Number of items per page")
+    pageSize: int = Field(20, ge=1, le=200, description="Number of items per page (max 200).")
     status: Optional[str] = Field(None, description="Filter by status")
     includeDeleted: bool = Field(
         False, alias="include_deleted",

@@ -34,9 +34,9 @@ def list_users(
             error="Page number must be >= 1",
             error_type="validation_error",
         )
-    if page_size < 1 or page_size > 100:
+    if page_size < 1 or page_size > 200:
         return ServiceResult.fail(
-            error="Page size must be between 1 and 100",
+            error="Page size must be between 1 and 200",
             error_type="validation_error",
         )
 

@@ -268,7 +268,7 @@ def check_login_available(
 def list_users(
     request: Request,
     offset: int = Query(1, ge=1, description="Page number (1-indexed)"),
-    pageSize: int = Query(20, ge=1, le=100, description="Items per page"),
+    pageSize: int = Query(20, ge=1, le=200, description="Items per page (max 200)."),
     status: str = Query(None, description="Filter by status"),
     include_deleted: bool = Query(
         False,

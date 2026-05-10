@@ -1,6 +1,6 @@
 {
   "info": {
-    "_postman_id": "384cf22c-7c3f-46b8-a02e-432809beddbc",
+    "_postman_id": "357a3ef0-8b11-44e4-b00e-4344d2bc3f4b",
     "name": "PMIS User Service",
     "description": "PMIS user-management + authentication microservice.\n\nAuto-generated from FastAPI OpenAPI by scripts/generate_postman_collection.py. Re-run that script after API changes.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
@@ -791,7 +791,7 @@
             "description": "Update user details. Path param accepts integer ``id`` or ``US-...`` code.\n\nGate (doc 44 round 5): callers need EITHER ``users:update`` (full edit \u2014 name / email / vendor / division / etc.) OR ``users:deactivate`` (status flip only \u2014 body must be limited to the ``status`` field). super_admin / admin hold both; org_admin / project_admin hold only ``users:deactivate`` so their PATCH calls are restricted to the status field.\n\nHierarchy boundary: an admin caller cannot modify a user who currently holds super_admin \u2014 only super_admin can. Returns 403.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"email\": \"user@example.com\",\n  \"firstName\": \"\",\n  \"lastName\": \"\",\n  \"admin\": false,\n  \"status\": \"\",\n  \"vendor_id\": \"\",\n  \"division\": \"\",\n  \"division_other\": \"\",\n  \"phone_number\": \"\"\n}",
+              "raw": "{\n  \"email\": \"user@example.com\",\n  \"firstName\": \"\",\n  \"lastName\": \"\",\n  \"admin\": false,\n  \"status\": \"\",\n  \"vendor_id\": \"\",\n  \"division\": \"\",\n  \"division_other\": \"\",\n  \"phone_number\": \"\",\n  \"project_ids\": [\n    \"\"\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"

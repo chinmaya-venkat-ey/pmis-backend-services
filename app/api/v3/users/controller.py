@@ -155,6 +155,33 @@ class UserController:
                 status=404,
             )
 
+        # Doc 44 round 9 — F1 read-side hierarchy guard. Only
+        # super_admin can read another super_admin's profile (PATCH /
+        # password / DELETE were already blocked by F1 in round 7;
+        # GET was the remaining gap). Self-fetch always allowed.
+        if (
+            requesting_user_id is not None
+            and requesting_user_id != canonical_id
+        ):
+            from ....infrastructure.db.repositories.rbac_repository import (
+                RbacRepository,
+            )
+            repo_rbac = RbacRepository(db)
+            target_is_super_admin = repo_rbac.user_has_super_admin_role(
+                canonical_id,
+            )
+            caller_is_super_admin = repo_rbac.user_has_super_admin_role(
+                requesting_user_id,
+            )
+            if target_is_super_admin and not caller_is_super_admin:
+                return BaseController.error(
+                    format_error_response(
+                        error_type="forbidden",
+                        message="Only super_admin can view a super_admin user.",
+                    ),
+                    status=403,
+                )
+
         result = get_user_by_id(
             db=db,
             user_id=canonical_id,
@@ -380,11 +407,7 @@ class UserController:
             can_change_status=can_change_status,
         )
 
-        if result.is_success():
-            payload = format_user_response(result.data.to_dict(), db=db)
-            resp = BaseController.ok(payload)
-            return resp
-        else:
+        if not result.is_success():
             error_payload = format_error_response(
                 error_type=result.error_type,
                 message=result.error,
@@ -400,8 +423,48 @@ class UserController:
             else:
                 status_code = 500
 
-            resp = BaseController.error(error_payload, status=status_code)
-            return resp
+            return BaseController.error(error_payload, status=status_code)
+
+        # Doc 44 round 9 — apply projectIds replacement after the user-
+        # field update succeeds. ``None`` is a no-op; ``[]`` clears;
+        # non-empty replaces. Caller-vs-target gate fires per grant /
+        # revoke. The helper flushes; we commit below.
+        if data.projectIds is not None:
+            from .services.replace_project_membership import (
+                replace_user_project_membership,
+            )
+            membership_result = replace_user_project_membership(
+                db=db,
+                user_id=canonical_id,
+                project_ids=data.projectIds,
+                caller_id=requesting_user_id,
+            )
+            if not membership_result.is_success():
+                db.rollback()
+                error_payload = format_error_response(
+                    error_type=membership_result.error_type,
+                    message=membership_result.error,
+                    details=membership_result.details,
+                )
+                status_code = (
+                    403 if membership_result.error_type == "authorization_error"
+                    else 422
+                )
+                return BaseController.error(error_payload, status=status_code)
+            db.commit()
+
+            # Re-hydrate the user so the response carries the updated
+            # projects[] / projectAssignments[] arrays.
+            from ....infrastructure.db.repositories.user_repository import (
+                UserRepository,
+            )
+            refreshed = UserRepository(db).get_by_id(canonical_id)
+            if refreshed is not None:
+                payload = format_user_response(refreshed.to_dict(), db=db)
+                return BaseController.ok(payload)
+
+        payload = format_user_response(result.data.to_dict(), db=db)
+        return BaseController.ok(payload)
 
     @staticmethod
     def update_password(

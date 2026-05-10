@@ -1,6 +1,6 @@
 # RBAC Guide — pmis-user-service
 
-**Last refresh**: 2026-05-09 (post-doc-44 round 8 — alignment-audit BE fixes shipped). The mental model + role bundles + lockout protections are kept in lockstep with the monolith via the shared `app/core/permissions.py` registry; for the canonical narrative, see the monolith's `RBAC_GUIDE.md` and `planned_changes/44.*`. This file mirrors what's relevant to user-mgmt.
+**Last refresh**: 2026-05-10 (post-doc-44 round 9 — tester-feedback BE fixes shipped: F1 read-side gate on `GET /users/{id}`, OA vendor-edit allowlist widened, `PATCH /users/{id}` accepts `projectIds`). The mental model + role bundles + lockout protections are kept in lockstep with the monolith via the shared `app/core/permissions.py` registry; for the canonical narrative, see the monolith's `RBAC_GUIDE.md` and `planned_changes/44.*` + `planned_changes/45.*`. This file mirrors what's relevant to user-mgmt.
 
 This service is the authoritative RBAC source for PMIS. The monolith reads from the same `roles` / `permissions` / `role_permissions` / `user_roles` / `user_permissions` / `user_role_assignments` tables (shared DB) but doesn't write to RBAC — every assignment, grant, role mutation, and permission catalog edit lands here. (Monolith does mutate `user_role_assignments` on the alembic migration backfill path during deploy, but at runtime all RBAC writes flow through user-mgmt.)
 

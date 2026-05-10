@@ -175,6 +175,30 @@ class UserUpdateRequest(BaseModel):
             "vendor PATCH schema."
         ),
     )
+    # Doc 44 round 9 — round-trip parity with CREATE + GET on the
+    # project-mapping field. Pre-round-9 PATCH /users/{id} only edited
+    # the user's own fields (name, email, vendor, division, status);
+    # changing project mappings required hitting per-user
+    # role-assignments endpoints separately. Round 9 accepts
+    # ``projectIds`` here so a single FE form-save can update everything.
+    # ``orgRole`` and ``projectAssignments`` are deferred to a follow-up
+    # — those need a richer diff/grant pipeline against the
+    # caller-vs-target gate that isn't ready yet. Use POST/DELETE on
+    # ``/users/{id}/role-assignments`` for now.
+    projectIds: Optional[List[str]] = Field(
+        None,
+        alias="project_ids",
+        description=(
+            "Project mapping. ``None`` (omitted) leaves existing mappings "
+            "unchanged; ``[]`` clears them; a non-empty list REPLACES the "
+            "full project-membership set. Re-binds project-scoped role "
+            "assignments accordingly: rows for projects no longer in the "
+            "list are revoked; rows for new projects are granted using "
+            "the user's current orgRole. Caller-vs-target rules apply "
+            "per row — admin / super_admin always pass; org_admin can "
+            "only operate on projects within their vendor."
+        ),
+    )
 
     @field_validator("status")
     @classmethod

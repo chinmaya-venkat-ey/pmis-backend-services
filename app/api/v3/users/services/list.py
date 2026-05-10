@@ -16,11 +16,18 @@ def list_users(
     is_admin: bool = False,
     include_deleted: bool = False,
     vendor_id_filter: Optional[str] = None,
+    exclude_admin_tier: bool = False,
 ) -> ServiceResult[PaginatedResult]:
     """List users with pagination, newest first.
 
     Soft-deleted rows are hidden by default. Admin can request them via
     ``include_deleted=True`` (e.g. for an audit view).
+
+    Doc 46 round 10 #6 / #13: ``exclude_admin_tier`` excludes any user
+    holding ``admin`` or ``super_admin`` role (legacy or scoped) from
+    the result. Set by the controller when the caller is non-admin so
+    OA / PA never see PMIS-Admin candidates in their User Mgmt list
+    or Assign-To dropdowns.
     """
     if page < 1:
         return ServiceResult.fail(
@@ -57,6 +64,7 @@ def list_users(
             status=status,
             include_deleted=include_deleted,
             vendor_id=vendor_id_filter,
+            exclude_admin_tier=exclude_admin_tier,
         )
         return ServiceResult.ok(PaginatedResult(
             items=users, total=total, page=page, page_size=page_size,

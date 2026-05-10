@@ -4,6 +4,14 @@ User API schemas (request/response models).
 from typing import List, Optional
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
+from ....core.permissions import (
+    ADMIN_ROLE_NAME,
+    DIVISION_MEMBER_ROLE_NAME,
+    ORG_ADMIN_ROLE_NAME,
+    PROJECT_ADMIN_ROLE_NAME,
+    PROJECT_MEMBER_ROLE_NAME,
+    SUPER_ADMIN_ROLE_NAME,
+)
 from ....domain.resource_types.resource_type import (
     DIVISION_CHOICES,
     DIVISION_OTHERS,
@@ -13,6 +21,18 @@ from ....domain.resource_types.resource_type import (
 # Allowed values for the user's status field. "inactive" is what soft-deleted
 # users carry; admins can also set it manually via the Edit User flow.
 _USER_STATUS_CHOICES = ("active", "inactive", "locked", "registered")
+
+# Doc 46 round 10 #3 — orgRole is now required on POST /users/create.
+# Tester-feedback: "While adding a user, the Role field should be
+# mandatory." The valid values are the six seeded role names.
+_ORG_ROLE_CHOICES = (
+    SUPER_ADMIN_ROLE_NAME,
+    ADMIN_ROLE_NAME,
+    ORG_ADMIN_ROLE_NAME,
+    PROJECT_ADMIN_ROLE_NAME,
+    PROJECT_MEMBER_ROLE_NAME,
+    DIVISION_MEMBER_ROLE_NAME,
+)
 
 
 class ProjectAssignmentEntry(BaseModel):
@@ -107,16 +127,20 @@ class UserCreateRequest(BaseModel):
             "``phoneNumber`` field exactly."
         ),
     )
-    # Doc 44 — role-aware create.
-    orgRole: Optional[str] = Field(
-        None, alias="orgRole",
+    # Doc 46 round 10 #3 — required (was Optional in doc 44).
+    # Tester-feedback: "While adding a user, the Role field should be
+    # mandatory."
+    orgRole: str = Field(
+        ..., alias="orgRole",
         description=(
-            "Primary role to grant to the user at create time. One of: "
-            "super_admin, admin, org_admin, project_admin, project_member. "
-            "Subject to caller-vs-target rules: super_admin can set any; "
-            "admin can set any except super_admin/admin; org_admin can set "
-            "project_admin / project_member only; project_admin can set "
-            "project_member only; project_member cannot create users."
+            "Primary role to grant the new user. REQUIRED. One of: "
+            "super_admin, admin, org_admin, project_admin, project_member, "
+            "division_member. Subject to caller-vs-target rules: "
+            "super_admin can set any except super_admin (init_db only); "
+            "admin can set any except super_admin / admin; org_admin can "
+            "set project_admin / project_member / division_member only; "
+            "project_admin can set project_member only; project_member "
+            "cannot create users."
         ),
     )
     projectAssignments: Optional[List[ProjectAssignmentEntry]] = Field(
@@ -142,6 +166,15 @@ class UserCreateRequest(BaseModel):
         if v not in DIVISION_CHOICES:
             raise ValueError(
                 f"Division must be one of: {', '.join(DIVISION_CHOICES)}."
+            )
+        return v
+
+    @field_validator("orgRole")
+    @classmethod
+    def _validate_org_role(cls, v: str) -> str:
+        if v not in _ORG_ROLE_CHOICES:
+            raise ValueError(
+                f"orgRole must be one of: {', '.join(_ORG_ROLE_CHOICES)}."
             )
         return v
 

@@ -371,6 +371,7 @@ class UserRepository:
         *,
         include_deleted: bool = False,
         vendor_id: Optional[str] = None,
+        exclude_admin_tier: bool = False,
     ) -> Tuple[List[User], int]:
         """List users — newest first, soft-deleted hidden by default.
 
@@ -378,6 +379,14 @@ class UserRepository:
         only users with that ``users.vendor_id`` are returned. Used by
         the route layer to scope org_admin / project_admin's listing
         to their own vendor.
+
+        Doc 46 round 10 #6 / #13: when ``exclude_admin_tier=True`` the
+        result also excludes any user who holds the ``admin`` or
+        ``super_admin`` role (via legacy ``user_roles`` OR doc-41
+        ``user_role_assignments``). Spec: org_admin must not see
+        PMIS Admin / Super Admin users in User Management, and
+        Project Admin / Org Admin "Assign To" dropdowns must not
+        surface PMIS Admin candidates.
         """
         query = self.db.query(UserModel)
         if not include_deleted:
@@ -386,6 +395,30 @@ class UserRepository:
             query = query.filter(UserModel.status == status)
         if vendor_id is not None:
             query = query.filter(UserModel.vendor_id == vendor_id)
+
+        if exclude_admin_tier:
+            from ..models.user_role import UserRoleModel
+            from ..models.user_role_assignment import UserRoleAssignmentModel
+            from sqlalchemy import or_, exists, select
+            admin_tier_names = (_ADMIN_ROLE_NAME, _SUPER_ADMIN_ROLE_NAME)
+            # NOT EXISTS sub-queries against both legacy and scoped
+            # role tables — a user is excluded if they hold the role in
+            # EITHER place, so we OR the two existence checks and negate.
+            legacy_holder = (
+                self.db.query(UserRoleModel.user_id)
+                .join(RoleModel, RoleModel.id == UserRoleModel.role_id)
+                .filter(UserRoleModel.user_id == UserModel.id)
+                .filter(RoleModel.name.in_(admin_tier_names))
+                .exists()
+            )
+            scoped_holder = (
+                self.db.query(UserRoleAssignmentModel.user_id)
+                .join(RoleModel, RoleModel.id == UserRoleAssignmentModel.role_id)
+                .filter(UserRoleAssignmentModel.user_id == UserModel.id)
+                .filter(RoleModel.name.in_(admin_tier_names))
+                .exists()
+            )
+            query = query.filter(~legacy_holder).filter(~scoped_holder)
 
         total = query.count()
 

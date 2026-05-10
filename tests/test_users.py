@@ -61,8 +61,14 @@ def _create_body(*, login="newuser", email="new@example.com",
                  password="password123", vendor_id, project_ids,
                  division="tmd1", division_other=None,
                  phone_number="9876543210",
-                 first_name="New", last_name="User"):
-    """Build a valid create payload with all required fields filled in."""
+                 first_name="New", last_name="User",
+                 org_role="project_member"):
+    """Build a valid create payload with all required fields filled in.
+
+    Doc 46 round 10 #3 made ``orgRole`` required on POST /users/create.
+    Default to ``project_member`` so existing tests that don't care
+    about the role still pass.
+    """
     body = {
         "login": login,
         "email": email,
@@ -74,6 +80,7 @@ def _create_body(*, login="newuser", email="new@example.com",
         "division": division,
         "projectIds": project_ids,
         "phoneNumber": phone_number,
+        "orgRole": org_role,
     }
     if division_other is not None:
         body["divisionOther"] = division_other

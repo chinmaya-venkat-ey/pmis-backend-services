@@ -28,6 +28,7 @@ from .permissions import (
     USERS_DEACTIVATE,
     USERS_DELETE_ALL
 )
+from ....core.base_controller import BaseController
 from ....core.middleware.rbac import (
     require_any_permission,
     require_authenticated,
@@ -223,6 +224,39 @@ def create_user(
     Requires: USERS_CREATE permission (admin only)
     """
     return UserController.create(request, data, db)
+
+
+@router.get(
+    "/check-login",
+    dependencies=[require_authenticated()],
+    summary="Check whether a login is available (real-time uniqueness)",
+    description=(
+        "Doc 46 round 10 #4 — lightweight uniqueness probe for the FE "
+        "create-user form. Returns ``{available: bool, login: str}`` so "
+        "the FE can debounce on every keystroke without spinning up a "
+        "full POST /create that would 409. Authenticated to avoid "
+        "casual login-enumeration; only callers who can already list "
+        "users (or are inside the create flow) need this anyway. "
+        "Includes soft-deleted rows in the existence check — same rule "
+        "as POST /create — so a tombstoned login cannot be recycled."
+    ),
+)
+def check_login_available(
+    login: str = Query(
+        ...,
+        min_length=1,
+        max_length=255,
+        description="The login to check.",
+    ),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    from ....infrastructure.db.repositories.user_repository import UserRepository
+    repo = UserRepository(db)
+    taken = repo.exists_by_login(login.strip())
+    return BaseController.ok(data={
+        "login": login.strip(),
+        "available": not taken,
+    })
 
 
 @router.get(

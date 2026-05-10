@@ -326,6 +326,11 @@ class UserController:
             is_admin=is_admin,
             include_deleted=getattr(query, "includeDeleted", False),
             vendor_id_filter=vendor_id_filter,
+            # Doc 46 round 10 #6 / #13 — non-admin callers (org_admin /
+            # project_admin) must not see PMIS-Admin / Super-Admin
+            # users in their listing or dropdown sources. The
+            # is_admin bypass keeps admin views unchanged.
+            exclude_admin_tier=not is_admin,
         )
 
         if result.is_success():

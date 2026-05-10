@@ -24,6 +24,139 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 COLLECTION = REPO_ROOT / "PMIS_User_Service.postman_collection.json"
 OUTPUT = REPO_ROOT / "POSTMAN_CURLS.md"
 
+# ---------------------------------------------------------------------------
+# Sample-value substitution. Goal: every curl is copy-paste-runnable
+# with sensible defaults. Dynamic values that MUST come from a prior
+# response (ephemeral_token, refresh_token, dynamic assignment_id) stay
+# as ``<UPPERCASE>`` placeholders so the user knows to swap them.
+# ---------------------------------------------------------------------------
+
+# Replace literal Postman variables in URLs.
+URL_VAR_DEFAULTS = {
+    "{{baseUrl}}": "http://10.1.131.199:8001",
+    "{{accessToken}}": "<ACCESS_TOKEN>",
+}
+
+# Path placeholders (`:user_id`, `:role_id`, …). Values picked from
+# real seeded data on the dev server: bootstrap admin user, "role org"
+# vendor, "ey app" published project, `admin` role (id 12).
+PATH_VAR_DEFAULTS = {
+    "user_id": "94eeede1-c925-44ad-8de6-416dc87b5999",  # bootstrap admin
+    "target_id": "94eeede1-c925-44ad-8de6-416dc87b5999",
+    "role_id": "12",                                      # admin role
+    "role_name": "admin",
+    "vendor_id": "7f9ec285-5a94-4d2f-9d2c-a248d302b1c5",  # role org
+    "project_uuid": "a278f77b-a2ef-4797-b4fa-ac3fe82e7037",  # ey app
+    "project_id": "a278f77b-a2ef-4797-b4fa-ac3fe82e7037",
+    "code": "users:read",
+    "permission_code": "users:read",
+    "assignment_id": "<ASSIGNMENT_ID>",
+    "milestone_id": "<MILESTONE_ID>",
+    "activity_id": "<ACTIVITY_ID>",
+    "task_id": "<TASK_ID>",
+    "subtask_id": "<SUBTASK_ID>",
+    "parent_subtask_id": "<PARENT_SUBTASK_ID>",
+    "comment_id": "<COMMENT_ID>",
+    "attachment_id": "<ATTACHMENT_ID>",
+    "membership_id": "<MEMBERSHIP_ID>",
+    "transition_id": "<TRANSITION_ID>",
+    "division_id": "<DIVISION_ID>",
+    "resource_type_id": "<RESOURCE_TYPE_ID>",
+    "id": "<ID>",
+}
+
+# Body field defaults — flat key → value lookup. Walks every JSON
+# object in the body and fills empty / placeholder values per this map.
+BODY_FIELD_DEFAULTS = {
+    # ---- auth ----
+    "login": "your_login",
+    "login_or_email": "your_login",
+    "password": "Pmis@1234",
+    "new_password": "Pmis@1234",
+    "ephemeral_token": "<EPHEMERAL_TOKEN>",
+    "code": "000000",
+    "channel": "email",
+    "token_or_code": "<TOKEN_OR_CODE>",
+    "access_token": "<ACCESS_TOKEN>",
+    "refresh_token": "<REFRESH_TOKEN>",
+
+    # ---- user / vendor common ----
+    "email": "user@example.com",
+    "firstName": "John",
+    "lastName": "Doe",
+    "phoneNumber": "+919999999999",
+    "phone_number": "+919999999999",
+    "admin": False,
+    "status": "active",
+    "vendorId": "7f9ec285-5a94-4d2f-9d2c-a248d302b1c5",
+    "vendor_id": "7f9ec285-5a94-4d2f-9d2c-a248d302b1c5",
+    "division": "tmd1",
+    "divisionOther": None,
+    "division_other": None,
+    "orgRole": "project_member",
+    "name": "Sample Name",
+    "description": "Sample description",
+    "active": True,
+    "contactPerson": "Jane Doe",
+    "contact_person": "Jane Doe",
+
+    # ---- ids & references ----
+    "userId": "94eeede1-c925-44ad-8de6-416dc87b5999",
+    "user_id": "94eeede1-c925-44ad-8de6-416dc87b5999",
+    "roleId": 12,
+    "role_id": 12,
+    "projectId": "a278f77b-a2ef-4797-b4fa-ac3fe82e7037",
+    "project_id": "a278f77b-a2ef-4797-b4fa-ac3fe82e7037",
+    "organizationId": "7f9ec285-5a94-4d2f-9d2c-a248d302b1c5",
+    "organization_id": "7f9ec285-5a94-4d2f-9d2c-a248d302b1c5",
+    "role": "project_member",
+
+    # ---- catalog rows ----
+    "label": "Sample Label",
+    "requiresOther": False,
+    "requires_other": False,
+}
+
+# When the schema gives a List[X] sample with a single placeholder
+# entry, fill the entry with a sensible value where we have a default
+# for that element shape.
+LIST_FIELD_DEFAULTS = {
+    "project_ids": ["a278f77b-a2ef-4797-b4fa-ac3fe82e7037"],
+    "projectIds": ["a278f77b-a2ef-4797-b4fa-ac3fe82e7037"],
+    "user_ids": ["94eeede1-c925-44ad-8de6-416dc87b5999"],
+    "userIds": ["94eeede1-c925-44ad-8de6-416dc87b5999"],
+    "permissions": ["users:read"],
+    # projectAssignments + assignments stay as a single sample dict;
+    # the dict's interior fields are filled by BODY_FIELD_DEFAULTS.
+}
+
+
+def _fill_body(value: Any, key_hint: str | None = None) -> Any:
+    """Recursively walk a parsed JSON body and substitute sample values.
+
+    The key_hint is the field name from the parent object — used so we
+    can fill ``"login": ""`` based on the key, not the empty value.
+    """
+    if isinstance(value, dict):
+        return {k: _fill_body(v, key_hint=k) for k, v in value.items()}
+    if isinstance(value, list):
+        # Whole-list override (e.g., project_ids → list of UUIDs).
+        if key_hint in LIST_FIELD_DEFAULTS:
+            return list(LIST_FIELD_DEFAULTS[key_hint])
+        # Otherwise recurse into each entry.
+        return [_fill_body(v) for v in value]
+    # Leaf: fill if the field name is known AND the existing value is
+    # the OpenAPI-generator sentinel (empty string, 0, etc.).
+    if key_hint in BODY_FIELD_DEFAULTS:
+        is_empty_string = isinstance(value, str) and value == ""
+        is_zero = value == 0 or value is False
+        is_none = value is None
+        # Always override known fields. The OpenAPI generator tends to
+        # emit empty strings; we replace them with sensible defaults.
+        if is_empty_string or is_none or is_zero or value == "user@example.com":
+            return BODY_FIELD_DEFAULTS[key_hint]
+    return value
+
 
 def _flatten_items(items: List[dict], parent_path: Tuple[str, ...] = ()) -> Iterable[Tuple[Tuple[str, ...], dict]]:
     """Yield (folder_path, request_item) pairs for every leaf item."""
@@ -34,22 +167,55 @@ def _flatten_items(items: List[dict], parent_path: Tuple[str, ...] = ()) -> Iter
             yield parent_path, it
 
 
-def _curl_for(item: dict) -> str:
-    """Build a single multi-line curl command for a Postman request item.
+def _substitute_url(url_raw: str) -> str:
+    """Apply URL_VAR_DEFAULTS + PATH_VAR_DEFAULTS to a Postman raw URL."""
+    out = url_raw
+    for var, val in URL_VAR_DEFAULTS.items():
+        out = out.replace(var, val)
+    # Postman raw URLs use ``{path_var}`` while path arrays use ``:path_var``.
+    for var, val in PATH_VAR_DEFAULTS.items():
+        out = out.replace("{" + var + "}", val)
+    return out
 
-    Keeps Postman placeholders ({{baseUrl}}, {{accessToken}}, :path_var)
-    so the user can do a global find-replace.
+
+def _substitute_header(value: str) -> str:
+    out = value
+    for var, val in URL_VAR_DEFAULTS.items():
+        out = out.replace(var, val)
+    return out
+
+
+def _substitute_body(raw: str) -> str:
+    """Parse the raw JSON body, fill sample values, and re-serialize.
+
+    Falls back to the original raw text if parsing fails (e.g. a body
+    that isn't valid JSON for some reason)."""
+    try:
+        parsed = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return raw
+    filled = _fill_body(parsed)
+    return json.dumps(filled, indent=2)
+
+
+def _curl_for(item: dict) -> str:
+    """Build a single multi-line curl command with sample values filled in.
+
+    Postman placeholders ({{baseUrl}}, path vars) are substituted from
+    URL_VAR_DEFAULTS / PATH_VAR_DEFAULTS. Body fields are filled from
+    BODY_FIELD_DEFAULTS / LIST_FIELD_DEFAULTS. Auth headers stay as
+    ``<ACCESS_TOKEN>`` for the user to paste a fresh JWT.
     """
     req = item["request"]
     method = req.get("method", "GET").upper()
-    url_raw = req.get("url", {}).get("raw", "")
+    url_raw = _substitute_url(req.get("url", {}).get("raw", ""))
 
     parts: List[str] = [f"curl -X {method} '{url_raw}'"]
     for h in req.get("header", []) or []:
         if h.get("disabled"):
             continue
         key = h.get("key", "")
-        val = h.get("value", "")
+        val = _substitute_header(h.get("value", ""))
         # Escape single quotes in header values.
         val_safe = val.replace("'", "'\\''")
         parts.append(f"  -H '{key}: {val_safe}'")
@@ -58,10 +224,8 @@ def _curl_for(item: dict) -> str:
     if body.get("mode") == "raw":
         raw = body.get("raw", "")
         if raw:
-            # Use $'...' if there's a newline so the multi-line JSON is preserved.
-            # Simpler: wrap in single quotes; users can paste into a shell
-            # that supports literal single-quote strings or rewrite for Windows.
-            body_safe = raw.replace("'", "'\\''")
+            filled = _substitute_body(raw)
+            body_safe = filled.replace("'", "'\\''")
             parts.append(f"  -d '{body_safe}'")
 
     return " \\\n".join(parts)
@@ -93,19 +257,28 @@ def main() -> None:
         out.append(f"\n{desc}\n")
     out.append(
         "\n## How to use\n\n"
-        "1. Replace `{{baseUrl}}` with the service URL — typically "
-        "`http://10.1.131.199:8001` for user-mgmt or "
-        "`http://10.1.131.199:8000` for the monolith.\n"
-        "2. Replace `{{accessToken}}` with the bearer JWT from the "
-        "login flow (Authenticate → Send OTP → Verify OTP). On the dev "
-        "server the universal OTP is `000000`.\n"
-        "3. Replace path placeholders like `:user_id`, `:vendor_id`, "
-        "`:project_uuid` with real IDs.\n"
-        "4. Replace empty body fields (`\"login\": \"\"` etc.) with "
-        "your values before firing.\n\n"
-        "On Windows PowerShell, swap single-quoted bodies for double-"
-        "quoted with escaped inner quotes, or run from Git Bash / WSL "
-        "where the quoting works as written.\n\n"
+        "Sample values are pre-filled — most curls run as-is once you "
+        "paste a fresh `<ACCESS_TOKEN>`. Keep the placeholders below "
+        "in mind:\n\n"
+        "- **`<ACCESS_TOKEN>`** — bearer JWT. Get one from the login "
+        "flow (`Authenticate user` → `Send OTP for 2FA login` → "
+        "`Verify OTP and complete login`). On the dev server the "
+        "universal OTP is `000000`. Tokens last ~15 min.\n"
+        "- **`<EPHEMERAL_TOKEN>`**, **`<TOKEN_OR_CODE>`**, "
+        "**`<REFRESH_TOKEN>`** — come from a prior response in the "
+        "auth flow. Substitute on each call.\n"
+        "- **`<ASSIGNMENT_ID>`**, **`<MILESTONE_ID>`**, etc. — IDs "
+        "the curl can't know up-front. Hit the relevant `GET /list` "
+        "first and paste an ID from the response.\n\n"
+        "Pre-filled sample IDs use real seeded data on the dev server "
+        "(`http://10.1.131.199`):\n"
+        "- bootstrap admin user `94eeede1-c925-44ad-8de6-416dc87b5999`,\n"
+        "- vendor `7f9ec285-5a94-4d2f-9d2c-a248d302b1c5` (\"role org\"),\n"
+        "- published project `a278f77b-a2ef-4797-b4fa-ac3fe82e7037` (\"ey app\"),\n"
+        "- `admin` role id `12`.\n\n"
+        "**Windows PowerShell**: swap single-quoted bodies for double-"
+        "quoted with escaped inner quotes, or run the curls from Git "
+        "Bash / WSL where the quoting works verbatim.\n\n"
         "---\n"
     )
 

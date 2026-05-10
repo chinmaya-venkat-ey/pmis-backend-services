@@ -2,15 +2,20 @@ name: pmis-usermanagement
 
 services:
   pmis-usermanagement:
-    image: ritamhudait/pmis-usermanagement:${IMAGE_TAG:-latest}
+    image: ${DOCKER_USERNAME:+${DOCKER_USERNAME}/}pmis-usermanagement:${IMAGE_TAG}
     container_name: pmis-usermanagement
     restart: unless-stopped
+
+    # Enable host access (important for DB)
     extra_hosts:
       - "host.docker.internal:host-gateway"
+
     env_file:
-      - /home/uidaiadmin/pmis-usermanagement/.env
+      - .env
+
     ports:
       - "8001:8001"
+
     healthcheck:
       test: ["CMD", "python", "-c",
              "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]

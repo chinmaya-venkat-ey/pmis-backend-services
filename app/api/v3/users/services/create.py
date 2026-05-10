@@ -149,11 +149,6 @@ def create_user(
         )
 
     # ---- Division ------------------------------------------------------
-    if division not in DIVISION_CHOICES:
-        return ServiceResult.fail(
-            error=f"Division must be one of: {', '.join(DIVISION_CHOICES)}.",
-            error_type="validation_error",
-        )
     if division == DIVISION_OTHERS:
         if not division_other:
             return ServiceResult.fail(

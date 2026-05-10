@@ -203,13 +203,6 @@ def update_user(
     clear_division_other = False
 
     if division is not None:
-        if final_division not in DIVISION_CHOICES:
-            return ServiceResult.fail(
-                error=(
-                    f"Division must be one of: {', '.join(DIVISION_CHOICES)}."
-                ),
-                error_type="validation_error",
-            )
         if final_division != DIVISION_OTHERS and division_other is None:
             # Division is changing AWAY from 'others' and the caller
             # didn't supply a new label → clear the existing one.

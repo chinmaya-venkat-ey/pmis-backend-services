@@ -412,6 +412,100 @@ def list_vendor_projects(
     })
 
 
+@vendor_projects_router.get(
+    "/{vendor_id}/users",
+    dependencies=[require_authenticated()],
+    summary="Users mapped to a vendor (employees of this organization)",
+    description=(
+        "Returns every user whose ``users.vendor_id`` equals "
+        "``vendor_id`` — i.e. the vendor's direct employees, "
+        "regardless of whether they currently hold a project-tier "
+        "role assignment. Distinct from GET /vendors/{id} (which "
+        "returns the per-project per-role ``user_assignments`` "
+        "matrix) and from GET /vendors/{id}/role-assignments. "
+        "Authorization: USERS_READ_ALL (admin / super_admin) OR "
+        "org_admin scoped to this vendor. Non-admin callers do NOT "
+        "see admin / super_admin tier users in the result, per "
+        "round 10."
+    ),
+)
+def list_vendor_users(
+    request: Request,
+    vendor_id: str,
+    offset: int = Query(1, ge=1, description="Page number (1-indexed)."),
+    pageSize: int = Query(50, ge=1, le=200, description="Items per page (max 200)."),
+    status: Optional[str] = Query(None, description="Filter by status (default: active for non-admin)."),
+    include_deleted: bool = Query(False, description="Admin-only: also surface soft-deleted users."),
+    db: Session = Depends(get_db),
+    caller_id: str = Depends(get_current_user_id),
+) -> Dict[str, Any]:
+    # Authz: global users-read-all (admin / super_admin) OR org_admin
+    # of this specific vendor. Mirrors list_vendor_projects above.
+    perms = getattr(request.state, "user_permissions", set()) or set()
+    scoped = getattr(request.state, "scoped_permissions", {}) or {}
+    is_global_reader = USERS_READ_ALL in perms
+    is_org_scoped = ("org", vendor_id) in scoped
+    if not (is_global_reader or is_org_scoped):
+        return BaseController.error(
+            format_error_response(
+                "forbidden",
+                "Insufficient permissions to view this organization's users.",
+            ),
+            status=403,
+        )
+
+    vendor = (
+        db.query(VendorModel)
+        .filter(VendorModel.id == vendor_id, VendorModel.deleted_at.is_(None))
+        .first()
+    )
+    if vendor is None:
+        return BaseController.error(
+            format_error_response("not_found", f"Vendor {vendor_id} not found."),
+            status=404,
+        )
+
+    is_admin = getattr(request.state, "is_admin", False)
+    # Delegate to the existing list-users service so pagination /
+    # status filter / soft-delete handling / admin-tier exclusion
+    # match GET /users behaviour 1:1. Only the vendor_id_filter is
+    # forced to this path's vendor regardless of caller's own vendor.
+    from ..users.services.list import list_users
+    from ....core.response import format_collection_response
+
+    result = list_users(
+        db=db,
+        page=offset,
+        page_size=pageSize,
+        status=status,
+        is_admin=is_admin,
+        include_deleted=include_deleted,
+        vendor_id_filter=vendor.id,
+        # Round 10 #6/#13 — non-admin callers must not see PMIS Admin /
+        # Super Admin users in vendor-scoped listings either.
+        exclude_admin_tier=not is_admin,
+    )
+
+    if not result.is_success():
+        status_code = 422 if result.error_type == "validation_error" else 500
+        return BaseController.error(
+            format_error_response(result.error_type, result.error),
+            status=status_code,
+        )
+
+    paginated = result.data
+    user_dicts = [u.to_dict() for u in paginated.items]
+    payload = format_collection_response(
+        items=user_dicts,
+        total=paginated.total,
+        page=paginated.page,
+        page_size=paginated.page_size,
+        collection_type="users",
+        db=db,
+    )
+    return BaseController.ok(payload)
+
+
 # ---------------------------------------------------------------------------
 # /users/{user_id}/projects — User-Mgmt landing view
 # (mounted on the user_role_assignments_router so /users/* shares one prefix)

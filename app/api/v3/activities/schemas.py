@@ -195,10 +195,12 @@ class ActivityCreateRequest(BaseModel):
     @field_validator("priority", mode="before")
     @classmethod
     def _normalize_priority(cls, v):
-        # Lowercase + strip; live catalog validation happens in the
-        # service layer (so p4/p5 etc. added by an admin are accepted).
+        # Uppercase + strip. Persisted canonical form is UPPERCASE
+        # (P1/P2/P3) — lowercase input accepted for back-compat.
+        # Live catalog validation happens in the service layer (so
+        # P4/P5 etc. added by an admin are accepted).
         if isinstance(v, str):
-            v = v.strip().lower()
+            v = v.strip().upper()
         return v
 
 
@@ -267,7 +269,7 @@ class ActivityUpdateRequest(BaseModel):
         if v is None:
             return v
         if isinstance(v, str):
-            v = v.strip().lower()
+            v = v.strip().upper()
         return v
 
 

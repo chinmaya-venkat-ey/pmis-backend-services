@@ -8,8 +8,15 @@ from ...shared.datetime import iso_ist
 
 # In-code fallback used when the DB catalog is empty (test fixtures
 # on fresh in-memory DBs that don't run init_db / migrations).
-PRIORITY_CHOICES = ("p1", "p2", "p3")
-PRIORITY_DEFAULT = "p3"
+#
+# UI-alignment migration: codes are persisted in canonical UPPERCASE
+# (``P1`` / ``P2`` / ``P3``) so the FE shows them verbatim without
+# a per-render uppercase translation. The Pydantic ``_normalize_priority``
+# validators on every M/A/T/S schema uppercase incoming values before
+# validation, so legacy callers still sending lowercase ``"p1"`` keep
+# working through the transition (input-tolerance).
+PRIORITY_CHOICES = ("P1", "P2", "P3")
+PRIORITY_DEFAULT = "P3"
 
 
 @dataclass

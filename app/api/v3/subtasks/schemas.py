@@ -70,7 +70,7 @@ class SubtaskCreateRequest(BaseModel):
     @classmethod
     def _normalize_priority(cls, v):
         if isinstance(v, str):
-            v = v.strip().lower()
+            v = v.strip().upper()
         return v
 
 
@@ -113,7 +113,7 @@ class SubtaskUpdateRequest(BaseModel):
         if v is None:
             return v
         if isinstance(v, str):
-            v = v.strip().lower()
+            v = v.strip().upper()
         return v
 
 

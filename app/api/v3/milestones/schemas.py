@@ -77,7 +77,7 @@ class MilestoneCreateRequest(BaseModel):
     @classmethod
     def _normalize_priority(cls, v):
         if isinstance(v, str):
-            v = v.strip().lower()
+            v = v.strip().upper()
         return v
 
 
@@ -129,7 +129,7 @@ class MilestoneUpdateRequest(BaseModel):
         if v is None:
             return v
         if isinstance(v, str):
-            v = v.strip().lower()
+            v = v.strip().upper()
         return v
 
 

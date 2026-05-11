@@ -68,7 +68,7 @@ class TaskCreateRequest(BaseModel):
     @classmethod
     def _normalize_priority(cls, v):
         if isinstance(v, str):
-            v = v.strip().lower()
+            v = v.strip().upper()
         return v
 
 
@@ -111,7 +111,7 @@ class TaskUpdateRequest(BaseModel):
         if v is None:
             return v
         if isinstance(v, str):
-            v = v.strip().lower()
+            v = v.strip().upper()
         return v
 
 

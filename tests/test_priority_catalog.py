@@ -2,12 +2,12 @@
 
 End-to-end coverage of the new feature:
 
-  - GET /api/v3/master/priorities lists the seeded p1/p2/p3.
-  - POST /api/v3/master/priorities/create lets admin add p4 etc.
+  - GET /api/v3/master/priorities lists the seeded P1/P2/P3.
+  - POST /api/v3/master/priorities/create lets admin add P4 etc.
   - PATCH /api/v3/master/priorities/{code} updates name/description.
   - DELETE / restore for non-builtin rows; built-ins refuse.
   - Activity create REQUIRES priority — 422 when omitted.
-  - Activity create accepts an admin-added code (p4) once it exists
+  - Activity create accepts an admin-added code (P4) once it exists
     in the catalog; rejects unknown codes with 422.
   - Activity PATCH updates priority.
   - Tree response surfaces priority on every activity node.
@@ -23,7 +23,7 @@ def _iso(y, m, d):
 
 @pytest.fixture
 def _seeded_priorities(db_session):
-    """The migration seeds p1/p2/p3, but in-memory tests don't run
+    """The migration seeds P1/P2/P3, but in-memory tests don't run
     migrations. Insert the rows manually so the catalog has the
     built-ins the tests expect."""
     from app.infrastructure.db.models.priority import PriorityModel
@@ -31,9 +31,9 @@ def _seeded_priorities(db_session):
         r.code for r in db_session.query(PriorityModel.code).all()
     }
     seeds = (
-        ("p1", "p1", "High priority", 1),
-        ("p2", "p2", "Medium priority", 2),
-        ("p3", "p3", "Low priority (default)", 3),
+        ("P1", "P1", "High priority", 1),
+        ("P2", "P2", "Medium priority", 2),
+        ("P3", "P3", "Low priority (default)", 3),
     )
     for code, name, desc, pos in seeds:
         if code in existing:
@@ -69,7 +69,7 @@ def _setup(client, admin_headers):
     m = client.post(
         f"/api/v3/projects/{pid}/milestones/create",
         headers=admin_headers,
-        json={"name": "M1", "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 8, 30), "priority": "p1"},
+        json={"name": "M1", "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 8, 30), "priority": "P1"},
     ).json()["data"]
     return pid, vid, m
 
@@ -88,7 +88,7 @@ class TestPriorityCatalog:
             item["code"]
             for item in r.json()["data"]["_embedded"]["elements"]
         ]
-        assert codes == ["p1", "p2", "p3"]
+        assert codes == ["P1", "P2", "P3"]
 
     def test_picker_endpoint_lists_active_priorities(
         self, client, admin_headers, _seeded_priorities,
@@ -99,7 +99,7 @@ class TestPriorityCatalog:
         r = client.get("/api/v3/priorities", headers=admin_headers)
         assert r.status_code == 200, r.text
         items = r.json()["data"]["_embedded"]["elements"]
-        assert [i["code"] for i in items] == ["p1", "p2", "p3"]
+        assert [i["code"] for i in items] == ["P1", "P2", "P3"]
         # Picker payload carries name + description for the dropdown UX.
         for item in items:
             assert "name" in item
@@ -107,22 +107,22 @@ class TestPriorityCatalog:
             assert "isBuiltin" in item
 
     def test_get_by_code(self, client, admin_headers, _seeded_priorities):
-        r = client.get("/api/v3/master/priorities/p1", headers=admin_headers)
+        r = client.get("/api/v3/master/priorities/P1", headers=admin_headers)
         assert r.status_code == 200
         body = r.json()["data"]
-        assert body["code"] == "p1"
-        assert body["name"] == "p1"
+        assert body["code"] == "P1"
+        assert body["name"] == "P1"
         assert body["isBuiltin"] is True
 
     def test_admin_can_add_p4(self, client, admin_headers, _seeded_priorities):
         r = client.post(
             "/api/v3/master/priorities/create",
             headers=admin_headers,
-            json={"code": "p4", "name": "p4", "description": "Critical", "position": 0},
+            json={"code": "P4", "name": "P4", "description": "Critical", "position": 0},
         )
         assert r.status_code == 201, r.text
         body = r.json()["data"]
-        assert body["code"] == "p4"
+        assert body["code"] == "P4"
         assert body["isBuiltin"] is False
 
     def test_patch_updates_name(self, client, admin_headers, _seeded_priorities):
@@ -131,21 +131,21 @@ class TestPriorityCatalog:
         client.post(
             "/api/v3/master/priorities/create",
             headers=admin_headers,
-            json={"code": "p9", "name": "p9", "description": "tmp"},
+            json={"code": "P9", "name": "P9", "description": "tmp"},
         )
         r = client.patch(
-            "/api/v3/master/priorities/p9",
+            "/api/v3/master/priorities/P9",
             headers=admin_headers,
-            json={"name": "p9-renamed"},
+            json={"name": "P9-renamed"},
         )
         assert r.status_code == 200, r.text
-        assert r.json()["data"]["name"] == "p9-renamed"
+        assert r.json()["data"]["name"] == "P9-renamed"
 
     def test_delete_refuses_builtin(
         self, client, admin_headers, _seeded_priorities,
     ):
         r = client.delete(
-            "/api/v3/master/priorities/p1", headers=admin_headers,
+            "/api/v3/master/priorities/P1", headers=admin_headers,
         )
         assert r.status_code in (401, 403, 422), r.text  # AuthorizationError
         assert "built-in" in r.text.lower()
@@ -207,11 +207,11 @@ class TestActivityPriority:
                 "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 7, 10),
                 "ownerDivision": "tmd1", "vendorId": vid,
                 "concernedDivision": ["tmd1"],
-                "priority": "p2",
+                "priority": "P2",
             },
         )
         assert r.status_code == 201, r.text
-        assert r.json()["data"]["priority"] == "p2"
+        assert r.json()["data"]["priority"] == "P2"
 
     def test_create_activity_rejects_unknown_priority(
         self, client, admin_headers, _seeded_priorities,
@@ -234,11 +234,11 @@ class TestActivityPriority:
     def test_admin_added_priority_is_immediately_accepted(
         self, client, admin_headers, _seeded_priorities,
     ):
-        # Admin adds p4.
+        # Admin adds P4.
         client.post(
             "/api/v3/master/priorities/create",
             headers=admin_headers,
-            json={"code": "p4", "name": "p4"},
+            json={"code": "P4", "name": "P4"},
         )
         pid, vid, m = _setup(client, admin_headers)
         r = client.post(
@@ -249,11 +249,11 @@ class TestActivityPriority:
                 "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 7, 10),
                 "ownerDivision": "tmd1", "vendorId": vid,
                 "concernedDivision": ["tmd1"],
-                "priority": "p4",
+                "priority": "P4",
             },
         )
         assert r.status_code == 201, r.text
-        assert r.json()["data"]["priority"] == "p4"
+        assert r.json()["data"]["priority"] == "P4"
 
     def test_patch_updates_priority(
         self, client, admin_headers, _seeded_priorities,
@@ -267,17 +267,17 @@ class TestActivityPriority:
                 "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 7, 10),
                 "ownerDivision": "tmd1", "vendorId": vid,
                 "concernedDivision": ["tmd1"],
-                "priority": "p3",
+                "priority": "P3",
             },
         ).json()["data"]
-        assert a["priority"] == "p3"
+        assert a["priority"] == "P3"
         r = client.patch(
             f"/api/v3/activities/{a['id']}",
             headers=admin_headers,
-            json={"priority": "p1"},
+            json={"priority": "P1"},
         )
         assert r.status_code == 200, r.text
-        assert r.json()["data"]["priority"] == "p1"
+        assert r.json()["data"]["priority"] == "P1"
 
     def test_tree_response_surfaces_priority(
         self, client, admin_headers, _seeded_priorities,
@@ -291,7 +291,7 @@ class TestActivityPriority:
                 "startDate": _iso(2026, 7, 1), "endDate": _iso(2026, 7, 10),
                 "ownerDivision": "tmd1", "vendorId": vid,
                 "concernedDivision": ["tmd1"],
-                "priority": "p2",
+                "priority": "P2",
             },
         )
         tree = client.get(
@@ -299,4 +299,4 @@ class TestActivityPriority:
         ).json()["data"]
         m_node = tree["milestones"][0]
         a_node = m_node["activities"][0]
-        assert a_node["priority"] == "p2"
+        assert a_node["priority"] == "P2"

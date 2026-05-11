@@ -267,15 +267,25 @@ class PriorityCreateRequest(BaseModel):
 
     code: str = Field(
         ..., min_length=1, max_length=16,
-        description="Wire identifier (e.g. ``p1``, ``p2``, ``p3``). Unique.",
+        description="Wire identifier (e.g. ``P1``, ``P2``, ``P3``). Unique. Stored canonical uppercase.",
     )
     name: str = Field(
         ..., min_length=1, max_length=64,
-        description="Label shown in the dropdown (e.g. ``p1``).",
+        description="Label shown in the dropdown (e.g. ``P1``).",
     )
     description: Optional[str] = Field(None, max_length=500)
     position: Optional[int] = Field(None, ge=0)
     active: bool = Field(True)
+
+    @field_validator("code", mode="before")
+    @classmethod
+    def _uppercase_code(cls, v):
+        # UI-alignment migration: priorities are stored canonical
+        # uppercase. Admin-added codes go through the same normalization
+        # so the catalog stays consistent with the seeded P1/P2/P3.
+        if isinstance(v, str):
+            return v.strip().upper()
+        return v
 
 
 class PriorityUpdateRequest(BaseModel):

@@ -26,17 +26,26 @@ from sqlalchemy import func
 from ....core.base_controller import BaseController
 from ....core.dependencies import get_current_user_id
 from ....core.errors import AlreadyExistsError, AuthorizationError, NotFoundError
-from ....core.middleware.rbac import require_permission
+from ....core.middleware.rbac import require_authenticated, require_permission
+from ....core.permissions import ORG_ADMIN_ROLE_NAME, RBAC_ASSIGN
 from ....core.rbac import Permission
 from ....infrastructure.db.models.project import ProjectModel
 from ....infrastructure.db.models.project_vendor import ProjectVendorModel
+from ....infrastructure.db.models.role import RoleModel
 from ....infrastructure.db.models.user import UserModel
+from ....infrastructure.db.models.user_role_assignment import (
+    UserRoleAssignmentModel,
+)
 from ....infrastructure.db.models.vendor import VendorModel
 from ....infrastructure.db.repositories.rbac_repository import RbacRepository
 from ....infrastructure.db.repositories.vendor_repository import VendorRepository
 from ....infrastructure.db.session import get_db
 from ....shared.datetime import iso_ist
 from .schemas import VendorCreateRequest, VendorUpdateRequest
+from .user_assignments import (
+    apply_vendor_user_assignments,
+    user_assignments_for_vendor,
+)
 
 
 router = APIRouter(prefix="/vendors", tags=["vendors"])
@@ -69,7 +78,11 @@ def _vendor_email_taken(
     return q.first() is not None
 
 
-def _vendor_to_response(v, projects: List[Dict[str, Any]] | None = None) -> Dict[str, Any]:
+def _vendor_to_response(
+    v,
+    projects: List[Dict[str, Any]] | None = None,
+    user_assignments: List[Dict[str, Any]] | None = None,
+) -> Dict[str, Any]:
     d = v.to_dict()
     return {
         "_type": "Vendor",
@@ -94,6 +107,12 @@ def _vendor_to_response(v, projects: List[Dict[str, Any]] | None = None) -> Dict
         # Empty list when the vendor has no live mappings — never null, so
         # the FE can iterate unconditionally.
         "projects": projects if projects is not None else [],
+        # Doc 44 round 6: per-(project, role) user assignments. Mirror
+        # of the FE's PATCH/POST body shape so the form can re-render
+        # without translating. Always a list (never null) so iteration
+        # is unconditional; empty when no role rows exist for any of
+        # this vendor's projects.
+        "user_assignments": user_assignments if user_assignments is not None else [],
     }
 
 
@@ -236,7 +255,11 @@ def list_vendors(
     vendors = repo.list_active() if active_only else repo.list_all()
     projects_by_vendor = _projects_by_vendor(db, (v.id for v in vendors))
     items = [
-        _vendor_to_response(v, projects_by_vendor.get(v.id, []))
+        _vendor_to_response(
+            v,
+            projects_by_vendor.get(v.id, []),
+            user_assignments_for_vendor(db, v.id),
+        )
         for v in vendors
     ]
     return BaseController.stamp_deprecation(
@@ -295,8 +318,47 @@ def get_vendor(
             )
 
     projects = _projects_by_vendor(db, [vendor.id]).get(vendor.id, [])
+    assignments = user_assignments_for_vendor(db, vendor.id)
+
+    # Round 12 (mirrored) — project_admin scope. A PA who isn't also
+    # an OA / admin / super_admin sees only the projects in this vendor
+    # that they have a project_admin role assignment on, plus only the
+    # user_assignments rows for those projects.
+    if caller_id is not None and not RbacRepository(db).user_has_admin_role(caller_id):
+        caller_holds_org_admin_here = (
+            db.query(UserRoleAssignmentModel)
+            .join(RoleModel, RoleModel.id == UserRoleAssignmentModel.role_id)
+            .filter(UserRoleAssignmentModel.user_id == caller_id)
+            .filter(RoleModel.name == ORG_ADMIN_ROLE_NAME)
+            .filter(UserRoleAssignmentModel.organization_id == vendor.id)
+            .first()
+            is not None
+        )
+        if not caller_holds_org_admin_here:
+            # Caller is project_admin / project_member tier in this
+            # vendor (or has no assignment here). Narrow the projects
+            # array + user_assignments to projects the caller is
+            # actually assigned to.
+            scoped_pids = {
+                pid for (pid,) in (
+                    db.query(UserRoleAssignmentModel.project_id)
+                    .filter(UserRoleAssignmentModel.user_id == caller_id)
+                    .filter(UserRoleAssignmentModel.project_id.isnot(None))
+                    .filter(UserRoleAssignmentModel.project_id.in_(
+                        [p["id"] for p in projects]
+                    ))
+                    .all()
+                )
+            }
+            projects = [p for p in projects if p["id"] in scoped_pids]
+            assignments = [
+                a for a in assignments if a["project_id"] in scoped_pids
+            ]
+
     return BaseController.stamp_deprecation(
-        BaseController.ok(data=_vendor_to_response(vendor, projects)),
+        BaseController.ok(
+            data=_vendor_to_response(vendor, projects, assignments),
+        ),
         successor_path=f"/api/v3/master/vendors/{vendor.id}",
     )
 
@@ -342,18 +404,66 @@ def create_vendor(
     )
     if project_ids:
         repo.set_vendor_projects(vendor.id, project_ids)
+    db.flush()
+    # Doc 44 round 6 (mirrored): apply user_assignments after the
+    # vendor + project mappings exist (helper validates project
+    # ownership via project_vendors).
+    if data.userAssignments:
+        try:
+            apply_vendor_user_assignments(
+                db, vendor.id,
+                [a.model_dump(by_alias=False) for a in data.userAssignments],
+                actor_id=getattr(request.state, "user_id", None),
+            )
+        except ValueError as exc:
+            db.rollback()
+            from ....core.errors import ValidationError
+            raise ValidationError(str(exc)) from exc
     db.commit()
     projects = _projects_by_vendor(db, [vendor.id]).get(vendor.id, [])
+    assignments = user_assignments_for_vendor(db, vendor.id)
     return BaseController.stamp_deprecation(
-        BaseController.created(data=_vendor_to_response(vendor, projects)),
+        BaseController.created(
+            data=_vendor_to_response(vendor, projects, assignments),
+        ),
         successor_path="/api/v3/master/vendors/create",
     )
 
 
+_OA_EDITABLE_FIELDS = frozenset({
+    # Doc 44 round 9 — fields an org_admin may edit on their own
+    # vendor without holding ``vendors:manage``. Spec:
+    #   "Org Admins should only be able to edit:
+    #    Contact Person, Email, Mobile Number, Project Mapping."
+    # plus the ``user_assignments`` matrix from round 6 — that's
+    # the FE Project Mapping → user-role surface.
+    "email", "contact_person", "phone_number",
+    "project_ids", "user_assignments",
+})
+
+_PA_EDITABLE_FIELDS = frozenset({
+    # Doc 44 round 9 — project_admin's vendor PATCH surface is
+    # strictly the user-role matrix on projects they administer.
+    "user_assignments",
+})
+
+
 @router.patch(
     "/{vendor_id}",
-    dependencies=[require_permission(Permission.VENDORS_MANAGE)],
-    summary="Update a vendor (admin)",
+    dependencies=[require_authenticated()],
+    summary="Update a vendor (admin / org_admin / project_admin per body-shape gate)",
+    description=(
+        "Doc 44 round 9 (mirrored): body-shape-aware permission gate, "
+        "tier-scoped. Bodies that touch ``name``/``description``/"
+        "``active`` require ``vendors:manage`` (admin / super_admin "
+        "only). org_admin (with ``rbac:assign`` + same-vendor) may "
+        "edit ``email`` / ``contact_person`` / ``phone_number`` / "
+        "``project_ids`` / ``user_assignments``. project_admin (with "
+        "``rbac:assign`` + same-vendor) may edit only "
+        "``user_assignments``. Per-(project, role) tuples in "
+        "``user_assignments`` are validated against the caller's scope "
+        "by ``apply_vendor_user_assignments``."
+    ),
 )
 def update_vendor(
     request: Request,
@@ -362,13 +472,96 @@ def update_vendor(
     db: Session = Depends(get_db),
 ) -> JSONResponse:
     """Path param accepts UUID or ``VN-...`` code (doc 25)."""
+    body_set = data.model_dump(exclude_unset=True, by_alias=True)
+    requested_fields = set(body_set.keys())
+    held = getattr(request.state, "user_permissions", set()) or set()
+    has_vendors_manage = (
+        Permission.VENDORS_MANAGE.value in held or "vendors:manage" in held
+    )
+    has_rbac_assign = RBAC_ASSIGN in held
+
+    # Load the vendor up-front so the body-shape gate can short-circuit
+    # no-op fields (round 10b).
     repo = VendorRepository(db)
     m = repo.get_model_by_id_or_code(vendor_id)
     if m is None:
         raise NotFoundError("Vendor not found.")
-    # If projectIds is supplied, validate BEFORE applying any field changes
-    # so a bad id doesn't leave the row half-updated. None means "leave the
-    # mapping unchanged"; [] clears it; non-empty list replaces it.
+
+    # Doc 44 round 9 (mirrored) — tier-scoped body-shape gate.
+    if has_vendors_manage:
+        allowed_fields = None  # admin tier — no field restrictions
+    elif has_rbac_assign:
+        caller_id = get_current_user_id(request)
+        caller_holds_org_admin = (
+            caller_id is not None
+            and db.query(UserRoleAssignmentModel)
+            .join(RoleModel, RoleModel.id == UserRoleAssignmentModel.role_id)
+            .filter(UserRoleAssignmentModel.user_id == caller_id)
+            .filter(RoleModel.name == ORG_ADMIN_ROLE_NAME)
+            .first()
+            is not None
+        )
+        allowed_fields = (
+            _OA_EDITABLE_FIELDS if caller_holds_org_admin else _PA_EDITABLE_FIELDS
+        )
+    else:
+        raise AuthorizationError(
+            "Insufficient permissions. Required: vendors:manage or rbac:assign",
+        )
+
+    if allowed_fields is not None:
+        # Doc 46 round 10b (mirrored) — FE round-trips the full vendor
+        # object on every PATCH. Filter out fields whose body value
+        # matches the current DB row before the allowlist check —
+        # those are no-ops and shouldn't trigger 403. Empty string vs
+        # None on description is treated as equivalent.
+        _SCALAR_FIELD_TO_ATTR = {
+            "name": "name",
+            "description": "description",
+            "active": "active",
+            "email": "email",
+            "contact_person": "contact_person",
+            "phone_number": "phone_number",
+        }
+
+        def _is_noop(field: str) -> bool:
+            attr = _SCALAR_FIELD_TO_ATTR.get(field)
+            if attr is None:
+                return False  # complex fields (project_ids / user_assignments) — apply layer decides
+            current = getattr(m, attr, None)
+            new = body_set.get(field)
+            if (current is None and new == "") or (current == "" and new is None):
+                return True
+            return current == new
+
+        no_ops = {f for f in requested_fields if _is_noop(f)}
+        effective_fields = requested_fields - no_ops
+        excess = effective_fields - allowed_fields
+        if excess:
+            raise AuthorizationError(
+                "Insufficient permissions to edit "
+                f"{', '.join(sorted(excess))}. Required: vendors:manage",
+            )
+
+    # Doc 44 round 8 (mirrored) — vendor-scope guard for non-admin
+    # callers using the user_assignments / OA carve-out. Without
+    # ``vendors:manage`` the caller can only PATCH the vendor they
+    # belong to; admin / super_admin bypass.
+    if not has_vendors_manage:
+        caller_id = get_current_user_id(request)
+        caller_user = (
+            db.query(UserModel).filter(UserModel.id == caller_id).first()
+            if caller_id else None
+        )
+        caller_vendor_id = (
+            getattr(caller_user, "vendor_id", None) if caller_user else None
+        )
+        if caller_vendor_id != m.id:
+            raise AuthorizationError(
+                "You can only update your own organization.",
+            )
+
+    # If projectIds is supplied, validate BEFORE applying any field changes.
     will_replace_projects = data.projectIds is not None
     project_ids: List[str] = []
     if will_replace_projects:
@@ -398,6 +591,22 @@ def update_vendor(
     db.flush()
     if will_replace_projects:
         repo.set_vendor_projects(m.id, project_ids)
+        db.flush()
+
+    # Doc 44 round 6 (mirrored): reconcile user_assignments after
+    # project mappings are committed.
+    if data.userAssignments is not None:
+        try:
+            apply_vendor_user_assignments(
+                db, m.id,
+                [a.model_dump(by_alias=False) for a in data.userAssignments],
+                actor_id=getattr(request.state, "user_id", None),
+            )
+        except ValueError as exc:
+            db.rollback()
+            from ....core.errors import ValidationError
+            raise ValidationError(str(exc)) from exc
+
     db.commit()
     from ....domain.vendors.vendor import Vendor
     domain = Vendor(
@@ -408,8 +617,11 @@ def update_vendor(
         phone_number=m.phone_number,
     )
     projects = _projects_by_vendor(db, [domain.id]).get(domain.id, [])
+    assignments = user_assignments_for_vendor(db, domain.id)
     return BaseController.stamp_deprecation(
-        BaseController.ok(data=_vendor_to_response(domain, projects)),
+        BaseController.ok(
+            data=_vendor_to_response(domain, projects, assignments),
+        ),
         successor_path=f"/api/v3/master/vendors/{domain.id}",
     )
 

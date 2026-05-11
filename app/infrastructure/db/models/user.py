@@ -98,6 +98,13 @@ class UserModel(Base):
     # leave the existing value alone unless the caller sends one.
     phone_number = Column(String(50), nullable=True)
 
+    # Doc 45 round 9b (read-side mirror): canonical write happens in
+    # user-service; project-service just needs the ORM attribute to
+    # read it (the column already exists in the shared DB). Used by
+    # GET /projects/{id}/assignable-users to project ``orgRole`` when
+    # the user holds no scoped role assignment.
+    org_role = Column(String(50), nullable=True)
+
     # Doc 33 change 3: per-user 2FA opt-in. Default True (mandatory by
     # default per Q3a.4); admins can flip individual users to False via
     # PATCH /users/{id} when ``REQUIRE_2FA=true`` globally would be too

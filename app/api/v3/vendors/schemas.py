@@ -5,6 +5,25 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 from ....shared.phone import validate_phone_number
 
 
+class UserAssignmentEntry(BaseModel):
+    """One row in the vendor's ``user_assignments`` matrix.
+
+    Carries a ``(project_id, role, user_ids[])`` tuple — the set of
+    users to hold ``role`` on ``project_id``. The ``role`` string is
+    the FE's display label (e.g. ``"Project Admin"``) — the service
+    layer maps it to the canonical role name. Duplicate user_ids in
+    a single entry are de-duped server-side. ``user_ids: []`` is
+    valid and means "no users should hold this (project, role)".
+    """
+    model_config = ConfigDict(populate_by_name=True)
+    project_id: str = Field(..., alias="project_id")
+    role: str = Field(..., description="Role display label or canonical name.")
+    user_ids: List[str] = Field(
+        default_factory=list, alias="user_ids",
+        description="UUIDs of users that should hold (project, role).",
+    )
+
+
 class VendorCreateRequest(BaseModel):
     """Body for POST /vendors/create.
 
@@ -62,6 +81,19 @@ class VendorCreateRequest(BaseModel):
         ),
     )
 
+    userAssignments: Optional[List[UserAssignmentEntry]] = Field(
+        None,
+        alias="user_assignments",
+        description=(
+            "Doc 44 round 6: per-(project, role) user assignments to "
+            "wire up at vendor creation time. Each entry sets the EXACT "
+            "set of users holding the role on that project — existing "
+            "assignments not in user_ids are revoked, missing ones are "
+            "granted. project_id must reference a project owned by this "
+            "vendor."
+        ),
+    )
+
 
 class VendorUpdateRequest(BaseModel):
     """Body for PATCH /vendors/{id}. Same fields as create, all optional.
@@ -94,4 +126,16 @@ class VendorUpdateRequest(BaseModel):
 
     projectIds: Optional[List[str]] = Field(
         None, alias="project_ids",
+    )
+
+    userAssignments: Optional[List[UserAssignmentEntry]] = Field(
+        None,
+        alias="user_assignments",
+        description=(
+            "Doc 44 round 6: per-(project, role) user assignments. Each "
+            "entry sets the EXACT set of users holding the role on that "
+            "project — existing assignments not in user_ids are revoked, "
+            "missing ones are granted. project_id must reference a "
+            "project owned by this vendor."
+        ),
     )

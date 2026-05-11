@@ -26,6 +26,7 @@ from .permission import PermissionModel  # noqa: F401
 from .role import RoleModel  # noqa: F401
 from .role_permission import RolePermissionModel  # noqa: F401
 from .user_role import UserRoleModel  # noqa: F401
+from .user_role_assignment import UserRoleAssignmentModel  # noqa: F401
 from .user_permission import UserPermissionModel  # noqa: F401
 from .division import DivisionModel  # noqa: F401
 from .milestone import MilestoneModel  # noqa: F401
@@ -83,6 +84,7 @@ __all__ = [
     "TaskResourceModel",
     "UserModel",
     "UserPermissionModel",
+    "UserRoleAssignmentModel",
     "UserRoleModel",
     "VendorModel",
 ]

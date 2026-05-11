@@ -232,6 +232,17 @@ VIEWER_ROLE_NAME = "viewer"
 # new projects, change status, or touch RBAC / master data.
 VENDOR_ROLE_NAME = "vendor"
 
+# Doc 41 / doc 44 scoped-RBAC tier role names. Reference-only constants
+# (read-side mirror — user-service is the canonical seed owner, see
+# pmis-user-service/app/core/permissions.py). Used by vendor PATCH
+# tier-aware allowlist gating and the GET /projects/{id}/assignable-
+# users endpoint to query user_role_assignments by role name.
+SUPER_ADMIN_ROLE_NAME = "super_admin"
+ORG_ADMIN_ROLE_NAME = "org_admin"
+PROJECT_ADMIN_ROLE_NAME = "project_admin"
+PROJECT_MEMBER_ROLE_NAME = "project_member"
+DIVISION_MEMBER_ROLE_NAME = "division_member"
+
 # The admin role holds EVERY permission in BUILTIN_PERMISSIONS — synced on
 # startup. Listed here for clarity / tests.
 ADMIN_ROLE_PERMISSIONS: List[str] = [p.code for p in BUILTIN_PERMISSIONS]

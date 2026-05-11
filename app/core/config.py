@@ -42,7 +42,9 @@ class Settings(BaseSettings):
     # flow; longer access-token TTL is a temporary stop-gap so users
     # don't hit the silent 401s. Revert once the refresh path is
     # solid (or drop further to a sensible 15 if rotation is fixed).
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+    # Bumped 60 → 120 (2 h) — wider workaround while the FE
+    # `client.js:285` bug is being diagnosed. Must match monolith.
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 120
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     REFRESH_TOKEN_GRACE_SECONDS: int = 120
 

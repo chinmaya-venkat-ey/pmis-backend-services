@@ -21,13 +21,18 @@ from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
+from sqlalchemy import func
+
 from ....core.base_controller import BaseController
 from ....core.dependencies import get_current_user_id
-from ....core.errors import AlreadyExistsError, NotFoundError
+from ....core.errors import AlreadyExistsError, AuthorizationError, NotFoundError
 from ....core.middleware.rbac import require_permission
 from ....core.rbac import Permission
 from ....infrastructure.db.models.project import ProjectModel
 from ....infrastructure.db.models.project_vendor import ProjectVendorModel
+from ....infrastructure.db.models.user import UserModel
+from ....infrastructure.db.models.vendor import VendorModel
+from ....infrastructure.db.repositories.rbac_repository import RbacRepository
 from ....infrastructure.db.repositories.vendor_repository import VendorRepository
 from ....infrastructure.db.session import get_db
 from ....shared.datetime import iso_ist
@@ -42,6 +47,26 @@ router = APIRouter(prefix="/vendors", tags=["vendors"])
 # `closed` is the terminal status today; if/when a `completed` status is
 # added, append it here.
 _HIDDEN_PROJECT_STATUSES = {"closed", "completed"}
+
+
+def _vendor_email_taken(
+    db: Session, email: str, *, exclude_vendor_id: str = None,
+) -> bool:
+    """Round 11 (mirrored from monolith) — case-insensitive
+    email-already-in-use check across all vendor rows (including
+    soft-deleted). When ``exclude_vendor_id`` is supplied, that
+    vendor's own row is ignored — used by PATCH so a no-op email
+    update doesn't trip the check.
+    """
+    if not email:
+        return False
+    q = (
+        db.query(VendorModel.id)
+        .filter(func.lower(VendorModel.email) == email.lower())
+    )
+    if exclude_vendor_id is not None:
+        q = q.filter(VendorModel.id != exclude_vendor_id)
+    return q.first() is not None
 
 
 def _vendor_to_response(v, projects: List[Dict[str, Any]] | None = None) -> Dict[str, Any]:
@@ -250,6 +275,25 @@ def get_vendor(
     vendor = repo.get_by_id_or_code(vendor_id)
     if vendor is None:
         raise NotFoundError("Vendor not found.")
+
+    # Doc 44 round 8 (mirrored from monolith) — caller-vendor scope
+    # check. admin / super_admin bypass; non-admin callers may only
+    # fetch the vendor they belong to (users.vendor_id). Mirrors the
+    # list-vendors filter so the detail endpoint doesn't leak
+    # cross-vendor data.
+    caller_id = get_current_user_id(request)
+    if caller_id is not None and not RbacRepository(db).user_has_admin_role(caller_id):
+        caller_user = (
+            db.query(UserModel).filter(UserModel.id == caller_id).first()
+        )
+        caller_vendor_id = (
+            getattr(caller_user, "vendor_id", None) if caller_user else None
+        )
+        if caller_vendor_id != vendor.id:
+            raise AuthorizationError(
+                "You can only view your own organization's details.",
+            )
+
     projects = _projects_by_vendor(db, [vendor.id]).get(vendor.id, [])
     return BaseController.stamp_deprecation(
         BaseController.ok(data=_vendor_to_response(vendor, projects)),
@@ -275,6 +319,14 @@ def create_vendor(
     if repo.get_by_name(data.name, include_deleted=True) is not None:
         raise AlreadyExistsError(
             f"A vendor named '{data.name}' already exists."
+        )
+    # Round 11 (mirrored from monolith) — email uniqueness across
+    # vendors. Same contact email cannot belong to two different
+    # organizations. Soft-deleted rows are checked too: tombstoned
+    # email is reserved (restore-aware).
+    if data.email and _vendor_email_taken(db, str(data.email)):
+        raise AlreadyExistsError(
+            f"A vendor with email '{data.email}' already exists."
         )
     # Validate projectIds BEFORE inserting the vendor row so we don't
     # leave a half-committed vendor when an id is bad. ValidationError
@@ -329,7 +381,16 @@ def update_vendor(
     if data.active is not None:
         m.active = data.active
     if data.email is not None:
-        m.email = str(data.email)
+        new_email = str(data.email)
+        # Round 11 (mirrored from monolith) — email uniqueness across
+        # vendors. Only check when the value is actually changing
+        # (no-op self-match exempt).
+        if (m.email or "").lower() != new_email.lower():
+            if _vendor_email_taken(db, new_email, exclude_vendor_id=m.id):
+                raise AlreadyExistsError(
+                    f"A vendor with email '{new_email}' already exists."
+                )
+        m.email = new_email
     if data.contactPerson is not None:
         m.contact_person = data.contactPerson
     if data.phoneNumber is not None:

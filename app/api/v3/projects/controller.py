@@ -109,6 +109,17 @@ class ProjectController:
 
     @staticmethod
     def list(request: Request, query: ProjectListQuery, db: Session) -> JSONResponse:
+        # Doc 44 round 8 (mirrored from monolith) — non-admin tiers see
+        # only post-publish projects. Anonymous callers (no user_id) are
+        # treated as admin so existing test/dev paths that hit the list
+        # without a token still see every row.
+        caller_id = get_current_user_id(request)
+        caller_is_admin = True
+        if caller_id is not None:
+            from ....infrastructure.db.repositories.rbac_repository import (
+                RbacRepository,
+            )
+            caller_is_admin = RbacRepository(db).user_has_admin_role(caller_id)
         result = list_projects(
             db=db,
             page=query.offset,
@@ -116,6 +127,7 @@ class ProjectController:
             active=query.active,
             public=None,  # doc 38: dropped from list-query schema
             include_deleted=query.includeDeleted,
+            caller_is_admin=caller_is_admin,
         )
         if not result.is_success():
             return _error_response(result, default_status=500)
@@ -136,6 +148,22 @@ class ProjectController:
         result = get_project_by_id(db, project_uuid)
         if not result.is_success():
             return _error_response(result, default_status=404)
+
+        # Doc 44 round 8 (mirrored from monolith) — non-admin tiers cannot
+        # view pre-publish projects (status in {draft, new}). 404 keeps
+        # the response shape consistent with the list-side silent hide.
+        caller_id = get_current_user_id(request)
+        project_status = getattr(result.data, "status", None)
+        if (
+            caller_id is not None
+            and project_status in ("draft", "new")
+        ):
+            from ....infrastructure.db.repositories.rbac_repository import (
+                RbacRepository,
+            )
+            if not RbacRepository(db).user_has_admin_role(caller_id):
+                return _error_response(_NotFoundResult(), default_status=404)
+
         formatted = format_project_response(result.data.to_dict(), "/api/v3")
         return BaseController.ok(data=formatted)
 

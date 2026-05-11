@@ -18,6 +18,7 @@ def list_projects(
     active: Optional[bool] = None,
     public: Optional[bool] = None,
     include_deleted: bool = False,
+    caller_is_admin: bool = True,
 ) -> ServiceResult[PaginatedResult[Project]]:
     """
     List projects with pagination and optional filtering.
@@ -25,6 +26,13 @@ def list_projects(
     ``include_deleted=False`` (default) returns only live rows — backs the
     Search Project view. ``include_deleted=True`` returns every row including
     soft-deleted ones — backs the admin "all projects" audit view.
+
+    Doc 44 round 8 (mirrored from monolith): when ``caller_is_admin`` is
+    False, pre-publish projects (status in {new, draft}) are hidden from
+    the response. Spec: non-admin tiers should not see projects assigned
+    to them before publish. ``caller_is_admin=True`` is the default so
+    every existing caller path (including unauthenticated tests) sees
+    every status — only the route layer flips it to False for non-admins.
     """
     # Validate pagination parameters
     if page < 1:
@@ -47,6 +55,15 @@ def list_projects(
             query = query.filter(ProjectModel.active == active)
         if public is not None:
             query = query.filter(ProjectModel.public == public)
+
+        # Doc 44 round 8 (mirrored) — non-admin tiers see only published
+        # projects. Pre-publish statuses (draft, new) are hidden; the
+        # post-publish lifecycle (closed/suspended/archived) stays visible
+        # so historical projects remain readable.
+        if not caller_is_admin:
+            query = query.filter(ProjectModel.status != "draft").filter(
+                ProjectModel.status != "new",
+            )
 
         # Get total count
         total = query.count()

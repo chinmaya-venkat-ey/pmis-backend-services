@@ -12,6 +12,13 @@ services:
 
     env_file:
       - .env
+    
+    environment:
+      TZ: Asia/Kolkata
+
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
 
     ports:
       - "8001:8001"

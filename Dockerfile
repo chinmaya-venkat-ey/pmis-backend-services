@@ -8,6 +8,7 @@ FROM python:3.11-slim
 # System deps:
 # - libpq-dev: for psycopg2 (Postgres adapter)
 # - gcc + libffi-dev: for argon2-cffi's C extension
+ENV TZ=Asia/Kolkata
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libpq-dev \
         gcc \

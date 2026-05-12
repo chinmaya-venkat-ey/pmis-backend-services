@@ -563,7 +563,18 @@ def update_activity(
         updates["status"] = status
 
     # Doc 38 additions — null is meaningful (clear the field).
+    # Doc 49: when supplied (non-empty), ownerDivision must reference an
+    # active row in the ``divisions`` master table.
     if owner_division is not None:
+        if owner_division:  # non-empty after schema normalisation
+            from .....infrastructure.db.repositories.division_repository import (
+                DivisionRepository,
+            )
+            if not DivisionRepository(db).is_known_code(owner_division):
+                raise ValidationError(
+                    f"ownerDivision '{owner_division}' is not an active "
+                    f"division. Pick one from GET /api/v3/master/divisions."
+                )
         updates["owner_division"] = owner_division
     if concerned_division is not None:
         updates["concerned_division"] = concerned_division

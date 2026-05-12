@@ -30,12 +30,36 @@ def db_engine():
     `cache=shared` + `uri=true` lets all connections in the same process
     see the same in-memory database (required for TestClient ->
     lifespan -> dependency-override flow).
+
+    Doc 49: also seeds the three built-in divisions (tmd1/tmd2/others)
+    into the ``divisions`` master table, mirroring what init_db does in
+    production — the new doc-49 catalog check on Activity.ownerDivision
+    needs at least one matching row.
     """
     engine = create_engine(
         "sqlite:///file:test.db?mode=memory&cache=shared&uri=true",
         connect_args={"check_same_thread": False},
     )
     Base.metadata.create_all(bind=engine)
+
+    from app.infrastructure.db.models.division import DivisionModel
+    seed_session = sessionmaker(bind=engine)()
+    try:
+        for code, label, requires_other in (
+            ("tmd1", "TMD1", False),
+            ("tmd2", "TMD2", False),
+            ("others", "Others", True),
+        ):
+            if seed_session.query(DivisionModel).filter_by(code=code).first() is None:
+                seed_session.add(DivisionModel(
+                    code=code, label=label,
+                    is_builtin=True, requires_other=requires_other, active=True,
+                    email="tests@example.com", phone_number="+910000000000",
+                ))
+        seed_session.commit()
+    finally:
+        seed_session.close()
+
     yield engine
     Base.metadata.drop_all(bind=engine)
     engine.dispose()

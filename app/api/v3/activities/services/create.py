@@ -136,6 +136,20 @@ def create_activity(
                 f"Priority must be one of: {', '.join(valid)}."
             )
 
+    # Doc 49: ownerDivision (when supplied) must reference an active
+    # row in the ``divisions`` master table. Built-ins (tmd1/tmd2/others)
+    # are seeded by init_db so they pass; admin-added codes via
+    # POST /api/v3/master/divisions also pass; soft-disabled rows do not.
+    if owner_division is not None:
+        from .....infrastructure.db.repositories.division_repository import (
+            DivisionRepository,
+        )
+        if not DivisionRepository(db).is_known_code(owner_division):
+            raise ValidationError(
+                f"ownerDivision '{owner_division}' is not an active "
+                f"division. Pick one from GET /api/v3/master/divisions."
+            )
+
     # Resource block: validate the classification columns now that we know we
     # have a details-mode resource block.
     if resource is not None:

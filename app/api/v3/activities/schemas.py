@@ -18,17 +18,22 @@ Doc 39:
 Doc 39 follow-up (concernedDivision free-text on "others"):
 - ``concernedDivision`` list elements now accept free-text values in
   addition to the catalog codes. The FE picker shows the catalog
-  (``tmd1`` / ``tmd2`` / ``others``) plus an "Other" option that
-  reveals a text input; the typed value is sent inline as a list
-  element, matching the project-vendors multi-add idiom. Example:
-  ``["tmd1", "other admin"]``.
+  plus an "Other" option that reveals a text input; the typed value
+  is sent inline as a list element, matching the project-vendors
+  multi-add idiom. Example: ``["tmd1", "other admin"]``.
 - Catalog codes are still normalized to lowercase. Free-text values
   pass through (whitespace stripped) so FE controls the display
   casing. Per-entry length 1..64; per-list size 1..20; case-insensitive
   dedup preserves the first occurrence.
-- ``ownerDivision`` is intentionally NOT relaxed — it's a single value
-  and stays strict against the catalog. Only the multi-value
-  concerned-division list takes free text.
+
+Doc 49 — ownerDivision catalog source moved to the divisions table:
+- Pydantic only normalises (strip + lowercase + non-empty). The
+  authoritative "is this an active division?" check moved to the
+  service layer (``services/create.py`` and ``services/update.py``)
+  where ``DivisionRepository(db).is_known_code(code)`` runs against
+  the live ``divisions`` master table — so any code an admin adds via
+  ``POST /api/v3/master/divisions`` becomes assignable without a code
+  change.
 """
 from typing import List, Optional
 
@@ -37,6 +42,10 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from ....shared.datetime import IstCalendarDate
 from ....domain.activities.activity import ACTIVITY_STATUS_CHOICES
 from ....domain.priorities.priority import PRIORITY_CHOICES
+# DIVISION_CHOICES is kept only for cosmetic canonicalisation of known
+# built-in codes inside ``concernedDivision`` (see _validate_concerned_entry).
+# OwnerDivision membership is checked at the service layer against the
+# live ``divisions`` master table (doc 49).
 from ....domain.resource_types.resource_type import DIVISION_CHOICES
 
 
@@ -45,13 +54,13 @@ _CONCERNED_LIST_MAX = 20
 
 
 def _validate_division_code(v: str) -> str:
-    """Strict catalog check — used by ``ownerDivision`` (single value)."""
+    """Normalise ``ownerDivision`` (single value). Doc 49: catalog
+    membership is checked at the service layer against the live
+    ``divisions`` master table, not here, so admin-added codes work."""
     if isinstance(v, str):
         v = v.strip().lower()
-    if v not in DIVISION_CHOICES:
-        raise ValueError(
-            f"Division code must be one of: {', '.join(DIVISION_CHOICES)}."
-        )
+        if not v:
+            raise ValueError("Division code must be a non-empty string.")
     return v
 
 

@@ -66,32 +66,38 @@ def _schedule_status(
     start_date: Optional[datetime],
     end_date: Optional[datetime],
     today: _date_type,
+    actual_start_date: Optional[datetime] = None,
+    actual_end_date: Optional[datetime] = None,
 ) -> Tuple[str, Optional[int]]:
-    """Compute schedule status + delay days from expected start/end only.
+    """Compute schedule status + delay days, preferring actual dates
+    when they're set and falling back to expected dates otherwise.
 
     Returns a tuple ``(status, days_delayed)`` where:
       * ``status`` is one of ``"not_started"``, ``"in_progress"``,
         ``"delayed"``.
-      * ``days_delayed`` is the integer count of calendar days past the
-        expected end date when ``status == "delayed"``; ``None``
-        otherwise. Callers omit the field from the response unless it's
-        non-None.
+      * ``days_delayed`` is the integer count of calendar days past
+        the effective end date when ``status == "delayed"``; ``None``
+        otherwise. Callers omit the field from the response unless
+        it's non-None.
 
-    Logic is purely based on **expected** start/end dates and the IST
-    calendar today — actual dates are intentionally not consulted.
-    Rationale: the field answers "is this on schedule?", not "is this
-    done?". Items completed before/on their deadline still appear as
-    ``in_progress`` until ``today > end_date``; items completed late
-    appear as ``delayed`` (the delay calc uses ``end_date``, not the
-    actual completion date).
+    Effective dates (per the user-requested rule):
+      * ``effective_start = actual_start_date or start_date``
+      * ``effective_end   = actual_end_date   or end_date``
 
-    Defensive default for legacy rows missing one of the dates:
+    Rationale: if work has actually started or finished, the actual
+    timestamps reflect reality. The expected dates remain the
+    fallback for items that haven't started yet or whose actual
+    completion time was never recorded.
+
+    Defensive default when either effective date is still missing:
     ``("not_started", None)``.
     """
-    if start_date is None or end_date is None:
+    eff_start = actual_start_date if actual_start_date is not None else start_date
+    eff_end = actual_end_date if actual_end_date is not None else end_date
+    if eff_start is None or eff_end is None:
         return "not_started", None
-    sd = _ist_calendar_date(start_date)
-    ed = _ist_calendar_date(end_date)
+    sd = _ist_calendar_date(eff_start)
+    ed = _ist_calendar_date(eff_end)
     if sd is None or ed is None:
         return "not_started", None
     if today < sd:
@@ -106,11 +112,18 @@ def _attach_schedule_status(
     start_date: Optional[datetime],
     end_date: Optional[datetime],
     today: _date_type,
+    actual_start_date: Optional[datetime] = None,
+    actual_end_date: Optional[datetime] = None,
 ) -> Dict[str, Any]:
     """Add ``scheduleStatus`` (always) and ``daysDelayed`` (only when
     delayed) to ``payload`` in place, returning the same dict for
-    fluent use."""
-    status, delay = _schedule_status(start_date, end_date, today)
+    fluent use. Forwards ``actual_*`` dates to ``_schedule_status``
+    so the actual-first / expected-fallback rule applies."""
+    status, delay = _schedule_status(
+        start_date, end_date, today,
+        actual_start_date=actual_start_date,
+        actual_end_date=actual_end_date,
+    )
     payload["scheduleStatus"] = status
     if delay is not None:
         payload["daysDelayed"] = delay
@@ -312,7 +325,11 @@ def build_project_tree(db: Session, project_id: str, include_deleted: bool = Fal
                 for child in children_by_parent_sub.get(s.id, [])
             ],
         }
-        return _attach_schedule_status(payload, s.start_date, s.end_date, today_ist)
+        return _attach_schedule_status(
+            payload, s.start_date, s.end_date, today_ist,
+            actual_start_date=getattr(s, "actual_start_date", None),
+            actual_end_date=getattr(s, "actual_end_date", None),
+        )
 
     def task_node(t: TaskModel) -> Dict[str, Any]:
         resource = (
@@ -350,7 +367,11 @@ def build_project_tree(db: Session, project_id: str, include_deleted: bool = Fal
                 subtask_node(s) for s in top_subs_by_task.get(t.id, [])
             ],
         }
-        return _attach_schedule_status(payload, t.start_date, t.end_date, today_ist)
+        return _attach_schedule_status(
+            payload, t.start_date, t.end_date, today_ist,
+            actual_start_date=getattr(t, "actual_start_date", None),
+            actual_end_date=getattr(t, "actual_end_date", None),
+        )
 
     def activity_node(a: ActivityModel) -> Dict[str, Any]:
         resource = (
@@ -390,7 +411,11 @@ def build_project_tree(db: Session, project_id: str, include_deleted: bool = Fal
             "resource": _resource_payload(resource) if resource else None,
             "tasks": [task_node(t) for t in tasks_by_activity.get(a.id, [])],
         }
-        return _attach_schedule_status(payload, a.start_date, a.end_date, today_ist)
+        return _attach_schedule_status(
+            payload, a.start_date, a.end_date, today_ist,
+            actual_start_date=getattr(a, "actual_start_date", None),
+            actual_end_date=getattr(a, "actual_end_date", None),
+        )
 
     def milestone_node(m: MilestoneModel) -> Dict[str, Any]:
         deps = sorted(milestone_deps_by_source.get(m.id, []))
@@ -412,7 +437,11 @@ def build_project_tree(db: Session, project_id: str, include_deleted: bool = Fal
             "deletedAt": _iso(m.deleted_at),
             "activities": [activity_node(a) for a in acts_by_milestone.get(m.id, [])],
         }
-        return _attach_schedule_status(payload, m.start_date, m.end_date, today_ist)
+        return _attach_schedule_status(
+            payload, m.start_date, m.end_date, today_ist,
+            actual_start_date=getattr(m, "actual_start_date", None),
+            actual_end_date=getattr(m, "actual_end_date", None),
+        )
 
     tree_milestones = [milestone_node(m) for m in milestones]
 

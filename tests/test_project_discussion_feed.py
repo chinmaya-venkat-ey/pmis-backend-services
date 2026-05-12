@@ -241,6 +241,28 @@ class TestDiscussionFeedAggregation:
         assert len(row["attachments"]) == 1
         assert row["attachments"][0]["filename"] == "a.pdf"
 
+    def test_row_carries_created_by_login(
+        self, client, admin_headers, project_id,
+        db_session, temp_storage,
+    ):
+        """``createdByLogin`` resolves the comment author's username
+        alongside the raw ``createdBy`` UUID — mirror of monolith
+        9255ed3."""
+        m = _make_milestone(db_session, project_id)
+        client.post(
+            f"/api/v3/milestones/{m.id}/comments",
+            headers=admin_headers,
+            data={"body": "with author login"},
+        )
+        r = client.get(
+            f"/api/v3/projects/{project_id}/discussion-feed",
+            headers=admin_headers,
+        )
+        assert r.status_code == 200, r.text
+        row = r.json()["data"]["_embedded"]["elements"][0]
+        assert row["createdBy"] == "00000000-0000-0000-0000-000000000001"
+        assert row["createdByLogin"] == "admin"
+
 
 class TestDiscussionFeedFiltering:
     def test_soft_deleted_comment_excluded(

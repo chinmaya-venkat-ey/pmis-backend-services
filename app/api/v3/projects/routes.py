@@ -456,6 +456,94 @@ def list_project_assignable_users(
 
 
 # ---------------------------------------------------------------------------
+# Project audit logs (doc 47)
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/{project_uuid}/audit-logs",
+    dependencies=[require_permission(PROJECTS_READ)],
+    summary="Project audit logs (doc 47)",
+    description=(
+        "Returns the recorded audit events for ``project_uuid`` — every "
+        "state change, M/A/T/S subtree edit, vendor/member association, "
+        "and dependency tweak that ``record_audit`` captured. Newest "
+        "row first. Each entry carries the snapshotted ``actorLogin`` / "
+        "``actorCode`` / ``actorRole`` at write time so the log row "
+        "stays meaningful even if the source user / project rows later "
+        "mutate. Project identity (``projectId`` / ``projectCode`` / "
+        "``projectName`` / ``projectStatus`` / ``owner``) is hoisted to "
+        "the top-level ``project`` block since every row in this "
+        "collection is scoped to one project. Authorization: any "
+        "caller with PROJECTS_READ."
+    ),
+)
+def list_project_audit_logs(
+    project_uuid: str,
+    offset: int = Query(1, ge=1, description="Page number (1-indexed)."),
+    pageSize: int = Query(50, ge=1, le=200, description="Items per page (max 200)."),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    from ....infrastructure.db.repositories.project_audit_log_repository import (
+        ProjectAuditLogRepository,
+    )
+
+    project = (
+        db.query(ProjectModel)
+        .filter(ProjectModel.id == project_uuid)
+        .first()
+    )
+    if project is None:
+        raise NotFoundError(f"Project {project_uuid} not found.")
+
+    db_offset = (offset - 1) * pageSize
+    rows, total = ProjectAuditLogRepository(db).list_for_project(
+        project_id=project_uuid,
+        offset=db_offset,
+        limit=pageSize,
+    )
+
+    def _to_response(entry) -> Dict[str, Any]:
+        d = entry.to_dict()
+        # Per-entry payload — only the audit-event-specific fields.
+        # Project identity (id / code / name / status / owner) is the
+        # same for every row in this collection so it lives at the
+        # top-level ``project`` key instead of being repeated.
+        return {
+            "id": d["id"],
+            "actorId": d["actor_id"],
+            "actorCode": d["actor_code"],
+            "actorLogin": d["actor_login"],
+            "actorRole": d["actor_role"],
+            "action": d["action"],
+            "before": d["before"],
+            "after": d["after"],
+            "createdAt": d["created_at"],
+        }
+
+    return BaseController.ok(data={
+        "_type": "Collection",
+        "_links": {
+            "self": {
+                "href": f"/api/v3/projects/{project_uuid}/audit-logs"
+                        f"?offset={offset}&pageSize={pageSize}"
+            },
+        },
+        "project": {
+            "projectId": project.id,
+            "projectCode": project.project_code,
+            "projectName": project.name,
+            "projectStatus": project.status,
+            "owner": project.owner,
+        },
+        "total": total,
+        "count": len(rows),
+        "offset": offset,
+        "pageSize": pageSize,
+        "_embedded": {"elements": [_to_response(r) for r in rows]},
+    })
+
+
+# ---------------------------------------------------------------------------
 # Project attachments (project-honest URL surface; storage is the
 # shared comments table — see app/api/v3/comments/_target_helper.py
 # for the polymorphism whitelist).
@@ -778,6 +866,21 @@ def list_project_discussion_feed(
         "subtask": subtask_id_to_name,
     }
 
+    # Bulk-resolve author logins so each row can carry the username
+    # next to the raw ``createdBy`` UUID. Single query per page.
+    # Soft-deleted users still resolve so historical comments don't
+    # render with a missing login. Comments with NULL author (system
+    # inserts) map to None.
+    author_ids = {c.author_user_id for c in rows if c.author_user_id}
+    author_login_by_id: Dict[str, str] = {}
+    if author_ids:
+        for uid, login in (
+            db.query(UserModel.id, UserModel.login)
+            .filter(UserModel.id.in_(author_ids))
+            .all()
+        ):
+            author_login_by_id[uid] = login
+
     def _shape(c) -> Dict[str, Any]:
         return {
             "id": c.id,
@@ -788,6 +891,7 @@ def list_project_discussion_feed(
             "attachments": c.attachments or [],
             "createdAt": c.created_at.isoformat() if c.created_at else None,
             "createdBy": c.author_user_id,
+            "createdByLogin": author_login_by_id.get(c.author_user_id),
         }
 
     return BaseController.ok(data={

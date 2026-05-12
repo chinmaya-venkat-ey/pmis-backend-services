@@ -7,6 +7,54 @@
   },
   "item": [
     {
+      "name": "Cron",
+      "item": [
+        {
+          "name": "Daily deadline-digest cron",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Cron-Secret",
+                "value": "{{cronSharedSecret}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/notifications/cron/daily-digest",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "notifications",
+                "cron",
+                "daily-digest"
+              ]
+            },
+            "description": "Scans the shared ``pmis_db`` for milestones / activities ending within DEADLINE_WINDOW_DAYS (default 5) OR already past due, groups them per responsible user (org_admin / project_admin / project_member scoped to the project), and sends one email per user via the existing dispatch + SMTP pipeline.\n\n**Auth:** ``X-Cron-Secret`` header matching the ``CRON_SHARED_SECRET`` env var on the notification-service container. Empty / unset secret → 503 (endpoint disabled). Wrong / missing header → 401.\n\n**Body:** all fields optional. Leave empty for the normal daily run. Override ``today`` (ISO date) to replay a specific day; override ``windowDays`` (0-30) to widen / narrow the look-ahead for one call.\n\n**Response:** ``{ranAt, usersNotified, emailsSent, emailsFailed, itemsAggregated}``.\n\nAdd a ``X-Cron-Secret`` header manually before sending.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"today\": \"\",\n  \"windowDays\": 5\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "Endpoints called by the DevOps host cron once a day. Gated by the ``X-Cron-Secret`` header that must match ``CRON_SHARED_SECRET`` env var on the notification-service container."
+    },
+    {
       "name": "Health & Root",
       "item": [
         {
@@ -16,8 +64,12 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/health",
-              "host": ["{{baseUrl}}"],
-              "path": ["health"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
             },
             "description": "Returns service status, configured email_provider, and sms_provider."
           },
@@ -41,8 +93,14 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/notifications/email/send",
-              "host": ["{{baseUrl}}"],
-              "path": ["notifications", "email", "send"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notifications",
+                "email",
+                "send"
+              ]
             },
             "description": "Sends an email through the provider configured in EMAIL_PROVIDER (smtp/sendgrid).",
             "body": {
@@ -75,8 +133,14 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/notifications/sms/send",
-              "host": ["{{baseUrl}}"],
-              "path": ["notifications", "sms", "send"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notifications",
+                "sms",
+                "send"
+              ]
             },
             "description": "Sends an SMS through the provider configured in SMS_PROVIDER (twilio/msg91/mock).",
             "body": {
@@ -109,8 +173,14 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/notifications/otp/send",
-              "host": ["{{baseUrl}}"],
-              "path": ["notifications", "otp", "send"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notifications",
+                "otp",
+                "send"
+              ]
             },
             "description": "Generates a numeric OTP and delivers it through the chosen channel.",
             "body": {
@@ -138,8 +208,14 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/notifications/otp/verify",
-              "host": ["{{baseUrl}}"],
-              "path": ["notifications", "otp", "verify"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notifications",
+                "otp",
+                "verify"
+              ]
             },
             "description": "Verifies a previously sent OTP for the given channel + destination.",
             "body": {
@@ -172,8 +248,15 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/api/v3/master/notification_templates?include_inactive=false",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v3", "master", "notification_templates"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "master",
+                "notification_templates"
+              ],
               "query": [
                 {
                   "key": "include_inactive",
@@ -199,8 +282,16 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/api/v3/master/notification_templates/{template_id}",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v3", "master", "notification_templates", ":template_id"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "master",
+                "notification_templates",
+                ":template_id"
+              ],
               "variable": [
                 {
                   "key": "template_id",
@@ -231,8 +322,16 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/api/v3/master/notification_templates/create",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v3", "master", "notification_templates", "create"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "master",
+                "notification_templates",
+                "create"
+              ]
             },
             "description": "Create a new notification template. Requires master_data:manage. Channel must be 'email' or 'sms'; subject required for email, omitted for sms. Placeholder allow-list is enforced for known kinds (otp_login, password_reset_link, password_reset_otp).",
             "body": {
@@ -265,8 +364,16 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/api/v3/master/notification_templates/{template_id}",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v3", "master", "notification_templates", ":template_id"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "master",
+                "notification_templates",
+                ":template_id"
+              ],
               "variable": [
                 {
                   "key": "template_id",
@@ -301,8 +408,16 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/api/v3/master/notification_templates/{template_id}",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v3", "master", "notification_templates", ":template_id"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "master",
+                "notification_templates",
+                ":template_id"
+              ],
               "variable": [
                 {
                   "key": "template_id",
@@ -328,8 +443,17 @@
             ],
             "url": {
               "raw": "{{baseUrl}}/api/v3/master/notification_templates/{template_id}/restore",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v3", "master", "notification_templates", ":template_id", "restore"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v3",
+                "master",
+                "notification_templates",
+                ":template_id",
+                "restore"
+              ],
               "variable": [
                 {
                   "key": "template_id",

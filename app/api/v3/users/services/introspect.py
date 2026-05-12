@@ -28,6 +28,7 @@ from .....infrastructure.db.repositories.revoked_token_repository import (
     RevokedTokenRepository,
 )
 from .....infrastructure.db.repositories.user_repository import UserRepository
+from .....shared.datetime import iso_ist
 from .....shared.service_result import ServiceResult
 
 
@@ -77,11 +78,11 @@ def _claims_to_response(
         "exp": exp,
         "iat": iat,
         "expiresAt": (
-            datetime.fromtimestamp(exp, tz=timezone.utc).isoformat()
+            iso_ist(datetime.fromtimestamp(exp, tz=timezone.utc))
             if isinstance(exp, (int, float)) else None
         ),
         "issuedAt": (
-            datetime.fromtimestamp(iat, tz=timezone.utc).isoformat()
+            iso_ist(datetime.fromtimestamp(iat, tz=timezone.utc))
             if isinstance(iat, (int, float)) else None
         ),
         "jti": payload.get("jti"),

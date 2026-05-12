@@ -25,6 +25,7 @@ from ....core.middleware.rbac import require_permission
 from ....core.permissions import MASTER_DATA_MANAGE, MASTER_DATA_VIEW
 from ....infrastructure.db.repositories.rbac_repository import RbacRepository
 from ....infrastructure.db.session import get_db
+from ....shared.datetime import iso_ist
 
 # Delegates: legacy /roles + /permissions handlers.
 from ..roles.routes import (
@@ -256,8 +257,8 @@ def list_master_permissions_by_module(
             "name": r.name,
             "description": r.description,
             "isBuiltin": bool(r.is_builtin),
-            "createdAt": r.created_at.isoformat() if r.created_at else None,
-            "updatedAt": r.updated_at.isoformat() if r.updated_at else None,
+            "createdAt": iso_ist(r.created_at),
+            "updatedAt": iso_ist(r.updated_at),
         })
     modules_list = [
         {

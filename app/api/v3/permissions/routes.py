@@ -19,6 +19,7 @@ from ....core.permissions import (
 from ....core.response import format_error_response
 from ....infrastructure.db.repositories.rbac_repository import RbacRepository
 from ....infrastructure.db.session import get_db
+from ....shared.datetime import iso_ist
 from .schemas import PermissionCreateRequest, PermissionUpdateRequest
 
 
@@ -43,8 +44,8 @@ def _serialize(p) -> Dict[str, Any]:
         "name": p.name,
         "description": p.description,
         "isBuiltin": p.is_builtin,
-        "createdAt": p.created_at.isoformat() if p.created_at else None,
-        "updatedAt": p.updated_at.isoformat() if p.updated_at else None,
+        "createdAt": iso_ist(p.created_at),
+        "updatedAt": iso_ist(p.updated_at),
     }
 
 

@@ -41,6 +41,7 @@ from ....infrastructure.db.models.user_role_assignment import (
     UserRoleAssignmentModel,
 )
 from ....infrastructure.db.repositories.rbac_repository import RbacRepository
+from ....shared.datetime import iso_ist
 
 
 # Role names this doc grants — the rule table only addresses these.
@@ -250,12 +251,7 @@ def serialize_assignment(
         "organizationId": assignment.organization_id,
         "projectId": assignment.project_id,
         "scope": scope,
-        "createdAt": (
-            assignment.created_at.replace(tzinfo=timezone.utc).isoformat()
-            if assignment.created_at and assignment.created_at.tzinfo is None
-            else assignment.created_at.isoformat() if assignment.created_at
-            else None
-        ),
+        "createdAt": iso_ist(assignment.created_at),
         "createdBy": assignment.created_by,
     }
 

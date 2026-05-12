@@ -4,7 +4,7 @@ User domain model.
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List, Optional
-from ...shared.datetime import iso_utc
+from ...shared.datetime import iso_ist
 
 
 @dataclass
@@ -85,14 +85,14 @@ class User:
             "last_name": self.last_name,
             "admin": self.admin,
             "status": self.status,
-            "created_at": iso_utc(self.created_at),
-            "updated_at": iso_utc(self.updated_at),
+            "created_at": iso_ist(self.created_at),
+            "updated_at": iso_ist(self.updated_at),
             "vendor_id": self.vendor_id,
             "vendor_name": self.vendor_name,
             "division": self.division,
             "division_other": self.division_other,
             "phone_number": self.phone_number,
-            "deleted_at": iso_utc(self.deleted_at),
+            "deleted_at": iso_ist(self.deleted_at),
             "deleted_by": self.deleted_by,
             "projects": list(self.projects or []),
         }

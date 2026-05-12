@@ -4,7 +4,7 @@ Role domain model.
 from dataclasses import dataclass
 from datetime import datetime
 from typing import List, Optional
-from ...shared.datetime import iso_utc
+from ...shared.datetime import iso_ist
 
 
 @dataclass
@@ -31,6 +31,6 @@ class Role:
             "description": self.description,
             "permissions": self.permissions,
             "builtin": self.builtin,
-            "created_at": iso_utc(self.created_at),
-            "updated_at": iso_utc(self.updated_at),
+            "created_at": iso_ist(self.created_at),
+            "updated_at": iso_ist(self.updated_at),
         }

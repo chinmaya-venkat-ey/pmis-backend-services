@@ -28,6 +28,7 @@ from .....core.security import (
     verify_refresh_token,
 )
 from .....infrastructure.db.repositories.user_repository import UserRepository
+from .....shared.datetime import iso_ist
 from .....shared.service_result import ServiceResult
 
 
@@ -55,11 +56,11 @@ def _exp_metadata(token: str) -> Dict[str, Any]:
     iat = payload.get("iat")
     return {
         "expiresAt": (
-            datetime.fromtimestamp(exp, tz=timezone.utc).isoformat()
+            iso_ist(datetime.fromtimestamp(exp, tz=timezone.utc))
             if isinstance(exp, (int, float)) else None
         ),
         "issuedAt": (
-            datetime.fromtimestamp(iat, tz=timezone.utc).isoformat()
+            iso_ist(datetime.fromtimestamp(iat, tz=timezone.utc))
             if isinstance(iat, (int, float)) else None
         ),
         "exp": exp,

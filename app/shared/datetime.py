@@ -114,6 +114,11 @@ def iso_utc(dt: Optional[datetime]) -> Optional[str]:
     type guarantees stored values are canonical naive UTC; this helper
     guarantees responses re-attach the ``+00:00`` so FE never sees a
     bare naive datetime.
+
+    Doc 53: kept for back-compat but most callers should use
+    ``iso_ist`` instead so user-mgmt response timestamps align with
+    monolith/project-mgmt (IST with ``+05:30`` offset). Update one
+    call site at a time as needed.
     """
     if dt is None:
         return None
@@ -122,6 +127,27 @@ def iso_utc(dt: Optional[datetime]) -> Optional[str]:
     else:
         dt = dt.astimezone(timezone.utc)
     return dt.isoformat()
+
+
+def iso_ist(dt: Optional[datetime]) -> Optional[str]:
+    """Format a datetime as a tz-aware IST ISO 8601 string
+    (``+05:30`` offset).
+
+    Doc 53: user-mgmt response timestamps now emit IST to match
+    monolith / project-mgmt. The stored value is still naive UTC
+    (via ``UtcDateTime``); this helper converts to IST on the way
+    out.
+
+    Behavior:
+      - ``None`` → ``None``
+      - Naive datetime → assumed UTC, converted to IST, ``+05:30`` suffix.
+      - tz-aware datetime → converted to IST, ``+05:30`` suffix.
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(IST).isoformat()
 
 
 def parse_datetime(dt_str: str) -> Optional[datetime]:

@@ -2,28 +2,31 @@
 User creation service.
 
 Single transaction:
-  1. Validate inputs (login, email, password, division enum, division_other
-     when division == 'others').
+  1. Validate inputs (login, email, password, division catalog membership,
+     division_other when division == 'others').
   2. Verify the supplied vendor exists and is not soft-deleted.
   3. Verify each project_id references an existing non-deleted project.
   4. Insert the user row + project_members rows.
   5. Commit.
+
+Doc 49: ``division`` membership is validated against the shared
+``divisions`` master table (owned by monolith, read here via raw SQL).
+Built-ins (tmd1/tmd2/others) are seeded by monolith's init_db so they
+pass; admin-added codes pass; soft-disabled rows do not.
 """
 from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
 from .....core.security import hash_password
-from .....domain.resource_types.resource_type import (
-    DIVISION_CHOICES,
-    DIVISION_OTHERS,
-)
+from .....domain.resource_types.resource_type import DIVISION_OTHERS
 from .....domain.users.user import User
 from .....infrastructure.db.models.project import ProjectModel
 from .....infrastructure.db.models.project_member import ProjectMemberModel
 from .....infrastructure.db.models.vendor import VendorModel
 from .....infrastructure.db.repositories.user_repository import UserRepository
 from .....infrastructure.db.repositories.vendor_repository import VendorRepository
+from .....shared.division_catalog import is_known_active_division
 from .....shared.service_result import ServiceResult
 from .....shared.utils import (
     is_valid_email,
@@ -149,6 +152,16 @@ def create_user(
         )
 
     # ---- Division ------------------------------------------------------
+    # Doc 49: must be an active row in the shared ``divisions`` master
+    # table. Built-ins (tmd1/tmd2/others) are seeded by monolith init_db.
+    if not is_known_active_division(db, division):
+        return ServiceResult.fail(
+            error=(
+                f"division '{division}' is not an active division. "
+                f"Pick one from GET /api/v3/master/divisions."
+            ),
+            error_type="validation_error",
+        )
     if division == DIVISION_OTHERS:
         if not division_other:
             return ServiceResult.fail(

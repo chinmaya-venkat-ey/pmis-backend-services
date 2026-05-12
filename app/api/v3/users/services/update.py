@@ -5,21 +5,20 @@ Adds two important behaviours on top of the basic patch:
   - Setting ``status='active'`` on a currently soft-deleted user
     triggers a restore (clears ``deleted_at`` / ``deleted_by``).
   - Vendor and division updates are validated the same way as create
-    (vendor exists; division enum; division_other only when 'others').
+    (vendor exists; division must be an active row in the master table;
+    division_other only when 'others'). Doc 49.
 """
 from typing import Optional
 
 from sqlalchemy.orm import Session
 
 from .....core.security import hash_password
-from .....domain.resource_types.resource_type import (
-    DIVISION_CHOICES,
-    DIVISION_OTHERS,
-)
+from .....domain.resource_types.resource_type import DIVISION_OTHERS
 from .....domain.users.user import User
 from .....infrastructure.db.models.vendor import VendorModel
 from .....infrastructure.db.repositories.user_repository import UserRepository
 from .....infrastructure.db.repositories.vendor_repository import VendorRepository
+from .....shared.division_catalog import is_known_active_division
 from .....shared.service_result import ServiceResult
 from .....shared.utils import (
     is_valid_email,
@@ -203,6 +202,16 @@ def update_user(
     clear_division_other = False
 
     if division is not None:
+        # Doc 49: only allow values that map to an active row in the
+        # shared ``divisions`` master table.
+        if not is_known_active_division(db, division):
+            return ServiceResult.fail(
+                error=(
+                    f"division '{division}' is not an active division. "
+                    f"Pick one from GET /api/v3/master/divisions."
+                ),
+                error_type="validation_error",
+            )
         if final_division != DIVISION_OTHERS and division_other is None:
             # Division is changing AWAY from 'others' and the caller
             # didn't supply a new label → clear the existing one.

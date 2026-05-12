@@ -13,6 +13,7 @@ audit log) plus read-only mirrors of vendors and projects so:
 The notification template catalog itself moved to
 PMIS-notification-service (doc 38), so there's no model for it here.
 """
+from .division import DivisionModel
 from .project import ProjectModel
 from .project_member import ProjectMemberModel
 from .revoked_token import RevokedTokenModel
@@ -34,6 +35,7 @@ from .otp_code import OtpCodeModel
 from .password_reset_token import PasswordResetTokenModel
 
 __all__ = [
+    "DivisionModel",
     "ProjectMemberModel",
     "ProjectModel",
     "RevokedTokenModel",

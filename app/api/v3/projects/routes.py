@@ -4,15 +4,16 @@ Project routes - URL definitions with permission bindings.
 All URL path parameters use ``project_uuid`` (the public handle). The
 controller resolves UUID -> internal id.
 """
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Body, Depends, Query, Request
+from fastapi import APIRouter, Body, Depends, File, Query, Request, UploadFile
 from sqlalchemy.orm import Session
 
 from ....core.base_controller import BaseController
 from ....core.errors import NotFoundError
 from ....core.middleware.rbac import require_permission
-from ....core.permissions import PROJECT_MEMBERS_READ
+from ....core.permissions import COMMENTS_CREATE, PROJECT_MEMBERS_READ
+from ....core.response import format_error_response
 from ....infrastructure.db.models.project import ProjectModel
 from ....infrastructure.db.models.project_vendor import ProjectVendorModel
 from ....infrastructure.db.models.role import RoleModel
@@ -23,6 +24,8 @@ from ....infrastructure.db.models.user_role_assignment import (
 )
 from ....infrastructure.db.session import get_db
 
+from .._inline_attachments import dispatch_create, pre_validate_files
+from ..comments.services import create_comment
 from .controller import ProjectController
 from .permissions import (
     PROJECTS_CLOSE,
@@ -46,15 +49,112 @@ router = APIRouter(prefix="/projects", tags=["projects"])
 @router.post(
     "/create",
     dependencies=[require_permission(PROJECTS_CREATE)],
-    summary="Create project",
+    summary="Create project (JSON or multipart with optional file attachments)",
+    description=(
+        "Dual-mode dispatch: ``application/json`` keeps the legacy "
+        "behaviour; ``multipart/form-data`` accepts the same project "
+        "fields PLUS optional ``files[]`` for documents (project "
+        "charter, RFP, scope notes etc.). Attached files land in the "
+        "shared comments table with ``body=NULL`` and "
+        "``target_kind=\"project\"`` — exposed back through "
+        "``GET /projects/{id}/attachments``."
+    ),
     status_code=201,
+    # Route signature is ``Request`` (so we can dispatch on Content-Type),
+    # which means FastAPI can't auto-generate the request-body OpenAPI
+    # schema. Declare it explicitly so Swagger UI renders body input
+    # fields for both shapes. JSON schema comes from the Pydantic model
+    # so Swagger stays in sync with the validators.
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": ProjectCreateRequest.model_json_schema(
+                        by_alias=True,
+                    ),
+                },
+                "multipart/form-data": {
+                    "schema": {
+                        "type": "object",
+                        "required": ["name"],
+                        "properties": {
+                            "name": {
+                                "type": "string", "minLength": 1, "maxLength": 255,
+                            },
+                            "description": {
+                                "type": "string", "maxLength": 5000,
+                            },
+                            "statusExplanation": {
+                                "type": "string", "maxLength": 5000,
+                            },
+                            "parentId": {
+                                "type": "string",
+                                "description": "Parent project UUID (optional).",
+                            },
+                            "status": {
+                                "type": "string",
+                                "description": "Project lifecycle status (new/draft/published/closed).",
+                            },
+                            "owner": {
+                                "type": "string",
+                                "description": "Division code: tmd1 / tmd2 / others.",
+                            },
+                            "ownerOther": {
+                                "type": "string",
+                                "description": (
+                                    "Required (non-empty) when ``owner == 'others'``. "
+                                    "Omit / null for other owner values."
+                                ),
+                            },
+                            "vendorIds": {
+                                "type": "string",
+                                "description": (
+                                    "JSON-encoded array of vendor UUIDs or vendor codes "
+                                    "(e.g. ``[\"VN-ACME-...\"]``). Multipart can't carry "
+                                    "typed arrays natively so the FE JSON-encodes them."
+                                ),
+                            },
+                            "startDate": {
+                                "type": "string", "format": "date-time",
+                                "description": "ISO 8601, e.g. 2026-07-01T00:00:00+05:30",
+                            },
+                            "endDate": {
+                                "type": "string", "format": "date-time",
+                            },
+                            "files": {
+                                "type": "array",
+                                "items": {"type": "string", "format": "binary"},
+                                "description": (
+                                    "Optional file uploads. Each file is stored as a "
+                                    "comment row with ``body=NULL`` and "
+                                    "``target_kind=\"project\"``. Allowed extensions "
+                                    "and per-file size cap apply. Disguised binaries "
+                                    "(e.g. .exe renamed to .pdf) are rejected by the "
+                                    "magic-byte content sniff."
+                                ),
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
 )
-def create_project(
+async def create_project(
     request: Request,
-    data: ProjectCreateRequest,
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
-    return ProjectController.create(request, data, db)
+    return await dispatch_create(
+        request,
+        schema_cls=ProjectCreateRequest,
+        json_handler=lambda req, db, data:
+            ProjectController.create(req, data, db),
+        multipart_handler=lambda req, db:
+            ProjectController.create_multipart(req, db),
+        json_args=(db,),
+        multipart_args=(db,),
+    )
 
 
 @router.put(
@@ -352,4 +452,358 @@ def list_project_assignable_users(
         "projectId": project_uuid,
         "projectName": project.name,
         "users": sorted(seen.values(), key=lambda x: (x["login"] or "")),
+    })
+
+
+# ---------------------------------------------------------------------------
+# Project attachments (project-honest URL surface; storage is the
+# shared comments table — see app/api/v3/comments/_target_helper.py
+# for the polymorphism whitelist).
+# ---------------------------------------------------------------------------
+
+def _list_project_attachments_rows(db: Session, project_uuid: str) -> List[Dict[str, Any]]:
+    """Slim attachment rows for the GET endpoint. Each entry is one
+    file, carrying the parent comment row id (use it with DELETE
+    ``/api/v3/comments/{id}`` to soft-delete the attachment)."""
+    from ....infrastructure.db.models.comment import CommentModel
+    rows = (
+        db.query(CommentModel)
+        .filter(CommentModel.target_kind == "project")
+        .filter(CommentModel.target_id == project_uuid)
+        .filter(CommentModel.deleted_at.is_(None))
+        .order_by(CommentModel.created_at.asc())
+        .all()
+    )
+    out: List[Dict[str, Any]] = []
+    for c in rows:
+        for att in (c.attachments or []):
+            # JSON column persists camelCase keys (see
+            # ``AttachmentInfo.to_dict``).
+            out.append({
+                "id": c.id,
+                "filename": att.get("filename"),
+                "url": att.get("url"),
+                "mimeType": att.get("mimeType") or att.get("mime_type"),
+                "sizeBytes": att.get("sizeBytes") or att.get("size_bytes"),
+                "uploadedAt": att.get("uploadedAt") or att.get("uploaded_at"),
+                "createdAt": c.created_at.isoformat() if c.created_at else None,
+                "createdBy": c.author_user_id,
+            })
+    return out
+
+
+@router.get(
+    "/{project_uuid}/attachments",
+    dependencies=[require_permission(PROJECTS_READ)],
+    summary="List attachments uploaded against this project",
+)
+def list_project_attachments(
+    request: Request,
+    project_uuid: str,
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    if (
+        db.query(ProjectModel)
+        .filter(ProjectModel.id == project_uuid)
+        .filter(ProjectModel.deleted_at.is_(None))
+        .first()
+    ) is None:
+        raise NotFoundError(f"Project {project_uuid} not found.")
+    items = _list_project_attachments_rows(db, project_uuid)
+    return BaseController.ok(data={
+        "_type": "Collection",
+        "total": len(items),
+        "count": len(items),
+        "_embedded": {"elements": items},
+    })
+
+
+@router.post(
+    "/{project_uuid}/attachments",
+    dependencies=[require_permission(COMMENTS_CREATE)],
+    summary="Upload more attachments to an existing project (multipart)",
+    description=(
+        "Multipart-only endpoint for adding files to a project after "
+        "create. Accepts ``files[]`` repeated; no comment body — "
+        "projects do not surface a comment-text field on this URL. "
+        "Files land in the comments table with ``body=NULL`` and "
+        "``target_kind=\"project\"`` for storage; the response carries "
+        "the FE-facing flat attachment shape."
+    ),
+    status_code=201,
+    # Render a file picker in Swagger UI rather than the auto-generated
+    # contentMediaType variant (which Swagger 5.x falls back to a text
+    # field for). Same pattern as POST /projects/create.
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {
+                "multipart/form-data": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "files": {
+                                "type": "array",
+                                "items": {"type": "string", "format": "binary"},
+                                "description": (
+                                    "One or more files to attach to the "
+                                    "project. Repeated form key ``files``; "
+                                    "Swagger UI's \"Add string item\" "
+                                    "button adds another picker. Allowed "
+                                    "extensions + per-file size cap apply; "
+                                    "disguised binaries (e.g. .exe renamed "
+                                    "to .pdf) are rejected by the magic-"
+                                    "byte content sniff."
+                                ),
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+)
+async def upload_project_attachments(
+    request: Request,
+    project_uuid: str,
+    files: Optional[List[UploadFile]] = File(None),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    if (
+        db.query(ProjectModel)
+        .filter(ProjectModel.id == project_uuid)
+        .filter(ProjectModel.deleted_at.is_(None))
+        .first()
+    ) is None:
+        raise NotFoundError(f"Project {project_uuid} not found.")
+    files = files or []
+    if not files:
+        return BaseController.error(
+            format_error_response(
+                error_type="validation_error",
+                message="At least one file is required.",
+            ),
+            status=422,
+        )
+    # Pre-validate (size + extension + magic-byte content sniff).
+    file_err = pre_validate_files(files)
+    if file_err is not None:
+        return BaseController.error(
+            format_error_response(
+                error_type=file_err["error_type"],
+                message=file_err["message"],
+                details=file_err["details"],
+            ),
+            status=422,
+        )
+    current_user_id = getattr(request.state, "user_id", None)
+    result = create_comment(
+        db=db,
+        target_kind="project",
+        target_id=project_uuid,
+        body=None,
+        files=files,
+        author_user_id=current_user_id,
+    )
+    if not result.is_success():
+        return BaseController.error(
+            format_error_response(
+                error_type=result.error_type or "internal_error",
+                message=result.error or "Failed to attach files.",
+                details=result.details,
+            ),
+            status=422,
+        )
+    # Emit the slim attachment shape for these freshly-uploaded rows
+    # only (caller wants "what just got created", not the full project
+    # attachment listing).
+    comment = result.data
+    new_rows: List[Dict[str, Any]] = []
+    for att in (comment.attachments or []):
+        new_rows.append({
+            "id": comment.id,
+            "filename": att.filename if hasattr(att, "filename") else att.get("filename"),
+            "url": att.url if hasattr(att, "url") else att.get("url"),
+            "mimeType": att.mime_type if hasattr(att, "mime_type") else att.get("mime_type"),
+            "sizeBytes": att.size_bytes if hasattr(att, "size_bytes") else att.get("size_bytes"),
+            "uploadedAt": (
+                att.uploaded_at.isoformat()
+                if hasattr(att, "uploaded_at") and att.uploaded_at
+                else att.get("uploaded_at") if isinstance(att, dict) else None
+            ),
+            "createdAt": comment.created_at.isoformat() if comment.created_at else None,
+            "createdBy": comment.author_user_id,
+        })
+    return BaseController.created(data={
+        "_type": "Collection",
+        "total": len(new_rows),
+        "count": len(new_rows),
+        "_embedded": {"elements": new_rows},
+    })
+
+
+# ---------------------------------------------------------------------------
+# Discussion feed — unified view of every comment row tied to the project
+# tree (the project itself + every milestone / activity / task / subtask
+# under it). Each row carries body (optional) AND attachments JSON list
+# (optional), so the response captures both written discussion and
+# shared files in one collated, time-ordered feed.
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/{project_uuid}/discussion-feed",
+    dependencies=[require_permission(PROJECTS_READ)],
+    summary="Unified discussion + attachments feed for the project tree",
+    description=(
+        "Returns every comment row attached to this project OR any of "
+        "its descendants (milestones / activities / tasks / subtasks) "
+        "in a single flat, newest-first, paginated feed. Each row "
+        "carries ``body`` (optional comment text) AND ``attachments`` "
+        "(JSON list of file metadata) so a single response captures "
+        "both written discussion and shared files. Each row also "
+        "carries ``targetKind`` / ``targetId`` / ``targetName`` so the "
+        "FE can render which entity in the tree the row belongs to. "
+        "Soft-deleted rows (and soft-deleted target entities) are "
+        "filtered out."
+    ),
+)
+def list_project_discussion_feed(
+    project_uuid: str,
+    offset: int = Query(1, ge=1, description="Page number (1-indexed)."),
+    pageSize: int = Query(50, ge=1, le=200, description="Items per page (max 200)."),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    from sqlalchemy import and_, or_
+
+    from ....infrastructure.db.models.activity import ActivityModel
+    from ....infrastructure.db.models.comment import CommentModel
+    from ....infrastructure.db.models.milestone import MilestoneModel
+    from ....infrastructure.db.models.subtask import SubtaskModel
+    from ....infrastructure.db.models.task import TaskModel
+
+    project = (
+        db.query(ProjectModel)
+        .filter(ProjectModel.id == project_uuid)
+        .filter(ProjectModel.deleted_at.is_(None))
+        .first()
+    )
+    if project is None:
+        raise NotFoundError(f"Project {project_uuid} not found.")
+
+    # Walk the tree once — get the live ids for every kind. Each
+    # entity model carries a denormalized ``project_id`` column for
+    # exactly this kind of query, so each scan is one indexed lookup.
+    milestone_id_to_name: Dict[str, str] = {
+        mid: mname for (mid, mname) in (
+            db.query(MilestoneModel.id, MilestoneModel.name)
+            .filter(MilestoneModel.project_id == project_uuid)
+            .filter(MilestoneModel.deleted_at.is_(None))
+            .all()
+        )
+    }
+    activity_id_to_name: Dict[str, str] = {
+        aid: aname for (aid, aname) in (
+            db.query(ActivityModel.id, ActivityModel.name)
+            .filter(ActivityModel.project_id == project_uuid)
+            .filter(ActivityModel.deleted_at.is_(None))
+            .all()
+        )
+    }
+    task_id_to_name: Dict[str, str] = {
+        tid: tname for (tid, tname) in (
+            db.query(TaskModel.id, TaskModel.name)
+            .filter(TaskModel.project_id == project_uuid)
+            .filter(TaskModel.deleted_at.is_(None))
+            .all()
+        )
+    }
+    subtask_id_to_name: Dict[str, str] = {
+        sid: sname for (sid, sname) in (
+            db.query(SubtaskModel.id, SubtaskModel.name)
+            .filter(SubtaskModel.project_id == project_uuid)
+            .filter(SubtaskModel.deleted_at.is_(None))
+            .all()
+        )
+    }
+
+    clauses = [
+        and_(
+            CommentModel.target_kind == "project",
+            CommentModel.target_id == project_uuid,
+        ),
+    ]
+    if milestone_id_to_name:
+        clauses.append(and_(
+            CommentModel.target_kind == "milestone",
+            CommentModel.target_id.in_(milestone_id_to_name.keys()),
+        ))
+    if activity_id_to_name:
+        clauses.append(and_(
+            CommentModel.target_kind == "activity",
+            CommentModel.target_id.in_(activity_id_to_name.keys()),
+        ))
+    if task_id_to_name:
+        clauses.append(and_(
+            CommentModel.target_kind == "task",
+            CommentModel.target_id.in_(task_id_to_name.keys()),
+        ))
+    if subtask_id_to_name:
+        clauses.append(and_(
+            CommentModel.target_kind == "subtask",
+            CommentModel.target_id.in_(subtask_id_to_name.keys()),
+        ))
+
+    base_q = (
+        db.query(CommentModel)
+        .filter(or_(*clauses))
+        .filter(CommentModel.deleted_at.is_(None))
+    )
+    total = base_q.count()
+    db_offset = (offset - 1) * pageSize
+    rows = (
+        # Tie-break on ``id`` so pagination is stable when multiple
+        # comments share a ``created_at`` (common in same-second
+        # bursts; SQLite truncates fractional seconds in tests).
+        base_q.order_by(CommentModel.created_at.desc(), CommentModel.id.desc())
+        .offset(db_offset)
+        .limit(pageSize)
+        .all()
+    )
+
+    name_resolvers: Dict[str, Dict[str, str]] = {
+        "project": {project_uuid: project.name},
+        "milestone": milestone_id_to_name,
+        "activity": activity_id_to_name,
+        "task": task_id_to_name,
+        "subtask": subtask_id_to_name,
+    }
+
+    def _shape(c) -> Dict[str, Any]:
+        return {
+            "id": c.id,
+            "targetKind": c.target_kind,
+            "targetId": c.target_id,
+            "targetName": name_resolvers.get(c.target_kind, {}).get(c.target_id),
+            "body": c.body,
+            "attachments": c.attachments or [],
+            "createdAt": c.created_at.isoformat() if c.created_at else None,
+            "createdBy": c.author_user_id,
+        }
+
+    return BaseController.ok(data={
+        "_type": "Collection",
+        "_links": {
+            "self": {
+                "href": (
+                    f"/api/v3/projects/{project_uuid}/discussion-feed"
+                    f"?offset={offset}&pageSize={pageSize}"
+                ),
+            },
+        },
+        "project": {"id": project_uuid, "name": project.name},
+        "total": total,
+        "count": len(rows),
+        "offset": offset,
+        "pageSize": pageSize,
+        "_embedded": {"elements": [_shape(c) for c in rows]},
     })

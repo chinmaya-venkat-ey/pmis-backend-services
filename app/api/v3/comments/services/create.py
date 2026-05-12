@@ -17,12 +17,13 @@ together. Steps:
 The previous two-table flow (one comments INSERT + N attachments
 INSERTs) has been collapsed into one row + one JSON column.
 """
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from fastapi import UploadFile
 from sqlalchemy.orm import Session
 
 from .....core.config import settings
+from .....core.errors import ValidationError as CoreValidationError
 from .....domain.comments.comment import AttachmentInfo, Comment
 from .....infrastructure.db.repositories.comment_repository import (
     CommentRepository,
@@ -32,7 +33,7 @@ from .....infrastructure.storage import (
     get_file_client,
 )
 from .....infrastructure.storage.file_storage import file_extension
-from .....shared.file_content_check import validate_content_matches_extension
+from .....shared.file_signature import detect_and_verify
 from .....shared.service_result import ServiceResult
 
 from .._target_helper import is_valid_target_kind, target_exists
@@ -84,12 +85,16 @@ def create_comment(
             error_type="not_found",
         )
 
-    # Per-file validation (size + extension whitelist). Run BEFORE the
-    # comment row is touched so an obviously-bad file doesn't leave an
-    # orphan row.
+    # Per-file validation (size + extension whitelist + magic-byte
+    # content sniff). Run BEFORE the comment row is touched so an
+    # obviously-bad file doesn't leave an orphan row. The sniffed MIME
+    # is captured per-upload so the storage write below persists the
+    # canonical detected type, not the client-declared one
+    # (``upload.content_type`` — spoofable).
     allowed_exts = _allowed_extensions()
     max_bytes = settings.ATTACHMENTS_MAX_BYTES
-    for upload in files:
+    sniffed_mime_by_idx: Dict[int, str] = {}
+    for idx, upload in enumerate(files):
         upload.file.seek(0, 2)
         size = upload.file.tell()
         upload.file.seek(0)
@@ -112,20 +117,17 @@ def create_comment(
                 error_type="validation_error",
                 details={"file": upload.filename, "extension": ext},
             )
-
-        # Magic-byte / declared-extension content check. Catches renamed
-        # payloads (evil.exe -> report.pdf) that pass the extension
-        # whitelist but lie about their content. Project-service-only
-        # post-demo client requirement; not present in monolith.
-        sniff_buf = upload.file.read(262)
-        upload.file.seek(0)
-        is_valid, content_err = validate_content_matches_extension(sniff_buf, ext)
-        if not is_valid:
+        try:
+            detected_mime, _ext = detect_and_verify(
+                upload.file, upload.filename or "",
+            )
+        except CoreValidationError as exc:
             return ServiceResult.fail(
-                error=content_err,
+                error=str(exc),
                 error_type="validation_error",
                 details={"file": upload.filename, "extension": ext},
             )
+        sniffed_mime_by_idx[idx] = detected_mime
 
     # ---- Upload bytes + collect URLs -----------------------------------
 
@@ -134,11 +136,13 @@ def create_comment(
     attachment_infos: List[AttachmentInfo] = []
 
     try:
-        for upload in files:
+        for idx, upload in enumerate(files):
             stored = client.upload(
                 upload.file,
                 upload.filename or "unnamed",
-                upload.content_type or "application/octet-stream",
+                # Use the sniffed (canonical) MIME, not the
+                # client-declared one — see the validation loop above.
+                sniffed_mime_by_idx[idx],
             )
             stored_keys.append(stored.storage_key)
             attachment_infos.append(AttachmentInfo(

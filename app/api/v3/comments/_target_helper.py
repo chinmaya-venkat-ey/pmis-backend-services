@@ -13,7 +13,14 @@ from sqlalchemy.orm import Session
 
 # (table_name, id_column) per allowed target_kind. Hardcoded — keeps
 # the polymorphic dispatch contained to one place.
+#
+# ``project`` joined the list to back the project-attachments feature
+# (FE upload-during-create + post-create attach/list/delete on the
+# project detail page). Project rows go into the same comments table
+# as M/A/T/S but always with ``body=NULL`` — the FE never sees a
+# /comments URL for projects (the surface is /projects/{id}/attachments).
 _TARGET_TABLES: dict[str, Tuple[str, str]] = {
+    "project": ("projects", "id"),
     "milestone": ("milestones", "id"),
     "activity": ("activities", "id"),
     "task": ("tasks", "id"),

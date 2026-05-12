@@ -440,8 +440,11 @@ class TestPostDemoFeedback:
         )
         assert r.status_code == 422, r.text
         msg = r.json()["error"]["message"].lower()
-        assert "executable" in msg, (
-            f"Expected an 'executable' rejection message, got: {msg}"
+        # Magic-byte mirror: error message generalised — any
+        # disguised-binary rejection works (the file no longer matches
+        # the .pdf signature, regardless of being specifically PE/EXE).
+        assert "content does not match" in msg or "executable" in msg, (
+            f"Expected a disguised-binary rejection message, got: {msg}"
         )
 
     def test_upload_rejects_jpeg_renamed_to_png(

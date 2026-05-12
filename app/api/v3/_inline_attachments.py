@@ -34,7 +34,9 @@ from fastapi import Request, UploadFile
 from pydantic import BaseModel, ValidationError
 
 from ...core.config import settings
+from ...core.errors import ValidationError as CoreValidationError
 from ...infrastructure.storage.file_storage import file_extension
+from ...shared.file_signature import detect_and_verify
 from .attachments.services import upload_standalone_attachment
 from .comments.services import create_comment
 
@@ -217,6 +219,13 @@ def pre_validate_files(files: List[UploadFile]) -> Optional[Dict[str, Any]]:
     ``upload_standalone_attachment`` do internally (so we catch them
     early). Returns ``None`` on success or an error-shape dict that the
     caller wraps in the standard error envelope.
+
+    Validation order (cheap → expensive):
+      1. Size against ``ATTACHMENTS_MAX_BYTES``
+      2. Extension against the allow-list
+      3. Magic-byte content sniff (``detect_and_verify``) — rejects
+         files whose binary content doesn't match their declared
+         extension (e.g. ``evil.exe`` renamed to ``evil.pdf``).
     """
     if not files:
         return None
@@ -245,6 +254,20 @@ def pre_validate_files(files: List[UploadFile]) -> Optional[Dict[str, Any]]:
                     f"File '{upload.filename}' has disallowed extension "
                     f"'.{ext}'. Allowed: {', '.join(sorted(allowed))}."
                 ),
+                "details": {"file": upload.filename, "extension": ext},
+            }
+        # Magic-byte / text-payload content sniff (security guard
+        # against disguised file types — ``evil.exe`` renamed to
+        # ``evil.pdf`` would have passed the extension check above).
+        # This is a fast-fail; the per-write paths (``create_comment``
+        # + ``upload_standalone_attachment``) re-run the sniff so the
+        # canonical detected MIME is what lands in storage.
+        try:
+            detect_and_verify(upload.file, upload.filename or "")
+        except CoreValidationError as exc:
+            return {
+                "error_type": "validation_error",
+                "message": str(exc),
                 "details": {"file": upload.filename, "extension": ext},
             }
     return None

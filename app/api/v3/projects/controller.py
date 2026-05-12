@@ -12,11 +12,32 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
+from pydantic import ValidationError
+
 from ....core.base_controller import BaseController
 from ....core.dependencies import get_current_user_id
 from ....core.errors import NotFoundError
-from ....core.response import format_collection_response, format_project_response
+from ....core.response import (
+    format_attachment_response,
+    format_collection_response,
+    format_comment_response,
+    format_error_response,
+    format_project_response,
+)
 from ....infrastructure.db.repositories.project_repository import ProjectRepository
+
+# Doc-30 inline-attachments pattern (mirrors M/A/T/S) — multipart variant
+# of POST /projects/create accepts ``files[]`` plus the same project fields
+# as the JSON variant. Files land in the comments table with body=NULL,
+# polymorphic on ``target_kind="project"``.
+from .._inline_attachments import (
+    Multipart422,
+    extract_files_from_form,
+    parse_form_fields,
+    persist_inline_comment_or_files,
+    pre_validate_files,
+    sanitize_pydantic_errors,
+)
 
 from .schemas import (
     ProjectCloseRequest,
@@ -107,6 +128,144 @@ class ProjectController:
         formatted = format_project_response(result.data.to_dict(), "/api/v3")
         return BaseController.created(data=formatted)
 
+    # Form-field spec for the multipart create path. Mirrors the keys
+    # accepted by ProjectCreateRequest (using its alias names). Files
+    # are extracted separately via ``extract_files_from_form``.
+    _MULTIPART_REQUIRED_STRING_KEYS = ("name",)
+    _MULTIPART_OPTIONAL_STRING_KEYS = (
+        "description", "statusExplanation", "parentId",
+        "status", "owner", "ownerOther",
+        "startDate", "endDate",
+    )
+    _MULTIPART_INT_KEYS = ()
+    _MULTIPART_ARRAY_KEYS = ("vendorIds",)
+
+    @staticmethod
+    async def create_multipart(
+        request: Request, db: Session,
+    ) -> JSONResponse:
+        """Multipart variant of POST /projects/create.
+
+        Accepts the same project fields as the JSON path PLUS optional
+        ``files[]`` for documents to attach (project charter, scope
+        doc, RFP, etc.). Files land in the comments table with
+        ``body=NULL`` and ``target_kind="project"`` — the FE never sees
+        a /comments URL for projects; the surface stays
+        ``/projects/{id}/attachments``.
+
+        Failure handling matches the M/A/T/S multipart create:
+        pre-validation (project fields, file extensions, file sizes,
+        magic-byte content sniff) catches the common bad inputs before
+        any DB write. If file persistence fails after the project row
+        is created, the project is left in place and the response
+        surfaces the project id so the FE can retry the upload via
+        POST /projects/{id}/attachments.
+        """
+        form = await request.form()
+
+        # ---- 1. Parse + validate project fields --------------------------
+        try:
+            project_fields = parse_form_fields(
+                form,
+                required_string_keys=ProjectController._MULTIPART_REQUIRED_STRING_KEYS,
+                string_keys=ProjectController._MULTIPART_OPTIONAL_STRING_KEYS,
+                int_keys=ProjectController._MULTIPART_INT_KEYS,
+                array_keys=ProjectController._MULTIPART_ARRAY_KEYS,
+            )
+        except Multipart422 as e:
+            return BaseController.error(
+                format_error_response(
+                    error_type="validation_error",
+                    message="Invalid project form fields.",
+                    details={"errors": e.detail},
+                ),
+                status=422,
+            )
+
+        try:
+            data = ProjectCreateRequest.model_validate(project_fields)
+        except ValidationError as e:
+            return BaseController.error(
+                format_error_response(
+                    error_type="validation_error",
+                    message="Project field validation failed.",
+                    details={"errors": sanitize_pydantic_errors(e.errors())},
+                ),
+                status=422,
+            )
+
+        files = extract_files_from_form(form)
+
+        # ---- 1b. Pre-validate files BEFORE creating the project ----------
+        # Size + extension + magic-byte content sniff. A bad file here
+        # means no project row is created.
+        file_err = pre_validate_files(files)
+        if file_err is not None:
+            return BaseController.error(
+                format_error_response(
+                    error_type=file_err["error_type"],
+                    message=file_err["message"],
+                    details=file_err["details"],
+                ),
+                status=422,
+            )
+
+        # ---- 2. Create project (existing service, commits) ---------------
+        actor_id = get_current_user_id(request)
+        result = create_project(
+            db=db,
+            actor_id=actor_id,
+            name=data.name,
+            description=data.description,
+            active=data.active,
+            public=False,
+            status_explanation=data.statusExplanation,
+            parent_id=data.parentId,
+            status=data.status,
+            owner=data.owner,
+            owner_other=data.ownerOther,
+            category=None,
+            category_other=None,
+            category_other_reason=None,
+            vendor_ids=data.vendorIds,
+            start_date=data.start_date,
+            end_date=data.end_date,
+        )
+        if not result.is_success():
+            return _error_response(result)
+        project = result.data
+
+        # ---- 3. Persist inline attachments (files-only, body=None) -------
+        # Project surface intentionally does NOT expose a body field —
+        # the FE only ever uploads files here, not comment text. The
+        # helper still requires a string-or-None for body, so pass "".
+        _comment_payload, _standalone, err_tuple = persist_inline_comment_or_files(
+            db,
+            target_kind="project",
+            target_id=project.id,
+            body="",  # always empty for project attachments
+            files=files,
+            current_user_id=actor_id,
+            format_comment_response=format_comment_response,
+            format_attachment_response=format_attachment_response,
+            parent_label="Project",
+            retry_endpoint_path=f"POST /api/v3/projects/{project.id}/attachments",
+        )
+        if err_tuple is not None:
+            err_dict, status = err_tuple
+            return BaseController.error(
+                format_error_response(
+                    error_type=err_dict["error_type"],
+                    message=err_dict["message"],
+                    details=err_dict["details"],
+                ),
+                status=status,
+            )
+
+        # ---- 4. Build response (eagerly includes attachments) ------------
+        formatted = format_project_response(project.to_dict(), "/api/v3", db=db)
+        return BaseController.created(data=formatted)
+
     @staticmethod
     def list(request: Request, query: ProjectListQuery, db: Session) -> JSONResponse:
         # Doc 44 round 8 (mirrored from monolith) — non-admin tiers see
@@ -164,7 +323,7 @@ class ProjectController:
             if not RbacRepository(db).user_has_admin_role(caller_id):
                 return _error_response(_NotFoundResult(), default_status=404)
 
-        formatted = format_project_response(result.data.to_dict(), "/api/v3")
+        formatted = format_project_response(result.data.to_dict(), "/api/v3", db=db)
         return BaseController.ok(data=formatted)
 
     @staticmethod

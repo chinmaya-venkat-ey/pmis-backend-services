@@ -158,7 +158,9 @@ def format_collection_response(
 
 def format_project_response(
     project_data: Dict[str, Any],
-    base_url: str = "/api/v3"
+    base_url: str = "/api/v3",
+    *,
+    db: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """
     Format a single project response in HAL+JSON format.
@@ -166,9 +168,12 @@ def format_project_response(
     Args:
         project_data: Project data dictionary
         base_url: Base API URL
-
-    Returns:
-        HAL+JSON formatted response
+        db: Optional SQLAlchemy session. When supplied, the response
+            includes an ``attachments[]`` array eagerly populated from
+            comment rows attached to this project (``target_kind=
+            "project"`` rows in the unified comments table). Without
+            a session the response omits the field — keeps the list /
+            collection paths cheap (they don't pass ``db``).
     """
     project_id = project_data.get("id")
     project_code = project_data.get("project_code")
@@ -224,7 +229,51 @@ def format_project_response(
             "href": f"{base_url}/projects/{parent_id}"
         }
 
+    # Eagerly include the project's attachments[] when a session is
+    # available. Slim shape — just the file metadata FE needs to render
+    # the attachments tab. Comment-thread-style fields are intentionally
+    # excluded (projects never carry a body field on these rows).
+    if db is not None and project_id:
+        response["attachments"] = _list_project_attachments(db, project_id)
+
     return response
+
+
+def _list_project_attachments(db: Any, project_id: str) -> List[Dict[str, Any]]:
+    """Flatten every live comment row attached to ``project_id`` into
+    the slim ``attachment[]`` shape FE renders on the project detail
+    page. Returns ``[]`` when none.
+
+    Each comment row may carry multiple attachment entries in its JSON
+    ``attachments`` column — we expose them as a flat list, each
+    carrying the comment row id (so DELETE / download endpoints can be
+    targeted) plus the per-file metadata.
+    """
+    from ..infrastructure.db.models.comment import CommentModel
+    rows = (
+        db.query(CommentModel)
+        .filter(CommentModel.target_kind == "project")
+        .filter(CommentModel.target_id == project_id)
+        .filter(CommentModel.deleted_at.is_(None))
+        .order_by(CommentModel.created_at.asc())
+        .all()
+    )
+    out: List[Dict[str, Any]] = []
+    for c in rows:
+        for att in (c.attachments or []):
+            # Keys persisted in the JSON column are camelCase (see
+            # ``AttachmentInfo.to_dict``).
+            out.append({
+                "id": c.id,
+                "filename": att.get("filename"),
+                "url": att.get("url"),
+                "mimeType": att.get("mimeType") or att.get("mime_type"),
+                "sizeBytes": att.get("sizeBytes") or att.get("size_bytes"),
+                "uploadedAt": att.get("uploadedAt") or att.get("uploaded_at"),
+                "createdAt": c.created_at.isoformat() if c.created_at else None,
+                "createdBy": c.author_user_id,
+            })
+    return out
 
 
 def format_role_response(

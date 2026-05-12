@@ -10,6 +10,7 @@ FROM python:3.11-slim
 # - gcc + libffi-dev: for argon2-cffi's C extension (used for password
 #   verify on the rare project-service path that needs it; mirrors the
 #   user-service base image so the two services share build assumptions)
+ENV TZ=Asia/Kolkata
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libpq-dev \
         gcc \

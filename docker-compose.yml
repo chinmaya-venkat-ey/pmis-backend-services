@@ -9,8 +9,14 @@ services:
       - "host.docker.internal:host-gateway"
     env_file:
       - /home/uidaiadmin/pmis-projectmanagement/.env
+    
+    environment:
+      TZ: Asia/Kolkata
+
     volumes:
       - /mnt/pmis_files:/mnt/pmis_files:rw
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
     ports:
       - "8003:8003"
     healthcheck:

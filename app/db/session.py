@@ -70,11 +70,13 @@ def init_db() -> None:
     tables this service writes to.
     """
     # In standalone-DB (SQLite) deploys we create tables in-process.
-    # In shared-DB (Postgres) deploys the table already exists via
+    # In shared-DB (Postgres) deploys these tables already exist via
     # monolith alembic, and create_all is a no-op.
     if _database_url.startswith("sqlite"):
-        # Importing the model registers it on Base.metadata.
-        from .models import notification_template  # noqa: F401
+        # Importing the package registers every model on Base.metadata
+        # (notification_templates + the daily-digest read-only mirrors
+        # of projects / milestones / activities / users / roles / etc).
+        from . import models  # noqa: F401
         Base.metadata.create_all(bind=engine)
 
     # Seed the 6 built-in templates.
@@ -169,6 +171,38 @@ _TEMPLATE_SEED = (
         ),
         "is_html": False,
         "description": "Sent on POST /users/forgot-password with channel=sms.",
+    },
+    # Daily deadline-digest cron — one email per responsible user per
+    # day. The cron pre-renders ``items_html`` (since str.format_map
+    # can't loop) and the template body just splices it in. Tone is
+    # intentionally subdued — see planned_changes/3.
+    {
+        "template_kind": "project_deadline_digest",
+        "channel": "email",
+        "subject": "PMIS — upcoming deadlines on your projects",
+        "body": (
+            "<p>Hi {first_name},</p>\n"
+            "<p>Here's a summary of items on the projects you're working "
+            "on that are due in the next few days or are now past due. "
+            "This is a daily summary.</p>\n"
+            "{items_html}\n"
+            "<p>To review and update progress, log in at "
+            "<a href=\"{portal_url}\">{portal_url}</a>.</p>\n"
+            "<p style=\"color:#666; font-size:11px;\">You're receiving this "
+            "because you're listed as an org-admin, project-admin, or "
+            "project-member on at least one of the projects above.</p>"
+        ),
+        "is_html": True,
+        "description": (
+            "Daily-digest email sent by the cron endpoint at "
+            "POST /api/v1/notifications/cron/daily-digest. One email "
+            "per responsible user aggregating every milestone / "
+            "activity ending within DEADLINE_WINDOW_DAYS (default 5) "
+            "or already past due, across all projects the user is "
+            "scoped to as org_admin / project_admin / project_member. "
+            "Placeholders: {first_name}, {items_html}, {portal_url}. "
+            "items_html is built by app/services/digest_service.py."
+        ),
     },
 )
 

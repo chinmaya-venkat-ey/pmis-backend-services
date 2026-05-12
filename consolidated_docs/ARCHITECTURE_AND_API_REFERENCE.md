@@ -74,8 +74,17 @@ app/
 | POST | `/api/v1/notifications/sms/send` | No | Legacy: `{to, message}`. Doc 38: also accepts `{to, template_kind, payload}`. |
 | POST | `/api/v1/notifications/otp/send` | No | Generate + email/SMS an OTP for an arbitrary purpose; in-memory store. |
 | POST | `/api/v1/notifications/otp/verify` | No | Verify against in-memory OTP. |
+| POST | `/api/v1/notifications/dispatch` | No | Templated dispatch — `{channel, recipient, template_kind, payload}`. Renders + sends in one call. |
 
 > The dispatch endpoints stay **unauthenticated** in this service so the monolith and user-service can call them without juggling tokens. They're inside the trust boundary.
+
+### Cron endpoints (doc 3 — daily deadline-digest)
+
+| Method | Path | Auth | Notes |
+|--------|------|------|-------|
+| POST | `/api/v1/notifications/cron/daily-digest` | `X-Cron-Secret` header matching `CRON_SHARED_SECRET` env var | Scans `pmis_db` for milestones / activities ending within `DEADLINE_WINDOW_DAYS` (default 5) or already past due; groups them per responsible user (org_admin / project_admin / project_member scoped to each project); sends one email per user via the existing `email_service`. Returns `{ranAt, usersNotified, emailsSent, emailsFailed, itemsAggregated}`. Returns 503 when `CRON_SHARED_SECRET` is unset (endpoint disabled). DevOps's host cron is the only intended caller. |
+
+> Empty body is fine. Optional overrides: `{today: "YYYY-MM-DD", windowDays: int}` for replays. See `planned_changes/3` for the design.
 
 ### Master data (doc 38 — new)
 

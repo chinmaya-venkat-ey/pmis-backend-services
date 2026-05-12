@@ -22,6 +22,13 @@ ALLOWED_PLACEHOLDERS = {
     ("password_reset_link", CHANNEL_SMS): {"token", "ttl_minutes"},
     ("password_reset_otp", CHANNEL_EMAIL): {"code", "ttl_minutes"},
     ("password_reset_otp", CHANNEL_SMS): {"code", "ttl_minutes"},
+    # Daily deadline-digest cron — fired once a day per responsible user.
+    # ``items_html`` is the pre-rendered per-project HTML block (the
+    # template can't loop on its own; the cron renders the list in
+    # Python and injects the resulting fragment here).
+    ("project_deadline_digest", CHANNEL_EMAIL): {
+        "first_name", "items_html", "portal_url",
+    },
 }
 
 _PLACEHOLDER_RE = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}")

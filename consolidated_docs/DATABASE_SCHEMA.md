@@ -40,7 +40,7 @@ DB-backed email + SMS template catalog. Renderers in `app/services/template_serv
 | Column | Type | Notes |
 |---|---|---|
 | `id` | `INTEGER PK` | Autoincrement |
-| `template_kind` | `VARCHAR(64) NOT NULL` | Free-form; built-ins: `otp_login` / `password_reset_link` / `password_reset_otp` |
+| `template_kind` | `VARCHAR(64) NOT NULL` | Free-form; built-ins: `otp_login` / `password_reset_link` / `password_reset_otp` / `project_deadline_digest` |
 | `channel` | `VARCHAR(16) NOT NULL` | `email` / `sms` |
 | `subject` | `VARCHAR(500) NULL` | Required for email; null for SMS |
 | `body` | `TEXT NOT NULL` | HTML for email, plaintext for SMS; `{placeholder}` substitution |
@@ -65,10 +65,29 @@ Validated on PATCH/POST; unknown kinds skip the check (free-form support).
 | `password_reset_link` | email | `{reset_url}`, `{token}`, `{ttl_minutes}` |
 | `password_reset_link` | sms | `{token}`, `{ttl_minutes}` |
 | `password_reset_otp` | email + sms | `{code}`, `{ttl_minutes}` |
+| `project_deadline_digest` | email | `{first_name}`, `{items_html}`, `{portal_url}` — `items_html` is pre-rendered by `digest_service.render_items_html`; `portal_url` comes from `FRONTEND_BASE_URL` |
 
 ---
 
-## 4. Migration coordination
+## 4. Read-only mirrors (doc 3 — daily deadline-digest cron)
+
+The daily-digest cron needs to query the shared-DB tables that the monolith owns. These models are declared in `app/db/models/` for SQLAlchemy lookup; in shared-DB production deploys they map to existing rows monolith populates, and `Base.metadata.create_all` is a no-op. For SQLite test DBs `create_all` builds the columns this service reads.
+
+| Mirror | Columns this service reads |
+|---|---|
+| `projects` | `id, project_code, name, status, deleted_at` |
+| `milestones` | `id, project_id, name, start_date, end_date, status, deleted_at` |
+| `activities` | `id, project_id, milestone_id, name, start_date, end_date, status, deleted_at` |
+| `users` | `id, login, email, first_name, last_name, status, deleted_at` |
+| `roles` | `id, name` |
+| `user_role_assignments` | `id, user_id, role_id, organization_id, project_id` |
+| `project_vendors` | `project_id, vendor_id` |
+
+Each mirror declares ONLY the columns the cron reads. Extra columns that exist in production (e.g. `users.phone_number`, `projects.description`, etc.) are absent from this service's mapping — keeps the cross-service coupling small and the SQLite create_all minimal.
+
+---
+
+## 5. Migration coordination
 
 The notification-service runs with `MIGRATIONS_AUTORUN=false` in shared-DB deploys. The monolith owns alembic on the shared Postgres. Adding a column to `notification_templates`:
 

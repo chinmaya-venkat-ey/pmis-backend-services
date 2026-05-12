@@ -60,10 +60,21 @@ def client_with_seed():
         ):
             db.execute(text(ddl))
         # Insert an admin user with master_data:view + master_data:manage perms.
+        # Doc-49 / digest-cron: the ``users`` table is now declared by
+        # this service's UserModel (read-only mirror), so the schema
+        # carries the monolith's NOT NULL columns (email, status, ...)
+        # — provide them here so the insert satisfies the constraints.
         admin_uuid = str(uuid.uuid4())
         db.execute(
-            text("INSERT INTO users (id, login) VALUES (:id, :login)"),
-            {"id": admin_uuid, "login": "admin"},
+            text(
+                "INSERT INTO users (id, login, email, first_name, last_name, status) "
+                "VALUES (:id, :login, :email, :first, :last, :status)"
+            ),
+            {
+                "id": admin_uuid, "login": "admin",
+                "email": "admin@example.com", "first": "Admin", "last": "User",
+                "status": "active",
+            },
         )
         db.execute(text("INSERT INTO roles (id, name) VALUES (1, 'admin')"))
         db.execute(
@@ -121,7 +132,7 @@ def _admin_token(user_id: str) -> str:
 # ---------------------------------------------------------------------------
 
 class TestSeed:
-    def test_six_seed_rows_present(self, client_with_seed):
+    def test_seed_rows_present(self, client_with_seed):
         client, uid = client_with_seed
         resp = client.get(
             "/api/v3/master/notification_templates",
@@ -137,6 +148,8 @@ class TestSeed:
             ("password_reset_link", "sms"),
             ("password_reset_otp", "email"),
             ("password_reset_otp", "sms"),
+            # Daily deadline-digest cron — email-only.
+            ("project_deadline_digest", "email"),
         }
         for r in rows:
             assert r["isBuiltin"] is True

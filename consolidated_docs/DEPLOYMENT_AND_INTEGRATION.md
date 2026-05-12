@@ -115,7 +115,29 @@ MSG91_API_KEY=
 
 ```bash
 FRONTEND_BASE_URL=              # public FE base URL; embedded in password-reset email links
+                                # AND in daily-digest portal links (see daily-digest cron below)
 ```
+
+### Daily deadline-digest cron (doc 3)
+
+```bash
+CRON_SHARED_SECRET=             # shared secret the DevOps host cron presents as X-Cron-Secret
+                                # Empty (default) → endpoint disabled, returns 503
+DEADLINE_WINDOW_DAYS=5          # look-ahead in days for items considered "ending soon" (default 5)
+                                # Overdue items (end_date < today) are always included regardless
+```
+
+DevOps's host crontab should call the endpoint daily, suggested 09:00 IST:
+
+```
+0 9 * * * curl -fsS -X POST -H "X-Cron-Secret: $SECRET" \
+  http://localhost:8002/api/v1/notifications/cron/daily-digest \
+  > /var/log/pmis/daily-digest.json
+```
+
+Smoke-test it after first deploy by curling manually with the secret and
+inspecting the JSON summary. `notification_log` will show one row per
+email attempt.
 
 ---
 

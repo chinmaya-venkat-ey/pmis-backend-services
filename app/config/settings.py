@@ -80,8 +80,20 @@ class Settings(BaseSettings):
     )
     algorithm: str = "HS256"
 
-    # Used by template_service when rendering password-reset emails.
+    # Used by template_service when rendering password-reset emails AND
+    # by the daily-digest cron when rendering the portal link.
     frontend_base_url: str = ""
+
+    # ---- Daily deadline-digest cron ----------------------------------
+    # ``cron_shared_secret`` gates POST /api/v1/notifications/cron/daily-digest.
+    # The DevOps cron caller must send ``X-Cron-Secret: <value>`` on every
+    # request. Empty string means the endpoint is disabled (returns 503)
+    # to keep boot-time safe defaults — must be set explicitly in deploy.
+    cron_shared_secret: str = ""
+    # ``deadline_window_days`` — how many days of look-ahead the cron
+    # scans. 5 = include items ending today through today+5 (inclusive).
+    # Overdue items (end_date < today) are always included regardless.
+    deadline_window_days: int = 5
 
     @field_validator("email_provider", "sms_provider")
     @classmethod

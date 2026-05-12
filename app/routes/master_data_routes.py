@@ -26,6 +26,7 @@ from ..schemas.notification_template import (
     NotificationTemplateUpdateRequest,
     validate_placeholder_set,
 )
+from ..utilities.timezones import iso_ist
 
 
 router = APIRouter(
@@ -51,8 +52,8 @@ def _to_response(row: NotificationTemplateModel) -> Dict[str, Any]:
         "isBuiltin": bool(row.is_builtin),
         "active": bool(row.active),
         "description": row.description,
-        "createdAt": row.created_at.isoformat() if row.created_at else None,
-        "updatedAt": row.updated_at.isoformat() if row.updated_at else None,
+        "createdAt": iso_ist(row.created_at),
+        "updatedAt": iso_ist(row.updated_at),
     }
 
 

@@ -38,7 +38,8 @@ from .priority import PriorityModel  # noqa: F401
 from .project import ProjectModel  # noqa: F401
 from .project_audit_log import ProjectAuditLogModel  # noqa: F401
 from .project_category import ProjectCategoryModel  # noqa: F401
-from .project_member import ProjectMemberModel  # noqa: F401
+# project_members retired — unified into user_role_assignments
+# (project scope). See monolith alembic migration baddc1146b85.
 from .project_status_transition import ProjectStatusTransitionModel  # noqa: F401
 from .project_vendor import ProjectVendorModel  # noqa: F401
 from .resource_type import ResourceTypeModel  # noqa: F401
@@ -68,7 +69,6 @@ __all__ = [
     "PriorityModel",
     "ProjectAuditLogModel",
     "ProjectCategoryModel",
-    "ProjectMemberModel",
     "ProjectModel",
     "ProjectStatusTransitionModel",
     "ProjectVendorModel",

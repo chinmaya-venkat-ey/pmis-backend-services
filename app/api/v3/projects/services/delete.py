@@ -6,8 +6,10 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from .....api.v3.milestones.services.cascade import cascade_soft_delete_project
-from .....infrastructure.db.models.project_member import ProjectMemberModel
 from .....infrastructure.db.models.project_vendor import ProjectVendorModel
+from .....infrastructure.db.models.user_role_assignment import (
+    UserRoleAssignmentModel,
+)
 from .....infrastructure.db.repositories.project_repository import ProjectRepository
 from .....shared.service_result import ServiceResult
 
@@ -29,8 +31,12 @@ def _disconnect_associations(db: Session, project_id: str) -> None:
     db.query(ProjectVendorModel).filter(
         ProjectVendorModel.project_id == project_id
     ).delete(synchronize_session=False)
-    db.query(ProjectMemberModel).filter(
-        ProjectMemberModel.project_id == project_id
+    # Project-scoped role assignments (the unified membership table
+    # after the project_members migration). URA's CHECK constraint
+    # ensures project_id IS NOT NULL implies organization_id is null,
+    # so this delete only touches project-scoped rows.
+    db.query(UserRoleAssignmentModel).filter(
+        UserRoleAssignmentModel.project_id == project_id
     ).delete(synchronize_session=False)
 
 

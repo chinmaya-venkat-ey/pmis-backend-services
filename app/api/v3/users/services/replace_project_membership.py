@@ -1,21 +1,25 @@
-"""Replace a user's project membership (doc 44 round 9).
+"""Replace a user's project membership.
 
 Handles ``PATCH /api/v3/users/{id}`` requests that include
-``projectIds``. Replaces the user's project_members rows AND their
-project-scoped role assignments (doc-41 ``user_role_assignments``)
-to match the new list, gated per-row by the caller-vs-target check.
+``projectIds``. Replaces the user's project-scoped role assignments
+in ``user_role_assignments`` to match the new list, gated per-row by
+the caller-vs-target check.
 
 Semantics:
-  * ``project_ids = None`` → no-op (leave both tables untouched).
+  * ``project_ids = None`` → no-op.
   * ``project_ids = []`` → clear: revoke every project-scoped role
-    assignment + delete every project_members row for the user.
+    assignment the caller is authorised to revoke.
   * ``project_ids = [...]`` → diff:
       - revoke project-scoped role assignments whose project_id is
         NOT in the new list,
       - grant project-scoped role assignments for projects that are
         in the new list but missing from existing rows (using the
-        user's current orgRole as the role to grant),
-      - replace project_members rows to match the new list.
+        user's current orgRole as the role to grant).
+
+The legacy ``project_members`` table was retired and unified into
+``user_role_assignments`` — the alembic migration backfilled the
+existing rows. This service is the single source of truth for
+project-scope membership writes.
 
 All grants + revokes pass through ``can_caller_grant`` so an
 org_admin can only edit memberships on projects within their vendor.
@@ -31,7 +35,6 @@ from .....core.permissions import (
     PROJECT_MEMBER_ROLE_NAME,
 )
 from .....infrastructure.db.models.project import ProjectModel
-from .....infrastructure.db.models.project_member import ProjectMemberModel
 from .....infrastructure.db.models.role import RoleModel
 from .....infrastructure.db.models.user_role_assignment import (
     UserRoleAssignmentModel,
@@ -199,16 +202,8 @@ def replace_user_project_membership(
                 actor_id=caller_id,
             )
 
-    # Replace project_members rows. Simple wipe + insert — the table
-    # is small per user and this is the same approach create uses on
-    # initial bind.
-    db.query(ProjectMemberModel).filter(
-        ProjectMemberModel.user_id == user_id,
-    ).delete(synchronize_session=False)
-    for pid in project_ids:
-        db.add(ProjectMemberModel(
-            project_id=pid, user_id=user_id, roles=[],
-        ))
-
+    # Legacy project_members wipe+insert was retired. Project-scoped
+    # role assignments above are now the single source of truth for
+    # membership.
     db.flush()
     return ServiceResult.ok(None)

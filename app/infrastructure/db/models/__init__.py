@@ -15,7 +15,8 @@ PMIS-notification-service (doc 38), so there's no model for it here.
 """
 from .division import DivisionModel
 from .project import ProjectModel
-from .project_member import ProjectMemberModel
+# project_members table retired — unified into user_role_assignments
+# (project scope). See monolith alembic migration baddc1146b85.
 from .revoked_token import RevokedTokenModel
 from .role import RoleModel
 from .user import UserModel
@@ -36,7 +37,6 @@ from .password_reset_token import PasswordResetTokenModel
 
 __all__ = [
     "DivisionModel",
-    "ProjectMemberModel",
     "ProjectModel",
     "RevokedTokenModel",
     "RoleModel",

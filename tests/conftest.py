@@ -23,7 +23,6 @@ from app.infrastructure.db.models import (  # noqa: F401
     UserModel,
     RoleModel,
     ProjectModel,
-    ProjectMemberModel,
     PermissionModel,
     RolePermissionModel,
     UserRoleModel,

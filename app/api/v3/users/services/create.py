@@ -22,7 +22,10 @@ from .....core.security import hash_password
 from .....domain.resource_types.resource_type import DIVISION_OTHERS
 from .....domain.users.user import User
 from .....infrastructure.db.models.project import ProjectModel
-from .....infrastructure.db.models.project_member import ProjectMemberModel
+from .....infrastructure.db.models.user_role_assignment import (
+    UserRoleAssignmentModel,
+)
+from .....infrastructure.db.models.role import RoleModel as _PMRole
 from .....infrastructure.db.models.vendor import VendorModel
 from .....infrastructure.db.repositories.user_repository import UserRepository
 from .....infrastructure.db.repositories.vendor_repository import VendorRepository
@@ -372,13 +375,26 @@ def create_user(
             org_role=normalized_org_role,
         )
 
-        # Wire up project_members rows.
-        for pid in project_ids:
-            db.add(ProjectMemberModel(
-                project_id=pid,
-                user_id=user.id,
-                roles=[],   # role per project — future feature
-            ))
+        # Wire up project membership via the scoped-RBAC table.
+        # ``roles`` on the legacy project_members table was always
+        # written as [] — each row maps to a single URA row with
+        # role=project_member, project_id set, organization_id NULL.
+        if project_ids:
+            pm_role_id = (
+                db.query(_PMRole.id)
+                .filter(_PMRole.name == "project_member")
+                .scalar()
+            )
+            if pm_role_id is None:
+                raise RuntimeError(
+                    "project_member role not seeded — RBAC sync did not run"
+                )
+            for pid in project_ids:
+                db.add(UserRoleAssignmentModel(
+                    user_id=user.id,
+                    role_id=pm_role_id,
+                    project_id=pid,
+                ))
         db.flush()
 
         # Doc 44 — write the planned role assignments. The repo helper

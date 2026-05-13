@@ -22,7 +22,6 @@ from ....shared.code_generators import (
     looks_like_user_code,
 )
 from ...db.models.project import ProjectModel
-from ...db.models.project_member import ProjectMemberModel
 from ...db.models.role import RoleModel
 from ...db.models.user import UserModel
 from ...db.models.user_role import UserRoleModel
@@ -41,20 +40,6 @@ _HIDDEN_PROJECT_STATUSES = ("closed",)
 
 _ADMIN_ROLE_NAME = "admin"
 _SUPER_ADMIN_ROLE_NAME = "super_admin"
-
-# Role names that count as "the user is mapped to this project" for the
-# Search-User / introspect / GET-/users response. Mirrors the read-side
-# pattern in monolith's projects/services/list.py "visible-to-me"
-# filter. project_members is the legacy table; user_role_assignments is
-# the doc-41 scoped-RBAC table. PATCH /users/{id} with projectIds dual-
-# writes both, but POST /projects/{id}/role-assignments writes only the
-# scoped table — so we UNION both sources to surface the full mapping.
-_PROJECT_TIER_ROLE_NAMES = (
-    "project_admin",
-    "project_member",
-    "division_member",
-)
-
 
 def _user_holds_admin_role(db: Session, user_id: str) -> bool:
     """Check whether ``user_id`` is assigned the seeded ``admin`` role.
@@ -139,33 +124,13 @@ class UserRepository:
     def _load_projects_for_user(self, user_id: str) -> List[dict]:
         """Return slim project dicts for embedding in user responses.
 
-        Reads from BOTH ``project_members`` AND project-tier rows in
-        ``user_role_assignments``, UNIONing the two so the response
-        surfaces a project mapping regardless of which write path
-        created it. Joins to ``projects`` and filters out hidden
-        statuses (closed) and soft-deleted projects. Ordered newest
-        first.
-
-        Why the UNION: PATCH /users/{id} with projectIds dual-writes
-        both tables, but POST /projects/{id}/role-assignments only
-        writes ``user_role_assignments``. Reading from a single table
-        used to hide the mapping for users granted via the latter
-        path. Same pattern monolith's projects/services/list.py uses
-        for the "visible-to-me" project filter.
+        Reads project-scoped rows from ``user_role_assignments`` (the
+        unified membership table after the project_members migration —
+        see monolith alembic ``baddc1146b85``). Distinct on project id
+        so a user holding multiple project-tier roles on the same
+        project surfaces only once. Filters out hidden statuses
+        (closed) and soft-deleted projects. Ordered newest first.
         """
-        pids_legacy = (
-            self.db.query(ProjectMemberModel.project_id)
-            .filter(ProjectMemberModel.user_id == user_id)
-        )
-        pids_scoped = (
-            self.db.query(UserRoleAssignmentModel.project_id)
-            .join(RoleModel, RoleModel.id == UserRoleAssignmentModel.role_id)
-            .filter(UserRoleAssignmentModel.user_id == user_id)
-            .filter(UserRoleAssignmentModel.project_id.isnot(None))
-            .filter(RoleModel.name.in_(_PROJECT_TIER_ROLE_NAMES))
-        )
-        visible_pids = pids_legacy.union(pids_scoped)
-
         rows = (
             self.db.query(
                 ProjectModel.id,
@@ -173,9 +138,15 @@ class UserRepository:
                 ProjectModel.name,
                 ProjectModel.status,
             )
-            .filter(ProjectModel.id.in_(visible_pids))
+            .join(
+                UserRoleAssignmentModel,
+                UserRoleAssignmentModel.project_id == ProjectModel.id,
+            )
+            .filter(UserRoleAssignmentModel.user_id == user_id)
+            .filter(UserRoleAssignmentModel.project_id.isnot(None))
             .filter(ProjectModel.deleted_at.is_(None))
             .filter(~ProjectModel.status.in_(_HIDDEN_PROJECT_STATUSES))
+            .distinct()
             .order_by(desc(ProjectModel.created_at), desc(ProjectModel.id))
             .all()
         )

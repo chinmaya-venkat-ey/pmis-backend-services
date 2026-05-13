@@ -420,7 +420,13 @@ def update_milestone(
     else:
         updated = repo._to_domain(model)
 
+    deps_before: Optional[List[str]] = None
     if desired_deps is not None:
+        # Doc 54: snapshot existing deps before the swap so the
+        # dep_change audit row can record both before and after states.
+        deps_before = DependencyRepository(db).list_milestone_dependencies(
+            milestone_id,
+        )
         DependencyRepository(db).set_milestone_dependencies(
             milestone_id, model.project_id, desired_deps,
             actor_id=current_user_id,
@@ -452,7 +458,7 @@ def update_milestone(
             project_id=model.project_id,
             actor_id=current_user_id,
             action=ACTION_MILESTONE_DEP_CHANGE,
-            before={"milestone_id": milestone_id},
+            before={"milestone_id": milestone_id, "depends_on": list(deps_before or [])},
             after={"milestone_id": milestone_id, "depends_on": list(desired_deps)},
         )
         db.commit()

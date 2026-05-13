@@ -201,12 +201,18 @@ def create_task(
                 f"Priority must be one of: {', '.join(valid)}."
             )
 
-    # Doc 41 follow-up: validate the assignee (if any). Must be a live,
-    # active user from the users catalog. Independent per-level: no
+    # Doc 41 follow-up + doc 54: validate the assignee (if any).
+    # Must be a live, active user from the users catalog. For non-admin
+    # callers, additionally must be in the caller's vendor AND hold a
+    # project-tier role on this project. Independent per-level: no
     # cascade from / to subtasks.
     if assigned_to is not None:
         from .....shared.assignee import validate_assignable_user_id
-        validate_assignable_user_id(db, assigned_to)
+        validate_assignable_user_id(
+            db, assigned_to,
+            project_id=activity.project_id,
+            caller_user_id=current_user_id,
+        )
 
     # Validate dependsOn BEFORE inserting the task row. Accepts UUIDs or
     # labels (e.g. "T1.2.3") — see app/shared/labels.py.

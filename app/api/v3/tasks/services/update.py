@@ -46,6 +46,15 @@ from .....domain.tasks.task_resource import TaskResource
 
 from .create import _validate_task_deps_same_project
 from .....infrastructure.db.models.subtask import SubtaskModel
+from ...projects.services.audit import (
+    ACTION_TASK_DEP_CHANGE,
+    ACTION_TASK_UPDATE,
+    record_audit,
+)
+
+
+def _iso(v):
+    return v.isoformat() if hasattr(v, "isoformat") else v
 
 
 _TASK_STATUS_COMPLETED = "completed"
@@ -381,8 +390,15 @@ def update_task(
     # None -> just clear.
     if assigned_to is not ...:
         if assigned_to is not None:
+            # Doc 54: assignee narrowing — non-admin callers must
+            # supply an assignee in the same vendor AND with a
+            # project-tier role on this project.
             from .....shared.assignee import validate_assignable_user_id
-            validate_assignable_user_id(db, assigned_to)
+            validate_assignable_user_id(
+                db, assigned_to,
+                project_id=model.project_id,
+                caller_user_id=current_user_id,
+            )
 
     updates: Dict[str, Any] = {}
     if name is not None: updates["name"] = name.strip()
@@ -400,6 +416,11 @@ def update_task(
         updates["resource_mode"] = final_mode
         updates["resource_count"] = final_count
 
+    before_snapshot = (
+        {k: _iso(getattr(model, k)) for k in updates.keys()}
+        if updates else {}
+    )
+
     if updates:
         repo.update(task_id, updates=updates, updated_by=current_user_id)
 
@@ -415,10 +436,37 @@ def update_task(
         repo.soft_delete_live_resource(task_id)
         resource_domain = None
 
+    deps_before: Optional[List[str]] = None
     if desired_deps is not None:
+        # Doc 54: snapshot existing deps before the swap so the
+        # dep_change audit row can record both before and after states.
+        deps_before = DependencyRepository(db).list_task_dependencies(task_id)
         DependencyRepository(db).set_task_dependencies(
             task_id, model.project_id, desired_deps,
             actor_id=current_user_id,
+        )
+
+    # Doc 54: tasks/services/update.py now fires record_audit on field
+    # updates AND on dep changes. Constants were declared but never
+    # called before, so T edits were silent in the history.
+    if updates:
+        record_audit(
+            db,
+            project_id=model.project_id,
+            actor_id=current_user_id,
+            action=ACTION_TASK_UPDATE,
+            before={"task_id": task_id, **before_snapshot},
+            after={k: _iso(v) for k, v in updates.items()},
+        )
+
+    if desired_deps is not None:
+        record_audit(
+            db,
+            project_id=model.project_id,
+            actor_id=current_user_id,
+            action=ACTION_TASK_DEP_CHANGE,
+            before={"task_id": task_id, "depends_on": list(deps_before or [])},
+            after={"task_id": task_id, "depends_on": list(desired_deps)},
         )
 
     db.commit()

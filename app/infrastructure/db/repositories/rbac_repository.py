@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from ....core.permissions import (
     ADMIN_ROLE_NAME,
+    SUPER_ADMIN_ROLE_NAME,
     VENDOR_ROLE_NAME,
     VENDOR_ROLE_PERMISSIONS,
     ADMIN_ROLE_PERMISSIONS,
@@ -29,6 +30,7 @@ from ..models.role import RoleModel
 from ..models.role_permission import RolePermissionModel
 from ..models.user_permission import UserPermissionModel
 from ..models.user_role import UserRoleModel
+from ..models.user_role_assignment import UserRoleAssignmentModel
 
 
 def _utcnow() -> datetime:
@@ -64,20 +66,43 @@ class RbacRepository:
         return role_codes | direct_codes
 
     def user_has_admin_role(self, user_id: str) -> bool:
+        """True iff the user holds admin or super_admin globally.
+
+        Doc 41 widens this to include super_admin (a strict superset of
+        admin) and to honour global rows in ``user_role_assignments``.
+        """
         if user_id is None:
             return False
-        return (
+        admin_names = (ADMIN_ROLE_NAME, SUPER_ADMIN_ROLE_NAME)
+        legacy = (
             self.db.query(
                 exists().where(
                     and_(
                         UserRoleModel.user_id == user_id,
                         UserRoleModel.role_id == RoleModel.id,
-                        RoleModel.name == ADMIN_ROLE_NAME,
+                        RoleModel.name.in_(admin_names),
                     )
                 )
             ).scalar()
             or False
         )
+        if legacy:
+            return True
+        scoped = (
+            self.db.query(
+                exists().where(
+                    and_(
+                        UserRoleAssignmentModel.user_id == user_id,
+                        UserRoleAssignmentModel.role_id == RoleModel.id,
+                        UserRoleAssignmentModel.organization_id.is_(None),
+                        UserRoleAssignmentModel.project_id.is_(None),
+                        RoleModel.name.in_(admin_names),
+                    )
+                )
+            ).scalar()
+            or False
+        )
+        return scoped
 
     # -------------------------------------------------------------------
     # Permission catalog CRUD

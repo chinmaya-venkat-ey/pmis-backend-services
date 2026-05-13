@@ -483,8 +483,23 @@ def list_project_audit_logs(
     pageSize: int = Query(50, ge=1, le=200, description="Items per page (max 200)."),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
+    from collections import defaultdict
     from ....infrastructure.db.repositories.project_audit_log_repository import (
         ProjectAuditLogRepository,
+    )
+    from ....infrastructure.db.models.activity_dependency import (
+        ActivityDependencyModel,
+    )
+    from ....infrastructure.db.models.milestone_dependency import (
+        MilestoneDependencyModel,
+    )
+    from ....infrastructure.db.models.subtask_dependency import (
+        SubtaskDependencyModel,
+    )
+    from ....infrastructure.db.models.task_dependency import TaskDependencyModel
+    from ....shared.labels import (
+        KIND_ACTIVITY, KIND_MILESTONE, KIND_SUBTASK, KIND_TASK,
+        build_label_index_for_project,
     )
 
     project = (
@@ -502,12 +517,127 @@ def list_project_audit_logs(
         limit=pageSize,
     )
 
+    # Doc 54: build the label index + dependency maps once per page —
+    # same pattern the tree endpoint uses. Each audit row references at
+    # most one M/A/T/S entity; we look up its current displayCode +
+    # dependsOnDisplay from these maps.
+    label_idx = build_label_index_for_project(db, project_uuid)
+
+    def _build_dep_map(model, src_col, tgt_col):
+        m: Dict[str, List[str]] = defaultdict(list)
+        for src, tgt in (
+            db.query(getattr(model, src_col), getattr(model, tgt_col))
+            .filter(model.project_id == project_uuid)
+            .filter(model.deleted_at.is_(None))
+            .all()
+        ):
+            m[src].append(tgt)
+        return m
+
+    deps_by_kind = {
+        KIND_MILESTONE: _build_dep_map(
+            MilestoneDependencyModel,
+            "source_milestone_id", "target_milestone_id",
+        ),
+        KIND_ACTIVITY: _build_dep_map(
+            ActivityDependencyModel,
+            "source_activity_id", "target_activity_id",
+        ),
+        KIND_TASK: _build_dep_map(
+            TaskDependencyModel,
+            "source_task_id", "target_task_id",
+        ),
+        KIND_SUBTASK: _build_dep_map(
+            SubtaskDependencyModel,
+            "source_subtask_id", "target_subtask_id",
+        ),
+    }
+
+    # Action prefix → (entity kind, JSON key in before/after carrying id).
+    _ACTION_KIND_MAP = {
+        "milestone": (KIND_MILESTONE, "milestone_id"),
+        "activity":  (KIND_ACTIVITY,  "activity_id"),
+        "task":      (KIND_TASK,      "task_id"),
+        "subtask":   (KIND_SUBTASK,   "subtask_id"),
+    }
+
+    def _entity_id_from_payload(payload, id_key):
+        if not isinstance(payload, dict):
+            return None
+        v = payload.get(id_key)
+        if v is None:
+            v = payload.get("id")
+        return v if isinstance(v, str) else None
+
+    def _labels_from_payload(payload, kind):
+        """Resolve ``payload.depends_on`` (a UUID list) to labels.
+        Returns None when the payload has no ``depends_on`` key
+        (so the response distinguishes "row never recorded deps" from
+        "row recorded an empty deps list")."""
+        if not isinstance(payload, dict):
+            return None
+        v = payload.get("depends_on")
+        if not isinstance(v, list):
+            return None
+        return label_idx.labels_of(
+            kind, [d for d in v if isinstance(d, str)],
+        )
+
+    def _resolve_target(action, before, after):
+        """Return (code, depends_on_display, depends_on_display_before)
+        for an audit row.
+
+        ``code``:
+          - project.* actions → ``project.project_code``.
+          - M/A/T/S actions   → the entity's current displayCode
+            (M1 / A1.2 / T1.2.3 / S1.2.3.4). None when the entity has
+            been hard-deleted.
+
+        ``dependsOnDisplay`` / ``dependsOnDisplayBefore`` resolve the
+        audit-snapshot's UUID dep lists to human-readable labels so the
+        reader doesn't have to cross-reference bare UUIDs.
+          - project.* → both None.
+          - ``*.create`` → ``after.depends_on`` resolved on the
+            ``dependsOnDisplay`` side; ``Before`` is None (no prior
+            state — row didn't exist).
+          - ``*.dep_change`` → both sides resolved from the snapshot.
+            Pre-fix historical rows that recorded only ``after`` will
+            surface ``Before = None`` honestly.
+          - ``*.update`` / ``*.soft_delete`` / ``*.restore`` → both
+            None (deps aren't part of these rows' payload).
+
+        The raw ``before`` / ``after`` JSON returned to the caller is
+        left untouched — UUIDs are preserved as-is so no audit detail
+        is lost.
+        """
+        prefix = (action or "").split(".", 1)[0]
+        if prefix == "project":
+            return project.project_code, None, None
+        kind_info = _ACTION_KIND_MAP.get(prefix)
+        if kind_info is None:
+            return None, None, None
+        kind, id_key = kind_info
+        entity_id = (
+            _entity_id_from_payload(after, id_key)
+            or _entity_id_from_payload(before, id_key)
+        )
+        if entity_id is None:
+            return None, None, None
+        code = label_idx.label_of(kind, entity_id)
+
+        deps_after = _labels_from_payload(after, kind)
+        deps_before = _labels_from_payload(before, kind)
+        if action.endswith(".dep_change"):
+            return code, deps_after, deps_before
+        if action.endswith(".create"):
+            return code, deps_after, None
+        return code, None, None
+
     def _to_response(entry) -> Dict[str, Any]:
         d = entry.to_dict()
-        # Per-entry payload — only the audit-event-specific fields.
-        # Project identity (id / code / name / status / owner) is the
-        # same for every row in this collection so it lives at the
-        # top-level ``project`` key instead of being repeated.
+        code, deps_after, deps_before = _resolve_target(
+            d["action"], d.get("before"), d.get("after"),
+        )
         return {
             "id": d["id"],
             "actorId": d["actor_id"],
@@ -515,6 +645,9 @@ def list_project_audit_logs(
             "actorLogin": d["actor_login"],
             "actorRole": d["actor_role"],
             "action": d["action"],
+            "code": code,
+            "dependsOnDisplay": deps_after,
+            "dependsOnDisplayBefore": deps_before,
             "before": d["before"],
             "after": d["after"],
             "createdAt": d["created_at"],

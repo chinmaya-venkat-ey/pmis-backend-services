@@ -253,12 +253,18 @@ def create_subtask(
                 f"Priority must be one of: {', '.join(valid)}."
             )
 
-    # Doc 41 follow-up: validate the assignee (if any). Must be a live,
-    # active user. Independent per-level — applies the same to nested
-    # subtasks; parent's assignee has no effect.
+    # Doc 41 follow-up + doc 54: validate the assignee (if any).
+    # Must be a live, active user; for non-admin callers, also same
+    # vendor + project-tier on this project. Independent per-level —
+    # applies the same to nested subtasks; parent's assignee has no
+    # effect.
     if assigned_to is not None:
         from .....shared.assignee import validate_assignable_user_id
-        validate_assignable_user_id(db, assigned_to)
+        validate_assignable_user_id(
+            db, assigned_to,
+            project_id=task.project_id,
+            caller_user_id=current_user_id,
+        )
 
     desired_deps: List[str] = []
     if depends_on is not None:

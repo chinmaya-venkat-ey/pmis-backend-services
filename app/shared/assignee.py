@@ -7,21 +7,55 @@ A "live, assignable" user is one that is:
   * has ``status = 'active'`` (inactive users are out of scope), and
   * is not soft-deleted (``deleted_at IS NULL``).
 
+Doc 54: when the caller supplies ``project_id`` and ``caller_user_id``,
+the validator additionally enforces, for non-admin callers, that the
+assignee be in the **same vendor** as the caller AND hold a
+**project-tier role assignment** on that project. admin / super_admin
+callers bypass the narrowing (they have global reach by design).
+
 The helper returns the UUID unchanged on success and raises a
 ``ValidationError`` with a stable message otherwise. Used by both
 task and subtask create / update flows.
 """
 from typing import Iterable, Dict, Optional
 
+from sqlalchemy import and_, exists
 from sqlalchemy.orm import Session
 
 from ..core.errors import ValidationError
 from ..infrastructure.db.models.user import UserModel
 
 
-def validate_assignable_user_id(db: Session, user_id: str) -> str:
-    """Confirm ``user_id`` is a live, active user. Raises ``ValidationError``
-    with a 422-friendly message if not. Returns the id unchanged on success.
+# Roles that count as "assigned to the project" for the doc-54 gate.
+# Per user direction: project-tier scoped roles only — not project_members
+# table entries, not org_admin reach via the vendor.
+_PROJECT_TIER_ROLES = ("project_admin", "project_member", "division_member")
+
+
+def validate_assignable_user_id(
+    db: Session,
+    user_id: str,
+    *,
+    project_id: Optional[str] = None,
+    caller_user_id: Optional[str] = None,
+) -> str:
+    """Confirm ``user_id`` is assignable. Raises ``ValidationError`` with
+    a 422-friendly message if not. Returns the id unchanged on success.
+
+    Layer 1 (always enforced): exists, active, not soft-deleted.
+
+    Layer 2 (enforced only when both ``project_id`` and ``caller_user_id``
+    are supplied AND the caller is NOT admin / super_admin):
+
+      * Same vendor — the assignee's ``vendor_id`` on the users row
+        must equal the caller's ``vendor_id``.
+      * Project-tier membership — the assignee must have a row in
+        ``user_role_assignments`` with role in
+        ``(project_admin, project_member, division_member)`` and
+        ``project_id`` equal to the target project.
+
+    Callers that pre-date doc 54 (omitting both new kwargs) keep the
+    Layer-1-only behaviour for back-compat.
     """
     if not isinstance(user_id, str) or not user_id.strip():
         raise ValidationError(
@@ -47,6 +81,74 @@ def validate_assignable_user_id(db: Session, user_id: str) -> str:
             f"assignedTo user '{user_id}' is not active "
             f"(current status: '{status}'). Pick an active user."
         )
+
+    # Layer 2 — only when caller passed both ids. Lazy imports inside
+    # the function so the legacy callers that don't pass either kwarg
+    # don't pay for the RBAC dependency.
+    if project_id is None or caller_user_id is None:
+        return user_id
+
+    from ..infrastructure.db.repositories.rbac_repository import RbacRepository
+    from ..infrastructure.db.models.role import RoleModel
+    from ..infrastructure.db.models.user_role_assignment import (
+        UserRoleAssignmentModel,
+    )
+
+    # admin / super_admin bypass — global tier, no narrowing.
+    if RbacRepository(db).user_has_admin_role(caller_user_id):
+        return user_id
+
+    # Same vendor — both caller and assignee must have a vendor_id and
+    # the two must match. (admin / super_admin already returned above;
+    # their vendor_id is typically null and would fail this check.)
+    caller_vendor = (
+        db.query(UserModel.vendor_id)
+        .filter(UserModel.id == caller_user_id)
+        .first()
+    )
+    if caller_vendor is None or caller_vendor[0] is None:
+        raise ValidationError(
+            "Caller has no vendor binding; cannot determine "
+            "organization scope for the assignment."
+        )
+    assignee_vendor = (
+        db.query(UserModel.vendor_id)
+        .filter(UserModel.id == user_id)
+        .first()
+    )
+    if (
+        assignee_vendor is None
+        or assignee_vendor[0] is None
+        or assignee_vendor[0] != caller_vendor[0]
+    ):
+        raise ValidationError(
+            f"assignedTo user '{user_id}' is not in your organization. "
+            f"You can only assign tasks / subtasks to users in your "
+            f"own vendor."
+        )
+
+    # Project-tier role on this project.
+    has_project_role = (
+        db.query(
+            exists().where(
+                and_(
+                    UserRoleAssignmentModel.user_id == user_id,
+                    UserRoleAssignmentModel.project_id == project_id,
+                    UserRoleAssignmentModel.role_id == RoleModel.id,
+                    RoleModel.name.in_(_PROJECT_TIER_ROLES),
+                )
+            )
+        )
+        .scalar()
+        or False
+    )
+    if not has_project_role:
+        raise ValidationError(
+            f"assignedTo user '{user_id}' is not assigned to this "
+            f"project. They must first be added as a project_admin, "
+            f"project_member, or division_member of the project."
+        )
+
     return user_id
 
 

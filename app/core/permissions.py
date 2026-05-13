@@ -364,6 +364,12 @@ PROJECT_ADMIN_ROLE_PERMISSIONS: List[str] = [
 PROJECT_MEMBER_ROLE_PERMISSIONS: List[str] = [
     PROJECTS_READ,
     PROJECT_MEMBERS_READ,
+    # USERS_READ_ALL: mirror of monolith. The FE's DataContext fetches
+    # GET /api/v3/users on boot and the assignTo picker reads from
+    # that global users state. Without this perm, project_member sees
+    # 403 + empty picker. /users vendor-scopes + admin-excludes for
+    # non-admin callers so no cross-vendor leak.
+    USERS_READ, USERS_READ_ALL,
     MILESTONES_READ,
     ACTIVITIES_READ,
     TASKS_CREATE, TASKS_READ, TASKS_UPDATE, TASKS_DELETE, TASKS_RESTORE,

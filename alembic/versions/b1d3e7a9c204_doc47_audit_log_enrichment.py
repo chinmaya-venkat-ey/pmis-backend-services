@@ -36,24 +36,49 @@ depends_on = None
 _NEW_COLS = ("actor_login", "project_name", "project_status", "owner")
 
 
+def _existing_columns(table: str) -> set:
+    """Names of columns currently present on ``table``.
+
+    Used to make the upgrade idempotent: monolith ships an identical
+    revision (same ID, same DDL) and runs against the same shared DB
+    via its own alembic version table. Whichever service runs alembic
+    first applies the columns; the other service must skip the ADDs
+    on its own pass to avoid "column already exists" errors.
+    """
+    bind = op.get_bind()
+    return {c["name"] for c in sa.inspect(bind).get_columns(table)}
+
+
+def _existing_indexes(table: str) -> set:
+    bind = op.get_bind()
+    return {ix["name"] for ix in sa.inspect(bind).get_indexes(table)}
+
+
 def upgrade() -> None:
+    existing = _existing_columns("project_audit_logs")
+
     # 1) Add columns as nullable so backfill doesn't get rejected.
-    op.add_column(
-        "project_audit_logs",
-        sa.Column("actor_login", sa.String(length=50), nullable=True),
-    )
-    op.add_column(
-        "project_audit_logs",
-        sa.Column("project_name", sa.String(length=255), nullable=True),
-    )
-    op.add_column(
-        "project_audit_logs",
-        sa.Column("project_status", sa.String(length=50), nullable=True),
-    )
-    op.add_column(
-        "project_audit_logs",
-        sa.Column("owner", sa.String(length=50), nullable=True),
-    )
+    #    Skip any that another service has already added.
+    if "actor_login" not in existing:
+        op.add_column(
+            "project_audit_logs",
+            sa.Column("actor_login", sa.String(length=50), nullable=True),
+        )
+    if "project_name" not in existing:
+        op.add_column(
+            "project_audit_logs",
+            sa.Column("project_name", sa.String(length=255), nullable=True),
+        )
+    if "project_status" not in existing:
+        op.add_column(
+            "project_audit_logs",
+            sa.Column("project_status", sa.String(length=50), nullable=True),
+        )
+    if "owner" not in existing:
+        op.add_column(
+            "project_audit_logs",
+            sa.Column("owner", sa.String(length=50), nullable=True),
+        )
 
     # 2) Backfill from joins. Correlated subqueries work on both
     #    Postgres and SQLite without dialect branching.
@@ -123,10 +148,14 @@ def upgrade() -> None:
     )
 
     # 5) Index on actor_login to keep "filter by user" reads fast.
-    op.create_index(
-        "idx_project_audit_logs_actor_login",
-        "project_audit_logs", ["actor_login"],
-    )
+    #    Skip if monolith's mirror already created it on the shared DB.
+    if "idx_project_audit_logs_actor_login" not in _existing_indexes(
+        "project_audit_logs",
+    ):
+        op.create_index(
+            "idx_project_audit_logs_actor_login",
+            "project_audit_logs", ["actor_login"],
+        )
 
 
 def downgrade() -> None:

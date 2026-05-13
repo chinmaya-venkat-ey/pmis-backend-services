@@ -20,23 +20,32 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "project_audit_logs",
-        sa.Column("actor_code", sa.String(length=40), nullable=True),
-    )
-    # Backfill from the users table.
+    # Idempotent: monolith ships an identical revision (same ID, same
+    # DDL) and runs against the same shared DB via its own alembic
+    # version table. Skip the ADD if another service got here first.
+    bind = op.get_bind()
+    existing = {
+        c["name"] for c in sa.inspect(bind).get_columns("project_audit_logs")
+    }
+    if "actor_code" not in existing:
+        op.add_column(
+            "project_audit_logs",
+            sa.Column("actor_code", sa.String(length=40), nullable=True),
+        )
+    # Backfill from the users table — safe to re-run; WHERE filters
+    # narrow to rows that need it.
     op.execute(
         "UPDATE project_audit_logs "
         "SET actor_code = ("
         "    SELECT user_code FROM users WHERE users.id = project_audit_logs.actor_id"
         ") "
-        "WHERE actor_id IS NOT NULL"
+        "WHERE actor_id IS NOT NULL AND actor_code IS NULL"
     )
-    # Catch-all 'system' for unauth rows / orphaned actor_ids.
     op.execute(
         "UPDATE project_audit_logs SET actor_code = 'system' "
         "WHERE actor_code IS NULL"
     )
+    # SET NOT NULL is a no-op when the column is already NOT NULL.
     op.alter_column(
         "project_audit_logs", "actor_code",
         existing_type=sa.String(length=40), nullable=False,

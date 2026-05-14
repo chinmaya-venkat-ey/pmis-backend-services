@@ -178,7 +178,7 @@ class TestPatchUserGate:
 
         resp = client.patch(
             f"/api/v3/users/{target.id}",
-            json={"firstName": "Hacker"},
+            json={"fullName": "Hacker Person"},
             headers=oa_headers,
         )
         assert resp.status_code == 403, resp.text
@@ -191,7 +191,7 @@ class TestPatchUserGate:
         """admin holds USERS_UPDATE, so the field-restriction doesn't apply."""
         resp = client.patch(
             f"/api/v3/users/{member_user.id}",
-            json={"firstName": "Edited"},
+            json={"fullName": "Edited Person"},
             headers=admin_headers,
         )
         assert resp.status_code == 200, resp.text

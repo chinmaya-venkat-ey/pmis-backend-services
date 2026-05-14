@@ -2,7 +2,24 @@
 User API schemas (request/response models).
 """
 from typing import List, Optional
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+from pydantic import (
+    BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator,
+)
+
+
+def _split_full_name(full_name: Optional[str]):
+    """Split ``"first last…"`` into ``(first, last_or_None)`` on the first
+    space. Returns ``(None, None)`` for empty input. Used by both
+    create and update schemas so the FE can send a single ``fullName``
+    field and the BE backfills firstName / lastName from it when the
+    caller didn't supply them explicitly. Mirrors the join rule used by
+    the response formatter (`format_user_response`)."""
+    if not full_name:
+        return None, None
+    parts = full_name.strip().split(" ", 1)
+    first = parts[0] or None
+    last = parts[1].strip() if len(parts) > 1 and parts[1].strip() else None
+    return first, last
 
 from ....core.permissions import (
     ADMIN_ROLE_NAME,
@@ -79,8 +96,23 @@ class UserCreateRequest(BaseModel):
     login: str = Field(..., min_length=3, max_length=50)
     email: EmailStr
     password: str = Field(..., min_length=8)
-    firstName: Optional[str] = Field(None, max_length=255)
-    lastName: Optional[str] = Field(None, max_length=255)
+    # Canonical name input. Split on the first space server-side into
+    # first_name / last_name for DB storage; the response formatter
+    # joins them back to fullName on the way out. firstName / lastName
+    # are exposed as read-only @property below so existing service
+    # code that reads ``data.firstName`` / ``data.lastName`` keeps
+    # working unchanged.
+    fullName: Optional[str] = Field(
+        None, alias="full_name", max_length=510,
+        description=(
+            "User's full name. Split on the first space into "
+            "first_name / last_name for storage — e.g. 'Saikat Aich "
+            "gupta' becomes first='Saikat', last='Aich gupta'. May be "
+            "omitted; in that case the DB rows are stored with NULL "
+            "first/last and the response falls back to ``login`` for "
+            "the fullName key."
+        ),
+    )
     admin: bool = False
 
     vendorId: str = Field(
@@ -169,14 +201,36 @@ class UserCreateRequest(BaseModel):
             )
         return v
 
+    @property
+    def firstName(self) -> Optional[str]:
+        first, _ = _split_full_name(self.fullName)
+        return first
+
+    @property
+    def lastName(self) -> Optional[str]:
+        _, last = _split_full_name(self.fullName)
+        return last
+
 
 class UserUpdateRequest(BaseModel):
     """Request schema for updating a user."""
     model_config = ConfigDict(populate_by_name=True)
 
     email: Optional[EmailStr] = None
-    firstName: Optional[str] = Field(None, max_length=255)
-    lastName: Optional[str] = Field(None, max_length=255)
+    # Canonical name input on PATCH. None / omitted leaves the existing
+    # first / last unchanged; a value is split on the first space and
+    # replaces BOTH fields atomically. firstName / lastName are exposed
+    # as read-only @property below for the service layer.
+    fullName: Optional[str] = Field(
+        None, alias="full_name", max_length=510,
+        description=(
+            "User's full name. Omit to leave the name unchanged. "
+            "When supplied, the value is split on the first space — "
+            "first token becomes first_name, the remainder becomes "
+            "last_name. Both columns are written; sending a single "
+            "token clears last_name."
+        ),
+    )
     admin: Optional[bool] = None
     status: Optional[str] = None
     vendorId: Optional[str] = Field(
@@ -232,6 +286,23 @@ class UserUpdateRequest(BaseModel):
                 f"Status must be one of: {', '.join(_USER_STATUS_CHOICES)}."
             )
         return v
+
+    @property
+    def firstName(self) -> Optional[str]:
+        # When fullName is omitted, return None so the update service
+        # treats the name as "no change". Don't fall back to login on
+        # update — that's only the response-side fallback.
+        if self.fullName is None:
+            return None
+        first, _ = _split_full_name(self.fullName)
+        return first
+
+    @property
+    def lastName(self) -> Optional[str]:
+        if self.fullName is None:
+            return None
+        _, last = _split_full_name(self.fullName)
+        return last
 
 
 class UserPasswordUpdateRequest(BaseModel):

@@ -392,12 +392,16 @@ class TestUpdateUser:
     """PATCH /api/v3/users/{id}"""
 
     def test_update_user(self, client, admin_user, member_user, admin_headers):
+        # Schema now takes fullName only — firstName / lastName are
+        # derived properties, not direct inputs.
         resp = client.patch(f"/api/v3/users/{member_user.id}", json={
-            "firstName": "Updated",
-            "lastName": "Name",
+            "fullName": "Updated Name",
         }, headers=admin_headers)
         assert resp.status_code == 200
-        assert resp.json()["data"]["firstName"] == "Updated"
+        d = resp.json()["data"]
+        assert d["firstName"] == "Updated"
+        assert d["lastName"] == "Name"
+        assert d["fullName"] == "Updated Name"
 
     def test_update_password(self, client, admin_user, member_user, admin_headers):
         resp = client.patch(f"/api/v3/users/{member_user.id}/password", json={

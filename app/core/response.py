@@ -91,6 +91,15 @@ def format_user_response(
         "login": user_data.get("login"),
         "firstName": user_data.get("first_name"),
         "lastName": user_data.get("last_name"),
+        # Convenience concat — first + last joined by a space, with
+        # graceful fallback to whichever name is present, then login.
+        # Saves the FE from doing this in every place it shows a user.
+        "fullName": (
+            " ".join(filter(None, [
+                user_data.get("first_name"),
+                user_data.get("last_name"),
+            ])) or user_data.get("login")
+        ),
         "email": user_data.get("email"),
         "admin": user_data.get("admin", False),
         "status": user_data.get("status", "active"),

@@ -1,0 +1,65 @@
+# PMIS Refactor — test compose for cross-service smoke + parity tests.
+# Brings up Postgres + all 4 backend services (no nginx, no frontend).
+# Tests connect directly to each service via internal docker network.
+
+services:
+  postgres-test:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: pmis_app
+      POSTGRES_PASSWORD: changeme
+      POSTGRES_DB: pmis_test
+    tmpfs:
+      - /var/lib/postgresql/data    # in-memory; clean every restart
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pmis_app -d pmis_test"]
+      interval: 3s
+      timeout: 2s
+      retries: 10
+
+  pmis-user-management:
+    build:
+      context: ./services/pmis-user-management
+    environment:
+      - ENV=test
+      - DATABASE_URL=postgresql+psycopg2://pmis_app:changeme@postgres-test:5432/pmis_test
+      - DATABASE_URL_MIGRATIONS=postgresql+psycopg2://pmis_app:changeme@postgres-test:5432/pmis_test
+      - SECRET_KEY=test-secret-key
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+
+  pmis-project-management:
+    build:
+      context: ./services/pmis-project-management
+    environment:
+      - ENV=test
+      - DATABASE_URL=postgresql+psycopg2://pmis_app:changeme@postgres-test:5432/pmis_test
+      - SECRET_KEY=test-secret-key
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+
+  pmis-notification-management:
+    build:
+      context: ./services/pmis-notification-management
+    environment:
+      - ENV=test
+      - DATABASE_URL=postgresql+psycopg2://pmis_app:changeme@postgres-test:5432/pmis_test
+      - SECRET_KEY=test-secret-key
+      - SMS_PROVIDER=mock
+      - EMAIL_PROVIDER=smtp
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+
+  pmis-masters-management:
+    build:
+      context: ./services/pmis-masters-management
+    environment:
+      - ENV=test
+      - DATABASE_URL=postgresql+psycopg2://pmis_app:changeme@postgres-test:5432/pmis_test
+      - SECRET_KEY=test-secret-key
+    depends_on:
+      postgres-test:
+        condition: service_healthy

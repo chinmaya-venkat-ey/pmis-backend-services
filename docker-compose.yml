@@ -1,0 +1,99 @@
+# PMIS Refactor — illustrative docker-compose for local dev and as a
+# devops reference. Devops adapts to their orchestrator of choice
+# (Kubernetes, ECS, etc.). Service definitions are intentionally simple.
+#
+# Bring up locally:    docker compose up
+# Run migrations:      docker compose run --rm pmis-user-management alembic upgrade head
+# Tail logs:           docker compose logs -f pmis-notification-management
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: pmis_app
+      POSTGRES_PASSWORD: changeme
+      POSTGRES_DB: pmis
+    ports:
+      - "5432:5432"
+    volumes:
+      - pmis_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pmis_app -d pmis"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  pmis-user-management:
+    build:
+      context: ./services/pmis-user-management
+    env_file: .env
+    environment:
+      - SERVICE_NAME=pmis-user-management
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - "8001"
+
+  pmis-project-management:
+    build:
+      context: ./services/pmis-project-management
+    env_file: .env
+    environment:
+      - SERVICE_NAME=pmis-project-management
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - "8003"
+    volumes:
+      - pmis_attachments:/var/lib/pmis/attachments
+
+  pmis-notification-management:
+    build:
+      context: ./services/pmis-notification-management
+    env_file: .env
+    environment:
+      - SERVICE_NAME=pmis-notification-management
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - "8002"
+
+  pmis-masters-management:
+    build:
+      context: ./services/pmis-masters-management
+    env_file: .env
+    environment:
+      - SERVICE_NAME=pmis-masters-management
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - "8004"
+
+  pmis-frontend:
+    # The frontend repo lives outside this refactor. Devops points this
+    # build at the actual frontend repo path or pulls a pre-built image.
+    image: pmis-frontend:latest
+    expose:
+      - "3000"
+    environment:
+      - VITE_API_BASE_URL=http://localhost:80
+
+  nginx:
+    build:
+      context: ./nginx
+    ports:
+      - "80:80"
+    depends_on:
+      - pmis-user-management
+      - pmis-project-management
+      - pmis-notification-management
+      - pmis-masters-management
+      - pmis-frontend
+
+volumes:
+  pmis_pg_data:
+  pmis_attachments:

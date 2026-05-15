@@ -1,0 +1,28 @@
+# PMIS Refactor — disposable Postgres for migration validation (Decision 4).
+# Brings up ONLY postgres so alembic chains and cutover SQL can be tested
+# without touching the dev/prod DB.
+#
+# Usage:
+#   docker compose -f docker-compose.staging.yml up -d
+#   docker compose -f docker-compose.staging.yml run --rm pmis-user-management alembic upgrade head
+#   docker compose -f docker-compose.staging.yml down -v   # destroy
+
+services:
+  postgres-staging:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: pmis_app
+      POSTGRES_PASSWORD: changeme
+      POSTGRES_DB: pmis_staging
+    ports:
+      - "5433:5432"          # different host port from prod compose
+    volumes:
+      - pmis_pg_staging:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pmis_app -d pmis_staging"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pmis_pg_staging:

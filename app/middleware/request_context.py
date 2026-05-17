@@ -1,3 +1,14 @@
+"""Per-request context middleware.
+
+Assigns an `X-Request-ID` (honoring an incoming header if present) and logs
+the request method/path/timing. The request_id is exposed at
+`request.state.request_id` for use by route handlers and the exception
+handler.
+
+Ported from C:\\Programming\\PMIS\\PMIS-notification-service\\app\\middleware\\request_context.py:1-41.
+"""
+from __future__ import annotations
+
 import time
 import uuid
 
@@ -6,23 +17,25 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.utilities.logger import get_logger
 
-logger = get_logger("pims.request")
+logger = get_logger("pmis.request")
 
 
 class RequestContextMiddleware(BaseHTTPMiddleware):
-    """Adds an X-Request-ID header and logs request/response timing."""
+    """Adds X-Request-ID header and logs request/response timing."""
 
     async def dispatch(self, request: Request, call_next):
         request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
         request.state.request_id = request_id
         start = time.perf_counter()
 
+        client_host = request.client.host if request.client else "-"
         logger.info(
             "--> %s %s | rid=%s | client=%s",
             request.method,
             request.url.path,
             request_id,
-            request.client.host if request.client else "-",
+            client_host,
+            extra={"request_id": request_id, "endpoint": request.url.path},
         )
 
         response = await call_next(request)
@@ -37,5 +50,6 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
             request_id,
             response.status_code,
             elapsed_ms,
+            extra={"request_id": request_id, "endpoint": request.url.path},
         )
         return response

@@ -1,15 +1,43 @@
+"""pmis-notification-management — FastAPI app entry point.
+
+Stateless dispatcher post-Q3+Q13:
+  - Owns no tables (notification_templates moved to masters per Q3;
+    OTP storage moved to user-svc.otp_codes per Q13).
+  - Reads masters.notification_templates and project.* / users.* cross-schema
+    for template lookup (dispatch) and recipient resolution (daily-digest cron).
+
+Routes:
+  - POST /notification/email/send           (direct, server-to-server)
+  - POST /notification/sms/send             (direct, server-to-server)
+  - POST /notification/dispatch             (Doc-38 canonical templated dispatch)
+  - POST /notification/cron/daily-digest    (X-Cron-Secret header)
+  - GET  /health, /ready, /                 (orchestrator + service info)
+
+No JWT auth middleware: every backend caller is on the docker-compose internal
+network (trust boundary). The cron endpoint is gated by a shared-secret
+header. If we ever add an admin endpoint here, add auth middleware then.
+
+Ported from C:\\Programming\\PMIS\\PMIS-notification-service\\app\\main.py:1-88
+with these changes:
+  - Removed AuthMiddleware (no JWT-required routes post-Q3).
+  - Removed master_data_router (notification_templates moved to masters-svc).
+  - Removed init_db() boot-time DDL (Q16: alembic runs separately on deploy).
+  - Service prefix changed from /api/v1/notifications to /notification (PLAN.md §2.4).
+"""
+from __future__ import annotations
+
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.middleware.auth_middleware import AuthMiddleware
 from app.middleware.error_handler import register_exception_handlers
 from app.middleware.request_context import RequestContextMiddleware
 from app.routes import api_router
-from app.routes.master_data_routes import router as master_data_router
+from app.routes.health_routes import router as health_router
 from app.utilities.logger import configure_logging, get_logger
+
 
 configure_logging()
 logger = get_logger(__name__)
@@ -17,70 +45,64 @@ logger = get_logger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Run init_db on startup so the template catalog is seeded."""
-    try:
-        from app.db.session import init_db
-        init_db()
-        logger.info("Database initialized.")
-    except Exception as e:  # noqa: BLE001
-        logger.error("init_db failed (continuing): %s", e)
+    logger.info(
+        "%s starting | env=%s | email=%s | sms=%s",
+        settings.service_name,
+        settings.env,
+        settings.email_provider,
+        settings.sms_provider,
+    )
     yield
+    logger.info("%s stopping", settings.service_name)
 
 
 def create_app() -> FastAPI:
     app = FastAPI(
-        title=settings.app_name,
+        title="pmis-notification-management",
+        version="0.1.0",
         description=(
-            "PIMS Notification Service — provides Email, SMS and OTP delivery "
-            "endpoints for the PIMS platform. Providers and credentials are "
-            "configured via environment variables (see `.env.example`).\n\n"
-            "Doc 38 added the `/api/v3/master/notification_templates/*` "
-            "admin surface (DB-backed template catalog, JWT-gated). The "
-            "legacy `/api/v1/notifications/...` dispatch endpoints remain "
-            "unauthenticated for back-compat."
+            "PMIS Notification Service — email/SMS dispatch + daily-digest cron. "
+            "Stateless dispatcher (no owned tables post-refactor). Reads "
+            "masters.notification_templates cross-schema for template render; "
+            "scans users.* and project.* cross-schema for daily-digest recipients. "
+            "Trust-boundary internal — no JWT (cron uses X-Cron-Secret header)."
         ),
-        version="1.1.0",
         docs_url="/docs",
         redoc_url="/redoc",
         openapi_url="/openapi.json",
-        contact={"name": "PIMS Platform Team"},
+        contact={"name": "PMIS Platform Team"},
         license_info={"name": "Proprietary"},
+        root_path=settings.root_path,
         lifespan=lifespan,
     )
 
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.cors_origin_list(),
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    # CORS — only in development per Decision 8e (nginx owns CORS in prod).
+    if settings.env.lower() == "development":
+        origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=origins,
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
     app.add_middleware(RequestContextMiddleware)
-    # Doc 38: JWT decode + RBAC hydration on /api/v3/master/* endpoints.
-    # The middleware is a no-op for /api/v1/notifications and /health.
-    app.add_middleware(AuthMiddleware)
 
     register_exception_handlers(app)
-    app.include_router(api_router)
-    # Doc 38: master-data router (notification_templates).
-    app.include_router(master_data_router)
 
-    @app.get("/", tags=["Root"], summary="Service info")
+    # API surface under /notification (health/ready/root mounted at app root).
+    app.include_router(api_router)
+    app.include_router(health_router)
+
+    @app.get("/", tags=["root"], summary="Service info")
     def root() -> dict:
         return {
-            "service": settings.app_name,
-            "version": "1.1.0",
-            "docs": "/docs",
-            "openapi": "/openapi.json",
+            "service": settings.service_name,
+            "version": "0.1.0",
+            "docs_url": f"{settings.root_path}/docs",
+            "openapi_url": f"{settings.root_path}/openapi.json",
         }
 
-    logger.info(
-        "%s started | env=%s | email=%s | sms=%s",
-        settings.app_name,
-        settings.app_env,
-        settings.email_provider,
-        settings.sms_provider,
-    )
     return app
 
 

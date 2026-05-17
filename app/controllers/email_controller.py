@@ -1,12 +1,22 @@
+"""EmailController — HTTP adapter for /notification/email/send.
+
+Per Q8: every resource has a thin controller layer between routes and
+services. Controllers unpack the request model, call the service, and
+shape the response.
+
+Ported from C:\\Programming\\PMIS\\PMIS-notification-service\\app\\controllers\\email_controller.py:1-19.
+"""
+from __future__ import annotations
+
 from app.schemas.email import EmailRequest, EmailResponse
 from app.services.email_service import EmailService
 
 
 class EmailController:
-    def __init__(self, service: EmailService) -> None:
+    def __init__(self, service: EmailService):
         self.service = service
 
-    def send_email(self, payload: EmailRequest) -> EmailResponse:
+    def send(self, payload: EmailRequest) -> EmailResponse:
         result = self.service.send(
             to=[str(e) for e in payload.to],
             subject=payload.subject,

@@ -1,17 +1,23 @@
-fastapi==0.115.0
-uvicorn[standard]==0.30.6
-pydantic==2.9.2
-pydantic-settings==2.5.2
-python-dotenv==1.0.1
+# Core
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+pydantic==2.10.3
+pydantic-settings==2.7.0
 email-validator==2.2.0
-httpx==0.27.2
-twilio==9.3.2
-jinja2==3.1.4
-python-multipart==0.0.12
-pytest==8.3.3
-pytest-asyncio==0.24.0
-# Doc 38 — DB + auth + template rendering
+python-multipart==0.0.20
+
+# DB (cross-schema reads only; owns no tables)
 sqlalchemy==2.0.36
-alembic==1.13.3
+alembic==1.18.1
 psycopg2-binary==2.9.10
-PyJWT==2.9.0
+
+# Auth (verify only)
+python-jose[cryptography]==3.3.0
+
+# Dispatch providers
+httpx==0.28.1                  # SendGrid + MSG91
+twilio==9.3.2                  # Twilio SMS
+
+# Tests
+pytest==8.3.4
+pytest-asyncio==0.24.0

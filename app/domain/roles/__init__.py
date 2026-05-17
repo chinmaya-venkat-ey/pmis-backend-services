@@ -1,3 +1,0 @@
-"""
-Roles domain module.
-"""

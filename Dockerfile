@@ -1,40 +1,25 @@
-# pmis-user-service — production image.
-#
-# Self-contained: no external build context, no sibling-folder copy.
-# Build context is just this folder.
+FROM python:3.12-slim
 
-FROM python:3.11-slim
-
-# System deps:
-# - libpq-dev: for psycopg2 (Postgres adapter)
-# - gcc + libffi-dev: for argon2-cffi's C extension
-ENV TZ=Asia/Kolkata
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        libpq-dev \
-        gcc \
-        libffi-dev \
-    && rm -rf /var/lib/apt/lists/*
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
 
 WORKDIR /app
 
-# Install Python deps. Cached as a separate layer so code-only edits
-# don't trigger a re-install.
-COPY requirements.txt /tmp/requirements.txt
-RUN pip install --no-cache-dir -r /tmp/requirements.txt \
-    && rm /tmp/requirements.txt
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    libpq-dev \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
 
-# Copy service source as the LAST step so code-only edits invalidate
-# only this thin layer.
-COPY app /app/app
-COPY alembic /app/alembic
-COPY alembic.ini /app/alembic.ini
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Flush stdout/stderr immediately — better for container logs.
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+COPY app/ ./app/
+COPY alembic/ ./alembic/
+COPY alembic.ini ./
 
 EXPOSE 8001
-
-# Bind to 0.0.0.0 so the port is reachable from outside the container.
-# No --reload in prod.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD curl -fsS http://localhost:8001/health || exit 1
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001"]

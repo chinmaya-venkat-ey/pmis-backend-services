@@ -1,0 +1,85 @@
+"""Project SQLAlchemy model — owned by pmis-project-management (schema `project`).
+
+UUID PK. `project_code` is the human-readable secondary key (UIDAI-PRYYMMDDHHMMSS
+in IST, server-generated). Self-FK on `parent_id` for project hierarchy.
+
+Status values: 'new' | 'draft' | 'published' | 'closed'. Transitions are
+governed by the `masters.project_status_transitions` catalog (read cross-schema).
+
+Soft-delete via `deleted_at` + `deleted_by`. `created_by` / `updated_by` /
+`deleted_by` are logical-only FKs to `users.users.id` (cross-schema; not
+enforced at the DB level).
+
+WARNING: mirrored read-only in other services'
+`app/models/_cross_schema.py`. Schema changes here must be replicated.
+"""
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Optional
+from uuid import uuid4
+
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Text
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.db import Base
+
+
+class Project(Base):
+    __tablename__ = "projects"
+    __table_args__ = (
+        Index("ix_projects_project_code", "project_code", unique=True),
+        Index("ix_projects_name", "name"),
+        Index("ix_projects_active", "active"),
+        Index("ix_projects_public", "public"),
+        Index("ix_projects_parent_id", "parent_id"),
+        Index("ix_projects_status", "status"),
+        Index("ix_projects_owner", "owner"),
+        Index("ix_projects_category", "category"),
+        Index("ix_projects_start_date", "start_date"),
+        Index("ix_projects_end_date", "end_date"),
+        Index("ix_projects_deleted_at", "deleted_at"),
+        {"schema": "project"},
+    )
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid4())
+    )
+    project_code: Mapped[str] = mapped_column(String(30))
+    name: Mapped[str] = mapped_column(String(255))
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    public: Mapped[bool] = mapped_column(Boolean, default=False)
+    status_explanation: Mapped[Optional[str]] = mapped_column(Text)
+
+    # Self-FK for project hierarchy.
+    parent_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("project.projects.id", use_alter=True, name="fk_projects_parent_id"),
+    )
+
+    status: Mapped[str] = mapped_column(String(50), default="new")
+    # Owner is a division code (logical FK to masters.divisions.code).
+    owner: Mapped[Optional[str]] = mapped_column(String(255))
+    owner_other: Mapped[Optional[str]] = mapped_column(String(255))
+    # Category is logical FK to masters.project_categories.code.
+    category: Mapped[Optional[str]] = mapped_column(String(50))
+    category_other: Mapped[Optional[str]] = mapped_column(String(255))
+    category_other_reason: Mapped[Optional[str]] = mapped_column(String(1000))
+
+    start_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    end_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    actual_start_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    actual_end_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+    # Audit / soft-delete. user-id FKs are LOGICAL only (cross-schema).
+    created_by: Mapped[Optional[str]] = mapped_column(String(36))
+    updated_by: Mapped[Optional[str]] = mapped_column(String(36))
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    deleted_by: Mapped[Optional[str]] = mapped_column(String(36))
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow
+    )

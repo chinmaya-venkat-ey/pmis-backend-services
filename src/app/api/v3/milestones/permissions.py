@@ -1,8 +1,0 @@
-"""Milestone permissions bindings."""
-from ....core.rbac import Permission
-
-MILESTONES_CREATE = Permission.MILESTONES_CREATE
-MILESTONES_READ = Permission.MILESTONES_READ
-MILESTONES_UPDATE = Permission.MILESTONES_UPDATE
-MILESTONES_DELETE = Permission.MILESTONES_DELETE
-MILESTONES_RESTORE = Permission.MILESTONES_RESTORE

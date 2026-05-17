@@ -1,56 +1,54 @@
-"""Alembic environment for pmis-project-service.
+"""Alembic environment for pmis-project-management.
 
-Key points:
-- DATABASE_URL is read from app.core.config.settings (env-driven).
-- target_metadata is Base.metadata from this service's own session module.
-  It will contain only tables this service owns once models are added in
-  Phase 2 (vendors, resource_types, projects, milestones, activities,
-  tasks, subtasks, comments, attachments, divisions,
-  project_status_transitions).
-- version_table is ``alembic_version_project_svc`` so our migration chain
-  does NOT collide with the monolith's ``alembic_version`` or the
-  user-service's ``alembic_version_user_svc`` in the same DB.
+Owns schema `project` and version table `project.alembic_version_project`.
+Mirror declarations (users.*, masters.*) are excluded from autogenerate.
 """
+from __future__ import annotations
+
 from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config, pool
-
 from alembic import context
 
-from app.core.config import settings
-from app.infrastructure.db.session import Base
-# Register every model on Base.metadata so autogenerate sees them.
-from app.infrastructure.db import models  # noqa: F401
+from app.config import settings
+from app.db import Base
+import app.models  # noqa: F401
 
 
 config = context.config
-
-# Override the placeholder URL in alembic.ini with the real env-driven value.
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+config.set_main_option(
+    "sqlalchemy.url",
+    settings.database_url_migrations or settings.database_url,
+)
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
 
-# IMPORTANT: separate version table. Every context.configure() call below
-# must pass this, or Alembic will default to 'alembic_version' and clash
-# with the monolith.
-VERSION_TABLE = "alembic_version_project_svc"
+VERSION_TABLE = "alembic_version_project"
+VERSION_TABLE_SCHEMA = "project"
+
+
+def include_object(object, name, type_, reflected, compare_to):
+    if type_ == "table" and getattr(object, "schema", None) and object.schema != VERSION_TABLE_SCHEMA:
+        return False
+    return True
 
 
 def run_migrations_offline() -> None:
-    url = config.get_main_option("sqlalchemy.url")
     context.configure(
-        url=url,
+        url=config.get_main_option("sqlalchemy.url"),
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        version_table=VERSION_TABLE,
+        version_table_schema=VERSION_TABLE_SCHEMA,
+        include_object=include_object,
         compare_type=True,
         compare_server_default=True,
-        version_table=VERSION_TABLE,
+        include_schemas=True,
     )
-
     with context.begin_transaction():
         context.run_migrations()
 
@@ -61,16 +59,17 @@ def run_migrations_online() -> None:
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
     )
-
     with connectable.connect() as connection:
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
+            version_table=VERSION_TABLE,
+            version_table_schema=VERSION_TABLE_SCHEMA,
+            include_object=include_object,
             compare_type=True,
             compare_server_default=True,
-            version_table=VERSION_TABLE,
+            include_schemas=True,
         )
-
         with context.begin_transaction():
             context.run_migrations()
 

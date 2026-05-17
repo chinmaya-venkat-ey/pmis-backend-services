@@ -1,583 +1,164 @@
+"""HAL+JSON envelope formatters — canonical wire shape for all responses.
+
+Outer envelope (always)::
+
+    {
+      "data":    <object | array | null>,
+      "message": <string | null>,
+      "error":   <error object | null>,
+      "status":  <int>
+    }
+
+Inner shapes (HAL+JSON, OpenProject v3 contract)::
+
+    Resource::    {"_type": "<Kind>", "_links": {...}, **attrs}
+    Collection::  {"_type": "Collection", "_links": {...},
+                   "total", "count", "offset", "pageSize",
+                   "_embedded": {"elements": [...]}}
+    Error::       {"_type": "Error", "errorIdentifier": "<code>",
+                   "message": "...", "_embedded": {"details": {...}}}
+
+Wiring:
+  - ``app.core.api_route.HalApiRoute`` wraps every successful response
+    automatically — handlers / controllers don't call these helpers.
+  - ``app.middleware.error_handler`` uses ``format_error`` + ``api_response``
+    on the failure path.
+
+Duplicated across all 4 services (microservice isolation) — keep in sync.
 """
-HAL+JSON response formatter for OpenProject API v3 compliance.
-"""
-from typing import Any, Dict, List, Optional, Union
-from pydantic import BaseModel
+from __future__ import annotations
+
+from typing import Any, Iterable, Optional
+
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 
-class Link(BaseModel):
-    """HAL link representation."""
-    href: str
-    title: Optional[str] = None
 
-
-class HalResponse(BaseModel):
-    """Base HAL+JSON response structure."""
-    _type: str
-    _links: Dict[str, Union[Link, Dict[str, str]]]
-    _embedded: Optional[Dict[str, Any]] = None
-
-
-def format_user_response(
-    user_data: Dict[str, Any],
-    base_url: str = "/api/v3"
-) -> Dict[str, Any]:
-    """Format a single user response in HAL+JSON format.
-
-    Embeds the slim vendor object (when present), the division enum +
-    its free-text override (when 'others'), and the user's mapped
-    projects (filtered for live + non-closed by the repository).
-    """
-    user_id = user_data.get("id")
-
-    # Vendor: embed { id, name } when the user is mapped, else None.
-    vendor_id = user_data.get("vendor_id")
-    vendor_block = None
-    if vendor_id:
-        vendor_block = {
-            "id": vendor_id,
-            "name": user_data.get("vendor_name"),
-        }
-
-    # Mapped projects (slim).
-    projects_block = [
-        {
-            "id": p.get("id"),
-            "projectCode": p.get("project_code"),
-            "name": p.get("name"),
-            "status": p.get("status"),
-        }
-        for p in (user_data.get("projects") or [])
-    ]
-
-    response = {
-        "_type": "User",
-        "_links": {
-            "self": {
-                "href": f"{base_url}/users/{user_id}",
-                "title": user_data.get("login"),
-            }
-        },
-        "id": user_id,
-        # Doc 25: human-readable display identifier (US-XXXX-YYMMDDHHMMSS).
-        # Coexists with ``id`` (the integer) — the FE prefers ``userCode``
-        # for display / search, ``id`` for FK / cross-references.
-        "userCode": user_data.get("user_code"),
-        "login": user_data.get("login"),
-        "firstName": user_data.get("first_name"),
-        "lastName": user_data.get("last_name"),
-        "email": user_data.get("email"),
-        "admin": user_data.get("admin", False),
-        "status": user_data.get("status", "active"),
-        "vendor": vendor_block,
-        "division": user_data.get("division"),
-        "divisionOther": user_data.get("division_other"),
-        "phoneNumber": user_data.get("phone_number"),
-        "projects": projects_block,
-        "createdAt": user_data.get("created_at"),
-        "updatedAt": user_data.get("updated_at"),
-        "deletedAt": user_data.get("deleted_at"),
-        "deletedBy": user_data.get("deleted_by"),
-    }
-
-    return response
-
-
-def format_collection_response(
-    items: List[Dict[str, Any]],
-    total: int,
-    page: int,
-    page_size: int,
-    base_url: str = "/api/v3",
-    collection_type: str = "users"
-) -> Dict[str, Any]:
-    """
-    Format a collection response in HAL+JSON format with pagination.
-
-    Args:
-        items: List of items to include
-        total: Total number of items
-        page: Current page number (1-indexed)
-        page_size: Number of items per page
-        base_url: Base API URL
-        collection_type: Type of collection (e.g., 'users', 'projects')
-
-    Returns:
-        HAL+JSON formatted collection response
-    """
-    # Sanitize pagination inputs to avoid division by zero and invalid pages
-    if page_size is None or page_size <= 0:
-        page_size = 20
-
-    if page is None or page < 1:
-        page = 1
-
-    # Compute total pages safely (if total == 0, treat as single empty page)
-    if total > 0:
-        total_pages = (total + page_size - 1) // page_size
-    else:
-        total_pages = 1
-
-    # Build pagination links
-    links = {
-        "self": {"href": f"{base_url}/{collection_type}?offset={page}&pageSize={page_size}"}
-    }
-
-    if page > 1:
-        links["first"] = {"href": f"{base_url}/{collection_type}?offset=1&pageSize={page_size}"}
-        links["prev"] = {"href": f"{base_url}/{collection_type}?offset={page - 1}&pageSize={page_size}"}
-
-    if page < total_pages:
-        links["next"] = {"href": f"{base_url}/{collection_type}?offset={page + 1}&pageSize={page_size}"}
-        links["last"] = {"href": f"{base_url}/{collection_type}?offset={total_pages}&pageSize={page_size}"}
-
-    # Format embedded items based on collection type
-    if collection_type == "users":
-        formatted_items = [format_user_response(item, base_url) for item in items]
-    elif collection_type == "projects":
-        formatted_items = [format_project_response(item, base_url) for item in items]
-    elif collection_type == "roles":
-        formatted_items = [format_role_response(item, base_url) for item in items]
-    else:
-        formatted_items = items
-
-    response = {
-        "_type": "Collection",
-        "_links": links,
-        "total": total,
-        "count": len(items),
-        "pageSize": page_size,
-        "offset": page,
-        "_embedded": {
-            "elements": formatted_items
-        }
-    }
-
-    return response
-
-
-def format_project_response(
-    project_data: Dict[str, Any],
-    base_url: str = "/api/v3",
+def hal_resource(
+    _type: str,
+    attributes: dict[str, Any],
     *,
-    db: Optional[Any] = None,
-) -> Dict[str, Any]:
+    self_link: Optional[str] = None,
+    extra_links: Optional[dict[str, dict]] = None,
+) -> dict:
+    """Wrap a flat resource dict in the HAL ``_type`` + ``_links`` envelope.
+
+    Monolith parity: when no self_link and no extra_links are provided
+    (e.g. the comment ``Success`` envelope returned from DELETE) we
+    OMIT the ``_links`` key entirely — emitting ``"_links": {}`` is a
+    visible divergence on the wire.
     """
-    Format a single project response in HAL+JSON format.
-
-    Args:
-        project_data: Project data dictionary
-        base_url: Base API URL
-        db: Optional SQLAlchemy session. When supplied, the response
-            includes an ``attachments[]`` array eagerly populated from
-            comment rows attached to this project (``target_kind=
-            "project"`` rows in the unified comments table). Without
-            a session the response omits the field — keeps the list /
-            collection paths cheap (they don't pass ``db``).
-    """
-    project_id = project_data.get("id")
-    project_code = project_data.get("project_code")
-
-    # URLs use id (UUID string — the public handle).
-    self_href = f"{base_url}/projects/{project_id}" if project_id else None
-
-    response = {
-        "_type": "Project",
-        "_links": {
-            "self": {
-                "href": self_href,
-                "title": project_data.get("name")
-            }
-        },
-        "id": project_id,
-        "projectCode": project_code,
-        "name": project_data.get("name"),
-        "description": project_data.get("description"),
-        "active": project_data.get("active", True),
-        "public": project_data.get("public", False),
-        "isPublic": project_data.get("public", False),
-        "statusExplanation": project_data.get("status_explanation"),
-        "status": project_data.get("status"),
-        "owner": project_data.get("owner"),
-        "ownerOther": project_data.get("owner_other"),
-        "category": project_data.get("category"),
-        "categoryOther": project_data.get("category_other"),
-        "categoryOtherReason": project_data.get("category_other_reason"),
-        "vendors": project_data.get("vendors", []),
-        "startDate": project_data.get("start_date"),
-        "endDate": project_data.get("end_date"),
-        "actualStartDate": project_data.get("actual_start_date"),
-        "actualEndDate": project_data.get("actual_end_date"),
-        # Doc 33: ``isVersion`` / ``versionOf`` / ``baselineId`` /
-        # ``versionNo`` removed from the response with the versioning
-        # feature.
-        "parentId": project_data.get("parent_id"),
-        "createdBy": project_data.get("created_by"),
-        "updatedBy": project_data.get("updated_by"),
-        "createdAt": project_data.get("created_at"),
-        "updatedAt": project_data.get("updated_at"),
-        # Soft-delete marker. NULL on live projects; set on rows surfaced by
-        # the GET /projects/all endpoint.
-        "deletedAt": project_data.get("deleted_at"),
-        "deletedBy": project_data.get("deleted_by"),
-    }
-
-    # Parent link derived from the UUID we emit above.
-    parent_id = project_data.get("parent_id")
-    if parent_id:
-        response["_links"]["parent"] = {
-            "href": f"{base_url}/projects/{parent_id}"
-        }
-
-    # Eagerly include the project's attachments[] when a session is
-    # available. Slim shape — just the file metadata FE needs to render
-    # the attachments tab. Comment-thread-style fields are intentionally
-    # excluded (projects never carry a body field on these rows).
-    if db is not None and project_id:
-        response["attachments"] = _list_project_attachments(db, project_id)
-
-    return response
-
-
-def _list_project_attachments(db: Any, project_id: str) -> List[Dict[str, Any]]:
-    """Flatten every live comment row attached to ``project_id`` into
-    the slim ``attachment[]`` shape FE renders on the project detail
-    page. Returns ``[]`` when none.
-
-    Each comment row may carry multiple attachment entries in its JSON
-    ``attachments`` column — we expose them as a flat list, each
-    carrying the comment row id (so DELETE / download endpoints can be
-    targeted) plus the per-file metadata.
-    """
-    from ..infrastructure.db.models.comment import CommentModel
-    rows = (
-        db.query(CommentModel)
-        .filter(CommentModel.target_kind == "project")
-        .filter(CommentModel.target_id == project_id)
-        .filter(CommentModel.deleted_at.is_(None))
-        .order_by(CommentModel.created_at.asc())
-        .all()
-    )
-    out: List[Dict[str, Any]] = []
-    for c in rows:
-        for att in (c.attachments or []):
-            # Keys persisted in the JSON column are camelCase (see
-            # ``AttachmentInfo.to_dict``).
-            out.append({
-                "id": c.id,
-                "filename": att.get("filename"),
-                "url": att.get("url"),
-                "mimeType": att.get("mimeType") or att.get("mime_type"),
-                "sizeBytes": att.get("sizeBytes") or att.get("size_bytes"),
-                "uploadedAt": att.get("uploadedAt") or att.get("uploaded_at"),
-                "createdAt": c.created_at.isoformat() if c.created_at else None,
-                "createdBy": c.author_user_id,
-            })
+    links: dict[str, dict] = {}
+    if self_link:
+        links["self"] = {"href": self_link}
+    if extra_links:
+        links.update(extra_links)
+    out: dict[str, Any] = {"_type": _type}
+    if links:
+        out["_links"] = links
+    out.update(attributes)
     return out
 
 
-def format_role_response(
-    role_data: Dict[str, Any],
-    base_url: str = "/api/v3"
-) -> Dict[str, Any]:
+def hal_collection(
+    elements: Iterable[dict],
+    total: int,
+    *,
+    offset: int = 1,
+    page_size: int = 20,
+    self_link: Optional[str] = None,
+    base_path: Optional[str] = None,
+    extra_links: Optional[dict[str, dict]] = None,
+) -> dict:
+    """Wrap an iterable of elements in the HAL Collection envelope.
+
+    When ``base_path`` is provided (path without query string), the
+    function auto-generates ``self`` / ``next`` / ``last`` links with
+    ``?offset=X&pageSize=Y`` query strings — matches the monolith's
+    ``format_*_collection`` HAL pagination shape.
     """
-    Format a single role response in HAL+JSON format.
-
-    Args:
-        role_data: Role data dictionary
-        base_url: Base API URL
-
-    Returns:
-        HAL+JSON formatted response
-    """
-    role_id = role_data.get("id")
-
-    response = {
-        "_type": "Role",
-        "_links": {
-            "self": {
-                "href": f"{base_url}/roles/{role_id}",
-                "title": role_data.get("name")
-            }
-        },
-        "id": role_id,
-        "name": role_data.get("name"),
-        "description": role_data.get("description"),
-        "permissions": role_data.get("permissions", []),
-        "builtin": role_data.get("builtin", False),
-        "createdAt": role_data.get("created_at"),
-        "updatedAt": role_data.get("updated_at"),
-    }
-
-    return response
-
-
-def format_meeting_response(
-    meeting_data: Dict[str, Any],
-    base_url: str = "/api/v3"
-) -> Dict[str, Any]:
-    """
-    Format a single meeting response in HAL+JSON format.
-
-    Args:
-        meeting_data: Meeting data dictionary
-        base_url: Base API URL
-
-    Returns:
-        HAL+JSON formatted response
-    """
-    meeting_id = meeting_data.get("id")
-    project_id = meeting_data.get("project_id")
-
-    response = {
-        "_type": "Meeting",
-        "_links": {
-            "self": {
-                "href": f"{base_url}/meetings/{meeting_id}",
-                "title": meeting_data.get("title")
-            },
-            "project": {
-                "href": f"{base_url}/projects/{project_id}"
-            }
-        },
-        "id": meeting_id,
-        "title": meeting_data.get("title"),
-        "description": meeting_data.get("description"),
-        "scheduledAt": meeting_data.get("scheduled_at"),
-        "durationMinutes": meeting_data.get("duration_minutes"),
-        "location": meeting_data.get("location"),
-        "createdBy": meeting_data.get("created_by_id"),
-        "createdAt": meeting_data.get("created_at"),
-        "updatedAt": meeting_data.get("updated_at"),
-    }
-
-    return response
-
-
-def format_meeting_participant_response(
-    participant_data: Dict[str, Any],
-    base_url: str = "/api/v3"
-) -> Dict[str, Any]:
-    """
-    Format a meeting participant response in HAL+JSON format.
-
-    Args:
-        participant_data: Participant data dictionary
-        base_url: Base API URL
-
-    Returns:
-        HAL+JSON formatted response
-    """
-    participant_id = participant_data.get("id")
-    user_id = participant_data.get("user_id")
-
-    response = {
-        "_type": "MeetingParticipant",
-        "_links": {
-            "self": {
-                "href": f"{base_url}/participants/{participant_id}"
-            },
-            "user": {
-                "href": f"{base_url}/users/{user_id}"
-            }
-        },
-        "id": participant_id,
-        "userId": user_id,
-        "createdAt": participant_data.get("created_at"),
-    }
-
-    return response
-
-
-def format_agenda_item_response(
-    agenda_item_data: Dict[str, Any],
-    base_url: str = "/api/v3"
-) -> Dict[str, Any]:
-    """
-    Format an agenda item response in HAL+JSON format.
-
-    Args:
-        agenda_item_data: Agenda item data dictionary
-        base_url: Base API URL
-
-    Returns:
-        HAL+JSON formatted response
-    """
-    agenda_item_id = agenda_item_data.get("id")
-    meeting_id = agenda_item_data.get("meeting_id")
-    project_id = agenda_item_data.get("project_id")
-
-    response = {
-        "_type": "AgendaItem",
-        "_links": {
-            "self": {
-                "href": f"{base_url}/agenda_items/{agenda_item_id}"
-            },
-            "meeting": {
-                "href": f"{base_url}/meetings/{meeting_id}"
-            },
-            "project": {
-                "href": f"{base_url}/projects/{project_id}"
-            }
-        },
-        "id": agenda_item_id,
-        "title": agenda_item_data.get("title"),
-        "description": agenda_item_data.get("description"),
-        "position": agenda_item_data.get("position"),
-        "createdAt": agenda_item_data.get("created_at"),
-        "updatedAt": agenda_item_data.get("updated_at"),
-    }
-
-    # Add work package link if present
-    if agenda_item_data.get("work_package_id"):
-        response["_links"]["workPackage"] = {
-            "href": f"{base_url}/work_packages/{agenda_item_data.get('work_package_id')}"
+    items = list(elements)
+    links: dict[str, dict] = {}
+    if base_path:
+        links["self"] = {
+            "href": f"{base_path}?offset={offset}&pageSize={page_size}",
         }
-        response["workPackageId"] = agenda_item_data.get("work_package_id")
-
-    return response
-
-
-    # Work-package-specific formatting removed to keep this module generic.
-    # Controllers are responsible for assembling module-specific HAL responses.
-
-
-def format_comment_response(
-    comment_data: Dict[str, Any],
-    base_url: str = "/api/v3",
-) -> Dict[str, Any]:
-    """HAL+JSON shape for a single comment (doc 35: unified send-event).
-
-    Each comment row carries body + an inline attachments array of
-    ``{url, filename, mimeType, sizeBytes, uploadedAt}``. Clients fetch
-    file bytes from the URL directly — there is no per-attachment id
-    or BE-streaming download link.
-
-    A row may have:
-      - body present, attachments empty   ⇒ comment-only
-      - body NULL,    attachments present ⇒ file-only ("attachment-only" send)
-      - body present, attachments present ⇒ comment with files (the
-                                            email-shaped happy path)
-    """
-    cid = comment_data.get("id")
-    target_kind = comment_data.get("target_kind")
-    target_id = comment_data.get("target_id")
-    author = comment_data.get("author") or {}
-    attachments = comment_data.get("attachments") or []
-
-    return {
-        "_type": "Comment",
-        "_links": {
-            "self": {"href": f"{base_url}/comments/{cid}"},
-            "target": {
-                "href": f"{base_url}/{target_kind}s/{target_id}",
-                "title": target_kind,
-            },
-        },
-        "id": cid,
-        "targetKind": target_kind,
-        "targetId": target_id,
-        "body": comment_data.get("body"),
-        "author": {
-            "id": author.get("id"),
-            "login": author.get("login"),
-            "firstName": author.get("first_name"),
-            "lastName": author.get("last_name"),
-            "email": author.get("email"),
-        },
-        "createdAt": comment_data.get("created_at"),
-        "updatedAt": comment_data.get("updated_at"),
-        "deletedAt": comment_data.get("deleted_at"),
-        # Doc 35: each entry is already in wire shape (camelCase keys)
-        # because the domain layer's ``AttachmentInfo.to_dict`` produces
-        # exactly that. Pass through as-is.
-        "attachments": list(attachments),
-    }
+        last_page = max(1, (total + page_size - 1) // page_size) if total > 0 else 1
+        if offset < last_page:
+            links["next"] = {
+                "href": f"{base_path}?offset={offset + 1}&pageSize={page_size}",
+            }
+        if last_page > 1:
+            links["last"] = {
+                "href": f"{base_path}?offset={last_page}&pageSize={page_size}",
+            }
+    elif self_link:
+        links["self"] = {"href": self_link}
+    if extra_links:
+        links.update(extra_links)
+    # Monolith parity: when a caller suppresses ``base_path`` (e.g. the
+    # COMMENT list path) the collection emits NO top-level ``_links`` key
+    # at all — not ``"_links": {}``. Only include ``_links`` when at
+    # least one link was synthesised.
+    out: dict[str, Any] = {"_type": "Collection"}
+    if links:
+        out["_links"] = links
+    out.update({
+        "total": total,
+        "count": len(items),
+        "pageSize": page_size,
+        "offset": offset,
+        "_embedded": {"elements": items},
+    })
+    return out
 
 
-def format_attachment_response(
-    comment_data: Dict[str, Any],
-    base_url: str = "/api/v3",
-) -> Dict[str, Any]:
-    """HAL+JSON shape for an "attachment" (doc 35: actually a comment row).
-
-    Pre-doc-34 this formatted a row from the ``attachments`` table.
-    After doc 35 there's no such table — every attachment lives on a
-    comment row. This formatter is kept under its old name so the
-    POST/GET/DELETE endpoints under ``/<entity>/{id}/attachments`` keep
-    returning a recognisably-shaped payload for the FE.
-
-    Strategy: emit the comment row in the comment shape, with the body
-    typically NULL (file-only path). The FE iterates ``attachments``
-    on the row to render files, exactly like comment rows.
-    """
-    return format_comment_response(comment_data, base_url)
-
-
-def format_error_response(
-    error_type: str,
+def format_error(
+    code: str,
     message: str,
-    details: Optional[Dict[str, Any]] = None
-) -> Dict[str, Any]:
-    """
-    Format an error response in HAL+JSON format.
+    details: Optional[Any] = None,
+) -> dict:
+    """Inner error body — matches the monolith's HAL Error shape.
 
-    Args:
-        error_type: Type of error
-        message: Error message
-        details: Optional additional error details
-
-    Returns:
-        HAL+JSON formatted error response
+    Default envelope is ``{_type, errorIdentifier, message}``.
+    Monolith emits ``_embedded.details`` only when an endpoint
+    explicitly populates it with a sub-code or structured context
+    (e.g. publish: ``{errorIdentifier: "no_milestones"}``). When
+    ``details`` is falsy we omit the block entirely so simple
+    validation/not-found errors carry the bare 3-key envelope the
+    monolith returns.
     """
-    response = {
+    body = {
         "_type": "Error",
-        "errorIdentifier": error_type,
-        "message": message
+        "errorIdentifier": code,
+        "message": message,
     }
-
     if details:
-        response["_embedded"] = {"details": details}
+        body["_embedded"] = {"details": details}
+    return body
 
-    return response
-
-
-def format_success_response(message: str) -> Dict[str, Any]:
-    """
-    Format a success response.
-
-    Args:
-        message: Success message
-
-    Returns:
-        HAL+JSON formatted success response
-    """
-    return {
-        "_type": "Success",
-        "message": message
-    }
 
 def api_response(
     *,
-    data: Optional[Any] = None,
-    message: Optional[Any] = None,
-    error: Optional[Any] = None,
+    data: Any = None,
+    message: Optional[str] = None,
+    error: Optional[dict] = None,
     status: int = 200,
+    headers: Optional[dict[str, str]] = None,
 ) -> JSONResponse:
-    """
-    Generic API response envelope.
-    Safe to use across all services.
-    Does NOT affect HAL+JSON formatting.
-    """
+    """Build the canonical outer envelope and return a FastAPI JSONResponse.
 
-    payload = {
+    On success, set ``data`` (and optional ``message``). On failure, set
+    ``error`` (built by ``format_error``). Never both.
+    """
+    body = {
         "data": data,
         "message": message,
         "error": error,
         "status": status,
     }
-
     return JSONResponse(
         status_code=status,
-        content=payload
+        content=jsonable_encoder(body),
+        headers=headers,
     )

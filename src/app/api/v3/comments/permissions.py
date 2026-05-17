@@ -1,9 +1,0 @@
-"""Comments + attachments permission shortcuts."""
-from ....core.rbac import Permission
-
-COMMENTS_CREATE = Permission.COMMENTS_CREATE
-COMMENTS_READ = Permission.COMMENTS_READ
-COMMENTS_DELETE = Permission.COMMENTS_DELETE
-ATTACHMENTS_CREATE = Permission.ATTACHMENTS_CREATE
-ATTACHMENTS_DOWNLOAD = Permission.ATTACHMENTS_DOWNLOAD
-ATTACHMENTS_DELETE = Permission.ATTACHMENTS_DELETE

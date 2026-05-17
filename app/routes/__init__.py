@@ -1,0 +1,52 @@
+"""Router composer for pmis-project-management.
+
+Business routers mount under ``/project``. Health probes (``/health``,
+``/ready``) and the dev attachment fallback (``GET /files/{key}``) live
+at the app root — mounted by ``app.main`` outside the ``/project`` prefix.
+"""
+from __future__ import annotations
+
+from fastapi import APIRouter
+
+from app.routes import (
+    activity_routes,
+    attachment_routes,
+    comment_routes,
+    dashboard_routes,
+    health_routes,
+    milestone_routes,
+    project_routes,
+    subtask_routes,
+    task_routes,
+    tree_routes,
+)
+
+
+project_router = APIRouter(prefix="/project")
+
+# Projects + their project-scoped sub-routes (role-assignments,
+# assignable-users, audit-logs, discussion-feed, attachments).
+project_router.include_router(project_routes.router)
+
+# M/A/T/S hierarchy — project-scoped create/list AND id-scoped CRUD.
+project_router.include_router(milestone_routes.project_scoped_router)
+project_router.include_router(milestone_routes.router)
+project_router.include_router(activity_routes.milestone_scoped_router)
+project_router.include_router(activity_routes.router)
+project_router.include_router(task_routes.activity_scoped_router)
+project_router.include_router(task_routes.router)
+project_router.include_router(subtask_routes.task_scoped_router)
+project_router.include_router(subtask_routes.router)
+
+# Polymorphic comments + per-target attachments + comment-id / attachment-id
+# operations. Both modules register their per-target routes inside one
+# router each.
+project_router.include_router(comment_routes.router)
+project_router.include_router(attachment_routes.router)
+
+# Read-only surfaces.
+project_router.include_router(dashboard_routes.router)
+project_router.include_router(tree_routes.router)
+
+
+__all__ = ["project_router", "health_routes", "attachment_routes"]

@@ -1,8 +1,0 @@
-"""Activities permissions bindings."""
-from ....core.rbac import Permission
-
-ACTIVITIES_CREATE = Permission.ACTIVITIES_CREATE
-ACTIVITIES_READ = Permission.ACTIVITIES_READ
-ACTIVITIES_UPDATE = Permission.ACTIVITIES_UPDATE
-ACTIVITIES_DELETE = Permission.ACTIVITIES_DELETE
-ACTIVITIES_RESTORE = Permission.ACTIVITIES_RESTORE

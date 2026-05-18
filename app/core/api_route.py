@@ -28,7 +28,7 @@ from typing import Any, Callable, Iterable, Optional
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.routing import APIRoute
-from starlette.routing import request_response
+from fastapi.routing import request_response
 
 from app.core.response import api_response, hal_collection, hal_resource
 

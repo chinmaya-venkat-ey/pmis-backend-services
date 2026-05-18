@@ -108,15 +108,25 @@ class RoleService:
         row = self.repo.create_role(
             name=payload.name,
             description=payload.description,
-            builtin=False,
+            builtin=payload.builtin,
         )
+        if payload.permissions:
+            self.repo.grant_permissions_to_role(row.id, payload.permissions)
         self.db.commit()
         return row
 
     def update(self, role_id: int, payload: RoleUpdateRequest) -> Role:
         row = self.get_by_id(role_id)
         _assert_role_unlocked(row)
-        self.repo.update_role(row, description=payload.description)
+        self.repo.update_role(row, name=payload.name, description=payload.description)
+        if payload.permissions is not None:
+            reserved = RESERVED_DIRECT_GRANT_CODES & set(payload.permissions)
+            if reserved:
+                raise ReservedPermissionError(
+                    f"Cannot place reserved permission(s) {sorted(reserved)} on role {row.name!r}.",
+                    details={"role": row.name, "reserved_codes": sorted(reserved)},
+                )
+            self.repo.replace_role_permissions(role_id, payload.permissions)
         self.db.commit()
         return row
 

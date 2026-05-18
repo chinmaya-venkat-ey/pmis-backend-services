@@ -70,7 +70,7 @@ class AuthController:
     # ------------------------------------------------------------------ password reset
 
     def forgot_password(self, payload: ForgotPasswordRequest) -> ForgotPasswordResponse:
-        return self.password_reset.request_reset(payload.login, payload.channel)
+        return self.password_reset.request_reset(payload.login_or_email, payload.channel)
 
     def reset_password(self, payload: ResetPasswordRequest) -> ResetPasswordResponse:
-        return self.password_reset.perform_reset(payload.token, payload.new_password)
+        return self.password_reset.perform_reset(payload.token_or_code, payload.new_password)

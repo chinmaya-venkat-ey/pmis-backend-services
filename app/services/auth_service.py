@@ -40,7 +40,6 @@ from app.schemas.auth import (
     LoginResponse,
     LoginUserSummary,
     LogoutResponse,
-    TokenPair,
 )
 from app.utilities.otp import generate_ephemeral_token, hash_ephemeral_token
 
@@ -124,13 +123,11 @@ class AuthService:
         self.db.commit()
 
         return LoginResponse(
-            tokens=TokenPair(
-                access_token=access_token,
-                refresh_token=refresh_token,
-                token_type="Bearer",
-                access_token_expires_at=access_expires_at,
-                refresh_token_expires_at=refresh_expires_at,
-            ),
+            access_token=access_token,
+            refresh_token=refresh_token,
+            token_type="bearer",
+            access_token_expires_at=access_expires_at,
+            refresh_token_expires_at=refresh_expires_at,
             user=LoginUserSummary(
                 id=user.id,
                 login=user.login,

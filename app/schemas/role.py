@@ -19,19 +19,22 @@ class RoleResponse(ResponseModel):
 
 
 class RoleCreateRequest(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
     name: Annotated[str, Field(min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9_]*$")]
     description: Annotated[Optional[str], Field(default=None, max_length=1024)]
+    permissions: List[str] = Field(default_factory=list)
+    builtin: bool = False
 
 
 class RoleUpdateRequest(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+    name: Annotated[Optional[str], Field(default=None, min_length=1, max_length=64)]
     description: Annotated[Optional[str], Field(default=None, max_length=1024)]
+    permissions: Optional[List[str]] = None
 
 
 class RolePermissionsResponse(BaseModel):
-    """Returned by GET /user/roles/{id}/permissions/list — flat list of codes
-    plus the role meta."""
+    """Returned by GET /roles/{id}/permissions — flat list of codes plus role meta."""
 
     model_config = ConfigDict(from_attributes=True)
     role_id: int
@@ -40,7 +43,7 @@ class RolePermissionsResponse(BaseModel):
 
 
 class RolePermissionsReplaceRequest(BaseModel):
-    """PUT /user/roles/{id}/permissions/replace — full-replace the set."""
+    """PUT /roles/{id}/permissions — full-replace the set."""
 
     model_config = ConfigDict(extra="forbid")
     permissions: List[str] = Field(default_factory=list)

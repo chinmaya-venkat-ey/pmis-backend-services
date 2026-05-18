@@ -37,6 +37,7 @@ router = APIRouter(prefix="/users", tags=["auth"])
 @router.post(
     "/login",
     response_model=Union[LoginResponse, LoginOtpRequired],
+    response_model_by_alias=True,
     summary="Login with username/email + password",
     description=(
         "Returns a token pair on success when 2FA is not required. If 2FA is "
@@ -68,6 +69,7 @@ def send_otp(
 @router.post(
     "/login/verify-otp",
     response_model=LoginResponse,
+    response_model_by_alias=True,
     summary="Verify a 2FA OTP and finish login",
     description="On success returns the full LoginResponse (token pair + user summary).",
     responses={
@@ -84,6 +86,7 @@ def verify_otp(
 @router.post(
     "/refresh",
     response_model=RefreshResponse,
+    response_model_by_alias=True,
     summary="Rotate access + refresh tokens",
     description="Accepts current OR grace-window refresh_token_jti.",
 )
@@ -146,7 +149,7 @@ def reset_password(
 
 
 @router.get(
-    "/me/get",
+    "/me",
     response_model=UserResponse,
     summary="Current user details",
 )

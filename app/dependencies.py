@@ -12,6 +12,7 @@ from app.controllers.role_grants_controller import RoleGrantsController
 from app.controllers.user_controller import UserController
 from app.core.errors import UnauthorizedError
 from app.db import get_db
+from app.repositories.rbac_repository import RbacRepository
 from app.services.auth_service import AuthService
 from app.services.password_reset_service import PasswordResetService
 from app.services.permission_service import PermissionService
@@ -57,6 +58,10 @@ def get_role_assignment_controller(db: Session = Depends(get_db)) -> RoleAssignm
 
 def get_role_grants_controller() -> RoleGrantsController:
     return RoleGrantsController(RoleGrantsService())
+
+
+def get_rbac_repo(db: Session = Depends(get_db)) -> RbacRepository:
+    return RbacRepository(db)
 
 
 # ---------------------------------------------------------------------------

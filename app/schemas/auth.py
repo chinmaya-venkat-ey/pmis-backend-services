@@ -15,16 +15,6 @@ class LoginRequest(BaseModel):
     password: Annotated[str, Field(min_length=1, max_length=256)]
 
 
-class TokenPair(ResponseModel):
-    """Embedded in LoginResponse / RefreshResponse."""
-
-    access_token: str
-    refresh_token: str
-    token_type: str = "Bearer"
-    access_token_expires_at: datetime
-    refresh_token_expires_at: datetime
-
-
 class LoginUserSummary(BaseModel):
     """Bare-minimum user payload returned on a successful login."""
 
@@ -40,11 +30,23 @@ class LoginUserSummary(BaseModel):
 
 
 class LoginResponse(BaseModel):
-    """Successful login (no 2FA required)."""
+    """Successful login — flat token fields matching the VM wire shape.
 
-    model_config = ConfigDict(from_attributes=True)
-    tokens: TokenPair
-    user: LoginUserSummary
+    FE persistAuthFromPayload reads: access_token, refresh_token, user,
+    and accessTokenExpiresAt (via readExpiresAt). Keep these at root level.
+    """
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    access_token_expires_at: Optional[datetime] = Field(
+        default=None, serialization_alias="accessTokenExpiresAt"
+    )
+    refresh_token_expires_at: Optional[datetime] = Field(
+        default=None, serialization_alias="refreshTokenExpiresAt"
+    )
+    user: Optional[LoginUserSummary] = None
 
 
 class LoginOtpRequired(BaseModel):

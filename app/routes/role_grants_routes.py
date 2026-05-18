@@ -13,7 +13,7 @@ router = APIRouter(prefix="/role-grants", tags=["role_grants"])
 
 
 @router.get(
-    "/{role_name}/matrix",
+    "/{role_name}",
     response_model=RoleGrantsMatrixResponse,
     summary="Get the grantable-roles matrix for a role tier",
     description=(

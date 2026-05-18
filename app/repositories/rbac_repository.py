@@ -113,8 +113,11 @@ class RbacRepository:
         self,
         row: Role,
         *,
+        name: Optional[str] = None,
         description: Optional[str] = None,
     ) -> Role:
+        if name is not None:
+            row.name = name
         if description is not None:
             row.description = description
         self.db.flush()
@@ -406,3 +409,45 @@ class RbacRepository:
         if not jti:
             return False
         return self.db.get(RevokedToken, jti) is not None
+
+    # ------------------------------------------------------------------ legacy user_roles
+
+    def list_user_legacy_roles(self, user_id: str) -> List[Role]:
+        stmt = (
+            select(Role)
+            .join(UserRole, UserRole.role_id == Role.id)
+            .where(UserRole.user_id == user_id)
+        )
+        return list(self.db.execute(stmt).scalars())
+
+    def assign_user_legacy_role(
+        self, user_id: str, role_id: int, *, caller_user_id: Optional[str] = None
+    ) -> Optional[Role]:
+        role = self.db.get(Role, role_id)
+        if not role:
+            return None
+        existing = self.db.execute(
+            select(UserRole).where(
+                UserRole.user_id == user_id, UserRole.role_id == role_id
+            )
+        ).scalar_one_or_none()
+        if not existing:
+            self.db.add(
+                UserRole(
+                    user_id=user_id,
+                    role_id=role_id,
+                    created_by=caller_user_id,
+                    created_at=_utcnow(),
+                )
+            )
+            self.db.commit()
+        return role
+
+    def unassign_user_legacy_role(self, user_id: str, role_id: int) -> Optional[Role]:
+        role = self.db.get(Role, role_id)
+        stmt = delete(UserRole).where(
+            UserRole.user_id == user_id, UserRole.role_id == role_id
+        )
+        self.db.execute(stmt)
+        self.db.commit()
+        return role

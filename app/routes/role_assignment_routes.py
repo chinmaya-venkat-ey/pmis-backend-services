@@ -34,7 +34,7 @@ user_assignments_router = APIRouter(prefix="/users", tags=["role_assignments"])
 
 
 @user_assignments_router.get(
-    "/{user_id}/role-assignments/list",
+    "/{user_id}/role-assignments",
     response_model=List[RoleAssignmentResponse],
     summary="List a user's role assignments",
     dependencies=[Depends(require_authenticated())],
@@ -47,7 +47,7 @@ def list_user_role_assignments(
 
 
 @user_assignments_router.post(
-    "/{user_id}/role-assignments/create",
+    "/{user_id}/role-assignments",
     response_model=Union[RoleAssignmentResponse, RoleAssignmentBatchResponse],
     status_code=status.HTTP_201_CREATED,
     summary="Grant a role to a user (global / org / project scope, or batch project_ids)",
@@ -71,7 +71,7 @@ def create_user_role_assignment(
 
 
 @user_assignments_router.delete(
-    "/{user_id}/role-assignments/{assignment_id}/delete",
+    "/{user_id}/role-assignments/{assignment_id}",
     response_model=RoleAssignmentResponse,
     summary="Revoke a role assignment",
     dependencies=[Depends(require_permission(RBAC_ASSIGN))],
@@ -95,7 +95,7 @@ project_assignments_router = APIRouter(prefix="/projects", tags=["role_assignmen
 
 
 @project_assignments_router.get(
-    "/{project_uuid}/role-assignments/list",
+    "/{project_uuid}/role-assignments",
     response_model=List[RoleAssignmentResponse],
     summary="List all role assignments on a project",
     dependencies=[Depends(require_permission(PROJECT_MEMBERS_READ))],
@@ -108,7 +108,7 @@ def list_project_role_assignments(
 
 
 @project_assignments_router.post(
-    "/{project_uuid}/role-assignments/create",
+    "/{project_uuid}/role-assignments",
     response_model=Union[RoleAssignmentResponse, RoleAssignmentBatchResponse],
     status_code=status.HTTP_201_CREATED,
     summary="Grant a project-scoped role to a user",
@@ -128,7 +128,7 @@ def create_project_role_assignment(
 
 
 @project_assignments_router.delete(
-    "/{project_uuid}/role-assignments/{assignment_id}/delete",
+    "/{project_uuid}/role-assignments/{assignment_id}",
     response_model=RoleAssignmentResponse,
     summary="Revoke a project-scoped role assignment",
     dependencies=[Depends(require_permission(RBAC_ASSIGN))],
@@ -152,7 +152,7 @@ vendor_listing_router = APIRouter(prefix="/vendors", tags=["vendor_listings"])
 
 
 @vendor_listing_router.get(
-    "/{vendor_id}/projects/list",
+    "/{vendor_id}/projects",
     response_model=VendorProjectsResponse,
     summary="List projects a vendor is mapped to (cross-schema)",
     dependencies=[Depends(require_any_permission(PROJECTS_READ_ALL))],
@@ -165,7 +165,7 @@ def list_vendor_projects(
 
 
 @vendor_listing_router.get(
-    "/{vendor_id}/users/list",
+    "/{vendor_id}/users",
     summary="List users mapped to a vendor (by direct vendor_id OR org-scoped assignment)",
     dependencies=[Depends(require_permission(USERS_READ_ALL))],
 )

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import List
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 
 from app.controllers.role_controller import RoleController
 from app.core.permissions import (
@@ -28,13 +28,20 @@ router = APIRouter(prefix="/roles", tags=["roles"])
 
 
 @router.get(
-    "/list",
-    response_model=List[RoleResponse],
+    "",
     summary="List all roles",
     dependencies=[Depends(require_permission(ROLES_READ))],
 )
-def list_roles(controller: RoleController = Depends(get_role_controller)):
-    return controller.list_()
+def list_roles(
+    offset: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100, alias="pageSize"),
+    controller: RoleController = Depends(get_role_controller),
+):
+    all_roles = controller.list_()
+    total = len(all_roles)
+    zero_based = max(0, offset - 1)
+    page = all_roles[zero_based * page_size : zero_based * page_size + page_size]
+    return {"items": page, "total": total, "offset": offset, "pageSize": page_size}
 
 
 @router.post(
@@ -53,7 +60,7 @@ def create_role(
 
 
 @router.get(
-    "/{role_id}/details",
+    "/{role_id}",
     response_model=RoleResponse,
     summary="Get role details",
     dependencies=[Depends(require_permission(ROLES_READ))],
@@ -67,7 +74,7 @@ def get_role(
 
 
 @router.patch(
-    "/{role_id}/update",
+    "/{role_id}",
     response_model=RoleResponse,
     summary="Update a role",
     dependencies=[Depends(require_permission(ROLES_UPDATE))],
@@ -81,7 +88,7 @@ def update_role(
 
 
 @router.delete(
-    "/{role_id}/delete",
+    "/{role_id}",
     response_model=RoleResponse,
     summary="Delete a role",
     dependencies=[Depends(require_permission(ROLES_DELETE))],
@@ -99,7 +106,7 @@ def delete_role(
 # ---------------------------------------------------------------------------
 
 @router.get(
-    "/{role_id}/permissions/list",
+    "/{role_id}/permissions",
     response_model=RolePermissionsResponse,
     summary="List the permission codes a role holds",
     dependencies=[Depends(require_permission(PERMISSIONS_READ))],
@@ -112,7 +119,7 @@ def list_role_permissions(
 
 
 @router.put(
-    "/{role_id}/permissions/replace",
+    "/{role_id}/permissions",
     response_model=RolePermissionsResponse,
     summary="Replace the entire permission set on a role",
     dependencies=[Depends(require_permission(ROLES_UPDATE))],
@@ -127,7 +134,7 @@ def replace_role_permissions(
 
 
 @router.post(
-    "/{role_id}/permissions/{code}/grant",
+    "/{role_id}/permissions/{code}",
     response_model=RolePermissionsResponse,
     summary="Grant a permission code to a role",
     dependencies=[Depends(require_permission(ROLES_UPDATE))],
@@ -141,7 +148,7 @@ def grant_role_permission(
 
 
 @router.delete(
-    "/{role_id}/permissions/{code}/revoke",
+    "/{role_id}/permissions/{code}",
     response_model=RolePermissionsResponse,
     summary="Revoke a permission code from a role",
     dependencies=[Depends(require_permission(ROLES_UPDATE))],

@@ -135,13 +135,15 @@ class UserService:
                     caller_is_admin=caller_is_admin,
                 )
 
-        full_name = " ".join(filter(None, [payload.first_name, payload.last_name])) or payload.login
+        first_name = payload.first_name
+        last_name = payload.last_name
+        full_name = " ".join(filter(None, [first_name, last_name])) or payload.login
         row = self.repo.create(
             login=payload.login,
             email=str(payload.email),
             hashed_password=hash_password(payload.password),
-            first_name=payload.first_name,
-            last_name=payload.last_name,
+            first_name=first_name,
+            last_name=last_name,
             phone_number=payload.phone_number,
             vendor_id=payload.vendor_id,
             division=payload.division,
@@ -152,8 +154,7 @@ class UserService:
             status="active",
         )
 
-        # Doc-44 project_assignments[] — create scoped role assignments.
-        # The matrix guard above has already validated each role_id.
+        # Legacy project_assignments[] (local format: {project_id, role_id}).
         for assignment in payload.project_assignments:
             self.assignments.create(
                 user_id=row.id,
@@ -161,6 +162,20 @@ class UserService:
                 project_id=assignment.project_id,
                 created_by_user_id=created_by_user_id,
             )
+
+        # VM-style: project_ids + org_role — create one scoped assignment per project.
+        if payload.project_ids and payload.org_role:
+            role = self.rbac.get_role_by_name(payload.org_role)
+            if role is not None:
+                already_assigned = {a.project_id for a in payload.project_assignments}
+                for pid in payload.project_ids:
+                    if pid not in already_assigned:
+                        self.assignments.create(
+                            user_id=row.id,
+                            role_id=role.id,
+                            project_id=pid,
+                            created_by_user_id=created_by_user_id,
+                        )
 
         self.db.commit()
         return row
@@ -189,6 +204,18 @@ class UserService:
         self._assert_caller_can_modify_user(caller_user_id, target, caller_is_admin)
 
         updates = payload.model_dump(exclude_unset=True)
+        # Split full_name → first_name / last_name when present
+        if "full_name" in updates and updates["full_name"]:
+            parts = updates.pop("full_name").split(None, 1)
+            if "first_name" not in updates:
+                updates["first_name"] = parts[0] if parts else None
+            if "last_name" not in updates:
+                updates["last_name"] = parts[1] if len(parts) > 1 else None
+        else:
+            updates.pop("full_name", None)
+        # project_ids replacement is handled by role-assignment routes; ignore here.
+        updates.pop("project_ids", None)
+        updates.pop("admin", None)
         if not updates:
             return target
 
@@ -238,7 +265,7 @@ class UserService:
                 details={"target_user_id": user_id},
             )
         target = self.get_by_id(user_id)
-        self.repo.set_password(target, hash_password(payload.new_password))
+        self.repo.set_password(target, hash_password(payload.password))
         # Invalidate refresh state — force re-login after password change.
         self.repo.rotate_refresh_token(target, new_jti=None, grace_seconds=0)
         self.db.commit()

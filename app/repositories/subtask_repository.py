@@ -25,9 +25,7 @@ class SubtaskRepository:
 
     def _collect_descendant_ids(self, root_id: str, *, deleted_at) -> List[str]:
         """Walk parent_subtask_id downwards from ``root_id``, collecting
-        every descendant whose ``deleted_at`` matches the predicate. Bounded
-        by the nesting cap (SUBTASK_MAX_NESTING_DEPTH) so iteration is
-        finite — but coded as a generic loop for safety."""
+        every descendant whose ``deleted_at`` matches the predicate."""
         all_ids: List[str] = []
         frontier = [root_id]
         seen: set = set()

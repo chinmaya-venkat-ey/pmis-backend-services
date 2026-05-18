@@ -24,7 +24,7 @@ def _slug(name: str) -> str:
 
 def _ts(now: datetime | None = None) -> str:
     moment = (now or datetime.now(IST)).astimezone(IST)
-    return moment.strftime("%y%m%d%H%M%S")
+    return moment.strftime("%y%m%d%H%M%S") + f"{moment.microsecond // 1000:03d}"
 
 
 def generate_project_code(now: datetime | None = None) -> str:

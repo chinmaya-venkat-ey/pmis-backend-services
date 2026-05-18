@@ -127,13 +127,11 @@ def parse_form_fields(
                     "type": "type_error",
                 })
                 continue
-            # Monolith parity: array form fields MUST be a JSON-encoded
-            # array string. The comma-split / single-item-wrap fallbacks
-            # the prior implementation accepted diverged from monolith
-            # (which rejects anything that doesn't json.loads to a list)
-            # and silently let malformed input through to the service
-            # layer — see the multipart-create harness scenario 4 diff.
             stripped = raw.strip()
+            if not stripped.startswith("["):
+                # Plain string (single value) — wrap as single-element list.
+                fields[key] = [raw]
+                continue
             try:
                 decoded = json.loads(stripped)
             except json.JSONDecodeError:

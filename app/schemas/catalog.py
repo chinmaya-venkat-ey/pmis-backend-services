@@ -82,25 +82,33 @@ class VendorResponse(ResponseModel):
 
 
 class VendorCreateRequest(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore", populate_by_name=True)
     name: Annotated[str, Field(min_length=1, max_length=255)]
     description: Annotated[Optional[str], Field(default=None, max_length=4096)]
     active: bool = True
     email: Annotated[Optional[str], Field(default=None)]
-    contact_person: Annotated[Optional[str], Field(default=None, max_length=255)]
-    phone_number: Annotated[Optional[str], Field(default=None, max_length=50)]
-    project_ids: List[str] = Field(default_factory=list)
+    contact_person: Annotated[Optional[str], Field(
+        default=None, max_length=255, alias="contactPerson"
+    )]
+    phone_number: Annotated[Optional[str], Field(
+        default=None, max_length=50, alias="phoneNumber"
+    )]
+    project_ids: Annotated[List[str], Field(default_factory=list, alias="projectIds")]
 
 
 class VendorUpdateRequest(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore", populate_by_name=True)
     name: Annotated[Optional[str], Field(default=None, min_length=1, max_length=255)]
     description: Annotated[Optional[str], Field(default=None, max_length=4096)]
     active: Annotated[Optional[bool], Field(default=None)]
     email: Annotated[Optional[str], Field(default=None)]
-    contact_person: Annotated[Optional[str], Field(default=None, max_length=255)]
-    phone_number: Annotated[Optional[str], Field(default=None, max_length=50)]
-    project_ids: Optional[List[str]] = None
+    contact_person: Annotated[Optional[str], Field(
+        default=None, max_length=255, alias="contactPerson"
+    )]
+    phone_number: Annotated[Optional[str], Field(
+        default=None, max_length=50, alias="phoneNumber"
+    )]
+    project_ids: Annotated[Optional[List[str]], Field(default=None, alias="projectIds")]
     user_assignments: Optional[List[Dict[str, Any]]] = None
 
 

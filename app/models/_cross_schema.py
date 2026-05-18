@@ -174,6 +174,8 @@ class ResourceType(MirrorBase):
     code: Mapped[str] = mapped_column(String(64))
     name: Mapped[str] = mapped_column(String(255))
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class ProjectCategory(MirrorBase):

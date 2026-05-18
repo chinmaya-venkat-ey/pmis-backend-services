@@ -110,8 +110,7 @@ class TaskCreateRequest(BaseModel):
     actual_start_date: Optional[datetime] = None
     actual_end_date: Optional[datetime] = None
     status: Annotated[Optional[str], Field(default=None, max_length=32)]
-    # Monolith parity: priority is REQUIRED on create (Doc-41).
-    priority: Annotated[str, Field(min_length=1, max_length=16)]
+    priority: Annotated[Optional[str], Field(default=None, max_length=16)]
     position: Optional[int] = None
     assigned_to: Annotated[Optional[str], Field(default=None, max_length=36)]
     depends_on: List[str] = Field(default_factory=list)
@@ -119,6 +118,8 @@ class TaskCreateRequest(BaseModel):
     @field_validator("priority", mode="before")
     @classmethod
     def _normalize_priority(cls, v):
+        if v is None:
+            return v
         if isinstance(v, str):
             v = v.strip().upper()
         return v

@@ -117,26 +117,23 @@ class ActivityCreateRequest(BaseModel):
     actual_start_date: Optional[datetime] = None
     actual_end_date: Optional[datetime] = None
     status: Annotated[Optional[str], Field(default=None, max_length=32)]
-    # Monolith parity (Doc-41): priority is REQUIRED on create.
-    priority: Annotated[str, Field(min_length=1, max_length=16)]
+    priority: Annotated[Optional[str], Field(default=None, max_length=16)]
     position: Optional[int] = None
-    # Monolith parity (Doc-39): owner_division + vendor_id REQUIRED on create.
-    owner_division: Annotated[str, Field(min_length=1, max_length=32)]
+    owner_division: Annotated[Optional[str], Field(default=None, max_length=32)]
     # Monolith wire keeps the SINGULAR alias ``concernedDivision`` for FE
     # back-compat — only the datatype changed (string → list). Python
     # attribute stays plural to match the JSON DB column.
-    concerned_divisions: List[str] = Field(
-        ..., alias="concernedDivision", min_length=1,
+    concerned_divisions: Optional[List[str]] = Field(
+        default=None, alias="concernedDivision",
     )
-    vendor_id: Annotated[str, Field(min_length=1, max_length=36)]
+    vendor_id: Annotated[Optional[str], Field(default=None, max_length=36)]
     depends_on: List[str] = Field(default_factory=list)
 
     @field_validator("priority", mode="before")
     @classmethod
     def _normalize_priority(cls, v):
-        # Persisted canonical form is UPPERCASE (P1/P2/P3); lowercase
-        # accepted for back-compat. Live catalog validation lives in the
-        # service layer so admin-added codes (P4/P5/…) are still accepted.
+        if v is None:
+            return v
         if isinstance(v, str):
             v = v.strip().upper()
         return v

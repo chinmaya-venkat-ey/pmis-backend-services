@@ -11,6 +11,7 @@ from fastapi import APIRouter
 from app.routes import (
     activity_routes,
     attachment_routes,
+    catalog_routes,
     comment_routes,
     dashboard_routes,
     health_routes,
@@ -19,10 +20,11 @@ from app.routes import (
     subtask_routes,
     task_routes,
     tree_routes,
+    vendor_routes,
 )
 
 
-project_router = APIRouter(prefix="/project")
+project_router = APIRouter(prefix="/api/v3")
 
 # Projects + their project-scoped sub-routes (role-assignments,
 # assignable-users, audit-logs, discussion-feed, attachments).
@@ -47,6 +49,11 @@ project_router.include_router(attachment_routes.router)
 # Read-only surfaces.
 project_router.include_router(dashboard_routes.router)
 project_router.include_router(tree_routes.router)
+
+# Catalog lookups (/api/v3/divisions, /api/v3/priorities, etc.) and vendor
+# management (/api/v3/vendors/*) — matching VM project service (port 8003).
+project_router.include_router(catalog_routes.router)
+project_router.include_router(vendor_routes.router)
 
 
 __all__ = ["project_router", "health_routes", "attachment_routes"]

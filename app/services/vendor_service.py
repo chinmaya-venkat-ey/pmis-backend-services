@@ -14,12 +14,14 @@ from __future__ import annotations
 
 from typing import List, Optional
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.errors import CatalogEntryConflictError, CatalogEntryNotFoundError
 from app.models.vendor import Vendor
 from app.repositories.vendor_repository import VendorRepository
 from app.schemas.vendor import VendorCreateRequest, VendorUpdateRequest
+from app.utilities.code_generators import generate_vendor_code
 
 
 class VendorService:
@@ -57,13 +59,15 @@ class VendorService:
                 f"Vendor name {payload.name!r} already exists",
                 details={"name": payload.name},
             )
+        vendor_code = generate_vendor_code(payload.name)
         row = self.repo.create(
+            vendor_code=vendor_code,
             name=payload.name,
             description=payload.description,
             email=str(payload.email) if payload.email else None,
             contact_person=payload.contact_person,
             phone_number=payload.phone_number,
-            active=True,
+            active=getattr(payload, "active", True) if getattr(payload, "active", None) is not None else True,
         )
         self.db.commit()
         return row
@@ -81,7 +85,14 @@ class VendorService:
         if "email" in updates and updates["email"] is not None:
             updates["email"] = str(updates["email"])
         self.repo.update(row, **updates)
-        self.db.commit()
+        try:
+            self.db.commit()
+        except IntegrityError:
+            self.db.rollback()
+            raise CatalogEntryConflictError(
+                f"Vendor name {updates.get('name', row.name)!r} already in use",
+                details={"name": updates.get("name", row.name)},
+            )
         return row
 
     def delete(self, vendor_id: str, *, deleted_by_user_id: str) -> Vendor:

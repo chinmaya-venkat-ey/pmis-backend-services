@@ -7,7 +7,7 @@ from typing import List, Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models._cross_schema import Project, ProjectVendor
+from app.models._cross_schema import Project, ProjectVendor, User
 from app.models.vendor import Vendor
 
 
@@ -23,7 +23,7 @@ class VendorRepository:
         return self.db.get(Vendor, vendor_id)
 
     def get_by_name(self, name: str) -> Optional[Vendor]:
-        stmt = select(Vendor).where(Vendor.name == name)
+        stmt = select(Vendor).where(Vendor.name == name, Vendor.deleted_at.is_(None))
         return self.db.execute(stmt).scalars().first()
 
     def get_by_vendor_code(self, vendor_code: str) -> Optional[Vendor]:
@@ -85,5 +85,16 @@ class VendorRepository:
             .where(ProjectVendor.vendor_id == vendor_id)
             .where(Project.deleted_at.is_(None))
             .order_by(Project.name.asc())
+        )
+        return list(self.db.execute(stmt).scalars().all())
+
+    def list_users_for_vendor(self, vendor_id: str) -> List[User]:
+        """Cross-schema: users.users where vendor_id = vendor_id.
+        Read-only — masters-svc never writes to users.*"""
+        stmt = (
+            select(User)
+            .where(User.vendor_id == vendor_id)
+            .where(User.deleted_at.is_(None))
+            .order_by(User.login.asc())
         )
         return list(self.db.execute(stmt).scalars().all())

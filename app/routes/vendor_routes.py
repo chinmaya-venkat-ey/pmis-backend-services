@@ -22,6 +22,7 @@ from app.schemas.vendor import (
     VendorUpdateRequest,
 )
 from app.schemas.vendor_project import VendorProjectSummary
+from app.schemas.vendor_user import VendorUserSummary
 
 
 router = APIRouter(prefix="/vendors", tags=["vendors"])
@@ -68,6 +69,24 @@ def get_vendor_details(
     controller: VendorController = Depends(get_vendor_controller),
 ) -> VendorResponse:
     return controller.get_details(vendor_id)
+
+
+@router.get(
+    "/{vendor_id}/users",
+    response_model=List[VendorUserSummary],
+    summary="List users belonging to this vendor",
+    description=(
+        "Returns all active (non-deleted) users whose vendor_id matches the given "
+        "vendor UUID. Cross-schema read from users.users. Requires vendors:read."
+    ),
+    dependencies=[Depends(require_permission(VENDORS_READ))],
+    responses={404: {"description": "Vendor not found"}},
+)
+def list_users_for_vendor(
+    vendor_id: str,
+    controller: VendorController = Depends(get_vendor_controller),
+) -> List[VendorUserSummary]:
+    return controller.list_users(vendor_id)
 
 
 @router.get(

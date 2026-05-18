@@ -5,7 +5,7 @@ Per Q1: wire keeps `vendor_*` field names (FE renders "Organization" label only)
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, Optional
+from typing import Annotated, List, Optional
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
@@ -15,27 +15,39 @@ from app.schemas._base import ResponseModel
 class VendorCreateRequest(BaseModel):
     """Body of POST /masters/vendors/create."""
 
-    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore", populate_by_name=True)
 
     name: Annotated[str, Field(min_length=1, max_length=255,
                                description="Display name (unique)")]
     description: Annotated[Optional[str], Field(default=None, max_length=4096)]
+    active: Annotated[Optional[bool], Field(default=True)]
     email: Annotated[Optional[EmailStr], Field(default=None)]
-    contact_person: Annotated[Optional[str], Field(default=None, max_length=255)]
-    phone_number: Annotated[Optional[str], Field(default=None, max_length=50)]
+    contact_person: Annotated[Optional[str], Field(
+        default=None, max_length=255, alias="contactPerson"
+    )]
+    phone_number: Annotated[Optional[str], Field(
+        default=None, max_length=50, alias="phoneNumber"
+    )]
+    project_ids: Annotated[Optional[List[str]], Field(
+        default_factory=list, alias="projectIds"
+    )]
 
 
 class VendorUpdateRequest(BaseModel):
     """Body of PATCH /masters/vendors/{vendor_id}/update — partial."""
 
-    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore", populate_by_name=True)
 
     name: Annotated[Optional[str], Field(default=None, min_length=1, max_length=255)]
     description: Annotated[Optional[str], Field(default=None, max_length=4096)]
     active: Annotated[Optional[bool], Field(default=None)]
     email: Annotated[Optional[EmailStr], Field(default=None)]
-    contact_person: Annotated[Optional[str], Field(default=None, max_length=255)]
-    phone_number: Annotated[Optional[str], Field(default=None, max_length=50)]
+    contact_person: Annotated[Optional[str], Field(
+        default=None, max_length=255, alias="contactPerson"
+    )]
+    phone_number: Annotated[Optional[str], Field(
+        default=None, max_length=50, alias="phoneNumber"
+    )]
 
 
 class VendorResponse(ResponseModel):

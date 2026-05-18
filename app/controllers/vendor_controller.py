@@ -13,6 +13,7 @@ from app.schemas.vendor import (
     VendorUpdateRequest,
 )
 from app.schemas.vendor_project import VendorProjectSummary
+from app.schemas.vendor_user import VendorUserSummary
 from app.services.vendor_service import VendorService
 
 
@@ -58,3 +59,8 @@ class VendorController:
         self.service.get_by_id(vendor_id)
         rows = self.service.repo.list_projects_for_vendor(vendor_id)
         return [VendorProjectSummary.model_validate(r) for r in rows]
+
+    def list_users(self, vendor_id: str) -> List[VendorUserSummary]:
+        self.service.get_by_id(vendor_id)
+        rows = self.service.repo.list_users_for_vendor(vendor_id)
+        return [VendorUserSummary.model_validate(r) for r in rows]

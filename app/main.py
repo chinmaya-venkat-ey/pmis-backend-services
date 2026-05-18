@@ -76,16 +76,13 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # CORS — only in development per Decision 8e (nginx owns CORS in prod).
-    if settings.env.lower() == "development":
-        origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
-        app.add_middleware(
-            CORSMiddleware,
-            allow_origins=origins,
-            allow_credentials=True,
-            allow_methods=["*"],
-            allow_headers=["*"],
-        )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     app.add_middleware(RequestContextMiddleware)
 
     register_exception_handlers(app)

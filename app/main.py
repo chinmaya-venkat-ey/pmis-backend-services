@@ -79,15 +79,13 @@ def create_app() -> FastAPI:
     # On-the-wire order: CORS → RequestContext → Auth → route handler.
     app.add_middleware(AuthMiddleware)
     app.add_middleware(RequestContextMiddleware)
-    if settings.env == "development":
-        origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
-        app.add_middleware(
-            CORSMiddleware,
-            allow_origins=origins,
-            allow_credentials=True,
-            allow_methods=["*"],
-            allow_headers=["*"],
-        )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     app.include_router(health_routes.router)
     app.include_router(project_router)

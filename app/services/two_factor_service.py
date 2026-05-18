@@ -92,18 +92,19 @@ class TwoFactorService:
         # rejected with 429 + `{remaining_seconds}` so the FE can render
         # "wait N seconds" without leaking timing.
         now = datetime.now(timezone.utc)
-        cooldown = timedelta(seconds=settings.otp_resend_cooldown_seconds)
-        if row.last_sent_at is not None:
-            elapsed = now - row.last_sent_at
-            if elapsed < cooldown:
-                remaining = int((cooldown - elapsed).total_seconds())
-                raise OtpCooldownError(
-                    f"Please wait {remaining}s before requesting another OTP.",
-                    details={
-                        "errorIdentifier": "cooldown",
-                        "remaining_seconds": remaining,
-                    },
-                )
+        if not settings.universal_otp_enabled:
+            cooldown = timedelta(seconds=settings.otp_resend_cooldown_seconds)
+            if row.last_sent_at is not None:
+                elapsed = now - row.last_sent_at
+                if elapsed < cooldown:
+                    remaining = int((cooldown - elapsed).total_seconds())
+                    raise OtpCooldownError(
+                        f"Please wait {remaining}s before requesting another OTP.",
+                        details={
+                            "errorIdentifier": "cooldown",
+                            "remaining_seconds": remaining,
+                        },
+                    )
 
         recipient = self._recipient_for_channel(user, channel)
         code = generate_otp_code(settings.otp_code_length)

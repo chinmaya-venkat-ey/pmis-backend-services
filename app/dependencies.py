@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.controllers.activity_controller import ActivityController
 from app.controllers.attachment_controller import AttachmentController
 from app.controllers.comment_controller import CommentController
+from app.controllers.critical_path_controller import CriticalPathController
 from app.controllers.dashboard_controller import DashboardController
 from app.controllers.milestone_controller import MilestoneController
 from app.controllers.project_controller import ProjectController
@@ -72,3 +73,7 @@ def get_dashboard_controller(db: Session = Depends(get_db)) -> DashboardControll
 
 def get_tree_controller(db: Session = Depends(get_db)) -> TreeController:
     return TreeController(db)
+
+
+def get_critical_path_controller(db: Session = Depends(get_db)) -> CriticalPathController:
+    return CriticalPathController(db)

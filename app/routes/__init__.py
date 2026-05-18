@@ -13,6 +13,7 @@ from app.routes import (
     attachment_routes,
     catalog_routes,
     comment_routes,
+    critical_path_routes,
     dashboard_routes,
     health_routes,
     milestone_routes,
@@ -49,6 +50,7 @@ project_router.include_router(attachment_routes.router)
 # Read-only surfaces.
 project_router.include_router(dashboard_routes.router)
 project_router.include_router(tree_routes.router)
+project_router.include_router(critical_path_routes.router)
 
 # Catalog lookups (/api/v3/divisions, /api/v3/priorities, etc.) and vendor
 # management (/api/v3/vendors/*) — matching VM project service (port 8003).

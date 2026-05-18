@@ -70,15 +70,13 @@ def create_app() -> FastAPI:
     #   3. RequestContextMiddleware  (X-Request-ID + timing logs; innermost)
     app.add_middleware(RequestContextMiddleware)
     app.add_middleware(AuthMiddleware)
-    if settings.env.lower() == "development":
-        origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
-        app.add_middleware(
-            CORSMiddleware,
-            allow_origins=origins,
-            allow_credentials=True,
-            allow_methods=["*"],
-            allow_headers=["*"],
-        )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     register_exception_handlers(app)
 

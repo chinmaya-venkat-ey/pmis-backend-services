@@ -105,6 +105,7 @@ class RefreshService:
                 email=user.email,
                 first_name=user.first_name,
                 last_name=user.last_name,
+                org_role=user.org_role,
                 is_admin=is_admin,
                 is_super_admin=is_super,
                 permissions=perms,

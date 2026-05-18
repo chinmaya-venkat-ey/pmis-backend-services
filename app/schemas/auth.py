@@ -24,6 +24,7 @@ class LoginUserSummary(BaseModel):
     email: EmailStr
     first_name: Optional[str] = None
     last_name: Optional[str] = None
+    org_role: Optional[str] = None
     is_admin: bool = Field(default=False)
     is_super_admin: bool = Field(default=False)
     permissions: List[str] = Field(default_factory=list)

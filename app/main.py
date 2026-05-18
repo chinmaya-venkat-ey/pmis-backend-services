@@ -89,6 +89,7 @@ def create_app() -> FastAPI:
         schema = get_openapi(
             title=app.title, version=app.version,
             description=app.description, routes=app.routes,
+            servers=[{"url": app.root_path}] if app.root_path else None,
         )
         schema.setdefault("components", {})["securitySchemes"] = {
             "BearerAuth": {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"}

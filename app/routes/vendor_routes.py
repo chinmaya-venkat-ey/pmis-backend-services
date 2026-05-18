@@ -28,7 +28,7 @@ router = APIRouter(prefix="/vendors", tags=["vendors"])
 
 
 @router.get(
-    "/list",
+    "",
     response_model=List[VendorResponse],
     summary="List vendors",
     description=(
@@ -56,7 +56,7 @@ def list_vendors(
 
 
 @router.get(
-    "/{vendor_id}/details",
+    "/{vendor_id}",
     response_model=VendorResponse,
     summary="Get vendor details",
     description="Returns one vendor by UUID. 404 if not found. Requires vendors:read.",
@@ -71,7 +71,7 @@ def get_vendor_details(
 
 
 @router.get(
-    "/{vendor_id}/projects/list",
+    "/{vendor_id}/projects",
     response_model=List[VendorProjectSummary],
     summary="List the projects this vendor is mapped to",
     description=(
@@ -110,7 +110,7 @@ def create_vendor(
 
 
 @router.patch(
-    "/{vendor_id}/update",
+    "/{vendor_id}",
     response_model=VendorResponse,
     summary="Update a vendor",
     description=(
@@ -132,7 +132,7 @@ def update_vendor(
 
 
 @router.delete(
-    "/{vendor_id}/delete",
+    "/{vendor_id}",
     response_model=VendorResponse,
     summary="Delete (soft-delete) a vendor",
     description=(

@@ -24,8 +24,9 @@ router = APIRouter(prefix="/divisions", tags=["divisions"])
 
 
 @router.get(
-    "/list",
+    "",
     response_model=List[DivisionResponse],
+    response_model_by_alias=True,
     summary="List divisions",
     description=(
         "Returns all divisions. By default omits inactive rows; pass "
@@ -42,8 +43,9 @@ def list_divisions(
 
 
 @router.get(
-    "/{code}/details",
+    "/{code}",
     response_model=DivisionResponse,
+    response_model_by_alias=True,
     summary="Get division details",
     description="Returns one division by code. 404 if not found. Requires divisions:read.",
     dependencies=[Depends(require_permission(DIVISIONS_READ))],
@@ -59,6 +61,7 @@ def get_division_details(
 @router.post(
     "/create",
     response_model=DivisionResponse,
+    response_model_by_alias=True,
     status_code=status.HTTP_201_CREATED,
     summary="Create a division",
     description=(
@@ -77,8 +80,9 @@ def create_division(
 
 
 @router.patch(
-    "/{code}/update",
+    "/{code}",
     response_model=DivisionResponse,
+    response_model_by_alias=True,
     summary="Update a division",
     description=(
         "Partial update — only the fields you send are changed. `code` is "
@@ -96,8 +100,9 @@ def update_division(
 
 
 @router.delete(
-    "/{code}/delete",
+    "/{code}",
     response_model=DivisionResponse,
+    response_model_by_alias=True,
     summary="Delete (deactivate) a division",
     description=(
         "Soft-delete: flips `active=False`. Row is preserved for history. "
@@ -116,6 +121,7 @@ def delete_division(
 @router.post(
     "/{code}/restore",
     response_model=DivisionResponse,
+    response_model_by_alias=True,
     summary="Restore (reactivate) a division",
     description=(
         "Re-flips `active=True` on a previously deactivated division. "

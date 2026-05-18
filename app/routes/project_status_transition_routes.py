@@ -26,12 +26,12 @@ from app.schemas.project_status_transition import (
 
 
 router = APIRouter(
-    prefix="/project-status-transitions", tags=["project_status_transitions"]
+    prefix="/project_status_transitions", tags=["project_status_transitions"]
 )
 
 
 @router.get(
-    "/list",
+    "",
     response_model=List[ProjectStatusTransitionResponse],
     summary="List project status transitions",
     description=(
@@ -50,7 +50,7 @@ def list_project_status_transitions(
 
 
 @router.get(
-    "/{row_id}/details",
+    "/{row_id}",
     response_model=ProjectStatusTransitionResponse,
     summary="Get project status transition details",
     dependencies=[Depends(require_permission(PROJECT_STATUS_TRANSITIONS_READ))],
@@ -84,7 +84,7 @@ def create_project_status_transition(
 
 
 @router.patch(
-    "/{row_id}/update",
+    "/{row_id}",
     response_model=ProjectStatusTransitionResponse,
     summary="Update a project status transition",
     description="`from_status` and `to_status` are immutable.",
@@ -102,7 +102,7 @@ def update_project_status_transition(
 
 
 @router.delete(
-    "/{row_id}/delete",
+    "/{row_id}",
     response_model=ProjectStatusTransitionResponse,
     summary="Delete (deactivate) a project status transition",
     dependencies=[Depends(require_permission(PROJECT_STATUS_TRANSITIONS_MANAGE))],

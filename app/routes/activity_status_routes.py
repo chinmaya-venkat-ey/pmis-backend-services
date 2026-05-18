@@ -16,11 +16,11 @@ from app.schemas.activity_status import (
 )
 
 
-router = APIRouter(prefix="/activity-statuses", tags=["activity_statuses"])
+router = APIRouter(prefix="/activity_statuses", tags=["activity_statuses"])
 
 
 @router.get(
-    "/list",
+    "",
     response_model=List[ActivityStatusResponse],
     summary="List activity statuses",
     description="Returns activity status options. `is_terminal=true` rows are 'done' states.",
@@ -34,7 +34,7 @@ def list_activity_statuses(
 
 
 @router.get(
-    "/{code}/details",
+    "/{code}",
     response_model=ActivityStatusResponse,
     summary="Get activity status details",
     dependencies=[Depends(require_permission(ACTIVITY_STATUSES_READ))],
@@ -63,7 +63,7 @@ def create_activity_status(
 
 
 @router.patch(
-    "/{code}/update",
+    "/{code}",
     response_model=ActivityStatusResponse,
     summary="Update an activity status",
     dependencies=[Depends(require_permission(ACTIVITY_STATUSES_MANAGE))],
@@ -78,7 +78,7 @@ def update_activity_status(
 
 
 @router.delete(
-    "/{code}/delete",
+    "/{code}",
     response_model=ActivityStatusResponse,
     summary="Delete (deactivate) an activity status",
     dependencies=[Depends(require_permission(ACTIVITY_STATUSES_MANAGE))],

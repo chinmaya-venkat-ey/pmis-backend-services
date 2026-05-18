@@ -27,11 +27,11 @@ from app.schemas.notification_template import (
 )
 
 
-router = APIRouter(prefix="/notification-templates", tags=["notification_templates"])
+router = APIRouter(prefix="/notification_templates", tags=["notification_templates"])
 
 
 @router.get(
-    "/list",
+    "",
     response_model=List[NotificationTemplateResponse],
     summary="List notification templates",
     dependencies=[Depends(require_permission(NOTIFICATION_TEMPLATES_READ))],
@@ -46,7 +46,7 @@ def list_notification_templates(
 
 
 @router.get(
-    "/{template_id}/details",
+    "/{template_id}",
     response_model=NotificationTemplateResponse,
     summary="Get notification template details",
     dependencies=[Depends(require_permission(NOTIFICATION_TEMPLATES_READ))],
@@ -84,7 +84,7 @@ def create_notification_template(
 
 
 @router.patch(
-    "/{template_id}/update",
+    "/{template_id}",
     response_model=NotificationTemplateResponse,
     summary="Update a notification template",
     description="`template_kind` and `channel` are immutable.",
@@ -102,7 +102,7 @@ def update_notification_template(
 
 
 @router.delete(
-    "/{template_id}/delete",
+    "/{template_id}",
     response_model=NotificationTemplateResponse,
     summary="Delete (deactivate) a notification template",
     dependencies=[Depends(require_permission(NOTIFICATION_TEMPLATES_MANAGE))],

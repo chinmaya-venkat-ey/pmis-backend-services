@@ -16,11 +16,11 @@ from app.schemas.project_category import (
 )
 
 
-router = APIRouter(prefix="/project-categories", tags=["project_categories"])
+router = APIRouter(prefix="/project_categories", tags=["project_categories"])
 
 
 @router.get(
-    "/list",
+    "",
     response_model=List[ProjectCategoryResponse],
     summary="List project categories",
     description="Returns project categories used by the project-create form. Requires project_categories:read.",
@@ -34,7 +34,7 @@ def list_project_categories(
 
 
 @router.get(
-    "/{code}/details",
+    "/{code}",
     response_model=ProjectCategoryResponse,
     summary="Get project category details",
     dependencies=[Depends(require_permission(PROJECT_CATEGORIES_READ))],
@@ -63,7 +63,7 @@ def create_project_category(
 
 
 @router.patch(
-    "/{code}/update",
+    "/{code}",
     response_model=ProjectCategoryResponse,
     summary="Update a project category",
     dependencies=[Depends(require_permission(PROJECT_CATEGORIES_MANAGE))],
@@ -78,7 +78,7 @@ def update_project_category(
 
 
 @router.delete(
-    "/{code}/delete",
+    "/{code}",
     response_model=ProjectCategoryResponse,
     summary="Delete (deactivate) a project category",
     dependencies=[Depends(require_permission(PROJECT_CATEGORIES_MANAGE))],

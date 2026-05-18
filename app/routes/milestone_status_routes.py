@@ -16,11 +16,11 @@ from app.schemas.milestone_status import (
 )
 
 
-router = APIRouter(prefix="/milestone-statuses", tags=["milestone_statuses"])
+router = APIRouter(prefix="/milestone_statuses", tags=["milestone_statuses"])
 
 
 @router.get(
-    "/list",
+    "",
     response_model=List[MilestoneStatusResponse],
     summary="List milestone statuses",
     description="Returns milestone status options. `is_terminal=true` rows are 'done' states.",
@@ -34,7 +34,7 @@ def list_milestone_statuses(
 
 
 @router.get(
-    "/{code}/details",
+    "/{code}",
     response_model=MilestoneStatusResponse,
     summary="Get milestone status details",
     dependencies=[Depends(require_permission(MILESTONE_STATUSES_READ))],
@@ -63,7 +63,7 @@ def create_milestone_status(
 
 
 @router.patch(
-    "/{code}/update",
+    "/{code}",
     response_model=MilestoneStatusResponse,
     summary="Update a milestone status",
     dependencies=[Depends(require_permission(MILESTONE_STATUSES_MANAGE))],
@@ -78,7 +78,7 @@ def update_milestone_status(
 
 
 @router.delete(
-    "/{code}/delete",
+    "/{code}",
     response_model=MilestoneStatusResponse,
     summary="Delete (deactivate) a milestone status",
     dependencies=[Depends(require_permission(MILESTONE_STATUSES_MANAGE))],

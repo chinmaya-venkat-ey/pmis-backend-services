@@ -20,7 +20,7 @@ router = APIRouter(prefix="/priorities", tags=["priorities"])
 
 
 @router.get(
-    "/list",
+    "",
     response_model=List[PriorityResponse],
     summary="List priorities",
     description="Returns priorities ordered by position. Requires priorities:read.",
@@ -34,7 +34,7 @@ def list_priorities(
 
 
 @router.get(
-    "/{code}/details",
+    "/{code}",
     response_model=PriorityResponse,
     summary="Get priority details",
     dependencies=[Depends(require_permission(PRIORITIES_READ))],
@@ -64,7 +64,7 @@ def create_priority(
 
 
 @router.patch(
-    "/{code}/update",
+    "/{code}",
     response_model=PriorityResponse,
     summary="Update a priority",
     dependencies=[Depends(require_permission(PRIORITIES_MANAGE))],
@@ -79,7 +79,7 @@ def update_priority(
 
 
 @router.delete(
-    "/{code}/delete",
+    "/{code}",
     response_model=PriorityResponse,
     summary="Delete (deactivate) a priority",
     dependencies=[Depends(require_permission(PRIORITIES_MANAGE))],

@@ -16,11 +16,11 @@ from app.schemas.activity_type import (
 )
 
 
-router = APIRouter(prefix="/activity-types", tags=["activity_types"])
+router = APIRouter(prefix="/activity_types", tags=["activity_types"])
 
 
 @router.get(
-    "/list",
+    "",
     response_model=List[ActivityTypeResponse],
     summary="List activity types",
     dependencies=[Depends(require_permission(ACTIVITY_TYPES_READ))],
@@ -33,7 +33,7 @@ def list_activity_types(
 
 
 @router.get(
-    "/{code}/details",
+    "/{code}",
     response_model=ActivityTypeResponse,
     summary="Get activity type details",
     dependencies=[Depends(require_permission(ACTIVITY_TYPES_READ))],
@@ -62,7 +62,7 @@ def create_activity_type(
 
 
 @router.patch(
-    "/{code}/update",
+    "/{code}",
     response_model=ActivityTypeResponse,
     summary="Update an activity type",
     dependencies=[Depends(require_permission(ACTIVITY_TYPES_MANAGE))],
@@ -77,7 +77,7 @@ def update_activity_type(
 
 
 @router.delete(
-    "/{code}/delete",
+    "/{code}",
     response_model=ActivityTypeResponse,
     summary="Delete (deactivate) an activity type",
     dependencies=[Depends(require_permission(ACTIVITY_TYPES_MANAGE))],

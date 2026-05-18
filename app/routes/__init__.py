@@ -36,7 +36,7 @@ from app.routes.resource_type_routes import router as resource_type_router
 from app.routes.vendor_routes import router as vendor_router
 
 
-api_router = APIRouter(prefix="/masters")
+api_router = APIRouter(prefix="/api/v3/master")
 api_router.include_router(division_router)
 api_router.include_router(vendor_router)
 api_router.include_router(resource_type_router)

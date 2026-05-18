@@ -12,13 +12,14 @@ from app.schemas._base import ResponseModel
 class DivisionCreateRequest(BaseModel):
     """Body of POST /masters/divisions/create."""
 
-    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore", populate_by_name=True)
 
     code: Annotated[str, Field(min_length=1, max_length=64, pattern=r"^[a-z0-9_-]+$",
                                description="Lowercase wire code, unique")]
     label: Annotated[str, Field(min_length=1, max_length=255,
                                 description="Display label (e.g. 'TMD1', 'Engineering')")]
-    requires_other: bool = Field(default=False,
+    # FE sends camelCase `requiresOther`; alias maps it to this field.
+    requires_other: bool = Field(default=False, alias="requiresOther",
                                  description="If true, the FE shows a free-text 'specify other' input")
     active: bool = Field(default=True)
     email: Annotated[EmailStr, Field(description="Doc 36: contact email (required)")]
@@ -29,10 +30,11 @@ class DivisionCreateRequest(BaseModel):
 class DivisionUpdateRequest(BaseModel):
     """Body of PATCH /masters/divisions/{code}/update — partial."""
 
-    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore", populate_by_name=True)
 
     label: Annotated[Optional[str], Field(default=None, min_length=1, max_length=255)]
-    requires_other: Annotated[Optional[bool], Field(default=None)]
+    # FE sends camelCase `requiresOther`; alias maps it to this field.
+    requires_other: Annotated[Optional[bool], Field(default=None, alias="requiresOther")]
     active: Annotated[Optional[bool], Field(default=None)]
     email: Annotated[Optional[EmailStr], Field(default=None)]
     phone_number: Annotated[Optional[str], Field(default=None, min_length=1, max_length=50)]
@@ -41,13 +43,16 @@ class DivisionUpdateRequest(BaseModel):
 class DivisionResponse(ResponseModel):
     """Returned by GET /masters/divisions/list and /details."""
 
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
     id: int
     code: str
     label: str
-    is_builtin: bool
-    requires_other: bool
+    # Serialized as camelCase to match VM API and FE fromApi expectations.
+    is_builtin: bool = Field(serialization_alias="isBuiltin")
+    requires_other: bool = Field(serialization_alias="requiresOther")
     active: bool
     email: str
-    phone_number: str
+    phone_number: str = Field(serialization_alias="phoneNumber")
     created_at: datetime
     updated_at: datetime

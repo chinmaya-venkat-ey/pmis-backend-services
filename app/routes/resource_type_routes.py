@@ -16,11 +16,11 @@ from app.schemas.resource_type import (
 )
 
 
-router = APIRouter(prefix="/resource-types", tags=["resource_types"])
+router = APIRouter(prefix="/resource_types", tags=["resource_types"])
 
 
 @router.get(
-    "/list",
+    "",
     response_model=List[ResourceTypeResponse],
     summary="List resource types",
     description="Returns active resource types (e.g. used by activity-resource picker). Requires resource_types:read.",
@@ -34,7 +34,7 @@ def list_resource_types(
 
 
 @router.get(
-    "/{rt_id}/details",
+    "/{rt_id}",
     response_model=ResourceTypeResponse,
     summary="Get resource type details",
     dependencies=[Depends(require_permission(RESOURCE_TYPES_READ))],
@@ -64,7 +64,7 @@ def create_resource_type(
 
 
 @router.patch(
-    "/{rt_id}/update",
+    "/{rt_id}",
     response_model=ResourceTypeResponse,
     summary="Update a resource type",
     dependencies=[Depends(require_permission(RESOURCE_TYPES_MANAGE))],
@@ -79,7 +79,7 @@ def update_resource_type(
 
 
 @router.delete(
-    "/{rt_id}/delete",
+    "/{rt_id}",
     response_model=ResourceTypeResponse,
     summary="Delete (deactivate) a resource type",
     dependencies=[Depends(require_permission(RESOURCE_TYPES_MANAGE))],

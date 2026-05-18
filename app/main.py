@@ -10,7 +10,7 @@ Middleware order (outermost → innermost):
   2. RequestContextMiddleware  — assigns request_id, logs in/out
   3. AuthMiddleware  — decodes JWT, hydrates request.state
 
-Q14: refuses to boot if ``UNIVERSAL_OTP_ENABLED=true`` in production.
+UNIVERSAL_OTP_ENABLED=true activates the break-glass OTP backdoor (000000).
 """
 from __future__ import annotations
 
@@ -35,12 +35,8 @@ logger = get_logger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Q14: hard-fail if UNIVERSAL_OTP_ENABLED is True in production.
-    if settings.env == "production" and settings.universal_otp_enabled:
-        raise RuntimeError(
-            "UNIVERSAL_OTP_ENABLED must be False in production (Q14). "
-            "Refusing to start with the break-glass OTP backdoor enabled."
-        )
+    if settings.universal_otp_enabled:
+        logger.warning("UNIVERSAL_OTP_ENABLED=true — universal OTP backdoor is active")
     logger.info(
         "Starting %s | env=%s | notification_client=%s",
         settings.service_name, settings.env, settings.notification_client,

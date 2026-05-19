@@ -1,0 +1,228 @@
+1. Vendor code is not coming while creating the vendor.
+2. Vendor ID in multipart is giving this error below.
+
+
+curl -X 'POST' \
+  'http://localhost:8003/api/v3/projects/create' \
+  -H 'accept: application/json' \
+  -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzdXBlcmFkbWluIiwidXNlcl9pZCI6ImRkOWE4YTFjLWRkYjgtNGQ2Zi05MjU5LWZiNDg3MWI5NTc1YiIsImVtYWlsIjoic3VwZXJhZG1pbkBleGFtcGxlLmNvbSIsImV4cCI6MTc3OTA5NjMxOSwiaWF0IjoxNzc5MDg5MTE5LCJqdGkiOiJlZmNjZThiZjY2NzI0ZTc2YjM5ODA0NDVhNDU0Mjg1YiJ9.Wo4pW50T8HxN6T08ESEpcxi9E0FbD8ZMRsLQEkVrxOg' \
+  -H 'Content-Type: multipart/form-data' \
+  -F 'parentId=' \
+  -F 'statusExplanation=' \
+  -F 'endDate=2027-12-31T00:00:00+05:30' \
+  -F 'name=EY D3' \
+  -F 'vendorIds=875527c2-f731-47fe-86f1-ad86c14a2a5f' \
+  -F 'startDate=2026-06-01T00:00:00+05:30' \
+  -F 'categoryOther=' \
+  -F 'status=new' \
+  -F 'owner=tmd1' \
+  -F 'categoryOtherReason=' \
+  -F 'files=@downloaded_via_api.png;type=image/png' \
+  -F 'files=@1778048761616YOdayFUbwC.pdf;type=application/pdf' \
+  -F 'ownerOther=' \
+  -F 'category='
+  
+{
+  "detail": [
+    {
+      "loc": [
+        "body",
+        "vendorIds"
+      ],
+      "msg": "vendorIds must be a JSON-encoded array string (got '875527c2-f731-47fe-86f1-ad86c14a2a5f')",
+      "type": "value_error"
+    }
+  ]
+}
+
+3. Attachment url is not coming with serverip:port/files, it is coming this only, "url": "attachments/2026/05/b539450f5ee64705a5e41e9bd5e0355c_downloaded_via_api.png"
+4. project_code timestamp collision if two projects created on same time.
+5. dependsOn must be a JSON-encoded array string in multipart like we were getting error on vendorId in multipart, see below.
+
+curl -X 'POST' \
+  'http://10.1.131.199/projects/api/v3/projects/2ca57431-a550-4130-b0ed-f0bb654338a0/milestones/create' \
+  -H 'accept: application/json' \
+  -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzdXBlcmFkbWluIiwidXNlcl9pZCI6ImRkOWE4YTFjLWRkYjgtNGQ2Zi05MjU5LWZiNDg3MWI5NTc1YiIsImVtYWlsIjoic3VwZXJhZG1pbkBleGFtcGxlLmNvbSIsImV4cCI6MTc3OTEwNjA4NCwiaWF0IjoxNzc5MDk4ODg0LCJqdGkiOiIzNjkzNDk0NTExNjM0NWI2OWE2YzgzNjA5MWU0NTQ1NCJ9.m5Ef85R19NUQjP4d2ksltjkobgo1ow5v2tcqJB610TM' \
+  -H 'Content-Type: multipart/form-data' \
+  -F 'actualStartDate=' \
+  -F 'body=hello' \
+  -F 'priority=' \
+  -F 'dependsOn=1f425c16-e8ea-4d3f-813b-795955e024c8' \
+  -F 'position=' \
+  -F 'endDate=2028-12-31T00:00:00+05:30' \
+  -F 'vendors=' \
+  -F 'name=milestone test' \
+  -F 'vendorIds=' \
+  -F 'startDate=2026-06-01T00:00:00+05:30"' \
+  -F 'status=not_completed' \
+  -F 'files=@1778048761616YOdayFUbwC.pdf;type=application/pdf' \
+  -F 'files=@downloaded_via_api (1).png;type=image/png' \
+  -F 'actualEndDate=' \
+  -F 'description='
+  
+{
+  "data": null,
+  "message": null,
+  "error": {
+    "_type": "Error",
+    "errorIdentifier": "validation_error",
+    "message": "Invalid milestone form fields.",
+    "_embedded": {
+      "details": {
+        "errors": [
+          {
+            "loc": [
+              "body",
+              "dependsOn"
+            ],
+            "msg": "dependsOn must be a JSON-encoded array string (got '1f425c16-e8ea-4d3f-813b-795955e024c8')",
+            "type": "value_error"
+          }
+        ]
+      }
+    }
+  },
+  "status": 422
+}
+
+6. multipart issues are having arrays issue in all project/milestone/activity/tasks/subtasks also. See below same issue on dependsOn and concernedDivisions both. 
+Basically whichever the value is in list/array, it is giving error in multipart not in json for all P/M/A/T/S/Nested S.
+
+curl -X 'POST' \
+  'http://10.1.131.199/projects/api/v3/milestones/1f425c16-e8ea-4d3f-813b-795955e024c8/activities/create' \
+  -H 'accept: application/json' \
+  -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzdXBlcmFkbWluIiwidXNlcl9pZCI6ImRkOWE4YTFjLWRkYjgtNGQ2Zi05MjU5LWZiNDg3MWI5NTc1YiIsImVtYWlsIjoic3VwZXJhZG1pbkBleGFtcGxlLmNvbSIsImV4cCI6MTc3OTEwNjA4NCwiaWF0IjoxNzc5MDk4ODg0LCJqdGkiOiIzNjkzNDk0NTExNjM0NWI2OWE2YzgzNjA5MWU0NTQ1NCJ9.m5Ef85R19NUQjP4d2ksltjkobgo1ow5v2tcqJB610TM' \
+  -H 'Content-Type: multipart/form-data' \
+  -F 'ownerDivision=tmd1' \
+  -F 'actualStartDate=' \
+  -F 'body=' \
+  -F 'vendorId=' \
+  -F 'priority=' \
+  -F 'dependsOn=3fb03458-3ad3-4e7b-be84-80278b651983' \
+  -F 'concernedDivisions=' \
+  -F 'position=' \
+  -F 'endDate=2028-12-31T00:00:00+05:30' \
+  -F 'name=test activity' \
+  -F 'startDate=2026-06-01T00:00:00+05:30' \
+  -F 'status=' \
+  -F 'files=@1778048761616YOdayFUbwC.pdf;type=application/pdf' \
+  -F 'actualEndDate=' \
+  -F 'description='
+  
+{
+  "data": null,
+  "message": null,
+  "error": {
+    "_type": "Error",
+    "errorIdentifier": "validation_error",
+    "message": "Invalid activity form fields.",
+    "_embedded": {
+      "details": {
+        "errors": [
+          {
+            "loc": [
+              "body",
+              "dependsOn"
+            ],
+            "msg": "dependsOn must be a JSON-encoded array string (got '3fb03458-3ad3-4e7b-be84-80278b651983')",
+            "type": "value_error"
+          }
+        ]
+      }
+    }
+  },
+  "status": 422
+}
+
+curl -X 'POST' \
+  'http://10.1.131.199/projects/api/v3/milestones/1f425c16-e8ea-4d3f-813b-795955e024c8/activities/create' \
+  -H 'accept: application/json' \
+  -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzdXBlcmFkbWluIiwidXNlcl9pZCI6ImRkOWE4YTFjLWRkYjgtNGQ2Zi05MjU5LWZiNDg3MWI5NTc1YiIsImVtYWlsIjoic3VwZXJhZG1pbkBleGFtcGxlLmNvbSIsImV4cCI6MTc3OTEwNjA4NCwiaWF0IjoxNzc5MDk4ODg0LCJqdGkiOiIzNjkzNDk0NTExNjM0NWI2OWE2YzgzNjA5MWU0NTQ1NCJ9.m5Ef85R19NUQjP4d2ksltjkobgo1ow5v2tcqJB610TM' \
+  -H 'Content-Type: multipart/form-data' \
+  -F 'ownerDivision=tmd1' \
+  -F 'actualStartDate=' \
+  -F 'body=' \
+  -F 'vendorId=' \
+  -F 'priority=' \
+  -F 'concernedDivisions=tmd1' \
+  -F 'position=' \
+  -F 'endDate=2028-12-31T00:00:00+05:30' \
+  -F 'name=test activity' \
+  -F 'startDate=2026-06-01T00:00:00+05:30' \
+  -F 'status=' \
+  -F 'files=@1778048761616YOdayFUbwC.pdf;type=application/pdf' \
+  -F 'actualEndDate=' \
+  -F 'description='
+  
+ 
+{
+  "data": null,
+  "message": null,
+  "error": {
+    "_type": "Error",
+    "errorIdentifier": "validation_error",
+    "message": "Invalid activity form fields.",
+    "_embedded": {
+      "details": {
+        "errors": [
+          {
+            "loc": [
+              "body",
+              "concernedDivisions"
+            ],
+            "msg": "concernedDivisions must be a JSON-encoded array string (got 'tmd1')",
+            "type": "value_error"
+          }
+        ]
+      }
+    }
+  },
+  "status": 422
+}
+
+7. Need to remove this `SUBTASK_MAX_NESTING_DEPTH` env var + misleading code comment as it is not in use.
+8. User code collision on rapid creates as timestamp is there as well.
+9. Vendor create schema diverges between project-svc and masters-svc which is why shubham singh got the issue.
+10. Renaming a vendor to a name already taken by another row returns 500 internal server error.
+11. Vendor schemas accept only snake_case requests; camelCase silently dropped.
+12. In vendor code and user code, need code to be returned, not uuid (from id).
+13. Vendor create payload needs to be fixed:
+Shell
+  {
+      "data": null,
+      "message": null,
+      "error": {
+          "_type": "Error",
+          "errorIdentifier": "VALIDATION_ERROR",
+          "message": "Validation failed",
+          "_embedded": {
+              "details": {
+                  "errors": [
+                      {
+                          "type": "extra_forbidden",
+                          "loc": [
+                              "body",
+                              "active"
+                          ],
+                          "msg": "Extra inputs are not permitted",
+                          "input": true
+                      },
+                      {
+                          "type": "extra_forbidden",
+                          "loc": [
+                              "body",
+                              "project_ids"
+                          ],
+                          "msg": "Extra inputs are not permitted",
+                          "input": []
+                      }
+                  ],
+                  "request_id": "c2d8da58-28b0-4110-97b9-e203cbf33ad1"
+              }
+          }
+      },
+      "status": 422
+  }
+ 
+14. Org_role not present in login response, list of permissions for role being returned instead
+15. /master/api/v3/master/vendors/875527c2-f731-47fe-86f1-ad86c14a2a5f/users? api not in new project service, needs to be ported from monolith

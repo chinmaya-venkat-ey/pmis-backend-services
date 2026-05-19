@@ -1,0 +1,18 @@
+========================================
+Triggered : 2026-05-12 06:25:51
+HTTP Status : 200
+Response    : {"ranAt":"2026-05-12T06:25:51.420705Z","usersNotified":13,"emailsSent":13,"emailsFailed":0,"itemsAggregated":28}
+Finished    : 2026-05-12 06:26:44
+Result      : SUCCESS 
+========================================
+Triggered : 2026-05-12 06:30:55
+HTTP Status : 000
+Response    : curl: (28) Operation timed out after 60002 milliseconds with 0 bytes received
+Finished    : 2026-05-12 06:31:55
+Result      : FAILED  (HTTP 000)
+========================================
+Triggered : 2026-05-12 23:00:01
+HTTP Status : 000
+Response    : curl: (28) Operation timed out after 90002 milliseconds with 0 bytes received
+Finished    : 2026-05-12 23:01:31
+Result      : FAILED  (HTTP 000)

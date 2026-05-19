@@ -1,0 +1,5 @@
+- targets:
+  - http://host.docker.internal:8000/health
+  - http://host.docker.internal:8001/health
+  - http://host.docker.internal:8002/api/v1/health
+  - http://host.docker.internal:3000/

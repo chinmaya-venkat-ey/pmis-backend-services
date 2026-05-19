@@ -1,0 +1,14 @@
+services:
+  grafana:
+    image: grafana/grafana-oss
+    container_name: pmis-grafana
+    restart: unless-stopped
+
+    ports:
+      - "3001:3000"
+
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin123
+
+    mem_limit: 512m

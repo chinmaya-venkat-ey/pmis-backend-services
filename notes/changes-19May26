@@ -1,0 +1,23 @@
+New findings -->
+------------
+
+master service vendor - /master/api/v3/master/vendors/*
+project service vendor - /projects/api/v3/vendors/*
+
+1. Vendor code null on create is coming on master service but still not coming on project service. 
+2. Vendor PATCH 500 on duplicate name has been resolved on Master service but still crashes on project service.
+3. Email format validation working on master service but not on project service.
+4. List filter params on master service has  include_inactive + include_deleted but on project service it has include_inactive only.
+5. Projects coming under vendors in project microservice but not coming in master service.
+6. Masters-svc vendor create silently ignores projectIds: the schema accepts projectIds but the service handler doesn't pass it to the repo, works in project service.
+
+Got using pytest -->
+1. DELETE audit fields has Sets deleted_at AND deleted_by in master service and has Sets deleted_at only in project service.
+2. RBAC on master service have vendors:read / vendors:manage and on project service have this require_authenticated only.
+3. Response shape on master service has Slim (the vendor row alone)  and has Embeds projects[] + user_assignments[] cross-schema on project service.
+4. /{id}/users pagination has No pagination — returns full list on master service but has Paginated (offset + page_size) on project service.
+5. Every UserResponse (GET /users, GET /users/{id}, GET /me, POST /create, …) - is_admin and is_super_admin always return false — even for the seeded super_admin. 
+The User model has no such columns; the schema falls back to default=False; nobody computes the flags from user_roles membership. 
+Auth-time admin checks work via a separate code path, so this is purely a response-side display bug — but the API contract is broken.
+6. PATCH /api/v3/users/{id}/password Route summary says "admin sets", implementation refuses every non-self caller with 403 CALLER_CANNOT_MODIFY_TARGET. Docs vs. impl mismatch.
+7. DELETE /api/v3/roles/{id} (builtin) - OpenAPI declares 409, server returns 403 LOCKED_ROLE. Both block the delete; just the status code disagrees with the contract.

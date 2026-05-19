@@ -142,10 +142,11 @@ class Project(MirrorBase):
 
 
 class ProjectVendor(MirrorBase):
-    """Read-only mirror of project.project_vendors (M:N project↔vendor)."""
+    """Mirror of project.project_vendors (M:N project↔vendor). Written to by master-svc when projectIds are supplied on vendor create/update."""
 
     __tablename__ = "project_vendors"
     __table_args__ = {"schema": "project"}
 
     project_id: Mapped[str] = mapped_column(String(36), primary_key=True)
     vendor_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))

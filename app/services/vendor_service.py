@@ -12,12 +12,15 @@ rules are deferred to the user-svc port discussion.
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import List, Optional
 
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.errors import CatalogEntryConflictError, CatalogEntryNotFoundError
+from app.models._cross_schema import ProjectVendor
 from app.models.vendor import Vendor
 from app.repositories.vendor_repository import VendorRepository
 from app.schemas.vendor import VendorCreateRequest, VendorUpdateRequest
@@ -28,6 +31,21 @@ class VendorService:
     def __init__(self, db: Session):
         self.db = db
         self.repo = VendorRepository(db)
+
+    def _apply_project_ids(self, vendor_id: str, project_ids: List[str]) -> None:
+        existing = self.db.execute(
+            select(ProjectVendor).where(ProjectVendor.vendor_id == vendor_id)
+        ).scalars().all()
+        for pv in existing:
+            self.db.delete(pv)
+        self.db.flush()
+        seen: set = set()
+        now = datetime.now(timezone.utc)
+        for pid in project_ids:
+            if pid in seen:
+                continue
+            seen.add(pid)
+            self.db.add(ProjectVendor(project_id=pid, vendor_id=vendor_id, created_at=now))
 
     def list_(
         self,
@@ -69,12 +87,15 @@ class VendorService:
             phone_number=payload.phone_number,
             active=getattr(payload, "active", True) if getattr(payload, "active", None) is not None else True,
         )
+        project_ids = getattr(payload, "project_ids", None) or []
+        if project_ids:
+            self._apply_project_ids(row.id, project_ids)
         self.db.commit()
         return row
 
     def update(self, vendor_id: str, payload: VendorUpdateRequest) -> Vendor:
         row = self.get_by_id(vendor_id)
-        updates = payload.model_dump(exclude_unset=True)
+        updates = payload.model_dump(exclude_unset=True, exclude={"project_ids"})
         if updates.get("name") and updates["name"] != row.name:
             clash = self.repo.get_by_name(updates["name"])
             if clash is not None and clash.id != row.id:
@@ -85,6 +106,9 @@ class VendorService:
         if "email" in updates and updates["email"] is not None:
             updates["email"] = str(updates["email"])
         self.repo.update(row, **updates)
+        project_ids = payload.model_dump(exclude_unset=True).get("project_ids")
+        if project_ids is not None:
+            self._apply_project_ids(vendor_id, project_ids)
         try:
             self.db.commit()
         except IntegrityError:

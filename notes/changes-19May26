@@ -21,3 +21,4 @@ The User model has no such columns; the schema falls back to default=False; nobo
 Auth-time admin checks work via a separate code path, so this is purely a response-side display bug — but the API contract is broken.
 6. PATCH /api/v3/users/{id}/password Route summary says "admin sets", implementation refuses every non-self caller with 403 CALLER_CANNOT_MODIFY_TARGET. Docs vs. impl mismatch.
 7. DELETE /api/v3/roles/{id} (builtin) - OpenAPI declares 409, server returns 403 LOCKED_ROLE. Both block the delete; just the status code disagrees with the contract.
+8. org_role is still null when response for login is sent. permissions are also still coming in the response. org_role should come and permissions should not.

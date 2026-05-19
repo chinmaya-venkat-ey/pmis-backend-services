@@ -59,6 +59,39 @@ class CpaAnalysisRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Critical path — each activity on the path with name + duration
+# ---------------------------------------------------------------------------
+
+class CpaCriticalPathActivity(BaseModel):
+    display_code: str
+    name: str
+    duration: int          # effective_duration (days_needed + days_delayed)
+    days_needed: int
+    days_delayed: int
+
+
+# ---------------------------------------------------------------------------
+# Per-activity calculation step detail (one formula row)
+# ---------------------------------------------------------------------------
+
+class CpaCalcDetail(BaseModel):
+    formula: str           # symbolic form  e.g. "max(EF[A1.1], EF[A1.2]) + 1"
+    substituted: str       # values plugged in  e.g. "max(5, 3) + 1"
+    result: int
+    note: Optional[str] = None   # extra plain-English note
+
+
+class CpaCalculationSteps(BaseModel):
+    early_start: CpaCalcDetail
+    early_finish: CpaCalcDetail
+    late_finish: CpaCalcDetail
+    late_start: CpaCalcDetail
+    slack: CpaCalcDetail
+    verdict: str           # human-readable conclusion
+    on_critical_path: bool
+
+
+# ---------------------------------------------------------------------------
 # Analysis response
 # ---------------------------------------------------------------------------
 
@@ -73,12 +106,14 @@ class CpaActivitySchedule(BaseModel):
     days_needed: int
     days_delayed: int
     effective_duration: int
+    depends_on: List[CpaDependsOn]
     early_start: int
     early_finish: int
     late_start: int
     late_finish: int
     slack: int
     on_critical_path: bool
+    calculation_steps: CpaCalculationSteps
 
 
 class CpaFlowNode(BaseModel):
@@ -87,6 +122,8 @@ class CpaFlowNode(BaseModel):
     display_code: str
     name: str
     milestone_display_code: str
+    days_needed: int
+    days_delayed: int
     effective_duration: int
     early_start: int
     early_finish: int
@@ -117,6 +154,6 @@ class CpaMetadata(BaseModel):
 class CpaAnalysisResponse(BaseModel):
     project_id: str
     metadata: CpaMetadata
-    critical_path: List[str]
+    critical_path: List[CpaCriticalPathActivity]
     activity_schedule: List[CpaActivitySchedule]
     flow_diagram: Dict[str, Any]

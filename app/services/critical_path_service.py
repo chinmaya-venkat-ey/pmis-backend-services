@@ -29,6 +29,9 @@ from app.schemas.critical_path import (
     CpaActivityOverride,
     CpaActivitySchedule,
     CpaAnalysisResponse,
+    CpaCalcDetail,
+    CpaCalculationSteps,
+    CpaCriticalPathActivity,
     CpaDependencyResponse,
     CpaDependencyRow,
     CpaDependsOn,
@@ -84,6 +87,95 @@ def _topological_sort(
                 queue.append(succ)
     has_cycle = len(order) < len(activity_ids)
     return order, has_cycle
+
+
+def _build_calculation_steps(
+    aid: str,
+    predecessors: Dict[str, Set[str]],
+    successors: Dict[str, Set[str]],
+    ES: Dict[str, int],
+    EF: Dict[str, int],
+    LS: Dict[str, int],
+    LF: Dict[str, int],
+    dur: int,
+    project_end: int,
+    slack: int,
+    code_map: Dict[str, str],   # aid -> display_code
+) -> CpaCalculationSteps:
+    """Build the step-by-step CPM calculation card for one activity."""
+    preds = sorted(predecessors.get(aid, set()))
+    succs = sorted(successors.get(aid, set()))
+
+    # Early Start
+    if not preds:
+        es_detail = CpaCalcDetail(
+            formula="No predecessors → ES = 1",
+            substituted="= 1",
+            result=ES[aid],
+            note="First activity — can start on Day 1",
+        )
+    else:
+        sym = ", ".join(f"EF[{code_map.get(p, p)}]" for p in preds)
+        vals = ", ".join(str(EF[p]) for p in preds)
+        es_detail = CpaCalcDetail(
+            formula=f"max({sym}) + 1",
+            substituted=f"max({vals}) + 1",
+            result=ES[aid],
+        )
+
+    # Early Finish
+    ef_detail = CpaCalcDetail(
+        formula="ES + Duration − 1",
+        substituted=f"{ES[aid]} + {dur} − 1",
+        result=EF[aid],
+    )
+
+    # Late Finish
+    if not succs:
+        lf_detail = CpaCalcDetail(
+            formula="No successors → LF = Project End",
+            substituted=f"= {project_end}",
+            result=LF[aid],
+            note="Last activity — must finish by Project End Day",
+        )
+    else:
+        sym = ", ".join(f"LS[{code_map.get(s, s)}]" for s in succs)
+        vals = ", ".join(str(LS[s]) for s in succs)
+        lf_detail = CpaCalcDetail(
+            formula=f"min({sym}) − 1",
+            substituted=f"min({vals}) − 1",
+            result=LF[aid],
+        )
+
+    # Late Start
+    ls_detail = CpaCalcDetail(
+        formula="LF − Duration + 1",
+        substituted=f"{LF[aid]} − {dur} + 1",
+        result=LS[aid],
+    )
+
+    # Slack
+    slack_detail = CpaCalcDetail(
+        formula="LS − ES",
+        substituted=f"{LS[aid]} − {ES[aid]}",
+        result=slack,
+    )
+
+    if slack == 0:
+        verdict = "Slack = 0 → ON CRITICAL PATH"
+    else:
+        day_word = "day" if slack == 1 else "days"
+        verdict = f"Slack = {slack} → Not on critical path (can slip up to {slack} {day_word})"
+
+    return CpaCalculationSteps(
+        early_start=es_detail,
+        early_finish=ef_detail,
+        late_finish=lf_detail,
+        late_start=ls_detail,
+        slack=slack_detail,
+        verdict=verdict,
+        on_critical_path=(slack == 0),
+    )
 
 
 class CriticalPathService:
@@ -220,14 +312,26 @@ class CriticalPathService:
         slack_map: Dict[str, int] = {aid: LS[aid] - ES[aid] for aid in activity_ids}
         critical_ids: Set[str] = {aid for aid, s in slack_map.items() if s == 0}
 
+        # aid -> display_code map (used in calculation steps)
+        code_map: Dict[str, str] = {}
+        for act in activities:
+            ms = milestones.get(act["milestone_id"], {})
+            code_map[act["id"]] = _display_code(ms.get("position", 0), act["position"])
+
         # Build ordered critical path (topological order, critical only)
-        critical_path_ordered: List[str] = []
+        critical_path_ordered: List[CpaCriticalPathActivity] = []
         for aid in topo_order:
             if aid in critical_ids:
-                ms = milestones.get(act_by_id[aid]["milestone_id"], {})
-                critical_path_ordered.append(
-                    _display_code(ms.get("position", 0), act_by_id[aid]["position"])
-                )
+                act = act_by_id[aid]
+                ms = milestones.get(act["milestone_id"], {})
+                dn, dd = get_duration(aid)
+                critical_path_ordered.append(CpaCriticalPathActivity(
+                    display_code=_display_code(ms.get("position", 0), act["position"]),
+                    name=act["name"],
+                    duration=_effective_duration(dn, dd),
+                    days_needed=dn,
+                    days_delayed=dd,
+                ))
 
         # Activity schedule
         schedule: List[CpaActivitySchedule] = []
@@ -236,6 +340,31 @@ class CriticalPathService:
             ms = milestones.get(act["milestone_id"], {})
             ms_pos = ms.get("position", 0)
             dn, dd = get_duration(aid)
+            dur = _effective_duration(dn, dd)
+            slk = slack_map.get(aid, 0)
+
+            # Build depends_on list from predecessors
+            depends_on: List[CpaDependsOn] = []
+            for pred_id in sorted(predecessors.get(aid, set())):
+                pred = act_by_id.get(pred_id)
+                if pred:
+                    depends_on.append(CpaDependsOn(
+                        activity_id=pred_id,
+                        display_code=code_map.get(pred_id, pred_id),
+                        name=pred["name"],
+                    ))
+
+            calc_steps = _build_calculation_steps(
+                aid=aid,
+                predecessors=predecessors,
+                successors=successors,
+                ES=ES, EF=EF, LS=LS, LF=LF,
+                dur=dur,
+                project_end=project_end,
+                slack=slk,
+                code_map=code_map,
+            )
+
             schedule.append(CpaActivitySchedule(
                 activity_id=aid,
                 display_code=_display_code(ms_pos, act["position"]),
@@ -246,13 +375,15 @@ class CriticalPathService:
                 status=act.get("status"),
                 days_needed=dn,
                 days_delayed=dd,
-                effective_duration=_effective_duration(dn, dd),
+                effective_duration=dur,
+                depends_on=depends_on,
                 early_start=ES.get(aid, 1),
                 early_finish=EF.get(aid, 1),
                 late_start=LS.get(aid, 1),
                 late_finish=LF.get(aid, 1),
-                slack=slack_map.get(aid, 0),
+                slack=slk,
                 on_critical_path=aid in critical_ids,
+                calculation_steps=calc_steps,
             ))
 
         # Flow diagram nodes (grid layout: column=ES, row by milestone order)
@@ -266,13 +397,16 @@ class CriticalPathService:
             ms_pos = ms.get("position", 0)
             col = ES.get(aid, 1)
             row = ms_order.get(act["milestone_id"], 0)
+            dn, dd = get_duration(aid)
             nodes.append(CpaFlowNode(
                 id=aid,
                 label=_display_code(ms_pos, act["position"]),
                 display_code=_display_code(ms_pos, act["position"]),
                 name=act["name"],
                 milestone_display_code=_milestone_code(ms_pos),
-                effective_duration=_effective_duration(*get_duration(aid)),
+                days_needed=dn,
+                days_delayed=dd,
+                effective_duration=_effective_duration(dn, dd),
                 early_start=ES.get(aid, 1),
                 early_finish=EF.get(aid, 1),
                 late_start=LS.get(aid, 1),

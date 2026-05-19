@@ -54,7 +54,7 @@ class LoginOtpRequired(BaseModel):
 
     requires_otp: bool = True
     ephemeral_token: str = Field(description="Opaque one-shot token tying this attempt to the OTP flow")
-    channels_available: List[str] = Field(description="['email', 'sms'] for what the user can receive")
+    channels_available: list[str] = Field(description="['email', 'sms'] for what the user can receive")
 
 
 class RefreshRequest(BaseModel):
@@ -148,3 +148,13 @@ class IntrospectResponse(BaseModel):
     # Both-tokens shape — set only when both were submitted.
     access: Optional[IntrospectTokenInfo] = None
     refresh: Optional[IntrospectTokenInfo] = None
+
+
+# Required because `from __future__ import annotations` defers annotation
+# evaluation; Pydantic v2 TypeAdapter (used by FastAPI for Union response_model)
+# cannot resolve forward references without an explicit rebuild.
+LoginUserSummary.model_rebuild()
+LoginResponse.model_rebuild()
+LoginOtpRequired.model_rebuild()
+IntrospectTokenInfo.model_rebuild()
+IntrospectResponse.model_rebuild()

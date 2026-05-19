@@ -37,3 +37,7 @@ def generate_milestone_code(name: str, now: datetime | None = None) -> str:
 
 def generate_activity_code(name: str, now: datetime | None = None) -> str:
     return f"AC-{_slug(name)}-{_ts(now)}"
+
+
+def generate_vendor_code(name: str, now: datetime | None = None) -> str:
+    return f"VD-{_slug(name)}-{_ts(now)}"

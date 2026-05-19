@@ -227,6 +227,7 @@ ACTIVITY_TYPES_READ: Final[str] = "activity_types:read"
 ACTIVITY_STATUSES_READ: Final[str] = "activity_statuses:read"
 MILESTONE_STATUSES_READ: Final[str] = "milestone_statuses:read"
 VENDORS_READ: Final[str] = "vendors:read"
+VENDORS_MANAGE: Final[str] = "vendors:manage"
 RESOURCE_TYPES_READ: Final[str] = "resource_types:read"
 
 

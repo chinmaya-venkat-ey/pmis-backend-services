@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Any, Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from app.schemas._base import ResponseModel
 
@@ -86,7 +86,7 @@ class VendorCreateRequest(BaseModel):
     name: Annotated[str, Field(min_length=1, max_length=255)]
     description: Annotated[Optional[str], Field(default=None, max_length=4096)]
     active: bool = True
-    email: Annotated[Optional[str], Field(default=None)]
+    email: Annotated[Optional[EmailStr], Field(default=None)]
     contact_person: Annotated[Optional[str], Field(
         default=None, max_length=255, alias="contactPerson"
     )]
@@ -101,7 +101,7 @@ class VendorUpdateRequest(BaseModel):
     name: Annotated[Optional[str], Field(default=None, min_length=1, max_length=255)]
     description: Annotated[Optional[str], Field(default=None, max_length=4096)]
     active: Annotated[Optional[bool], Field(default=None)]
-    email: Annotated[Optional[str], Field(default=None)]
+    email: Annotated[Optional[EmailStr], Field(default=None)]
     contact_person: Annotated[Optional[str], Field(
         default=None, max_length=255, alias="contactPerson"
     )]

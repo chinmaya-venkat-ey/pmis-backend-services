@@ -21,9 +21,11 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.rbac import require_authenticated
+from app.core.permissions import VENDORS_MANAGE, VENDORS_READ
+from app.core.rbac import require_permission
 from app.db import get_db
 from app.dependencies import get_current_user_id
 from app.models._cross_schema import Role, User, UserRoleAssignment, Vendor
@@ -35,6 +37,7 @@ from app.schemas.catalog import (
     VendorResponse,
     VendorUpdateRequest,
 )
+from app.utilities.code_generators import generate_vendor_code
 from app.utilities.timezones import IST
 
 
@@ -214,15 +217,18 @@ def _apply_user_assignments(
     response_model=List[VendorResponse],
     response_model_by_alias=True,
     summary="List vendors (organizations)",
-    dependencies=[Depends(require_authenticated())],
+    dependencies=[Depends(require_permission(VENDORS_READ))],
 )
 def list_vendors(
     include_inactive: bool = Query(False),
+    include_deleted: bool = Query(False),
     db: Session = Depends(get_db),
 ) -> List[VendorResponse]:
     stmt = select(Vendor)
     if not include_inactive:
         stmt = stmt.where(Vendor.active.is_(True))
+    if not include_deleted:
+        stmt = stmt.where(Vendor.deleted_at.is_(None))
     rows = db.execute(stmt).scalars().all()
     return [_build_vendor_response(db, row) for row in rows]
 
@@ -233,7 +239,7 @@ def list_vendors(
     response_model_by_alias=True,
     status_code=status.HTTP_201_CREATED,
     summary="Create a vendor (organization)",
-    dependencies=[Depends(require_authenticated())],
+    dependencies=[Depends(require_permission(VENDORS_MANAGE))],
     responses={409: {"description": "Vendor name already exists"}},
 )
 def create_vendor(
@@ -242,16 +248,17 @@ def create_vendor(
     caller_user_id: str = Depends(get_current_user_id),
 ) -> VendorResponse:
     existing = db.execute(
-        select(Vendor).where(Vendor.name == payload.name)
+        select(Vendor).where(Vendor.name == payload.name).where(Vendor.deleted_at.is_(None))
     ).scalar_one_or_none()
     if existing:
         raise HTTPException(status_code=409, detail="Vendor name already exists")
     now = datetime.now(timezone.utc)
     row = Vendor(
         id=str(uuid.uuid4()),
+        vendor_code=generate_vendor_code(payload.name),
         name=payload.name,
         description=payload.description,
-        email=payload.email,
+        email=str(payload.email) if payload.email else None,
         contact_person=payload.contact_person,
         phone_number=payload.phone_number,
         active=payload.active,
@@ -274,7 +281,7 @@ def create_vendor(
     response_model=VendorResponse,
     response_model_by_alias=True,
     summary="Get vendor details",
-    dependencies=[Depends(require_authenticated())],
+    dependencies=[Depends(require_permission(VENDORS_READ))],
     responses={404: {"description": "Vendor not found"}},
 )
 def get_vendor(
@@ -292,8 +299,11 @@ def get_vendor(
     response_model=VendorResponse,
     response_model_by_alias=True,
     summary="Update a vendor",
-    dependencies=[Depends(require_authenticated())],
-    responses={404: {"description": "Vendor not found"}},
+    dependencies=[Depends(require_permission(VENDORS_MANAGE))],
+    responses={
+        404: {"description": "Vendor not found"},
+        409: {"description": "Vendor name already in use"},
+    },
 )
 def update_vendor(
     vendor_id: str,
@@ -305,6 +315,17 @@ def update_vendor(
     if not row:
         raise HTTPException(status_code=404, detail="Vendor not found")
     update_data = payload.model_dump(exclude_unset=True, exclude={"project_ids", "user_assignments"})
+    if "name" in update_data and update_data["name"] != row.name:
+        clash = db.execute(
+            select(Vendor)
+            .where(Vendor.name == update_data["name"])
+            .where(Vendor.deleted_at.is_(None))
+            .where(Vendor.id != vendor_id)
+        ).scalar_one_or_none()
+        if clash:
+            raise HTTPException(status_code=409, detail="Vendor name already in use")
+    if "email" in update_data and update_data["email"] is not None:
+        update_data["email"] = str(update_data["email"])
     for field, value in update_data.items():
         setattr(row, field, value)
     row.updated_at = datetime.now(timezone.utc)
@@ -315,7 +336,11 @@ def update_vendor(
     if payload.user_assignments is not None:
         _apply_user_assignments(db, vendor_id, payload.user_assignments, actor_id=caller_user_id)
 
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Vendor name already in use")
     db.refresh(row)
     return _build_vendor_response(db, row)
 
@@ -325,7 +350,7 @@ def update_vendor(
     response_model=VendorResponse,
     response_model_by_alias=True,
     summary="Delete (deactivate) a vendor",
-    dependencies=[Depends(require_authenticated())],
+    dependencies=[Depends(require_permission(VENDORS_MANAGE))],
     responses={404: {"description": "Vendor not found"}},
 )
 def delete_vendor(
@@ -351,7 +376,7 @@ def delete_vendor(
     response_model=VendorResponse,
     response_model_by_alias=True,
     summary="Restore a deleted vendor",
-    dependencies=[Depends(require_authenticated())],
+    dependencies=[Depends(require_permission(VENDORS_MANAGE))],
     responses={404: {"description": "Vendor not found"}},
 )
 def restore_vendor(
@@ -373,7 +398,7 @@ def restore_vendor(
 @router.get(
     "/{vendor_id}/users",
     summary="List users mapped to a vendor",
-    dependencies=[Depends(require_authenticated())],
+    dependencies=[Depends(require_permission(VENDORS_READ))],
     responses={404: {"description": "Vendor not found"}},
 )
 def list_vendor_users(

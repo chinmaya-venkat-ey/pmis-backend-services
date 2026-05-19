@@ -101,7 +101,6 @@ class AuthService:
         """Common path: mint tokens, persist refresh_jti, build LoginResponse."""
         is_admin = self.rbac.user_has_admin_role(user.id)
         is_super = self._is_super_admin(user.id)
-        perms = sorted(self.rbac.effective_permissions_for_user(user.id))
 
         claims = {
             "sub": user.login,
@@ -137,7 +136,6 @@ class AuthService:
                 org_role=user.org_role,
                 is_admin=is_admin,
                 is_super_admin=is_super,
-                permissions=perms,
             ),
         )
 

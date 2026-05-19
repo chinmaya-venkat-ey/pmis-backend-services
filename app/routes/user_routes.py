@@ -182,7 +182,8 @@ def delete_user(
 @router.patch(
     "/{user_id}/password",
     response_model=UserResponse,
-    summary="Change a user's password (admin sets; self-change handled in auth flow)",
+    summary="Change own password (self-only; callers cannot change another user's password)",
+    responses={403: {"description": "Caller cannot modify another user's password"}},
 )
 def update_user_password(
     user_id: str,

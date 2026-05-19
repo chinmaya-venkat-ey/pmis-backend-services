@@ -3,6 +3,12 @@ from __future__ import annotations
 
 from typing import List
 
+from sqlalchemy import select
+
+from app.models.user_role import UserRole
+from app.models.user_role_assignment import UserRoleAssignment
+from app.repositories.rbac_repository import RbacRepository
+from app.repositories.user_role_assignment_repository import UserRoleAssignmentRepository
 from app.schemas.permission import EffectivePermissionsResponse
 from app.schemas.summaries import ProjectSummary, UserProjectsResponse
 from app.schemas.user import (
@@ -14,7 +20,6 @@ from app.schemas.user import (
 )
 from app.services.permission_service import PermissionService
 from app.services.user_service import UserService
-from app.repositories.user_role_assignment_repository import UserRoleAssignmentRepository
 
 
 class UserController:
@@ -25,8 +30,40 @@ class UserController:
     ):
         self.user_service = user_service
         self.permission_service = permission_service
-        # Reach into the same db session as user_service for project listings.
         self.assignments = UserRoleAssignmentRepository(user_service.db)
+        self.rbac = RbacRepository(user_service.db)
+
+    def _is_super_admin(self, user_id: str) -> bool:
+        from app.core.permissions import SUPER_ADMIN_ROLE
+        role = self.rbac.get_role_by_name(SUPER_ADMIN_ROLE)
+        if role is None:
+            return False
+        db = self.user_service.db
+        if db.execute(
+            select(UserRole.user_id)
+            .where(UserRole.user_id == user_id)
+            .where(UserRole.role_id == role.id)
+            .limit(1)
+        ).first():
+            return True
+        return db.execute(
+            select(UserRoleAssignment.id)
+            .where(UserRoleAssignment.user_id == user_id)
+            .where(UserRoleAssignment.role_id == role.id)
+            .limit(1)
+        ).first() is not None
+
+    def _build_user_response(self, user) -> UserResponse:
+        is_admin = self.rbac.user_has_admin_role(user.id)
+        is_super_admin = self._is_super_admin(user.id)
+        data = {
+            col: getattr(user, col)
+            for col in user.__class__.__table__.columns.keys()
+            if hasattr(user, col)
+        }
+        data["is_admin"] = is_admin
+        data["is_super_admin"] = is_super_admin
+        return UserResponse.model_validate(data)
 
     # ------------------------------------------------------------------ list / get
 
@@ -37,14 +74,14 @@ class UserController:
             caller_vendor_id=caller_vendor_id, caller_is_admin=caller_is_admin,
         )
         return {
-            "items": [UserResponse.model_validate(r) for r in rows],
+            "items": [self._build_user_response(r) for r in rows],
             "total": total,
             "offset": offset,
             "pageSize": page_size,
         }
 
     def get_details(self, user_id: str) -> UserResponse:
-        return UserResponse.model_validate(self.user_service.get_by_id(user_id))
+        return self._build_user_response(self.user_service.get_by_id(user_id))
 
     def check_login(self, login: str) -> UserCheckLoginResponse:
         return self.user_service.check_login_available(login)
@@ -57,7 +94,7 @@ class UserController:
             created_by_user_id=caller_user_id,
             caller_is_admin=caller_is_admin,
         )
-        return UserResponse.model_validate(row)
+        return self._build_user_response(row)
 
     def update(self, user_id: str, payload: UserUpdateRequest, *, request, caller_user_id: str, caller_is_admin: bool) -> UserResponse:
         row = self.user_service.update(
@@ -65,28 +102,27 @@ class UserController:
             request=request,
             caller_user_id=caller_user_id, caller_is_admin=caller_is_admin,
         )
-        return UserResponse.model_validate(row)
+        return self._build_user_response(row)
 
     def update_password(self, user_id: str, payload: UserPasswordUpdateRequest, *, caller_user_id: str) -> UserResponse:
-        # Round-7 Flow 2: self-only. caller_is_admin not consulted.
         row = self.user_service.update_password(
             user_id, payload, caller_user_id=caller_user_id,
         )
-        return UserResponse.model_validate(row)
+        return self._build_user_response(row)
 
     def delete(self, user_id: str, *, request, caller_user_id: str, caller_is_admin: bool) -> UserResponse:
         row = self.user_service.delete(
             user_id, request=request,
             caller_user_id=caller_user_id, caller_is_admin=caller_is_admin,
         )
-        return UserResponse.model_validate(row)
+        return self._build_user_response(row)
 
     def restore(self, user_id: str, *, request, caller_user_id: str, caller_is_admin: bool) -> UserResponse:
         row = self.user_service.restore(
             user_id, request=request,
             caller_user_id=caller_user_id, caller_is_admin=caller_is_admin,
         )
-        return UserResponse.model_validate(row)
+        return self._build_user_response(row)
 
     # ------------------------------------------------------------------ direct user permissions
 

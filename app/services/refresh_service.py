@@ -87,7 +87,6 @@ class RefreshService:
 
         # Build the user summary (matches LoginResponse.user shape).
         is_admin = self.rbac.user_has_admin_role(user.id)
-        perms = sorted(self.rbac.effective_permissions_for_user(user.id))
         is_super = self._is_super_admin(user.id)
 
         return RefreshResponse(
@@ -108,7 +107,6 @@ class RefreshService:
                 org_role=user.org_role,
                 is_admin=is_admin,
                 is_super_admin=is_super,
-                permissions=perms,
             ),
         )
 

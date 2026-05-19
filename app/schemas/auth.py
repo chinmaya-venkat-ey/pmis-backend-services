@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, List, Optional
+from typing import Annotated, Optional
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
@@ -27,7 +27,6 @@ class LoginUserSummary(BaseModel):
     org_role: Optional[str] = None
     is_admin: bool = Field(default=False)
     is_super_admin: bool = Field(default=False)
-    permissions: List[str] = Field(default_factory=list)
 
 
 class LoginResponse(BaseModel):

@@ -92,7 +92,10 @@ def update_role(
     response_model=RoleResponse,
     summary="Delete a role",
     dependencies=[Depends(require_permission(ROLES_DELETE))],
-    responses={409: {"description": "Cannot delete a builtin role"}},
+    responses={
+        403: {"description": "Role is locked/builtin and cannot be deleted"},
+        409: {"description": "Cannot delete a builtin role"},
+    },
 )
 def delete_role(
     role_id: int,

@@ -90,9 +90,7 @@ class VendorCreateRequest(BaseModel):
     contact_person: Annotated[Optional[str], Field(
         default=None, max_length=255, alias="contactPerson"
     )]
-    phone_number: Annotated[Optional[str], Field(
-        default=None, max_length=50, alias="phoneNumber"
-    )]
+    phone_number: Annotated[str, Field(min_length=1, max_length=50, alias="phoneNumber")]
     project_ids: Annotated[List[str], Field(default_factory=list, alias="projectIds")]
 
 

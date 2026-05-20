@@ -4,14 +4,14 @@ Project-svc mirrors the VM project service (port 8003) which serves vendor
 CRUD without the /master/ prefix. The canonical write service is masters-svc;
 project-svc exposes these for FE compatibility.
 
-Endpoints:
-  GET    /api/v3/vendors
-  GET    /api/v3/vendors/{vendor_id}
-  POST   /api/v3/vendors/create
-  PATCH  /api/v3/vendors/{vendor_id}
-  DELETE /api/v3/vendors/{vendor_id}
-  POST   /api/v3/vendors/{vendor_id}/restore
-  GET    /api/v3/vendors/{vendor_id}/users
+Response shapes:
+  List / projects  → {_type:"Collection", total, count, _embedded:{elements:[...]}}
+  Single vendor    → {_type:"Vendor", id, vendorCode, name, ..., projects:[...]}
+  Delete           → null data (no-content equivalent)
+  Users            → [{id, login, email, ...}]
+
+All responses are wrapped in the PMIS envelope by HalApiRoute:
+  {data: <above>, message: null, error: null, status: 200}
 """
 from __future__ import annotations
 
@@ -26,17 +26,13 @@ from sqlalchemy.orm import Session
 
 from app.core.permissions import VENDORS_MANAGE, VENDORS_READ
 from app.core.rbac import require_permission
+from app.core.response import api_response
 from app.db import get_db
 from app.dependencies import get_current_user_id
 from app.models._cross_schema import Role, User, UserRoleAssignment, Vendor
 from app.models.project import Project
 from app.models.project_vendor import ProjectVendor
-from app.schemas.catalog import (
-    UserSummary,
-    VendorCreateRequest,
-    VendorResponse,
-    VendorUpdateRequest,
-)
+from app.schemas.catalog import VendorCreateRequest, VendorUpdateRequest
 from app.utilities.code_generators import generate_vendor_code
 from app.utilities.timezones import IST
 
@@ -75,6 +71,7 @@ def _vendor_projects(db: Session, vendor_id: str) -> List[Dict[str, Any]]:
         .where(ProjectVendor.vendor_id == vendor_id)
         .where(Project.deleted_at.is_(None))
         .where(Project.status.not_in(["closed", "completed"]))
+        .order_by(Project.created_at.desc(), Project.id.desc())
     )
     return [
         {
@@ -89,71 +86,39 @@ def _vendor_projects(db: Session, vendor_id: str) -> List[Dict[str, Any]]:
     ]
 
 
-def _vendor_user_assignments(db: Session, vendor_id: str) -> List[Dict[str, Any]]:
-    project_ids = [
-        row[0] for row in db.execute(
-            select(ProjectVendor.project_id).where(ProjectVendor.vendor_id == vendor_id)
-        ).all()
-    ]
-    if not project_ids:
-        return []
-
-    stmt = (
-        select(
-            UserRoleAssignment.project_id,
-            Role.name,
-            UserRoleAssignment.user_id,
-            User.login,
-            User.first_name,
-            User.last_name,
-            User.email,
-        )
-        .join(Role, Role.id == UserRoleAssignment.role_id)
-        .join(User, User.id == UserRoleAssignment.user_id)
-        .where(UserRoleAssignment.project_id.in_(project_ids))
-        .where(Role.name.in_(_PROJECT_TIER_ROLES))
-        .where(User.deleted_at.is_(None))
-    )
-
-    grouped: Dict[tuple, Dict[str, Any]] = {}
-    for pid, role_name, uid, login, first_name, last_name, email in db.execute(stmt).all():
-        key = (pid, role_name)
-        if key not in grouped:
-            grouped[key] = {
-                "project_id": pid,
-                "role": _NAME_TO_LABEL.get(role_name, role_name),
-                "user_ids": [],
-                "users": [],
-            }
-        grouped[key]["user_ids"].append(uid)
-        grouped[key]["users"].append({
-            "id": uid,
-            "login": login,
-            "firstName": first_name or "",
-            "lastName": last_name or "",
-            "email": email or "",
-        })
-
-    return list(grouped.values())
-
-
-def _build_vendor_response(db: Session, row: Vendor) -> VendorResponse:
-    return VendorResponse.model_validate({
+def _vendor_dict(db: Session, row: Vendor) -> Dict[str, Any]:
+    """Build a vendor entry in the monolith wire shape (camelCase, _type discriminator)."""
+    return {
+        "_type": "Vendor",
         "id": row.id,
-        "vendor_code": row.vendor_code,
+        "vendorCode": row.vendor_code,
         "name": row.name,
         "description": row.description,
         "active": row.active,
         "email": row.email,
-        "contact_person": row.contact_person,
-        "phone_number": row.phone_number,
-        "created_at": row.created_at,
-        "updated_at": row.updated_at,
-        "deleted_at": row.deleted_at,
-        "deleted_by": row.deleted_by,
+        "contactPerson": row.contact_person,
+        "phoneNumber": row.phone_number,
+        "createdAt": _iso_ist(row.created_at),
+        "updatedAt": _iso_ist(row.updated_at),
+        "deletedAt": _iso_ist(row.deleted_at),
         "projects": _vendor_projects(db, row.id),
-        "user_assignments": _vendor_user_assignments(db, row.id),
-    })
+    }
+
+
+def _collection(items: List[Any]) -> Dict[str, Any]:
+    """Build a PMIS Collection envelope.
+
+    _bare=True signals HalApiRoute to skip HAL resource-wrapping and
+    return the dict as-is (after camelizing), matching the monolith shape:
+    {_type:"Collection", total, count, _embedded:{elements:[...]}}.
+    """
+    return {
+        "_bare": True,
+        "_type": "Collection",
+        "total": len(items),
+        "count": len(items),
+        "_embedded": {"elements": items},
+    }
 
 
 def _apply_project_ids(db: Session, vendor_id: str, project_ids: List[str]) -> None:
@@ -173,7 +138,10 @@ def _apply_project_ids(db: Session, vendor_id: str, project_ids: List[str]) -> N
 
 
 def _apply_user_assignments(
-    db: Session, vendor_id: str, assignments: List[Dict[str, Any]], actor_id: Optional[str] = None
+    db: Session,
+    vendor_id: str,
+    assignments: List[Dict[str, Any]],
+    actor_id: Optional[str] = None,
 ) -> None:
     if not assignments:
         return
@@ -214,31 +182,38 @@ def _apply_user_assignments(
 
 @router.get(
     "",
-    response_model=List[VendorResponse],
-    response_model_by_alias=True,
-    summary="List vendors (organizations)",
+    summary="List vendors (newest first)",
+    description=(
+        "Returns vendors that are not soft-deleted, ordered by createdAt "
+        "descending. Active and inactive vendors are returned by default. "
+        "Pass active_only=true (picker dropdowns) to show only active. "
+        "Requires vendors:read."
+    ),
     dependencies=[Depends(require_permission(VENDORS_READ))],
 )
 def list_vendors(
-    include_inactive: bool = Query(False),
-    include_deleted: bool = Query(False),
+    active_only: bool = Query(
+        False,
+        description="When true, return only active vendors. Default false shows all (active + inactive).",
+    ),
     db: Session = Depends(get_db),
-) -> List[VendorResponse]:
-    stmt = select(Vendor)
-    if not include_inactive:
+) -> Dict[str, Any]:
+    stmt = select(Vendor).where(Vendor.deleted_at.is_(None))
+    if active_only:
         stmt = stmt.where(Vendor.active.is_(True))
-    if not include_deleted:
-        stmt = stmt.where(Vendor.deleted_at.is_(None))
+    stmt = stmt.order_by(Vendor.created_at.desc())
     rows = db.execute(stmt).scalars().all()
-    return [_build_vendor_response(db, row) for row in rows]
+    return _collection([_vendor_dict(db, row) for row in rows])
 
 
 @router.post(
     "/create",
-    response_model=VendorResponse,
-    response_model_by_alias=True,
     status_code=status.HTTP_201_CREATED,
-    summary="Create a vendor (organization)",
+    summary="Create a vendor",
+    description=(
+        "Creates a new vendor. name must be unique. phoneNumber is required. "
+        "Requires vendors:manage."
+    ),
     dependencies=[Depends(require_permission(VENDORS_MANAGE))],
     responses={409: {"description": "Vendor name already exists"}},
 )
@@ -246,7 +221,7 @@ def create_vendor(
     payload: VendorCreateRequest,
     db: Session = Depends(get_db),
     caller_user_id: str = Depends(get_current_user_id),
-) -> VendorResponse:
+) -> Dict[str, Any]:
     existing = db.execute(
         select(Vendor).where(Vendor.name == payload.name).where(Vendor.deleted_at.is_(None))
     ).scalar_one_or_none()
@@ -267,38 +242,38 @@ def create_vendor(
     )
     db.add(row)
     db.flush()
-
     if payload.project_ids:
         _apply_project_ids(db, row.id, payload.project_ids)
-
     db.commit()
     db.refresh(row)
-    return _build_vendor_response(db, row)
+    return {"_bare": True, **_vendor_dict(db, row)}
 
 
 @router.get(
     "/{vendor_id}",
-    response_model=VendorResponse,
-    response_model_by_alias=True,
     summary="Get vendor details",
+    description="Returns one vendor by UUID with embedded projects. 404 if not found. Requires vendors:read.",
     dependencies=[Depends(require_permission(VENDORS_READ))],
     responses={404: {"description": "Vendor not found"}},
 )
 def get_vendor(
     vendor_id: str,
     db: Session = Depends(get_db),
-) -> VendorResponse:
+) -> Dict[str, Any]:
     row = db.get(Vendor, vendor_id)
     if not row:
         raise HTTPException(status_code=404, detail="Vendor not found")
-    return _build_vendor_response(db, row)
+    return {"_bare": True, **_vendor_dict(db, row)}
 
 
 @router.patch(
     "/{vendor_id}",
-    response_model=VendorResponse,
-    response_model_by_alias=True,
     summary="Update a vendor",
+    description=(
+        "Partial update. name is unique — collision returns 409. "
+        "projectIds: null = leave mappings unchanged, [] = clear all, "
+        "non-empty list = replace. Requires vendors:manage."
+    ),
     dependencies=[Depends(require_permission(VENDORS_MANAGE))],
     responses={
         404: {"description": "Vendor not found"},
@@ -310,7 +285,7 @@ def update_vendor(
     payload: VendorUpdateRequest,
     db: Session = Depends(get_db),
     caller_user_id: str = Depends(get_current_user_id),
-) -> VendorResponse:
+) -> Dict[str, Any]:
     row = db.get(Vendor, vendor_id)
     if not row:
         raise HTTPException(status_code=404, detail="Vendor not found")
@@ -342,14 +317,17 @@ def update_vendor(
         db.rollback()
         raise HTTPException(status_code=409, detail="Vendor name already in use")
     db.refresh(row)
-    return _build_vendor_response(db, row)
+    return {"_bare": True, **_vendor_dict(db, row)}
 
 
 @router.delete(
     "/{vendor_id}",
-    response_model=VendorResponse,
-    response_model_by_alias=True,
-    summary="Delete (deactivate) a vendor",
+    status_code=status.HTTP_200_OK,
+    summary="Soft-delete a vendor",
+    description=(
+        "Marks the vendor deleted (stamps deletedAt, flips active=False). "
+        "Project mappings are preserved for restore. Requires vendors:manage."
+    ),
     dependencies=[Depends(require_permission(VENDORS_MANAGE))],
     responses={404: {"description": "Vendor not found"}},
 )
@@ -357,7 +335,7 @@ def delete_vendor(
     vendor_id: str,
     db: Session = Depends(get_db),
     caller_user_id: str = Depends(get_current_user_id),
-) -> VendorResponse:
+) -> None:
     row = db.get(Vendor, vendor_id)
     if not row:
         raise HTTPException(status_code=404, detail="Vendor not found")
@@ -367,22 +345,22 @@ def delete_vendor(
     row.deleted_by = caller_user_id
     row.updated_at = now
     db.commit()
-    db.refresh(row)
-    return _build_vendor_response(db, row)
 
 
 @router.post(
     "/{vendor_id}/restore",
-    response_model=VendorResponse,
-    response_model_by_alias=True,
-    summary="Restore a deleted vendor",
+    summary="Restore a soft-deleted vendor",
+    description=(
+        "Clears deletedAt + deletedBy and flips active=True. "
+        "Requires vendors:manage."
+    ),
     dependencies=[Depends(require_permission(VENDORS_MANAGE))],
     responses={404: {"description": "Vendor not found"}},
 )
 def restore_vendor(
     vendor_id: str,
     db: Session = Depends(get_db),
-) -> VendorResponse:
+) -> Dict[str, Any]:
     row = db.get(Vendor, vendor_id)
     if not row:
         raise HTTPException(status_code=404, detail="Vendor not found")
@@ -392,34 +370,38 @@ def restore_vendor(
     row.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(row)
-    return _build_vendor_response(db, row)
+    return {"_bare": True, **_vendor_dict(db, row)}
 
 
 @router.get(
     "/{vendor_id}/users",
-    summary="List users mapped to a vendor",
+    summary="List users belonging to this vendor",
+    description=(
+        "Returns all active (non-deleted) users whose vendor_id matches the given "
+        "vendor UUID or who have an organization_id role assignment for this vendor. "
+        "Requires vendors:read."
+    ),
     dependencies=[Depends(require_permission(VENDORS_READ))],
     responses={404: {"description": "Vendor not found"}},
 )
 def list_vendor_users(
     vendor_id: str,
-    offset: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-    include_deleted: bool = Query(False),
     db: Session = Depends(get_db),
-) -> Dict[str, Any]:
+) -> Any:
     if not db.get(Vendor, vendor_id):
         raise HTTPException(status_code=404, detail="Vendor not found")
 
-    stmt_direct = select(User).where(User.vendor_id == vendor_id)
+    stmt_direct = (
+        select(User)
+        .where(User.vendor_id == vendor_id)
+        .where(User.deleted_at.is_(None))
+    )
     stmt_org = (
         select(User)
         .join(UserRoleAssignment, UserRoleAssignment.user_id == User.id)
         .where(UserRoleAssignment.organization_id == vendor_id)
+        .where(User.deleted_at.is_(None))
     )
-    if not include_deleted:
-        stmt_direct = stmt_direct.where(User.deleted_at.is_(None))
-        stmt_org = stmt_org.where(User.deleted_at.is_(None))
 
     seen: dict[str, User] = {}
     for u in db.execute(stmt_direct).scalars().all():
@@ -428,12 +410,15 @@ def list_vendor_users(
         seen[u.id] = u
 
     rows = sorted(seen.values(), key=lambda u: u.login)
-    total = len(rows)
-    zero_based = max(0, offset - 1)
-    page = rows[zero_based * page_size : zero_based * page_size + page_size]
-    return {
-        "items": [UserSummary.model_validate(u) for u in page],
-        "total": total,
-        "offset": offset,
-        "pageSize": page_size,
-    }
+    users = [
+        {
+            "id": u.id,
+            "login": u.login,
+            "email": u.email,
+            "firstName": u.first_name or "",
+            "lastName": u.last_name or "",
+            "status": u.status,
+        }
+        for u in rows
+    ]
+    return api_response(data=users)

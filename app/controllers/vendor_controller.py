@@ -1,20 +1,32 @@
-"""VendorController — HTTP adapter for /masters/vendors/* routes.
+"""VendorController — HTTP adapter for /master/vendors/* routes.
 
-Includes the extra `list_projects_for_vendor` adapter for the FE's
-vendor-detail page (`GET /masters/vendors/{vendor_id}/projects/list`).
+All public methods return plain dicts that match the monolith wire shape
+(_type discriminator, camelCase keys, embedded projects list / Collection
+wrapper). FastAPI JSON-encodes the dict and HalApiRoute wraps it in the
+PMIS envelope {data:..., message:..., error:..., status:...}.
 """
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from app.schemas.vendor import (
     VendorCreateRequest,
-    VendorResponse,
     VendorUpdateRequest,
+    _project_dict,
+    _vendor_dict,
 )
-from app.schemas.vendor_project import VendorProjectSummary
 from app.schemas.vendor_user import VendorUserSummary
 from app.services.vendor_service import VendorService
+
+
+def _collection(items: List[Any]) -> Dict[str, Any]:
+    """Build a PMIS Collection envelope."""
+    return {
+        "_type": "Collection",
+        "total": len(items),
+        "count": len(items),
+        "_embedded": {"elements": items},
+    }
 
 
 class VendorController:
@@ -24,41 +36,50 @@ class VendorController:
     def list_(
         self,
         *,
-        include_inactive: bool = False,
-        include_deleted: bool = False,
+        active_only: bool = False,
         caller_vendor_id: Optional[str] = None,
         is_admin: bool = False,
-    ) -> List[VendorResponse]:
-        rows = self.service.list_(
-            include_inactive=include_inactive,
-            include_deleted=include_deleted,
+    ) -> Dict[str, Any]:
+        vendors = self.service.list_(
+            active_only=active_only,
             caller_vendor_id=caller_vendor_id,
             is_admin=is_admin,
         )
-        return [VendorResponse.model_validate(r) for r in rows]
+        vendor_ids = [v.id for v in vendors]
+        projects_by_vendor = self.service.list_projects_for_vendors(vendor_ids)
+        items = [
+            _vendor_dict(v, projects_by_vendor.get(v.id, []))
+            for v in vendors
+        ]
+        return _collection(items)
 
-    def get_details(self, vendor_id: str) -> VendorResponse:
-        return VendorResponse.model_validate(self.service.get_by_id(vendor_id))
+    def get_details(self, vendor_id: str) -> Dict[str, Any]:
+        vendor = self.service.get_by_id(vendor_id)
+        projects = self.service.repo.list_projects_for_vendor(vendor_id)
+        return _vendor_dict(vendor, projects)
 
-    def create(self, payload: VendorCreateRequest) -> VendorResponse:
-        return VendorResponse.model_validate(self.service.create(payload))
+    def create(self, payload: VendorCreateRequest) -> Dict[str, Any]:
+        vendor = self.service.create(payload)
+        projects = self.service.repo.list_projects_for_vendor(vendor.id)
+        return _vendor_dict(vendor, projects)
 
-    def update(self, vendor_id: str, payload: VendorUpdateRequest) -> VendorResponse:
-        return VendorResponse.model_validate(self.service.update(vendor_id, payload))
+    def update(self, vendor_id: str, payload: VendorUpdateRequest) -> Dict[str, Any]:
+        vendor = self.service.update(vendor_id, payload)
+        projects = self.service.repo.list_projects_for_vendor(vendor_id)
+        return _vendor_dict(vendor, projects)
 
-    def delete(self, vendor_id: str, *, deleted_by_user_id: str) -> VendorResponse:
-        return VendorResponse.model_validate(
-            self.service.delete(vendor_id, deleted_by_user_id=deleted_by_user_id)
-        )
+    def delete(self, vendor_id: str, *, deleted_by_user_id: str) -> None:
+        self.service.delete(vendor_id, deleted_by_user_id=deleted_by_user_id)
 
-    def restore(self, vendor_id: str) -> VendorResponse:
-        return VendorResponse.model_validate(self.service.restore(vendor_id))
+    def restore(self, vendor_id: str) -> Dict[str, Any]:
+        vendor = self.service.restore(vendor_id)
+        projects = self.service.repo.list_projects_for_vendor(vendor_id)
+        return _vendor_dict(vendor, projects)
 
-    def list_projects(self, vendor_id: str) -> List[VendorProjectSummary]:
-        # Ensure the vendor exists (404 otherwise) before listing its projects.
+    def list_projects(self, vendor_id: str) -> Dict[str, Any]:
         self.service.get_by_id(vendor_id)
         rows = self.service.repo.list_projects_for_vendor(vendor_id)
-        return [VendorProjectSummary.model_validate(r) for r in rows]
+        return _collection([_project_dict(p) for p in rows])
 
     def list_users(self, vendor_id: str) -> List[VendorUserSummary]:
         self.service.get_by_id(vendor_id)

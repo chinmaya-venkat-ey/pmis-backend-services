@@ -1,27 +1,25 @@
-"""Routes for the vendors catalog (CRUD + restore + projects sub-listing).
+"""Routes for the vendors catalog — wire shape matches monolith /api/v3/vendors.
 
-Vendors are the org-tier entity referenced by user.user_role_assignments.organization_id
-and project.project_vendors.vendor_id. Soft-delete is audit-rich (deleted_at + deleted_by)
-per Q1 — vendors are managed more carefully than other catalogs.
+Response shapes:
+  List / projects  → {_type:"Collection", total, count, _embedded:{elements:[...]}}
+  Single vendor    → {_type:"Vendor", id, vendorCode, name, ..., projects:[...]}
+  Delete           → null data (no-content equivalent)
+  Users            → [{id, login, email, ...}]
 
-Auth gates: vendors:read for reads, vendors:manage for writes.
+All responses are wrapped in the PMIS envelope by HalApiRoute:
+  {data: <above>, message: null, error: null, status: 200}
 """
 from __future__ import annotations
 
-from typing import List
+from typing import Any, Dict, List
 
-from fastapi import APIRouter, Depends, Query, Request, status
+from fastapi import APIRouter, Depends, Query, Request, Response, status
 
 from app.controllers.vendor_controller import VendorController
 from app.core.permissions import VENDORS_MANAGE, VENDORS_READ
 from app.core.rbac import require_permission
 from app.dependencies import get_vendor_controller
-from app.schemas.vendor import (
-    VendorCreateRequest,
-    VendorResponse,
-    VendorUpdateRequest,
-)
-from app.schemas.vendor_project import VendorProjectSummary
+from app.schemas.vendor import VendorCreateRequest, VendorUpdateRequest
 from app.schemas.vendor_user import VendorUserSummary
 
 
@@ -30,27 +28,25 @@ router = APIRouter(prefix="/vendors", tags=["vendors"])
 
 @router.get(
     "",
-    response_model=List[VendorResponse],
-    summary="List vendors",
+    summary="List vendors (newest first)",
     description=(
-        "Returns vendors visible to the caller. Non-admin users currently "
-        "see only their own vendor (Option C row-level scoping — refined "
-        "during user-svc port). Requires vendors:read."
+        "Returns vendors that are not soft-deleted, ordered by createdAt "
+        "descending. Active and inactive vendors are returned by default. "
+        "Pass active_only=true (picker dropdowns) to show only active. "
+        "Requires vendors:read."
     ),
     dependencies=[Depends(require_permission(VENDORS_READ))],
 )
 def list_vendors(
     request: Request,
-    include_inactive: bool = Query(False, description="Include deactivated rows"),
-    include_deleted: bool = Query(False, description="Include soft-deleted rows"),
+    active_only: bool = Query(
+        False,
+        description="When true, return only active vendors. Default false shows all (active + inactive).",
+    ),
     controller: VendorController = Depends(get_vendor_controller),
-) -> List[VendorResponse]:
-    # Row-level scope hooks from request.state (hydrated by AuthMiddleware).
-    # `caller_vendor_id` lookup will land when user-svc populates it; for now
-    # admins see all, non-admins see all (placeholder behavior).
+) -> Dict[str, Any]:
     return controller.list_(
-        include_inactive=include_inactive,
-        include_deleted=include_deleted,
+        active_only=active_only,
         caller_vendor_id=getattr(request.state, "user_vendor_id", None),
         is_admin=getattr(request.state, "is_admin", False),
     )
@@ -58,16 +54,15 @@ def list_vendors(
 
 @router.get(
     "/{vendor_id}",
-    response_model=VendorResponse,
     summary="Get vendor details",
-    description="Returns one vendor by UUID. 404 if not found. Requires vendors:read.",
+    description="Returns one vendor by UUID with embedded projects. 404 if not found. Requires vendors:read.",
     dependencies=[Depends(require_permission(VENDORS_READ))],
     responses={404: {"description": "Vendor not found"}},
 )
 def get_vendor_details(
     vendor_id: str,
     controller: VendorController = Depends(get_vendor_controller),
-) -> VendorResponse:
+) -> Dict[str, Any]:
     return controller.get_details(vendor_id)
 
 
@@ -91,12 +86,10 @@ def list_users_for_vendor(
 
 @router.get(
     "/{vendor_id}/projects",
-    response_model=List[VendorProjectSummary],
     summary="List the projects this vendor is mapped to",
     description=(
-        "Returns the slim project list a vendor participates in. Joins "
-        "cross-schema via project.project_vendors → project.projects. "
-        "Excludes soft-deleted projects. Requires vendors:read."
+        "Returns a Collection of slim project entries. Excludes soft-deleted, "
+        "closed, and completed projects. Requires vendors:read."
     ),
     dependencies=[Depends(require_permission(VENDORS_READ))],
     responses={404: {"description": "Vendor not found"}},
@@ -104,19 +97,17 @@ def list_users_for_vendor(
 def list_projects_for_vendor(
     vendor_id: str,
     controller: VendorController = Depends(get_vendor_controller),
-) -> List[VendorProjectSummary]:
+) -> Dict[str, Any]:
     return controller.list_projects(vendor_id)
 
 
 @router.post(
     "/create",
-    response_model=VendorResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create a vendor",
     description=(
-        "Creates a new vendor. `name` must be unique. `vendor_code` is "
-        "auto-generated separately (post-Doc-25 — null at create time). "
-        "Requires vendors:manage."
+        "Creates a new vendor. name must be unique. phone_number / phoneNumber "
+        "is required. Requires vendors:manage."
     ),
     dependencies=[Depends(require_permission(VENDORS_MANAGE))],
     responses={409: {"description": "Vendor name already in use"}},
@@ -124,17 +115,17 @@ def list_projects_for_vendor(
 def create_vendor(
     payload: VendorCreateRequest,
     controller: VendorController = Depends(get_vendor_controller),
-) -> VendorResponse:
+) -> Dict[str, Any]:
     return controller.create(payload)
 
 
 @router.patch(
     "/{vendor_id}",
-    response_model=VendorResponse,
     summary="Update a vendor",
     description=(
-        "Partial update. `name` is unique — collision returns 409. "
-        "Requires vendors:manage."
+        "Partial update. name is unique — collision returns 409. "
+        "projectIds: null = leave mappings unchanged, [] = clear all, "
+        "non-empty list = replace. Requires vendors:manage."
     ),
     dependencies=[Depends(require_permission(VENDORS_MANAGE))],
     responses={
@@ -146,18 +137,17 @@ def update_vendor(
     vendor_id: str,
     payload: VendorUpdateRequest,
     controller: VendorController = Depends(get_vendor_controller),
-) -> VendorResponse:
+) -> Dict[str, Any]:
     return controller.update(vendor_id, payload)
 
 
 @router.delete(
     "/{vendor_id}",
-    response_model=VendorResponse,
-    summary="Delete (soft-delete) a vendor",
+    status_code=status.HTTP_200_OK,
+    summary="Soft-delete a vendor",
     description=(
-        "Soft-delete: sets `deleted_at`, `deleted_by`, and flips `active=False`. "
-        "Project + milestone mappings to the vendor are preserved (history-safe). "
-        "Requires vendors:manage."
+        "Marks the vendor deleted (stamps deletedAt, flips active=False). "
+        "Project mappings are preserved for restore. Requires vendors:manage."
     ),
     dependencies=[Depends(require_permission(VENDORS_MANAGE))],
     responses={404: {"description": "Vendor not found"}},
@@ -166,17 +156,16 @@ def delete_vendor(
     vendor_id: str,
     request: Request,
     controller: VendorController = Depends(get_vendor_controller),
-) -> VendorResponse:
+) -> None:
     deleted_by_user_id = getattr(request.state, "user_id", None) or ""
-    return controller.delete(vendor_id, deleted_by_user_id=deleted_by_user_id)
+    controller.delete(vendor_id, deleted_by_user_id=deleted_by_user_id)
 
 
 @router.post(
     "/{vendor_id}/restore",
-    response_model=VendorResponse,
     summary="Restore a soft-deleted vendor",
     description=(
-        "Clears `deleted_at` + `deleted_by` and flips `active=True`. "
+        "Clears deletedAt + deletedBy and flips active=True. "
         "Requires vendors:manage."
     ),
     dependencies=[Depends(require_permission(VENDORS_MANAGE))],
@@ -185,5 +174,5 @@ def delete_vendor(
 def restore_vendor(
     vendor_id: str,
     controller: VendorController = Depends(get_vendor_controller),
-) -> VendorResponse:
+) -> Dict[str, Any]:
     return controller.restore(vendor_id)

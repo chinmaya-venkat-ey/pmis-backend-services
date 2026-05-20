@@ -139,6 +139,7 @@ class Project(MirrorBase):
     name: Mapped[str] = mapped_column(String(255))
     status: Mapped[str] = mapped_column(String(32))
     deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
 
 class ProjectVendor(MirrorBase):

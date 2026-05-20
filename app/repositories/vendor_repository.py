@@ -2,13 +2,15 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models._cross_schema import Project, ProjectVendor, User
 from app.models.vendor import Vendor
+
+_HIDDEN_STATUSES = {"closed", "completed"}
 
 
 def _utcnow() -> datetime:
@@ -33,20 +35,22 @@ class VendorRepository:
     def list_(
         self,
         *,
-        include_inactive: bool = False,
-        include_deleted: bool = False,
+        active_only: bool = False,
         vendor_id_filter: Optional[str] = None,
     ) -> List[Vendor]:
-        """List vendors. `vendor_id_filter` is an optional row-level scope hook —
-        services pass the caller's own vendor_id when the user isn't admin."""
-        stmt = select(Vendor)
-        if not include_deleted:
-            stmt = stmt.where(Vendor.deleted_at.is_(None))
-        if not include_inactive:
+        """List vendors ordered by created_at DESC (newest first, matches monolith).
+
+        active_only=False (default): return both active and inactive vendors,
+        excluding soft-deleted rows — same as monolith GET /vendors default.
+        active_only=True: only active vendors (picker dropdown behaviour).
+        Soft-deleted rows are always excluded.
+        """
+        stmt = select(Vendor).where(Vendor.deleted_at.is_(None))
+        if active_only:
             stmt = stmt.where(Vendor.active.is_(True))
         if vendor_id_filter is not None:
             stmt = stmt.where(Vendor.id == vendor_id_filter)
-        stmt = stmt.order_by(Vendor.name.asc())
+        stmt = stmt.order_by(Vendor.created_at.desc())
         return list(self.db.execute(stmt).scalars().all())
 
     def create(self, **kwargs) -> Vendor:
@@ -77,16 +81,35 @@ class VendorRepository:
         return row
 
     def list_projects_for_vendor(self, vendor_id: str) -> List[Project]:
-        """Cross-schema: masters.vendors → project.project_vendors → project.projects.
-        Read-only — masters-svc never writes to project.*"""
+        """Projects for a single vendor — excludes soft-deleted and closed/completed."""
         stmt = (
             select(Project)
             .join(ProjectVendor, ProjectVendor.project_id == Project.id)
             .where(ProjectVendor.vendor_id == vendor_id)
             .where(Project.deleted_at.is_(None))
-            .order_by(Project.name.asc())
+            .where(Project.status.notin_(_HIDDEN_STATUSES))
+            .order_by(Project.created_at.desc(), Project.id.desc())
         )
         return list(self.db.execute(stmt).scalars().all())
+
+    def list_projects_for_vendors_batch(
+        self, vendor_ids: List[str]
+    ) -> Dict[str, List[Project]]:
+        """Batched project load for multiple vendors — no N+1 on list endpoint."""
+        if not vendor_ids:
+            return {}
+        stmt = (
+            select(ProjectVendor.vendor_id, Project)
+            .join(Project, Project.id == ProjectVendor.project_id)
+            .where(ProjectVendor.vendor_id.in_(vendor_ids))
+            .where(Project.deleted_at.is_(None))
+            .where(Project.status.notin_(_HIDDEN_STATUSES))
+            .order_by(Project.created_at.desc(), Project.id.desc())
+        )
+        grouped: Dict[str, List[Project]] = {}
+        for vid, project in self.db.execute(stmt).all():
+            grouped.setdefault(vid, []).append(project)
+        return grouped
 
     def list_users_for_vendor(self, vendor_id: str) -> List[User]:
         """Cross-schema: users.users where vendor_id = vendor_id.

@@ -1,26 +1,15 @@
-"""Business logic for the vendors catalog.
-
-Enforces:
-  - Name uniqueness on create (case-sensitive — matches source)
-  - Soft-delete via deleted_at + deleted_by (NOT active=False alone)
-  - Built-in handling NOT applicable here (vendors are all user-created)
-
-Row-level scoping (org_admin sees only vendors in their org): the
-`list_for_caller` helper accepts `caller_vendor_id` and `is_admin` from
-the route — services pass them in based on request.state. Final scoping
-rules are deferred to the user-svc port discussion.
-"""
+"""Business logic for the vendors catalog."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.errors import CatalogEntryConflictError, CatalogEntryNotFoundError
-from app.models._cross_schema import ProjectVendor
+from app.models._cross_schema import Project, ProjectVendor
 from app.models.vendor import Vendor
 from app.repositories.vendor_repository import VendorRepository
 from app.schemas.vendor import VendorCreateRequest, VendorUpdateRequest
@@ -50,20 +39,18 @@ class VendorService:
     def list_(
         self,
         *,
-        include_inactive: bool = False,
-        include_deleted: bool = False,
+        active_only: bool = False,
         caller_vendor_id: Optional[str] = None,
         is_admin: bool = False,
     ) -> List[Vendor]:
-        """List vendors. If `is_admin=False`, the result is scoped to the
-        caller's own vendor (Option C row-level scoping — first-pass heuristic;
-        refined during user-svc port)."""
         vendor_id_filter = None if is_admin else caller_vendor_id
         return self.repo.list_(
-            include_inactive=include_inactive,
-            include_deleted=include_deleted,
+            active_only=active_only,
             vendor_id_filter=vendor_id_filter,
         )
+
+    def list_projects_for_vendors(self, vendor_ids: List[str]) -> Dict[str, List[Project]]:
+        return self.repo.list_projects_for_vendors_batch(vendor_ids)
 
     def get_by_id(self, vendor_id: str) -> Vendor:
         row = self.repo.get_by_id(vendor_id)
@@ -85,9 +72,9 @@ class VendorService:
             email=str(payload.email) if payload.email else None,
             contact_person=payload.contact_person,
             phone_number=payload.phone_number,
-            active=getattr(payload, "active", True) if getattr(payload, "active", None) is not None else True,
+            active=payload.active if payload.active is not None else True,
         )
-        project_ids = getattr(payload, "project_ids", None) or []
+        project_ids = payload.project_ids or []
         if project_ids:
             self._apply_project_ids(row.id, project_ids)
         self.db.commit()

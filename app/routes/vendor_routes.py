@@ -19,7 +19,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -192,15 +192,23 @@ def _apply_user_assignments(
     dependencies=[Depends(require_permission(VENDORS_READ))],
 )
 def list_vendors(
+    request: Request,
     active_only: bool = Query(
         False,
         description="When true, return only active vendors. Default false shows all (active + inactive).",
     ),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
+    is_admin = getattr(request.state, "is_admin", False)
+    caller_vendor_id = getattr(request.state, "user_vendor_id", None)
+    # Admins see all vendors; vendor-users see only their own vendor.
+    vendor_id_filter = None if is_admin else caller_vendor_id
+
     stmt = select(Vendor).where(Vendor.deleted_at.is_(None))
     if active_only:
         stmt = stmt.where(Vendor.active.is_(True))
+    if vendor_id_filter is not None:
+        stmt = stmt.where(Vendor.id == vendor_id_filter)
     stmt = stmt.order_by(Vendor.created_at.desc())
     rows = db.execute(stmt).scalars().all()
     return _collection([_vendor_dict(db, row) for row in rows])

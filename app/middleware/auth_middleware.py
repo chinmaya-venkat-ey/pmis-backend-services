@@ -55,6 +55,7 @@ def _set_anonymous(request: Request) -> None:
     request.state.user_permissions = set()  # type: Set[str]
     request.state.scoped_permissions = {}
     request.state.is_admin = False
+    request.state.user_vendor_id = None  # hydrated below from users.users mirror
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -94,6 +95,12 @@ class AuthMiddleware(BaseHTTPMiddleware):
             request.state.user_permissions = perms
             request.state.scoped_permissions = scoped
             request.state.is_admin = is_admin
+
+            # Hydrate caller's vendor_id for row-level vendor scoping.
+            from app.models._cross_schema import User as MirrorUser
+            mirror_row = db.get(MirrorUser, user_id)
+            if mirror_row is not None:
+                request.state.user_vendor_id = mirror_row.vendor_id
         except Exception as exc:  # noqa: BLE001
             logger.warning("Auth hydration failed for user_id=%s: %s", user_id, exc)
         finally:

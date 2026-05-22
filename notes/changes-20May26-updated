@@ -1,0 +1,21 @@
+1. In divisions dropdown the Others are coming in the first. It should be at the last option in the dropdown
+2. The Search User and Search Organization is not getting sorted as the latest one at the top. All searches should show latest on top by default.
+3. The Users, Organization and Projects; the old database has not been migrated
+4. The Division/Owner column is taking division code, not division label in Search User and Search Project pages
+5. The Organization column is coming blank in Search User
+6. Cannot create dependencies for anything, even after giving different dates. The popup is also not correct.
+7. The Priority column in Milestone Config page table is not showing 'P1, P2 or P3'. It is showing 'High, Medium or Low'. Compare it with monolith and make it similar to that working there.
+8. The Project Admin is coming in the dropdown in Organization Management page under Project Member. In the Organization Management page, users with the Project Admin role are appearing in the Project Member dropdown selection list.
+9. Cannot Add users in the Project Admin or Project Member. After adding, if we Save it, they get removed.
+[While adding users under Project Admin, the selected users disappear after clicking Save and are not retained.
+While adding users under Project Member, the selected users disappear after clicking Save and are not retained.]
+10. The Audit logs are completely blank. No Audit Logs are being displayed
+11. The Master Data tables are not coming updated. There are different data coming in Master Data and Org, User Managements. Master Data values are inconsistent across Master Data, Organization Management, and User Management modules. Updated values are not reflecting uniformly across the application.
+12. In the Critical Path flow diagram, delay values inside the critical path boxes are not being calculated correctly.
+13. The Organization admin and Project Admin Roles cannot view anything in the User and Org Managements.
+[Users with the Project Admin role or Organization Admin role are unable to view data in the User Management module.
+Users with the Project Admin role or Organization Admin role are unable to view data in the Organization Management module.]
+14. In the Profile section, updates to organization, mobile number, and other profile details are not being saved successfully.
+15. In PMIS-user-management/app/controllers/auth_controller.py:66-68, replace UserResponse.model_validate(user) with a call to UserController._build_user_response(user, db) — this routes /me through the same RBAC-recompute path used by GET /users/{id}, so is_admin / is_super_admin reflect live role-assignment state instead of stale ORM columns.
+16. The org_role: "admin" text label means nothing — it's just decoration. "Authorization is still driven entirely by role assignments (this column grants nothing)." org_role should be auto-derived from the user's highest role assignment so the label always reflects reality. Document clearly in Swagger: passing org_role on create does NOT grant any role. To grant a role you MUST call /role-assignments separately.
+17. I have assigned a project to a user but it is not coming in the response. And vendor_name is not coming in response against the vendor_id in response.

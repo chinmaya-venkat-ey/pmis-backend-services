@@ -1,0 +1,51 @@
+version: "3.9"
+
+services:
+  pmis-file-store:
+    build: .
+    image: ${DOCKER_USERNAME:+${DOCKER_USERNAME}/}pmis-file-store:${VERSION:-latest}
+    container_name: pmis-file-store
+    restart: unless-stopped
+    ports:
+      - "${HOST_PORT:-8005}:8005"
+    environment:
+      # ── Core ──────────────────────────────────────────────────────
+      ENV: ${ENV:-production}
+      SERVICE_NAME: pmis-file-store
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+
+      # ── Database ──────────────────────────────────────────────────
+      DATABASE_URL: ${DATABASE_URL}
+
+      # ── JWT (verify only — issued by user-svc) ────────────────────
+      SECRET_KEY: ${SECRET_KEY}
+      ALGORITHM: ${ALGORITHM:-HS256}
+
+      # ── S3 ────────────────────────────────────────────────────────
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME}
+      S3_REGION: ${S3_REGION:-ap-south-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-}
+      S3_KEY_PREFIX: ${S3_KEY_PREFIX:-pmis}
+      S3_PRESIGNED_URL_EXPIRES: ${S3_PRESIGNED_URL_EXPIRES:-3600}
+      S3_PUBLIC_URL_BASE: ${S3_PUBLIC_URL_BASE:-}
+
+      # ── Upload limits ─────────────────────────────────────────────
+      MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-26214400}
+      ALLOWED_EXTENSIONS: ${ALLOWED_EXTENSIONS:-pdf,docx,xlsx,txt,csv,jpg,jpeg,png,heic,mp4,webm,mov}
+
+      # ── CORS ──────────────────────────────────────────────────────
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+
+      # Timezone
+      TZ: Asia/Kolkata
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8005/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3

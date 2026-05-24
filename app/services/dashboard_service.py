@@ -36,7 +36,7 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
 from app.core.errors import NotFoundError
-from app.models._cross_schema import Vendor
+from app.models._cross_schema import Division, Vendor
 from app.models.activity import Activity
 from app.models.milestone import Milestone
 from app.models.project import Project
@@ -221,6 +221,16 @@ class DashboardService:
 
     def __init__(self, db: Session):
         self.db = db
+        self._div_labels: Optional[Dict[str, str]] = None
+
+    def _get_division_labels(self) -> Dict[str, str]:
+        """Load active division code→label map from DB (cached per request)."""
+        if self._div_labels is None:
+            rows = self.db.execute(
+                select(Division.code, Division.label).where(Division.active.is_(True))
+            ).all()
+            self._div_labels = {code.lower(): label for code, label in rows}
+        return self._div_labels
 
     # ---------------------------------------------------------------------
     # Low-level repo-style helpers (kept inline; the monolith's
@@ -439,13 +449,16 @@ class DashboardService:
         bucket: str,
     ) -> Dict[str, Any]:
         """Compose the dict that matches the ``ProjectCard`` schema."""
+        owner_code = project.owner or ""
+        div_labels = self._get_division_labels()
         return {
             "id": project.id,
             "projectCode": project.project_code,
             "name": project.name,
             "description": project.description,
             "organisations": _vendor_chips(vendors),
-            "division": project.owner,
+            "division": owner_code,
+            "divisionLabel": div_labels.get(owner_code.lower(), owner_code),
             "divisionOther": project.owner_other,
             "lifecycleStatus": project.status,
             "bucket": bucket,
@@ -522,12 +535,15 @@ class DashboardService:
             # Counts every delayed item in that project, not just worst.
             if c["delayedItemCount"] <= 0 or c["maxDelayDays"] < delay_min_days:
                 continue
+            p_owner = p.owner or ""
+            div_labels = self._get_division_labels()
             delayed_rows.append({
                 "id": p.id,
                 "projectCode": p.project_code,
                 "name": p.name,
                 "organisations": _vendor_chips(vendors_by_pid.get(p.id, [])),
-                "division": p.owner,
+                "division": p_owner,
+                "divisionLabel": div_labels.get(p_owner.lower(), p_owner),
                 "divisionOther": p.owner_other,
                 "delayedItemCount": c["delayedItemCount"],
                 "maxDelayDays": c["maxDelayDays"],
@@ -565,12 +581,13 @@ class DashboardService:
         for p in projects:
             code = (p.owner or "").lower() or "unspecified"
             div_to_buckets[code].append(derived[p.id][1])
+        _div_labels = self._get_division_labels()
         div_cards: List[Dict[str, Any]] = []
         for code, buckets in div_to_buckets.items():
             div_cards.append({
                 "code": code,
-                "label": _division_label(code) if code != "unspecified"
-                                              else "Unspecified",
+                "label": (_div_labels.get(code, code) if code != "unspecified"
+                          else "Unspecified"),
                 "projectCount": len(buckets),
                 "counts": _build_bucket_counts(buckets),
             })

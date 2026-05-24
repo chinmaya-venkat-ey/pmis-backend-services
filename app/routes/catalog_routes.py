@@ -53,6 +53,8 @@ def list_divisions(
     stmt = select(Division)
     if not include_inactive:
         stmt = stmt.where(Division.active.is_(True))
+    # requires_other=True ("Others") must always appear last (Bug #1).
+    stmt = stmt.order_by(Division.requires_other.asc(), Division.label.asc())
     rows = db.execute(stmt).scalars().all()
     return [DivisionResponse.model_validate(r) for r in rows]
 
@@ -70,8 +72,17 @@ def list_priorities(
     stmt = select(Priority)
     if not include_inactive:
         stmt = stmt.where(Priority.active.is_(True))
+    stmt = stmt.order_by(Priority.position.asc())
     rows = db.execute(stmt).scalars().all()
-    return [PriorityResponse.model_validate(r) for r in rows]
+    # Bug #7: FE uses `name` for column display; return code ("P1/P2/P3") as name.
+    return [
+        PriorityResponse(
+            id=r.id, code=r.code, name=r.code,
+            description=r.description, position=r.position,
+            is_builtin=r.is_builtin, active=r.active,
+        )
+        for r in rows
+    ]
 
 
 @router.get(

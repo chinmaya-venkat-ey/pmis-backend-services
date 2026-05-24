@@ -149,25 +149,22 @@ class RoleAssignmentService:
     ) -> List[RoleAssignmentResponse]:
         """Full-replace the specified roles for a project (Manage-Team Submit).
 
+        The route gate (PROJECT_MEMBERS_UPDATE) already verified the caller
+        is allowed to manage team members. We skip the rbac:assign / vendor-
+        linkage checks here — those are for RBAC delegation (granting
+        arbitrary roles), not for the team-management use case.
+
         For each role_name in `assignments`:
-          1. Validate caller can grant that role at project scope.
+          1. Look up the role; raise 404 if unknown.
           2. Delete all existing rows for (project_id, role).
-          3. Insert one row per user_id in the list (skips unknown users).
-        Roles not in `assignments` are untouched.
+          3. Insert one row per user_id (skips unknown users silently).
+        Roles not listed are left unchanged.
         Commits once at the end.
         """
         for role_name, user_ids in assignments.items():
             role = self.rbac.get_role_by_name(role_name)
             if role is None:
                 raise RoleAssignmentNotFoundError(f"Role {role_name!r} not found")
-
-            self._assert_caller_can_grant(
-                role_name=role_name,
-                organization_id=None,
-                project_id=project_id,
-                caller_user_id=caller_user_id,
-                caller_is_admin=caller_is_admin,
-            )
 
             self.repo.delete_by_project_and_role(project_id, role.id)
             for uid in set(user_ids):

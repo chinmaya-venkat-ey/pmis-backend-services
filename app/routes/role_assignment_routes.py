@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, Query, status
 from app.controllers.role_assignment_controller import RoleAssignmentController
 from app.core.permissions import (
     PROJECT_MEMBERS_READ,
+    PROJECT_MEMBERS_UPDATE,
     PROJECTS_READ_ALL,
     RBAC_ASSIGN,
     USERS_READ_ALL,
@@ -21,6 +22,7 @@ from app.dependencies import (
     get_role_assignment_controller,
 )
 from app.schemas.role_assignment import (
+    ProjectRolesBulkWriteRequest,
     RoleAssignmentBatchResponse,
     RoleAssignmentCreateRequest,
     RoleAssignmentResponse,
@@ -122,6 +124,33 @@ def create_project_role_assignment(
     caller_is_admin: bool = Depends(get_caller_is_admin),
 ):
     return controller.create_for_project(
+        project_uuid, payload,
+        caller_user_id=caller_user_id, caller_is_admin=caller_is_admin,
+    )
+
+
+@project_assignments_router.put(
+    "/{project_uuid}/role-assignments",
+    response_model=List[RoleAssignmentResponse],
+    summary="Bulk-replace project role assignments (Manage-Team Submit)",
+    description=(
+        "Full replace for the role names listed in the request body. "
+        "For each role, all existing assignments are deleted and replaced "
+        "with the supplied user list. Roles not mentioned are unchanged. "
+        "Accepts role_name strings (e.g. 'project_admin', 'project_member'). "
+        "Unknown user IDs are silently skipped. "
+        "Returns the updated full assignment list for the project."
+    ),
+    dependencies=[Depends(require_permission(PROJECT_MEMBERS_UPDATE))],
+)
+def bulk_replace_project_role_assignments(
+    project_uuid: str,
+    payload: ProjectRolesBulkWriteRequest,
+    controller: RoleAssignmentController = Depends(get_role_assignment_controller),
+    caller_user_id: str = Depends(get_current_user_id),
+    caller_is_admin: bool = Depends(get_caller_is_admin),
+):
+    return controller.bulk_replace_for_project(
         project_uuid, payload,
         caller_user_id=caller_user_id, caller_is_admin=caller_is_admin,
     )

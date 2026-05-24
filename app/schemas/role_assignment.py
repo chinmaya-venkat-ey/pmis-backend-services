@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, List, Optional
+from typing import Annotated, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -63,3 +63,30 @@ class RoleAssignmentBatchResponse(BaseModel):
 
     items: List[RoleAssignmentResponse]
     total: int
+
+
+class ProjectRolesBulkWriteRequest(BaseModel):
+    """PUT /user/projects/{uuid}/role-assignments — bulk-replace for Manage-Team page.
+
+    Each role_name listed is fully replaced (all existing assignments for that
+    role+project are deleted, then the supplied user_ids are inserted).
+    Roles not mentioned in the dict are left unchanged.
+
+    Example::
+
+        {
+          "assignments": {
+            "project_admin":  ["uid-1", "uid-2"],
+            "project_member": ["uid-3", "uid-4", "uid-5"]
+          }
+        }
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    assignments: Dict[str, List[str]] = Field(
+        description=(
+            "Map of role_name → user_id list. "
+            "Each listed role is fully replaced. "
+            "Roles not present are left unchanged."
+        )
+    )

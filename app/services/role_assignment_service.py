@@ -11,7 +11,7 @@ Caller-can-grant rules (simplified for first port — refine in follow-up):
 """
 from __future__ import annotations
 
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
@@ -138,6 +138,50 @@ class RoleAssignmentService:
         if payload.project_ids:
             return RoleAssignmentBatchResponse(items=results, total=len(results))
         return results[0]
+
+    def bulk_replace_for_project(
+        self,
+        project_id: str,
+        assignments: Dict[str, List[str]],
+        *,
+        caller_user_id: str,
+        caller_is_admin: bool,
+    ) -> List[RoleAssignmentResponse]:
+        """Full-replace the specified roles for a project (Manage-Team Submit).
+
+        For each role_name in `assignments`:
+          1. Validate caller can grant that role at project scope.
+          2. Delete all existing rows for (project_id, role).
+          3. Insert one row per user_id in the list (skips unknown users).
+        Roles not in `assignments` are untouched.
+        Commits once at the end.
+        """
+        for role_name, user_ids in assignments.items():
+            role = self.rbac.get_role_by_name(role_name)
+            if role is None:
+                raise RoleAssignmentNotFoundError(f"Role {role_name!r} not found")
+
+            self._assert_caller_can_grant(
+                role_name=role_name,
+                organization_id=None,
+                project_id=project_id,
+                caller_user_id=caller_user_id,
+                caller_is_admin=caller_is_admin,
+            )
+
+            self.repo.delete_by_project_and_role(project_id, role.id)
+            for uid in set(user_ids):
+                if self.user_repo.get_by_id(uid) is None:
+                    continue
+                self.repo.create(
+                    user_id=uid,
+                    role_id=role.id,
+                    project_id=project_id,
+                    created_by_user_id=caller_user_id,
+                )
+
+        self.db.commit()
+        return self.list_for_project(project_id)
 
     def delete(
         self,

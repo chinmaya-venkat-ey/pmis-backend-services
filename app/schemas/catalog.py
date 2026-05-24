@@ -107,7 +107,8 @@ class VendorUpdateRequest(BaseModel):
         default=None, max_length=50, alias="phoneNumber"
     )]
     project_ids: Annotated[Optional[List[str]], Field(default=None, alias="projectIds")]
-    user_assignments: Optional[List[Dict[str, Any]]] = None
+    # Bug #9: FE sends the flat assignments list under "assignments" key.
+    user_assignments: Optional[List[Dict[str, Any]]] = Field(default=None, alias="assignments")
 
 
 class UserSummary(ResponseModel):

@@ -16,6 +16,7 @@ All responses are wrapped in the PMIS envelope by HalApiRoute:
 from __future__ import annotations
 
 import uuid
+from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -86,6 +87,41 @@ def _vendor_projects(db: Session, vendor_id: str) -> List[Dict[str, Any]]:
     ]
 
 
+def _vendor_assignments(db: Session, vendor_id: str) -> List[Dict[str, Any]]:
+    """Return flat list of {project_id, role, user_ids} for all projects of
+    this vendor. Powers the FE's Project Mapping role table seeding (Bug #8).
+    Each project always has an entry for project_admin and project_member even
+    if the list is empty — so the FE can build its filter correctly."""
+    project_ids = [
+        row[0] for row in db.execute(
+            select(ProjectVendor.project_id).where(ProjectVendor.vendor_id == vendor_id)
+        ).all()
+    ]
+    if not project_ids:
+        return []
+
+    rows = db.execute(
+        select(UserRoleAssignment.project_id, Role.name, UserRoleAssignment.user_id)
+        .join(Role, Role.id == UserRoleAssignment.role_id)
+        .where(UserRoleAssignment.project_id.in_(project_ids))
+        .where(Role.name.in_(_PROJECT_TIER_ROLES))
+    ).all()
+
+    grouped: Dict[tuple, List[str]] = defaultdict(list)
+    for pid, role_name, uid in rows:
+        grouped[(pid, role_name)].append(uid)
+
+    out = []
+    for pid in project_ids:
+        for role_name in ("project_admin", "project_member", "division_member"):
+            out.append({
+                "project_id": pid,
+                "role": role_name,
+                "user_ids": grouped.get((pid, role_name), []),
+            })
+    return out
+
+
 def _vendor_dict(db: Session, row: Vendor) -> Dict[str, Any]:
     """Build a vendor entry in the monolith wire shape (camelCase, _type discriminator)."""
     return {
@@ -102,6 +138,7 @@ def _vendor_dict(db: Session, row: Vendor) -> Dict[str, Any]:
         "updatedAt": _iso_ist(row.updated_at),
         "deletedAt": _iso_ist(row.deleted_at),
         "projects": _vendor_projects(db, row.id),
+        "user_assignments": _vendor_assignments(db, row.id),
     }
 
 

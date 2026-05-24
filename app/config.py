@@ -54,6 +54,19 @@ class Settings(BaseSettings):
     file_server_base_url: Optional[str] = Field(default=None)
     file_server_auth_token: Optional[str] = Field(default=None)
 
+    # === pmis-file-store (S3 microservice) ===
+    # When set, project-svc delegates all uploads/deletes to file-svc over HTTP
+    # instead of writing to the NFS mount. Set to the internal service URL,
+    # e.g. "http://pmis-file-store:8005".
+    file_store_service_url: Optional[str] = Field(default=None)
+    # Service-to-service JWT used by file_store requests.
+    # Must be a valid token accepted by file-svc's auth middleware
+    # (same SECRET_KEY). Generate via user-svc or share a long-lived admin token.
+    file_store_service_token: Optional[str] = Field(default=None)
+    # Default logical folder sent to file-svc when no entity-specific folder
+    # is provided. Callers can override per-upload.
+    file_store_default_folder: str = Field(default="project-attachments")
+
     # === Frontend reference (HAL link builder) ===
     frontend_base_url: Optional[str] = Field(default=None)
 

@@ -204,28 +204,42 @@ def get_file_client() -> FileClient:
     """Return the process-wide file client (lazy-initialised from settings).
 
     Resolution order:
-      1. If ``settings.file_server_base_url`` is set ->
-         ``HttpExternalFileClient`` (with a local-storage fallback).
-      2. Else -> ``LocalAndPublicUrlClient`` (the default; uses
-         ``settings.file_server_public_base_url`` when set, relative
-         storage keys when unset).
+      1. ``settings.file_store_service_url`` is set →
+         ``HttpFileStoreClient`` — delegates to pmis-file-store (S3).
+         This is the production path after file-svc is deployed.
+      2. ``settings.file_server_base_url`` is set →
+         ``HttpExternalFileClient`` (legacy external file-server stub).
+      3. Default → ``LocalAndPublicUrlClient`` (NFS mount / local dev).
     """
     global _client
     if _client is None:
         with _client_lock:
             if _client is None:
-                local = LocalAndPublicUrlClient(
-                    storage=get_storage(),
-                    public_base_url=settings.file_server_public_base_url or "",
-                )
-                if settings.file_server_base_url:
-                    _client = HttpExternalFileClient(
-                        base_url=settings.file_server_base_url,
-                        auth_token=settings.file_server_auth_token or "",
-                        fallback=local,
+                # Priority 1: pmis-file-store S3 microservice.
+                if settings.file_store_service_url:
+                    from app.utilities.http_file_client import HttpFileStoreClient
+                    _client = HttpFileStoreClient(
+                        base_url=settings.file_store_service_url,
+                        token=settings.file_store_service_token or "",
+                        folder=settings.file_store_default_folder,
+                    )
+                    logger.info(
+                        "FileClient: using pmis-file-store at %s",
+                        settings.file_store_service_url,
                     )
                 else:
-                    _client = local
+                    local = LocalAndPublicUrlClient(
+                        storage=get_storage(),
+                        public_base_url=settings.file_server_public_base_url or "",
+                    )
+                    if settings.file_server_base_url:
+                        _client = HttpExternalFileClient(
+                            base_url=settings.file_server_base_url,
+                            auth_token=settings.file_server_auth_token or "",
+                            fallback=local,
+                        )
+                    else:
+                        _client = local
     return _client
 
 

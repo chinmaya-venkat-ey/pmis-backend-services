@@ -20,6 +20,7 @@ from app.routes import (
     project_routes,
     subtask_routes,
     task_routes,
+    team_routes,
     tree_routes,
     vendor_routes,
 )
@@ -56,6 +57,10 @@ project_router.include_router(critical_path_routes.router)
 # management (/api/v3/vendors/*) — matching VM project service (port 8003).
 project_router.include_router(catalog_routes.router)
 project_router.include_router(vendor_routes.router)
+
+# Team management — Manage-Team page endpoints.
+project_router.include_router(team_routes.project_team_router)
+project_router.include_router(team_routes.activity_team_router)
 
 
 __all__ = ["project_router", "health_routes", "attachment_routes"]

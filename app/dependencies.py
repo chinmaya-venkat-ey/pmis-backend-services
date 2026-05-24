@@ -15,6 +15,7 @@ from app.controllers.milestone_controller import MilestoneController
 from app.controllers.project_controller import ProjectController
 from app.controllers.subtask_controller import SubtaskController
 from app.controllers.task_controller import TaskController
+from app.controllers.team_controller import TeamController
 from app.controllers.tree_controller import TreeController
 from app.core.errors import UnauthorizedError
 from app.db import get_db
@@ -77,3 +78,7 @@ def get_tree_controller(db: Session = Depends(get_db)) -> TreeController:
 
 def get_critical_path_controller(db: Session = Depends(get_db)) -> CriticalPathController:
     return CriticalPathController(db)
+
+
+def get_team_controller(db: Session = Depends(get_db)) -> TeamController:
+    return TeamController(db)

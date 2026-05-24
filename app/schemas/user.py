@@ -31,6 +31,7 @@ class UserResponse(ResponseModel):
     vendor_id: Optional[str] = None
     vendor_name: Optional[str] = None
     division: Optional[str] = None
+    division_label: Optional[str] = None
     division_other: Optional[str] = None
     phone_number: Optional[str] = None
     org_role: Optional[str] = None

@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from typing import Union
 
+from sqlalchemy.orm import Session
+
 from app.schemas.auth import (
     IntrospectRequest,
     IntrospectResponse,
@@ -33,11 +35,15 @@ class AuthController:
         two_factor_service: TwoFactorService,
         refresh_service: RefreshService,
         password_reset_service: PasswordResetService,
+        db: Session | None = None,
     ):
         self.auth = auth_service
         self.otp = two_factor_service
         self.refresh = refresh_service
         self.password_reset = password_reset_service
+        # db is stored to allow get_me to reuse the same session for RBAC
+        # checks instead of returning stale ORM column values.
+        self._db = db or auth_service.db
 
     # ------------------------------------------------------------------ login flow
 
@@ -65,7 +71,17 @@ class AuthController:
 
     def get_me(self, user_id: str) -> UserResponse:
         user = self.auth.get_me(user_id)
-        return UserResponse.model_validate(user)
+        # Route through the same RBAC-recompute path used by GET /users/{id}
+        # so is_admin / is_super_admin / org_role / vendor_name reflect live
+        # role-assignment state rather than stale ORM columns.
+        from app.controllers.user_controller import UserController
+        from app.services.permission_service import PermissionService
+        from app.services.user_service import UserService
+        uc = UserController(
+            user_service=UserService(self._db),
+            permission_service=PermissionService(self._db),
+        )
+        return uc._build_user_response(user)
 
     # ------------------------------------------------------------------ password reset
 

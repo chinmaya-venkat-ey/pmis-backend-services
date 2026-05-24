@@ -1,10 +1,12 @@
 """UserController — HTTP adapter for /user/users/* routes (CRUD + perms-by-user + projects)."""
 from __future__ import annotations
 
-from typing import List
+from typing import List, Optional
 
 from sqlalchemy import select
 
+from app.models._cross_schema import Division, Vendor
+from app.models.role import Role
 from app.models.user_role import UserRole
 from app.models.user_role_assignment import UserRoleAssignment
 from app.repositories.rbac_repository import RbacRepository
@@ -20,6 +22,13 @@ from app.schemas.user import (
 )
 from app.services.permission_service import PermissionService
 from app.services.user_service import UserService
+
+
+# Ordered highest → lowest; first match is the canonical org_role label.
+_ROLE_PRIORITY = (
+    "super_admin", "admin", "org_admin",
+    "project_admin", "project_member", "division_member",
+)
 
 
 class UserController:
@@ -53,7 +62,30 @@ class UserController:
             .limit(1)
         ).first() is not None
 
+    def _derive_org_role(self, user_id: str) -> Optional[str]:
+        """Return the highest-tier role the user currently holds (both legacy
+        user_roles and scoped user_role_assignments). Used to populate the
+        org_role label — the DB column value is decoration only."""
+        db = self.user_service.db
+        legacy = set(db.execute(
+            select(Role.name)
+            .join(UserRole, UserRole.role_id == Role.id)
+            .where(UserRole.user_id == user_id)
+        ).scalars())
+        scoped = set(db.execute(
+            select(Role.name)
+            .join(UserRoleAssignment, UserRoleAssignment.role_id == Role.id)
+            .where(UserRoleAssignment.user_id == user_id)
+            .distinct()
+        ).scalars())
+        held = legacy | scoped
+        for tier in _ROLE_PRIORITY:
+            if tier in held:
+                return tier
+        return None
+
     def _build_user_response(self, user) -> UserResponse:
+        db = self.user_service.db
         is_admin = self.rbac.user_has_admin_role(user.id)
         is_super_admin = self._is_super_admin(user.id)
         data = {
@@ -63,6 +95,26 @@ class UserController:
         }
         data["is_admin"] = is_admin
         data["is_super_admin"] = is_super_admin
+
+        # Resolve vendor_name from masters.vendors mirror.
+        if data.get("vendor_id"):
+            vendor = db.get(Vendor, data["vendor_id"])
+            data["vendor_name"] = vendor.name if vendor else None
+        else:
+            data["vendor_name"] = None
+
+        # Resolve division_label from masters.divisions mirror.
+        if data.get("division"):
+            div = db.execute(
+                select(Division).where(Division.code == data["division"])
+            ).scalar_one_or_none()
+            data["division_label"] = div.label if div else None
+        else:
+            data["division_label"] = None
+
+        # Derive org_role from live role assignments (Bug #16).
+        data["org_role"] = self._derive_org_role(user.id)
+
         return UserResponse.model_validate(data)
 
     # ------------------------------------------------------------------ list / get

@@ -93,12 +93,24 @@ class UserCreateRequest(BaseModel):
 
 
 class UserUpdateRequest(BaseModel):
-    """PATCH /users/{id} — partial update, matches VM UserUpdateRequest."""
+    """PATCH /users/{id} — partial update, matches VM UserUpdateRequest.
 
-    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+    Bug #14: FE sends a mix of camelCase (fullName, twoFactorEnabled) and
+    snake_case (vendor_id, phone_number, division_other) keys. Using
+    alias_generator=to_camel + populate_by_name=True accepts both forms.
+    """
+
+    model_config = ConfigDict(
+        str_strip_whitespace=True,
+        extra="ignore",
+        alias_generator=lambda s: (
+            "".join(w.capitalize() if i else w for i, w in enumerate(s.split("_")))
+        ),
+        populate_by_name=True,
+    )
 
     email: Optional[EmailStr] = None
-    # VM sends full_name (single string); first_name/last_name also accepted.
+    # VM sends fullName (camelCase); first_name/last_name also accepted.
     full_name: Optional[str] = Field(default=None, max_length=510)
     first_name: Optional[str] = Field(default=None, max_length=64)
     last_name: Optional[str] = Field(default=None, max_length=64)

@@ -1,7 +1,13 @@
 """ActivityService — CRUD + dependency cycle guard + inline-comment / files."""
 from __future__ import annotations
 
+import re
 from typing import List, Optional
+
+# FE normalizes activity node.id to the WBS display code (e.g. "A1.2") after
+# normalizeProject runs, so depends_on arrives as display codes rather than
+# UUIDs. Bug #12: resolve them to UUIDs via milestone+activity position lookup.
+_ACTIVITY_DISPLAY_CODE_RE = re.compile(r"^A(\d+)\.(\d+)$", re.IGNORECASE)
 
 from sqlalchemy.orm import Session
 
@@ -116,10 +122,11 @@ class ActivityService:
             updated_by=caller_user_id,
         )
         if payload.depends_on:
-            self._guard_dependency_cycle(row.id, payload.depends_on)
-            self._assert_deps_in_same_project(row.project_id, payload.depends_on)
-            self._assert_dep_dates_outlasting(row, payload.depends_on)
-            self.repo.replace_dependencies(row.id, payload.depends_on)
+            resolved_deps = self._resolve_depends_on(row.project_id, payload.depends_on)
+            self._guard_dependency_cycle(row.id, resolved_deps)
+            self._assert_deps_in_same_project(row.project_id, resolved_deps)
+            self._assert_dep_dates_outlasting(row, resolved_deps)
+            self.repo.replace_dependencies(row.id, resolved_deps)
 
         # Inline comment / attachments — written under the new activity.
         # Captured on ``_inline_comment`` so the controller can echo the
@@ -224,16 +231,17 @@ class ActivityService:
                 },
             )
         if depends_on is not None:
-            self._guard_dependency_cycle(row.id, depends_on)
-            if depends_on:
-                self._assert_deps_in_same_project(row.project_id, depends_on)
-                self._assert_dep_dates_outlasting(row, depends_on)
-            self.repo.replace_dependencies(row.id, depends_on)
+            resolved_deps = self._resolve_depends_on(row.project_id, depends_on)
+            self._guard_dependency_cycle(row.id, resolved_deps)
+            if resolved_deps:
+                self._assert_deps_in_same_project(row.project_id, resolved_deps)
+                self._assert_dep_dates_outlasting(row, resolved_deps)
+            self.repo.replace_dependencies(row.id, resolved_deps)
             self.audit.write(
                 project_id=row.project_id,
                 target_kind="activity", target_id=row.id,
                 action="update", actor_user_id=caller_user_id,
-                changes={"depends_on": depends_on},
+                changes={"depends_on": resolved_deps},
             )
         self.db.commit()
         return row
@@ -418,6 +426,47 @@ class ActivityService:
             f"milestone '{m.name}' is still completed. Revert the parent "
             f"milestone first."
         )
+
+    # ------------------------------------------ display-code resolver -----
+
+    def _resolve_depends_on(
+        self, project_id: str, raw_ids: List[str],
+    ) -> List[str]:
+        """Resolve display codes (e.g. 'A1.2') mixed with UUIDs to UUIDs.
+
+        The FE normalizes activity node.id to serverDisplayCode (A{ms}.{act})
+        via normalizeProject, so depends_on arrives as display codes (Bug #12).
+        Activities use A{milestone_position}.{activity_position} format.
+        """
+        if not raw_ids:
+            return []
+        from sqlalchemy import select
+        from app.models.activity import Activity
+        from app.models.milestone import Milestone
+
+        lookups: List[tuple] = []
+        uuid_ids: List[str] = []
+        for dep_id in raw_ids:
+            match = _ACTIVITY_DISPLAY_CODE_RE.match(dep_id)
+            if match:
+                lookups.append((int(match.group(1)), int(match.group(2))))
+            else:
+                uuid_ids.append(dep_id)
+
+        resolved = list(uuid_ids)
+        for ms_pos, act_pos in lookups:
+            row = self.db.execute(
+                select(Activity.id)
+                .join(Milestone, Milestone.id == Activity.milestone_id)
+                .where(Milestone.project_id == project_id)
+                .where(Milestone.position == ms_pos)
+                .where(Milestone.deleted_at.is_(None))
+                .where(Activity.position == act_pos)
+                .where(Activity.deleted_at.is_(None))
+            ).scalar_one_or_none()
+            if row:
+                resolved.append(row)
+        return resolved
 
     # ----------------------------------------------------- dep cycle -----
 

@@ -8,7 +8,13 @@ files via the file client.
 """
 from __future__ import annotations
 
+import re
 from typing import Any, List, Optional
+
+# FE normalizes node.id to the WBS display code (e.g. "M1") after
+# normalizeProject runs, so depends_on arrives as display codes rather
+# than UUIDs. Bug #6: resolve them back to UUIDs via the position column.
+_MILESTONE_DISPLAY_CODE_RE = re.compile(r"^M(\d+)$", re.IGNORECASE)
 
 from sqlalchemy.orm import Session
 
@@ -130,10 +136,11 @@ class MilestoneService:
             updated_by=caller_user_id,
         )
         if payload.depends_on:
-            self._guard_dependency_cycle(row.id, payload.depends_on)
-            self._assert_deps_in_same_project(project_id, payload.depends_on)
-            self._assert_dep_dates_outlasting(row, payload.depends_on)
-            self.repo.replace_dependencies(row.id, payload.depends_on)
+            resolved_deps = self._resolve_depends_on(project_id, payload.depends_on)
+            self._guard_dependency_cycle(row.id, resolved_deps)
+            self._assert_deps_in_same_project(project_id, resolved_deps)
+            self._assert_dep_dates_outlasting(row, resolved_deps)
+            self.repo.replace_dependencies(row.id, resolved_deps)
         if canonical_vendor_ids:
             self.repo.set_vendor_mapping(row.id, canonical_vendor_ids)
 
@@ -250,16 +257,17 @@ class MilestoneService:
                 },
             )
         if depends_on is not None:
-            self._guard_dependency_cycle(row.id, depends_on)
-            if depends_on:
-                self._assert_deps_in_same_project(row.project_id, depends_on)
-                self._assert_dep_dates_outlasting(row, depends_on)
-            self.repo.replace_dependencies(row.id, depends_on)
+            resolved_deps = self._resolve_depends_on(row.project_id, depends_on)
+            self._guard_dependency_cycle(row.id, resolved_deps)
+            if resolved_deps:
+                self._assert_deps_in_same_project(row.project_id, resolved_deps)
+                self._assert_dep_dates_outlasting(row, resolved_deps)
+            self.repo.replace_dependencies(row.id, resolved_deps)
             self.audit.write(
                 project_id=row.project_id,
                 target_kind="milestone", target_id=row.id,
                 action="update", actor_user_id=caller_user_id,
-                changes={"depends_on": depends_on},
+                changes={"depends_on": resolved_deps},
             )
         if canonical_vendor_ids is not None:
             self.repo.set_vendor_mapping(row.id, canonical_vendor_ids)
@@ -460,6 +468,42 @@ class MilestoneService:
             f"Cannot mark this milestone as completed — the following "
             f"child activit{plural} not yet completed: {names}{more}."
         )
+
+    # ------------------------------------------ display-code resolver -----
+
+    def _resolve_depends_on(
+        self, project_id: str, raw_ids: List[str],
+    ) -> List[str]:
+        """Resolve a mix of UUIDs and display codes (e.g. 'M1') to UUIDs.
+
+        The FE normalizes milestone node.id to serverDisplayCode (M{n}) via
+        normalizeProject, so depends_on arrives as display codes rather than
+        UUIDs (Bug #6). Milestones use M{position} format.
+        """
+        if not raw_ids:
+            return []
+        from sqlalchemy import select
+        from app.models.milestone import Milestone
+
+        positions: List[int] = []
+        uuid_ids: List[str] = []
+        for dep_id in raw_ids:
+            match = _MILESTONE_DISPLAY_CODE_RE.match(dep_id)
+            if match:
+                positions.append(int(match.group(1)))
+            else:
+                uuid_ids.append(dep_id)
+
+        resolved = list(uuid_ids)
+        if positions:
+            rows = self.db.execute(
+                select(Milestone.id)
+                .where(Milestone.project_id == project_id)
+                .where(Milestone.position.in_(positions))
+                .where(Milestone.deleted_at.is_(None))
+            ).all()
+            resolved.extend(r[0] for r in rows)
+        return resolved
 
     # ----------------------------------------------------- dep cycle -----
 

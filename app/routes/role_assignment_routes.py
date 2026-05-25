@@ -43,7 +43,7 @@ user_assignments_router = APIRouter(prefix="/users", tags=["role_assignments"])
 )
 def list_user_role_assignments(
     user_id: str,
-    controller: Annotated[RoleAssignmentController, Depends(get_role_assignment_controller)],
+    controller: Annotated[RoleAssignmentController, Depends(get_role_assignment_controller)] = Depends(get_role_assignment_controller),
 ):
     return controller.list_for_user(user_id)
 
@@ -62,9 +62,9 @@ def list_user_role_assignments(
 def create_user_role_assignment(
     user_id: str,
     payload: RoleAssignmentCreateRequest,
-    controller: Annotated[RoleAssignmentController, Depends(get_role_assignment_controller)],
-    caller_user_id: Annotated[str, Depends(get_current_user_id)],
-    caller_is_admin: Annotated[bool, Depends(get_caller_is_admin)],
+    controller: Annotated[RoleAssignmentController, Depends(get_role_assignment_controller)] = Depends(get_role_assignment_controller),
+    caller_user_id: Annotated[str, Depends(get_current_user_id)] = Depends(get_current_user_id),
+    caller_is_admin: Annotated[bool, Depends(get_caller_is_admin)] = Depends(get_caller_is_admin),
 ):
     return controller.create_for_user(
         user_id, payload,
@@ -81,9 +81,9 @@ def create_user_role_assignment(
 def delete_user_role_assignment(
     user_id: str,
     assignment_id: int,
-    controller: Annotated[RoleAssignmentController, Depends(get_role_assignment_controller)],
-    caller_user_id: Annotated[str, Depends(get_current_user_id)],
-    caller_is_admin: Annotated[bool, Depends(get_caller_is_admin)],
+    controller: Annotated[RoleAssignmentController, Depends(get_role_assignment_controller)] = Depends(get_role_assignment_controller),
+    caller_user_id: Annotated[str, Depends(get_current_user_id)] = Depends(get_current_user_id),
+    caller_is_admin: Annotated[bool, Depends(get_caller_is_admin)] = Depends(get_caller_is_admin),
 ):
     return controller.delete_user_assignment(
         user_id, assignment_id,
@@ -169,7 +169,7 @@ project_assignments_router = APIRouter(prefix="/projects", tags=["role_assignmen
 )
 def list_project_role_assignments(
     project_uuid: str,
-    controller: Annotated[RoleAssignmentController, Depends(get_role_assignment_controller)],
+    controller: Annotated[RoleAssignmentController, Depends(get_role_assignment_controller)] = Depends(get_role_assignment_controller),
 ):
     return controller.list_for_project(project_uuid)
 
@@ -184,9 +184,9 @@ def list_project_role_assignments(
 def create_project_role_assignment(
     project_uuid: str,
     payload: RoleAssignmentCreateRequest,
-    controller: Annotated[RoleAssignmentController, Depends(get_role_assignment_controller)],
-    caller_user_id: Annotated[str, Depends(get_current_user_id)],
-    caller_is_admin: Annotated[bool, Depends(get_caller_is_admin)],
+    controller: Annotated[RoleAssignmentController, Depends(get_role_assignment_controller)] = Depends(get_role_assignment_controller),
+    caller_user_id: Annotated[str, Depends(get_current_user_id)] = Depends(get_current_user_id),
+    caller_is_admin: Annotated[bool, Depends(get_caller_is_admin)] = Depends(get_caller_is_admin),
 ):
     return controller.create_for_project(
         project_uuid, payload,
@@ -303,9 +303,9 @@ def create_project_role_assignment(
 def bulk_replace_project_role_assignments(
     project_uuid: str,
     payload: ProjectRolesBulkWriteRequest,
-    controller: Annotated[RoleAssignmentController, Depends(get_role_assignment_controller)],
-    caller_user_id: Annotated[str, Depends(get_current_user_id)],
-    caller_is_admin: Annotated[bool, Depends(get_caller_is_admin)],
+    controller: Annotated[RoleAssignmentController, Depends(get_role_assignment_controller)] = Depends(get_role_assignment_controller),
+    caller_user_id: Annotated[str, Depends(get_current_user_id)] = Depends(get_current_user_id),
+    caller_is_admin: Annotated[bool, Depends(get_caller_is_admin)] = Depends(get_caller_is_admin),
 ):
     return controller.bulk_replace_for_project(
         project_uuid, payload,
@@ -322,9 +322,9 @@ def bulk_replace_project_role_assignments(
 def delete_project_role_assignment(
     project_uuid: str,
     assignment_id: int,
-    controller: Annotated[RoleAssignmentController, Depends(get_role_assignment_controller)],
-    caller_user_id: Annotated[str, Depends(get_current_user_id)],
-    caller_is_admin: Annotated[bool, Depends(get_caller_is_admin)],
+    controller: Annotated[RoleAssignmentController, Depends(get_role_assignment_controller)] = Depends(get_role_assignment_controller),
+    caller_user_id: Annotated[str, Depends(get_current_user_id)] = Depends(get_current_user_id),
+    caller_is_admin: Annotated[bool, Depends(get_caller_is_admin)] = Depends(get_caller_is_admin),
 ):
     return controller.delete_project_assignment(
         project_uuid, assignment_id,
@@ -345,7 +345,7 @@ vendor_listing_router = APIRouter(prefix="/vendors", tags=["vendor_listings"])
 )
 def list_vendor_projects(
     vendor_id: str,
-    controller: Annotated[RoleAssignmentController, Depends(get_role_assignment_controller)],
+    controller: Annotated[RoleAssignmentController, Depends(get_role_assignment_controller)] = Depends(get_role_assignment_controller),
 ):
     return controller.list_vendor_projects(vendor_id)
 
@@ -360,7 +360,7 @@ def list_vendor_users(
     offset: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     include_deleted: bool = Query(False),
-    controller: Annotated[RoleAssignmentController, Depends(get_role_assignment_controller)],
+    controller: Annotated[RoleAssignmentController, Depends(get_role_assignment_controller)] = Depends(get_role_assignment_controller),
 ):
     return controller.list_vendor_users(
         vendor_id,

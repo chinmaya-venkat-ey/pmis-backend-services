@@ -11,7 +11,7 @@ from app.controllers.role_controller import RoleController
 from app.controllers.role_grants_controller import RoleGrantsController
 from app.controllers.user_controller import UserController
 from app.core.rbac import AUTH_REQUIRED_MESSAGE
-.errors import UnauthorizedError
+from app.core.errors import UnauthorizedError
 from app.db import get_db
 from app.repositories.rbac_repository import RbacRepository
 from app.services.auth_service import AuthService

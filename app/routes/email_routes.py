@@ -32,6 +32,6 @@ router = APIRouter(prefix="/email", tags=["email"])
 )
 def send_email(
     payload: EmailRequest,
-    controller: EmailController = Depends(get_email_controller),
+    controller: Annotated[EmailController, Depends(get_email_controller)],
 ) -> EmailResponse:
     return controller.send(payload)

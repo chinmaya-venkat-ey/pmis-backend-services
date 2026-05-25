@@ -65,7 +65,7 @@ def _verify_cron_secret(
 )
 def daily_digest(
     payload: DigestRequest = Body(default_factory=DigestRequest),
-    controller: CronController = Depends(get_cron_controller),
-    _auth: None = Depends(_verify_cron_secret),
+    controller: Annotated[CronController, Depends(get_cron_controller)],
+    _auth: Annotated[None, Depends(_verify_cron_secret)],
 ) -> DigestResponse:
     return controller.run_daily_digest(payload)

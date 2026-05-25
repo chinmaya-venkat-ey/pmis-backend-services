@@ -34,6 +34,6 @@ router = APIRouter(tags=["dispatch"])
 )
 def dispatch_templated(
     payload: DispatchRequest,
-    controller: DispatchController = Depends(get_dispatch_controller),
+    controller: Annotated[DispatchController, Depends(get_dispatch_controller)],
 ) -> DispatchResponse:
     return controller.dispatch(payload)

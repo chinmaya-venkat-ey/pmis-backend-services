@@ -29,6 +29,6 @@ router = APIRouter(prefix="/sms", tags=["sms"])
 )
 def send_sms(
     payload: SMSRequest,
-    controller: SMSController = Depends(get_sms_controller),
+    controller: Annotated[SMSController, Depends(get_sms_controller)],
 ) -> SMSResponse:
     return controller.send(payload)

@@ -42,7 +42,7 @@ router = APIRouter(
 )
 def get_dashboard_summary(
     delay_min_days: int = Query(5, ge=1, le=365, alias="delayMinDays"),
-    controller: Annotated[DashboardController, Depends(get_dashboard_controller)],
+    controller: Annotated[DashboardController, Depends(get_dashboard_controller)] = Depends(get_dashboard_controller),
 ) -> Dict[str, Any]:
     return controller.summary(delay_min_days=delay_min_days)
 
@@ -66,7 +66,7 @@ def list_dashboard_projects_route(
     division: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(200, ge=1, le=500, alias="pageSize"),
-    controller: Annotated[DashboardController, Depends(get_dashboard_controller)],
+    controller: Annotated[DashboardController, Depends(get_dashboard_controller)] = Depends(get_dashboard_controller),
 ) -> Dict[str, Any]:
     return controller.projects(
         bucket=bucket,
@@ -92,7 +92,7 @@ def list_dashboard_projects_route(
 def get_dashboard_project_detail(
     project_uuid: str,
     delay_min_days: int = Query(5, ge=1, le=365, alias="delayMinDays"),
-    controller: Annotated[DashboardController, Depends(get_dashboard_controller)],
+    controller: Annotated[DashboardController, Depends(get_dashboard_controller)] = Depends(get_dashboard_controller),
 ) -> Dict[str, Any]:
     return controller.project_detail(
         project_id=project_uuid, delay_min_days=delay_min_days,
@@ -115,7 +115,7 @@ def get_dashboard_project_items(
     bucket: Optional[str] = Query(None),
     milestone_id: Optional[str] = Query(None, alias="milestoneId"),
     min_delay: Optional[int] = Query(None, ge=0, alias="minDelay"),
-    controller: Annotated[DashboardController, Depends(get_dashboard_controller)],
+    controller: Annotated[DashboardController, Depends(get_dashboard_controller)] = Depends(get_dashboard_controller),
 ) -> Dict[str, Any]:
     return controller.project_items(
         project_id=project_uuid,
@@ -137,7 +137,7 @@ def get_dashboard_project_items(
     ),
 )
 def list_dashboard_organisations(
-    controller: Annotated[DashboardController, Depends(get_dashboard_controller)],
+    controller: Annotated[DashboardController, Depends(get_dashboard_controller)] = Depends(get_dashboard_controller),
 ) -> Dict[str, Any]:
     return controller.organisations()
 
@@ -153,6 +153,6 @@ def list_dashboard_organisations(
 )
 def get_dashboard_organisation_detail(
     vendor_id: str,
-    controller: Annotated[DashboardController, Depends(get_dashboard_controller)],
+    controller: Annotated[DashboardController, Depends(get_dashboard_controller)] = Depends(get_dashboard_controller),
 ) -> Dict[str, Any]:
     return controller.organisation_detail(vendor_id=vendor_id)

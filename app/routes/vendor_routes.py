@@ -236,7 +236,7 @@ def list_vendors(
         False,
         description="When true, return only active vendors. Default false shows all (active + inactive).",
     ),
-    db: Annotated[Session, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)] = Depends(get_db),
 ) -> Dict[str, Any]:
     is_admin = getattr(request.state, "is_admin", False)
     caller_vendor_id = getattr(request.state, "user_vendor_id", None)
@@ -266,8 +266,8 @@ def list_vendors(
 )
 def create_vendor(
     payload: VendorCreateRequest,
-    db: Annotated[Session, Depends(get_db)],
-    caller_user_id: Annotated[str, Depends(get_current_user_id)],
+    db: Annotated[Session, Depends(get_db)] = Depends(get_db),
+    caller_user_id: Annotated[str, Depends(get_current_user_id)] = Depends(get_current_user_id),
 ) -> Dict[str, Any]:
     existing = db.execute(
         select(Vendor).where(Vendor.name == payload.name).where(Vendor.deleted_at.is_(None))
@@ -305,7 +305,7 @@ def create_vendor(
 )
 def get_vendor(
     vendor_id: str,
-    db: Annotated[Session, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)] = Depends(get_db),
 ) -> Dict[str, Any]:
     row = db.get(Vendor, vendor_id)
     if not row:
@@ -330,8 +330,8 @@ def get_vendor(
 def update_vendor(
     vendor_id: str,
     payload: VendorUpdateRequest,
-    db: Annotated[Session, Depends(get_db)],
-    caller_user_id: Annotated[str, Depends(get_current_user_id)],
+    db: Annotated[Session, Depends(get_db)] = Depends(get_db),
+    caller_user_id: Annotated[str, Depends(get_current_user_id)] = Depends(get_current_user_id),
 ) -> Dict[str, Any]:
     row = db.get(Vendor, vendor_id)
     if not row:
@@ -380,8 +380,8 @@ def update_vendor(
 )
 def delete_vendor(
     vendor_id: str,
-    db: Annotated[Session, Depends(get_db)],
-    caller_user_id: Annotated[str, Depends(get_current_user_id)],
+    db: Annotated[Session, Depends(get_db)] = Depends(get_db),
+    caller_user_id: Annotated[str, Depends(get_current_user_id)] = Depends(get_current_user_id),
 ) -> None:
     row = db.get(Vendor, vendor_id)
     if not row:
@@ -406,7 +406,7 @@ def delete_vendor(
 )
 def restore_vendor(
     vendor_id: str,
-    db: Annotated[Session, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)] = Depends(get_db),
 ) -> Dict[str, Any]:
     row = db.get(Vendor, vendor_id)
     if not row:
@@ -433,7 +433,7 @@ def restore_vendor(
 )
 def list_vendor_users(
     vendor_id: str,
-    db: Annotated[Session, Depends(get_db)],
+    db: Annotated[Session, Depends(get_db)] = Depends(get_db),
 ) -> Any:
     if not db.get(Vendor, vendor_id):
         raise HTTPException(status_code=404, detail=_VENDOR_NOT_FOUND)

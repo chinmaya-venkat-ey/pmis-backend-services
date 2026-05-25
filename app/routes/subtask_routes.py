@@ -138,7 +138,7 @@ async def _create_under_task_multipart(
 async def create_subtask_under_task(
     request: Request,
     task_id: str,
-    controller: Annotated[SubtaskController, Depends(get_subtask_controller)],
+    controller: Annotated[SubtaskController, Depends(get_subtask_controller)] = Depends(get_subtask_controller),
     caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
 ):
     return await dispatch_create(
@@ -163,7 +163,7 @@ def list_task_subtasks(
     offset: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100, alias="pageSize"),
     include_deleted: bool = Query(False, alias="includeDeleted"),
-    controller: Annotated[SubtaskController, Depends(get_subtask_controller)],
+    controller: Annotated[SubtaskController, Depends(get_subtask_controller)] = Depends(get_subtask_controller),
 ):
     # Monolith parity: no ``topLevelOnly`` filter — returns every subtask
     # under the task (nested + top-level alike).
@@ -218,7 +218,7 @@ async def _create_nested_multipart(
 async def create_nested_subtask(
     request: Request,
     parent_subtask_id: str,
-    controller: Annotated[SubtaskController, Depends(get_subtask_controller)],
+    controller: Annotated[SubtaskController, Depends(get_subtask_controller)] = Depends(get_subtask_controller),
     caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
 ):
     return await dispatch_create(
@@ -241,7 +241,7 @@ async def create_nested_subtask(
 )
 def get_subtask(
     subtask_id: str,
-    controller: Annotated[SubtaskController, Depends(get_subtask_controller)],
+    controller: Annotated[SubtaskController, Depends(get_subtask_controller)] = Depends(get_subtask_controller),
 ):
     return controller.get(subtask_id)
 
@@ -256,7 +256,7 @@ def update_subtask(
     subtask_id: str,
     payload: SubtaskUpdateRequest,
     request: Request,
-    controller: Annotated[SubtaskController, Depends(get_subtask_controller)],
+    controller: Annotated[SubtaskController, Depends(get_subtask_controller)] = Depends(get_subtask_controller),
     caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
 ):
     return controller.update(
@@ -273,7 +273,7 @@ def update_subtask(
 )
 def delete_subtask(
     subtask_id: str,
-    controller: Annotated[SubtaskController, Depends(get_subtask_controller)],
+    controller: Annotated[SubtaskController, Depends(get_subtask_controller)] = Depends(get_subtask_controller),
     caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
 ):
     controller.delete(subtask_id, caller_user_id=caller_user_id)
@@ -287,7 +287,7 @@ def delete_subtask(
 )
 def restore_subtask(
     subtask_id: str,
-    controller: Annotated[SubtaskController, Depends(get_subtask_controller)],
+    controller: Annotated[SubtaskController, Depends(get_subtask_controller)] = Depends(get_subtask_controller),
     caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
 ):
     return controller.restore(subtask_id, caller_user_id=caller_user_id)

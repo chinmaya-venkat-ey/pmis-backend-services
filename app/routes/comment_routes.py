@@ -73,8 +73,8 @@ def _make_create_endpoint(target_kind: str):
         request: Request,
         body: str = Form(""),
         files: Optional[List[UploadFile]] = File(None),
-        controller: Annotated[CommentController, Depends(get_comment_controller)],
-        caller_user_id: Annotated[str, Depends(get_current_user_id)],
+        controller: Annotated[CommentController, Depends(get_comment_controller)] = Depends(get_comment_controller),
+        caller_user_id: Annotated[str, Depends(get_current_user_id)] = Depends(get_current_user_id),
     ) -> CommentResponse:
         project_id = _project_id_for_target(target_kind, target_id)
         assert_action_allowed(
@@ -106,7 +106,7 @@ def _make_list_endpoint(target_kind: str):
         request: Request,
         offset: int = Query(1, ge=1),
         page_size: int = Query(20, ge=1, le=100, alias="pageSize"),
-        controller: Annotated[CommentController, Depends(get_comment_controller)],
+        controller: Annotated[CommentController, Depends(get_comment_controller)] = Depends(get_comment_controller),
     ):
         project_id = _project_id_for_target(target_kind, target_id)
         assert_action_allowed(
@@ -174,9 +174,9 @@ for _path, _kind in _KIND_BY_PATH.items():
 )
 def delete_comment(
     comment_id: str,
-    controller: Annotated[CommentController, Depends(get_comment_controller)],
-    caller_user_id: Annotated[str, Depends(get_current_user_id)],
-    caller_is_admin: Annotated[bool, Depends(get_caller_is_admin)],
+    controller: Annotated[CommentController, Depends(get_comment_controller)] = Depends(get_comment_controller),
+    caller_user_id: Annotated[str, Depends(get_current_user_id)] = Depends(get_current_user_id),
+    caller_is_admin: Annotated[bool, Depends(get_caller_is_admin)] = Depends(get_caller_is_admin),
 ) -> CommentDeleteSuccess:
     return controller.delete(
         comment_id,

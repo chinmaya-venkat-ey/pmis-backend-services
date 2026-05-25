@@ -124,7 +124,7 @@ async def create_activity(
     request: Request,
     milestone_id: str,
     controller: Annotated[ActivityController, Depends(get_activity_controller)] = Depends(get_activity_controller),
-    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
+    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)] = Depends(get_optional_current_user_id),
 ):
     return await dispatch_create(
         request,
@@ -184,7 +184,7 @@ def update_activity(
     payload: ActivityUpdateRequest,
     request: Request,
     controller: Annotated[ActivityController, Depends(get_activity_controller)] = Depends(get_activity_controller),
-    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
+    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)] = Depends(get_optional_current_user_id),
 ):
     return controller.update(
         activity_id, payload,
@@ -201,7 +201,7 @@ def update_activity(
 def delete_activity(
     activity_id: str,
     controller: Annotated[ActivityController, Depends(get_activity_controller)] = Depends(get_activity_controller),
-    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
+    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)] = Depends(get_optional_current_user_id),
 ):
     controller.delete(activity_id, caller_user_id=caller_user_id)
 
@@ -215,6 +215,6 @@ def delete_activity(
 def restore_activity(
     activity_id: str,
     controller: Annotated[ActivityController, Depends(get_activity_controller)] = Depends(get_activity_controller),
-    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
+    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)] = Depends(get_optional_current_user_id),
 ):
     return controller.restore(activity_id, caller_user_id=caller_user_id)

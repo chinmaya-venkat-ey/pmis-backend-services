@@ -117,7 +117,7 @@ async def create_task(
     request: Request,
     activity_id: str,
     controller: Annotated[TaskController, Depends(get_task_controller)] = Depends(get_task_controller),
-    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
+    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)] = Depends(get_optional_current_user_id),
 ):
     return await dispatch_create(
         request,
@@ -183,7 +183,7 @@ def update_task(
     payload: TaskUpdateRequest,
     request: Request,
     controller: Annotated[TaskController, Depends(get_task_controller)] = Depends(get_task_controller),
-    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
+    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)] = Depends(get_optional_current_user_id),
 ):
     return controller.update(
         task_id, payload,
@@ -200,7 +200,7 @@ def update_task(
 def delete_task(
     task_id: str,
     controller: Annotated[TaskController, Depends(get_task_controller)] = Depends(get_task_controller),
-    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
+    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)] = Depends(get_optional_current_user_id),
 ):
     controller.delete(task_id, caller_user_id=caller_user_id)
 
@@ -214,6 +214,6 @@ def delete_task(
 def restore_task(
     task_id: str,
     controller: Annotated[TaskController, Depends(get_task_controller)] = Depends(get_task_controller),
-    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
+    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)] = Depends(get_optional_current_user_id),
 ):
     return controller.restore(task_id, caller_user_id=caller_user_id)

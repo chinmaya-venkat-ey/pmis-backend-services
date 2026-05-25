@@ -129,7 +129,7 @@ async def create_milestone(
     request: Request,
     project_uuid: str,
     controller: Annotated[MilestoneController, Depends(get_milestone_controller)] = Depends(get_milestone_controller),
-    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
+    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)] = Depends(get_optional_current_user_id),
 ):
     return await dispatch_create(
         request,
@@ -189,7 +189,7 @@ def update_milestone(
     payload: MilestoneUpdateRequest,
     request: Request,
     controller: Annotated[MilestoneController, Depends(get_milestone_controller)] = Depends(get_milestone_controller),
-    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
+    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)] = Depends(get_optional_current_user_id),
 ):
     return controller.update(
         milestone_id, payload,
@@ -206,7 +206,7 @@ def update_milestone(
 def delete_milestone(
     milestone_id: str,
     controller: Annotated[MilestoneController, Depends(get_milestone_controller)] = Depends(get_milestone_controller),
-    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
+    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)] = Depends(get_optional_current_user_id),
 ):
     controller.delete(milestone_id, caller_user_id=caller_user_id)
 
@@ -220,6 +220,6 @@ def delete_milestone(
 def restore_milestone(
     milestone_id: str,
     controller: Annotated[MilestoneController, Depends(get_milestone_controller)] = Depends(get_milestone_controller),
-    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
+    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)] = Depends(get_optional_current_user_id),
 ):
     return controller.restore(milestone_id, caller_user_id=caller_user_id)

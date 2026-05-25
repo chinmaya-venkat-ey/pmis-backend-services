@@ -139,7 +139,7 @@ async def create_subtask_under_task(
     request: Request,
     task_id: str,
     controller: Annotated[SubtaskController, Depends(get_subtask_controller)] = Depends(get_subtask_controller),
-    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
+    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)] = Depends(get_optional_current_user_id),
 ):
     return await dispatch_create(
         request,
@@ -219,7 +219,7 @@ async def create_nested_subtask(
     request: Request,
     parent_subtask_id: str,
     controller: Annotated[SubtaskController, Depends(get_subtask_controller)] = Depends(get_subtask_controller),
-    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
+    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)] = Depends(get_optional_current_user_id),
 ):
     return await dispatch_create(
         request,
@@ -257,7 +257,7 @@ def update_subtask(
     payload: SubtaskUpdateRequest,
     request: Request,
     controller: Annotated[SubtaskController, Depends(get_subtask_controller)] = Depends(get_subtask_controller),
-    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
+    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)] = Depends(get_optional_current_user_id),
 ):
     return controller.update(
         subtask_id, payload,
@@ -274,7 +274,7 @@ def update_subtask(
 def delete_subtask(
     subtask_id: str,
     controller: Annotated[SubtaskController, Depends(get_subtask_controller)] = Depends(get_subtask_controller),
-    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
+    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)] = Depends(get_optional_current_user_id),
 ):
     controller.delete(subtask_id, caller_user_id=caller_user_id)
 
@@ -288,6 +288,6 @@ def delete_subtask(
 def restore_subtask(
     subtask_id: str,
     controller: Annotated[SubtaskController, Depends(get_subtask_controller)] = Depends(get_subtask_controller),
-    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
+    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)] = Depends(get_optional_current_user_id),
 ):
     return controller.restore(subtask_id, caller_user_id=caller_user_id)

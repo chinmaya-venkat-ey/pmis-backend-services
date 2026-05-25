@@ -193,7 +193,8 @@ class MilestoneService:
         if "status" in updates and updates["status"] is not None:
             new_status = updates["status"]
             if is_terminal_status(new_status) and not is_terminal_status(row.status):
-                # Completing — validate every child activity is complete.
+                # Completing — validate every dep + every child activity is complete.
+                self._assert_deps_completed(row.id)
                 self._assert_all_child_activities_completed(row.id)
         # Vendor replacement: resolve + verify on-project.
         canonical_vendor_ids = None
@@ -443,6 +444,32 @@ class MilestoneService:
             target_start=new_start,
             target_end=new_end,
             kind_singular="milestone",
+        )
+
+    def _assert_deps_completed(self, milestone_id: str) -> None:
+        """Dependency-completion gate (monolith parity, _gate_status_against_deps).
+        Block flipping a milestone's status to ``completed`` while any of its
+        dependency targets are still ``not_completed``. Mirrors monolith
+        ``PMIS-OpenProject/app/api/v3/milestones/services/update.py``.
+        """
+        from sqlalchemy import select
+        from app.models.milestone import Milestone
+        dep_ids = self.repo.list_dependencies_for(milestone_id)
+        if not dep_ids:
+            return
+        rows = self.db.execute(
+            select(Milestone.name, Milestone.status)
+            .where(Milestone.id.in_(dep_ids))
+            .where(Milestone.deleted_at.is_(None))
+        ).all()
+        blockers = [name for name, status in rows if not is_terminal_status(status)]
+        if not blockers:
+            return
+        names = ", ".join(f"'{n}'" for n in blockers[:3])
+        more = f" (+{len(blockers) - 3} more)" if len(blockers) > 3 else ""
+        raise ValidationError(
+            f"Cannot mark this milestone as completed — the following "
+            f"dependency target(s) are not yet completed: {names}{more}."
         )
 
     def _assert_all_child_activities_completed(

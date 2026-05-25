@@ -177,6 +177,7 @@ class ActivityService:
         if "status" in updates and updates["status"] is not None:
             new_status = updates["status"]
             if is_terminal_status(new_status) and not is_terminal_status(row.status):
+                self._assert_deps_completed(row.id)
                 self._assert_all_child_tasks_completed(row.id)
             if (
                 not is_terminal_status(new_status)
@@ -393,6 +394,32 @@ class ActivityService:
             target_start=new_start,
             target_end=new_end,
             kind_singular="activity",
+        )
+
+    def _assert_deps_completed(self, activity_id: str) -> None:
+        """Dependency-completion gate (monolith parity, _gate_status_against_deps).
+        Block flipping an activity's status to ``completed`` while any of its
+        dependency targets are still ``not_completed``. Mirrors monolith
+        ``PMIS-OpenProject/app/api/v3/activities/services/update.py:88-118``.
+        """
+        from sqlalchemy import select
+        from app.models.activity import Activity
+        dep_ids = self.repo.list_dependencies_for(activity_id)
+        if not dep_ids:
+            return
+        rows = self.db.execute(
+            select(Activity.name, Activity.status)
+            .where(Activity.id.in_(dep_ids))
+            .where(Activity.deleted_at.is_(None))
+        ).all()
+        blockers = [name for name, status in rows if not is_terminal_status(status)]
+        if not blockers:
+            return
+        names = ", ".join(f"'{n}'" for n in blockers[:3])
+        more = f" (+{len(blockers) - 3} more)" if len(blockers) > 3 else ""
+        raise ValidationError(
+            f"Cannot mark this activity as completed — the following "
+            f"dependency target(s) are not yet completed: {names}{more}."
         )
 
     def _assert_all_child_tasks_completed(self, activity_id: str) -> None:

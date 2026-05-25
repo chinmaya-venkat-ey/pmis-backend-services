@@ -196,6 +196,7 @@ class SubtaskService:
         if "status" in updates and updates["status"] is not None:
             new_status = updates["status"]
             if is_terminal_status(new_status) and not is_terminal_status(row.status):
+                self._assert_deps_completed(row.id)
                 self._assert_all_nested_subtasks_completed(row.id)
             if (
                 not is_terminal_status(new_status)
@@ -481,6 +482,29 @@ class SubtaskService:
         allowed = active_priorities(self.db)
         raise ValidationError(
             f"Priority must be one of: {', '.join(allowed)}."
+        )
+
+    def _assert_deps_completed(self, subtask_id: str) -> None:
+        """Dependency-completion gate (monolith parity). Block flipping a
+        subtask (top-level or nested) to ``completed`` while any of its
+        dependency targets are still ``not_completed``."""
+        from app.models.subtask import Subtask
+        dep_ids = self.repo.list_dependencies_for(subtask_id)
+        if not dep_ids:
+            return
+        rows = self.db.execute(
+            select(Subtask.name, Subtask.status)
+            .where(Subtask.id.in_(dep_ids))
+            .where(Subtask.deleted_at.is_(None))
+        ).all()
+        blockers = [name for name, status in rows if not is_terminal_status(status)]
+        if not blockers:
+            return
+        names = ", ".join(f"'{n}'" for n in blockers[:3])
+        more = f" (+{len(blockers) - 3} more)" if len(blockers) > 3 else ""
+        raise ValidationError(
+            f"Cannot mark this subtask as completed — the following "
+            f"dependency target(s) are not yet completed: {names}{more}."
         )
 
     def _assert_all_nested_subtasks_completed(self, subtask_id: str) -> None:

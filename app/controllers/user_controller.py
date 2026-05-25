@@ -115,6 +115,14 @@ class UserController:
         # Derive org_role from live role assignments (Bug #16).
         data["org_role"] = self._derive_org_role(user.id)
 
+        # Convenience concat — monolith parity. Joins first + last with a
+        # space; falls back to ``login`` when both names are empty. Lets
+        # the FE render a user label without an "or" chain on every row.
+        first = (data.get("first_name") or "").strip()
+        last = (data.get("last_name") or "").strip()
+        joined = " ".join(filter(None, [first, last]))
+        data["full_name"] = joined or data.get("login")
+
         return UserResponse.model_validate(data)
 
     # ------------------------------------------------------------------ list / get

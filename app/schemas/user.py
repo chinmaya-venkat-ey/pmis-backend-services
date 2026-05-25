@@ -27,6 +27,10 @@ class UserResponse(ResponseModel):
     email: EmailStr
     first_name: Optional[str] = None
     last_name: Optional[str] = None
+    # Convenience concat populated by the controller: ``first_name + " " +
+    # last_name``, falling back to ``login`` when both names are empty.
+    # Monolith parity — saves the FE from doing this concat on every row.
+    full_name: Optional[str] = None
     status: str
     vendor_id: Optional[str] = None
     vendor_name: Optional[str] = None

@@ -8,7 +8,7 @@ from typing import Any, Dict, Optional, Tuple
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models._cross_schema import Vendor as _VendorMirror
+from app.models._cross_schema import Division as _DivisionMirror, Vendor as _VendorMirror
 from app.repositories.project_repository import ProjectRepository
 from app.schemas.project import (
     ProjectCloseRequest,
@@ -52,9 +52,23 @@ class ProjectController:
         resp.is_public = bool(getattr(row, "public", False))
         vendor_ids = self.repo.list_vendors_for_project(row.id)
         resp.vendors = self._hydrate_vendor_chips(vendor_ids)
+        # Resolve owner_label from masters.divisions mirror so the FE has a
+        # human-readable label without a separate /master/divisions call.
+        resp.owner_label = self._resolve_owner_label(resp.owner)
         if with_attachments:
             resp.attachments = self._hydrate_attachments(row.id)
         return resp
+
+    def _resolve_owner_label(self, owner_code: Optional[str]) -> Optional[str]:
+        """Look up the division label for the project owner via the
+        masters.divisions cross-schema mirror. Returns None when the owner
+        is null, "others", or an unknown code."""
+        if not owner_code or owner_code.lower() == "others":
+            return None
+        div = self.db.execute(
+            select(_DivisionMirror).where(_DivisionMirror.code == owner_code)
+        ).scalars().first()
+        return div.label if div is not None else None
 
     def _hydrate_attachments(self, project_id: str):
         """Pull every ``body IS NULL`` comment row under

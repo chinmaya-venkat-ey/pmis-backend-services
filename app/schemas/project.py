@@ -74,6 +74,10 @@ class ProjectResponse(ResponseModel):
 
     status: str
     owner: Optional[str] = None
+    # Human-readable label of the owner division (resolved from masters.divisions).
+    # Null when owner is None, "others", or an unknown code. Lets the FE render
+    # the project owner column without a separate /master/divisions call.
+    owner_label: Optional[str] = None
     owner_other: Optional[str] = None
     category: Optional[str] = None
     category_other: Optional[str] = None

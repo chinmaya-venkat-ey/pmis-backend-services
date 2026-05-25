@@ -420,7 +420,10 @@ class TeamService:
 
         return TeamPageResponse(
             project_id=proj.id,
+<<<<<<< HEAD
             project_code=proj.project_code,
+=======
+>>>>>>> d69cf5c (Update team management changes)
             project_name=proj.name,
             user_directory=user_directory,
             org_user=org_user,

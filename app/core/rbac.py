@@ -28,7 +28,7 @@ from app.core.errors import ForbiddenError, UnauthorizedError
 # request.state helpers
 # ---------------------------------------------------------------------------
 
-AUTH_REQUIRED_MESSAGE = AUTH_REQUIRED_MESSAGE
+AUTH_REQUIRED_MESSAGE = "Authentication required"
 
 def _user_id(request: Request) -> Optional[str]:
     return getattr(request.state, "user_id", None)

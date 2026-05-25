@@ -58,7 +58,21 @@ class RoleAssignmentService:
 
     def list_for_project(self, project_id: str) -> List[RoleAssignmentResponse]:
         rows = self.repo.list_by_project(project_id)
-        return [self._to_response(a, role=r, user=u) for a, r, u in rows]
+        # Resolve project_code once per call (all rows share the same project).
+        project_code = self._project_code_for(project_id)
+        return [
+            self._to_response(a, role=r, user=u, project_code=project_code)
+            for a, r, u in rows
+        ]
+
+    def _project_code_for(self, project_id: Optional[str]) -> Optional[str]:
+        """Look up project_code via the cross-schema Project mirror. Returns
+        None for global/org-scoped grants or missing projects."""
+        if not project_id:
+            return None
+        from app.models._cross_schema import Project as ProjectMirror
+        proj = self.db.get(ProjectMirror, project_id)
+        return proj.project_code if proj is not None else None
 
     # ------------------------------------------------------------------ create
 
@@ -402,6 +416,7 @@ class RoleAssignmentService:
         *,
         role,
         user: Optional[User],
+        project_code: Optional[str] = None,
     ) -> RoleAssignmentResponse:
         if assignment.organization_id is not None:
             scope = "org"
@@ -409,6 +424,11 @@ class RoleAssignmentService:
             scope = "project"
         else:
             scope = "global"
+        # Default project_code lookup for callers that didn't pre-resolve
+        # (single-create / single-update paths). list_for_project resolves
+        # once per call and threads it through to avoid N+1 queries.
+        if project_code is None and assignment.project_id is not None:
+            project_code = self._project_code_for(assignment.project_id)
         return RoleAssignmentResponse(
             id=assignment.id,
             user_id=assignment.user_id,
@@ -418,6 +438,7 @@ class RoleAssignmentService:
             role_name=role.name,
             organization_id=assignment.organization_id,
             project_id=assignment.project_id,
+            project_code=project_code,
             scope=scope,
             created_at=assignment.created_at,
             created_by=assignment.created_by,

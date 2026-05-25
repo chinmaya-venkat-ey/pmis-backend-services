@@ -20,6 +20,11 @@ class RoleAssignmentResponse(ResponseModel):
     role_name: str
     organization_id: Optional[str] = None
     project_id: Optional[str] = None
+    # Human-readable display ID of the project this assignment is scoped to.
+    # Populated when the row's scope is "project" (resolved via cross-schema
+    # mirror); null for global / org-scoped grants. Lets the FE render the
+    # Manage-Team page header without a separate /projects/{id} call.
+    project_code: Optional[str] = None
     scope: str = Field(description="'global' | 'org' | 'project'")
     created_at: datetime
     created_by: Optional[str] = None

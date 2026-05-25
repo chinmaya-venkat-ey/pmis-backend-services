@@ -18,7 +18,7 @@ from app.controllers.task_controller import TaskController
 from app.controllers.team_controller import TeamController
 from app.controllers.tree_controller import TreeController
 from app.core.rbac import AUTH_REQUIRED_MESSAGE
-.errors import UnauthorizedError
+from app.core.errors import UnauthorizedError
 from app.db import get_db
 
 

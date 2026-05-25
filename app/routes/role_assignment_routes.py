@@ -100,7 +100,72 @@ project_assignments_router = APIRouter(prefix="/projects", tags=["role_assignmen
     "/{project_uuid}/role-assignments",
     response_model=List[RoleAssignmentResponse],
     summary="List all role assignments on a project",
+    description=(
+        "Returns every user_role_assignment row scoped to this project. "
+        "Powers the Organisation User section of the Manage-Team page — "
+        "filter by role_name ('project_admin' / 'project_member') on the FE."
+    ),
     dependencies=[Depends(require_permission(PROJECT_MEMBERS_READ))],
+    openapi_extra={
+        "responses": {
+            "200": {
+                "content": {
+                    "application/json": {
+                        "examples": {
+                            "two_admins_three_members": {
+                                "summary": "1 project_admin and 2 project_members assigned",
+                                "value": [
+                                    {
+                                        "id": 101,
+                                        "user_id":    "usr-0001",
+                                        "user_login": "rajesh.kumar",
+                                        "user_email": "rajesh.kumar@uidai.gov.in",
+                                        "role_id":   3,
+                                        "role_name": "project_admin",
+                                        "organization_id": None,
+                                        "project_id": "proj-1111-2222-3333-4444",
+                                        "scope": "project",
+                                        "created_at": "2026-05-01T09:00:00Z",
+                                        "created_by": "admin",
+                                    },
+                                    {
+                                        "id": 102,
+                                        "user_id":    "usr-0002",
+                                        "user_login": "priya.sharma",
+                                        "user_email": "priya.sharma@uidai.gov.in",
+                                        "role_id":   4,
+                                        "role_name": "project_member",
+                                        "organization_id": None,
+                                        "project_id": "proj-1111-2222-3333-4444",
+                                        "scope": "project",
+                                        "created_at": "2026-05-01T09:05:00Z",
+                                        "created_by": "admin",
+                                    },
+                                    {
+                                        "id": 103,
+                                        "user_id":    "usr-0005",
+                                        "user_login": "suresh.patel",
+                                        "user_email": "suresh.patel@uidai.gov.in",
+                                        "role_id":   4,
+                                        "role_name": "project_member",
+                                        "organization_id": None,
+                                        "project_id": "proj-1111-2222-3333-4444",
+                                        "scope": "project",
+                                        "created_at": "2026-05-01T09:10:00Z",
+                                        "created_by": "admin",
+                                    },
+                                ],
+                            },
+                            "empty": {
+                                "summary": "No users assigned to this project yet",
+                                "value": [],
+                            },
+                        }
+                    }
+                }
+            }
+        }
+    },
 )
 def list_project_role_assignments(
     project_uuid: str,
@@ -139,9 +204,101 @@ def create_project_role_assignment(
         "with the supplied user list. Roles not mentioned are unchanged. "
         "Accepts role_name strings (e.g. 'project_admin', 'project_member'). "
         "Unknown user IDs are silently skipped. "
-        "Returns the updated full assignment list for the project."
+        "Returns the updated full assignment list for the project. "
+        "This is the Organisation User section of the Manage-Team Submit button."
     ),
     dependencies=[Depends(require_permission(PROJECT_MEMBERS_UPDATE))],
+    openapi_extra={
+        "requestBody": {
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "org_user_submit": {
+                            "summary": "Organisation User section — 1 admin, 2 members",
+                            "value": {
+                                "assignments": {
+                                    "project_admin":  ["usr-0001"],
+                                    "project_member": ["usr-0002", "usr-0005"],
+                                }
+                            },
+                        },
+                        "clear_members": {
+                            "summary": "Remove all members, keep admin",
+                            "value": {
+                                "assignments": {
+                                    "project_admin":  ["usr-0001"],
+                                    "project_member": [],
+                                }
+                            },
+                        },
+                        "both_empty": {
+                            "summary": "Clear all org user assignments",
+                            "value": {
+                                "assignments": {
+                                    "project_admin":  [],
+                                    "project_member": [],
+                                }
+                            },
+                        },
+                    }
+                }
+            }
+        },
+        "responses": {
+            "200": {
+                "content": {
+                    "application/json": {
+                        "examples": {
+                            "after_bulk_replace": {
+                                "summary": "Updated assignment list after save",
+                                "value": [
+                                    {
+                                        "id": 201,
+                                        "user_id":    "usr-0001",
+                                        "user_login": "rajesh.kumar",
+                                        "user_email": "rajesh.kumar@uidai.gov.in",
+                                        "role_id":   3,
+                                        "role_name": "project_admin",
+                                        "organization_id": None,
+                                        "project_id": "proj-1111-2222-3333-4444",
+                                        "scope": "project",
+                                        "created_at": "2026-05-25T10:30:00Z",
+                                        "created_by": "admin",
+                                    },
+                                    {
+                                        "id": 202,
+                                        "user_id":    "usr-0002",
+                                        "user_login": "priya.sharma",
+                                        "user_email": "priya.sharma@uidai.gov.in",
+                                        "role_id":   4,
+                                        "role_name": "project_member",
+                                        "organization_id": None,
+                                        "project_id": "proj-1111-2222-3333-4444",
+                                        "scope": "project",
+                                        "created_at": "2026-05-25T10:30:00Z",
+                                        "created_by": "admin",
+                                    },
+                                    {
+                                        "id": 203,
+                                        "user_id":    "usr-0005",
+                                        "user_login": "suresh.patel",
+                                        "user_email": "suresh.patel@uidai.gov.in",
+                                        "role_id":   4,
+                                        "role_name": "project_member",
+                                        "organization_id": None,
+                                        "project_id": "proj-1111-2222-3333-4444",
+                                        "scope": "project",
+                                        "created_at": "2026-05-25T10:30:00Z",
+                                        "created_by": "admin",
+                                    },
+                                ],
+                            }
+                        }
+                    }
+                }
+            }
+        },
+    },
 )
 def bulk_replace_project_role_assignments(
     project_uuid: str,

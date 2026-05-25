@@ -71,18 +71,20 @@ class ProjectRolesBulkWriteRequest(BaseModel):
     Each role_name listed is fully replaced (all existing assignments for that
     role+project are deleted, then the supplied user_ids are inserted).
     Roles not mentioned in the dict are left unchanged.
-
-    Example::
-
-        {
-          "assignments": {
-            "project_admin":  ["uid-1", "uid-2"],
-            "project_member": ["uid-3", "uid-4", "uid-5"]
-          }
-        }
     """
 
-    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    model_config = ConfigDict(
+        str_strip_whitespace=True,
+        extra="forbid",
+        json_schema_extra={
+            "example": {
+                "assignments": {
+                    "project_admin":  ["usr-0001"],
+                    "project_member": ["usr-0002", "usr-0005"],
+                }
+            }
+        },
+    )
     assignments: Dict[str, List[str]] = Field(
         description=(
             "Map of role_name → user_id list. "

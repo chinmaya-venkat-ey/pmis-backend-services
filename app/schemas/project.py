@@ -26,6 +26,7 @@ from app.schemas.attachment import AttachmentRow
 # PROJECT_STATUS_CHOICES). Service-level transition validation (uses the
 # full ``masters.project_status_transitions`` catalog) only fires on PATCH.
 _PROJECT_STATUS_CHOICES = ("new", "draft", "published", "closed")
+_ERR_END_BEFORE_START = "end_date cannot be before start_date"
 
 
 # ---------------------------------------------------------------------------
@@ -163,7 +164,7 @@ class ProjectCreateRequest(BaseModel):
         if v is not None and "start_date" in info.data:
             start = info.data["start_date"]
             if start is not None and v < start:
-                raise ValueError("end_date cannot be before start_date")
+                raise ValueError(_ERR_END_BEFORE_START)
         return v
 
 
@@ -200,7 +201,7 @@ class ProjectUpdateRequest(BaseModel):
         if v is not None and "start_date" in info.data:
             start = info.data["start_date"]
             if start is not None and v < start:
-                raise ValueError("end_date cannot be before start_date")
+                raise ValueError(_ERR_END_BEFORE_START)
         return v
 
 
@@ -252,7 +253,7 @@ class ProjectUpsertRequest(BaseModel):
         if v is not None and "start_date" in info.data:
             start = info.data["start_date"]
             if start is not None and v < start:
-                raise ValueError("end_date cannot be before start_date")
+                raise ValueError(_ERR_END_BEFORE_START)
         return v
 
 

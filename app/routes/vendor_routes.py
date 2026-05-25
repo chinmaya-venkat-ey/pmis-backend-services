@@ -28,6 +28,8 @@ from sqlalchemy.orm import Session
 from app.core.permissions import VENDORS_MANAGE, VENDORS_READ
 from app.core.rbac import require_permission
 from app.core.response import api_response
+
+_VENDOR_NOT_FOUND = "Vendor not found."
 from app.db import get_db
 from app.dependencies import get_current_user_id
 from app.models._cross_schema import Role, User, UserRoleAssignment, Vendor
@@ -234,7 +236,7 @@ def list_vendors(
         False,
         description="When true, return only active vendors. Default false shows all (active + inactive).",
     ),
-    db: Session = Depends(get_db),
+    db: Annotated[Session, Depends(get_db)],
 ) -> Dict[str, Any]:
     is_admin = getattr(request.state, "is_admin", False)
     caller_vendor_id = getattr(request.state, "user_vendor_id", None)
@@ -264,8 +266,8 @@ def list_vendors(
 )
 def create_vendor(
     payload: VendorCreateRequest,
-    db: Session = Depends(get_db),
-    caller_user_id: str = Depends(get_current_user_id),
+    db: Annotated[Session, Depends(get_db)],
+    caller_user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Dict[str, Any]:
     existing = db.execute(
         select(Vendor).where(Vendor.name == payload.name).where(Vendor.deleted_at.is_(None))
@@ -299,15 +301,15 @@ def create_vendor(
     summary="Get vendor details",
     description="Returns one vendor by UUID with embedded projects. 404 if not found. Requires vendors:read.",
     dependencies=[Depends(require_permission(VENDORS_READ))],
-    responses={404: {"description": "Vendor not found"}},
+    responses={404: {"description": _VENDOR_NOT_FOUND}},
 )
 def get_vendor(
     vendor_id: str,
-    db: Session = Depends(get_db),
+    db: Annotated[Session, Depends(get_db)],
 ) -> Dict[str, Any]:
     row = db.get(Vendor, vendor_id)
     if not row:
-        raise HTTPException(status_code=404, detail="Vendor not found")
+        raise HTTPException(status_code=404, detail=_VENDOR_NOT_FOUND)
     return {"_bare": True, **_vendor_dict(db, row)}
 
 
@@ -321,19 +323,19 @@ def get_vendor(
     ),
     dependencies=[Depends(require_permission(VENDORS_MANAGE))],
     responses={
-        404: {"description": "Vendor not found"},
+        404: {"description": _VENDOR_NOT_FOUND},
         409: {"description": "Vendor name already in use"},
     },
 )
 def update_vendor(
     vendor_id: str,
     payload: VendorUpdateRequest,
-    db: Session = Depends(get_db),
-    caller_user_id: str = Depends(get_current_user_id),
+    db: Annotated[Session, Depends(get_db)],
+    caller_user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> Dict[str, Any]:
     row = db.get(Vendor, vendor_id)
     if not row:
-        raise HTTPException(status_code=404, detail="Vendor not found")
+        raise HTTPException(status_code=404, detail=_VENDOR_NOT_FOUND)
     update_data = payload.model_dump(exclude_unset=True, exclude={"project_ids", "user_assignments"})
     if "name" in update_data and update_data["name"] != row.name:
         clash = db.execute(
@@ -374,16 +376,16 @@ def update_vendor(
         "Project mappings are preserved for restore. Requires vendors:manage."
     ),
     dependencies=[Depends(require_permission(VENDORS_MANAGE))],
-    responses={404: {"description": "Vendor not found"}},
+    responses={404: {"description": _VENDOR_NOT_FOUND}},
 )
 def delete_vendor(
     vendor_id: str,
-    db: Session = Depends(get_db),
-    caller_user_id: str = Depends(get_current_user_id),
+    db: Annotated[Session, Depends(get_db)],
+    caller_user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> None:
     row = db.get(Vendor, vendor_id)
     if not row:
-        raise HTTPException(status_code=404, detail="Vendor not found")
+        raise HTTPException(status_code=404, detail=_VENDOR_NOT_FOUND)
     now = datetime.now(timezone.utc)
     row.active = False
     row.deleted_at = now
@@ -400,15 +402,15 @@ def delete_vendor(
         "Requires vendors:manage."
     ),
     dependencies=[Depends(require_permission(VENDORS_MANAGE))],
-    responses={404: {"description": "Vendor not found"}},
+    responses={404: {"description": _VENDOR_NOT_FOUND}},
 )
 def restore_vendor(
     vendor_id: str,
-    db: Session = Depends(get_db),
+    db: Annotated[Session, Depends(get_db)],
 ) -> Dict[str, Any]:
     row = db.get(Vendor, vendor_id)
     if not row:
-        raise HTTPException(status_code=404, detail="Vendor not found")
+        raise HTTPException(status_code=404, detail=_VENDOR_NOT_FOUND)
     row.active = True
     row.deleted_at = None
     row.deleted_by = None
@@ -427,14 +429,14 @@ def restore_vendor(
         "Requires vendors:read."
     ),
     dependencies=[Depends(require_permission(VENDORS_READ))],
-    responses={404: {"description": "Vendor not found"}},
+    responses={404: {"description": _VENDOR_NOT_FOUND}},
 )
 def list_vendor_users(
     vendor_id: str,
-    db: Session = Depends(get_db),
+    db: Annotated[Session, Depends(get_db)],
 ) -> Any:
     if not db.get(Vendor, vendor_id):
-        raise HTTPException(status_code=404, detail="Vendor not found")
+        raise HTTPException(status_code=404, detail=_VENDOR_NOT_FOUND)
 
     stmt_direct = (
         select(User)

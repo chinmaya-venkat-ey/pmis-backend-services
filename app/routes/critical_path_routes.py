@@ -45,7 +45,7 @@ router = APIRouter(
 )
 def get_dependencies(
     project_id: str,
-    controller: CriticalPathController = Depends(get_critical_path_controller),
+    controller: Annotated[CriticalPathController, Depends(get_critical_path_controller)],
 ) -> Dict[str, Any]:
     return controller.dependencies(project_id)
 
@@ -66,7 +66,7 @@ def get_dependencies(
 def get_analysis(
     project_id: str,
     body: Optional[CpaAnalysisRequest] = None,
-    controller: CriticalPathController = Depends(get_critical_path_controller),
+    controller: Annotated[CriticalPathController, Depends(get_critical_path_controller)],
 ) -> Dict[str, Any]:
     overrides = body.overrides if body else None
     return controller.analysis(project_id, overrides=overrides)

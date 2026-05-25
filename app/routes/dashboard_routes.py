@@ -41,10 +41,10 @@ router = APIRouter(
     ),
 )
 def get_dashboard_summary(
-    delayMinDays: int = Query(5, ge=1, le=365),
-    controller: DashboardController = Depends(get_dashboard_controller),
+    delay_min_days: int = Query(5, ge=1, le=365, alias="delayMinDays"),
+    controller: Annotated[DashboardController, Depends(get_dashboard_controller)],
 ) -> Dict[str, Any]:
-    return controller.summary(delay_min_days=delayMinDays)
+    return controller.summary(delay_min_days=delay_min_days)
 
 
 @router.get(
@@ -62,19 +62,19 @@ def get_dashboard_summary(
 def list_dashboard_projects_route(
     bucket: Optional[str] = Query(None),
     q: Optional[str] = Query(None),
-    vendorId: Optional[str] = Query(None),
+    vendor_id: Optional[str] = Query(None, alias="vendorId"),
     division: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
-    pageSize: int = Query(200, ge=1, le=500),
-    controller: DashboardController = Depends(get_dashboard_controller),
+    page_size: int = Query(200, ge=1, le=500, alias="pageSize"),
+    controller: Annotated[DashboardController, Depends(get_dashboard_controller)],
 ) -> Dict[str, Any]:
     return controller.projects(
         bucket=bucket,
         q=q,
-        vendor_id=vendorId,
+        vendor_id=vendor_id,
         division=division,
         page=page,
-        page_size=pageSize,
+        page_size=page_size,
     )
 
 
@@ -91,11 +91,11 @@ def list_dashboard_projects_route(
 )
 def get_dashboard_project_detail(
     project_uuid: str,
-    delayMinDays: int = Query(5, ge=1, le=365),
-    controller: DashboardController = Depends(get_dashboard_controller),
+    delay_min_days: int = Query(5, ge=1, le=365, alias="delayMinDays"),
+    controller: Annotated[DashboardController, Depends(get_dashboard_controller)],
 ) -> Dict[str, Any]:
     return controller.project_detail(
-        project_id=project_uuid, delay_min_days=delayMinDays,
+        project_id=project_uuid, delay_min_days=delay_min_days,
     )
 
 
@@ -113,16 +113,16 @@ def get_dashboard_project_items(
     project_uuid: str,
     kind: Optional[str] = Query(None),
     bucket: Optional[str] = Query(None),
-    milestoneId: Optional[str] = Query(None),
-    minDelay: Optional[int] = Query(None, ge=0),
-    controller: DashboardController = Depends(get_dashboard_controller),
+    milestone_id: Optional[str] = Query(None, alias="milestoneId"),
+    min_delay: Optional[int] = Query(None, ge=0, alias="minDelay"),
+    controller: Annotated[DashboardController, Depends(get_dashboard_controller)],
 ) -> Dict[str, Any]:
     return controller.project_items(
         project_id=project_uuid,
         kind=kind,
         bucket=bucket,
-        milestone_id=milestoneId,
-        min_delay=minDelay,
+        milestone_id=milestone_id,
+        min_delay=min_delay,
     )
 
 
@@ -137,7 +137,7 @@ def get_dashboard_project_items(
     ),
 )
 def list_dashboard_organisations(
-    controller: DashboardController = Depends(get_dashboard_controller),
+    controller: Annotated[DashboardController, Depends(get_dashboard_controller)],
 ) -> Dict[str, Any]:
     return controller.organisations()
 
@@ -153,6 +153,6 @@ def list_dashboard_organisations(
 )
 def get_dashboard_organisation_detail(
     vendor_id: str,
-    controller: DashboardController = Depends(get_dashboard_controller),
+    controller: Annotated[DashboardController, Depends(get_dashboard_controller)],
 ) -> Dict[str, Any]:
     return controller.organisation_detail(vendor_id=vendor_id)

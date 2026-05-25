@@ -128,8 +128,8 @@ async def _create_multipart(
 async def create_milestone(
     request: Request,
     project_uuid: str,
-    controller: MilestoneController = Depends(get_milestone_controller),
-    caller_user_id: Optional[str] = Depends(get_optional_current_user_id),
+    controller: Annotated[MilestoneController, Depends(get_milestone_controller)],
+    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
 ):
     return await dispatch_create(
         request,
@@ -153,7 +153,7 @@ def list_project_milestones(
     offset: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100, alias="pageSize"),
     include_deleted: bool = Query(False, alias="includeDeleted"),
-    controller: MilestoneController = Depends(get_milestone_controller),
+    controller: Annotated[MilestoneController, Depends(get_milestone_controller)],
 ):
     return controller.list_for_project(
         project_uuid, offset=offset, page_size=page_size,
@@ -173,7 +173,7 @@ router = APIRouter(prefix="/milestones", tags=["milestones"])
 )
 def get_milestone(
     milestone_id: str,
-    controller: MilestoneController = Depends(get_milestone_controller),
+    controller: Annotated[MilestoneController, Depends(get_milestone_controller)],
 ):
     return controller.get(milestone_id)
 
@@ -188,8 +188,8 @@ def update_milestone(
     milestone_id: str,
     payload: MilestoneUpdateRequest,
     request: Request,
-    controller: MilestoneController = Depends(get_milestone_controller),
-    caller_user_id: Optional[str] = Depends(get_optional_current_user_id),
+    controller: Annotated[MilestoneController, Depends(get_milestone_controller)],
+    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
 ):
     return controller.update(
         milestone_id, payload,
@@ -205,8 +205,8 @@ def update_milestone(
 )
 def delete_milestone(
     milestone_id: str,
-    controller: MilestoneController = Depends(get_milestone_controller),
-    caller_user_id: Optional[str] = Depends(get_optional_current_user_id),
+    controller: Annotated[MilestoneController, Depends(get_milestone_controller)],
+    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
 ):
     controller.delete(milestone_id, caller_user_id=caller_user_id)
 
@@ -219,7 +219,7 @@ def delete_milestone(
 )
 def restore_milestone(
     milestone_id: str,
-    controller: MilestoneController = Depends(get_milestone_controller),
-    caller_user_id: Optional[str] = Depends(get_optional_current_user_id),
+    controller: Annotated[MilestoneController, Depends(get_milestone_controller)],
+    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
 ):
     return controller.restore(milestone_id, caller_user_id=caller_user_id)

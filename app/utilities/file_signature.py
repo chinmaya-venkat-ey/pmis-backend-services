@@ -38,22 +38,24 @@ _SNIFF_BYTES = 4096
 # ``ATTACHMENTS_ALLOWED_EXTENSIONS`` env var. Office documents
 # (.docx / .xlsx / .pptx) are ZIP archives — accept either the
 # Office-specific MIME or ``application/zip``.
+MIME_ZIP = "application/zip"
+
 ALLOWED_BY_EXT: dict[str, Set[str]] = {
     "pdf":  {"application/pdf"},
     "doc":  {"application/msword"},
     "docx": {
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "application/zip",
+        MIME_ZIP,
     },
     "xls":  {"application/vnd.ms-excel"},
     "xlsx": {
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "application/zip",
+        MIME_ZIP,
     },
     "ppt":  {"application/vnd.ms-powerpoint"},
     "pptx": {
         "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        "application/zip",
+        MIME_ZIP,
     },
     "jpg":  {"image/jpeg"},
     "jpeg": {"image/jpeg"},

@@ -123,8 +123,8 @@ async def _create_multipart(
 async def create_activity(
     request: Request,
     milestone_id: str,
-    controller: ActivityController = Depends(get_activity_controller),
-    caller_user_id: Optional[str] = Depends(get_optional_current_user_id),
+    controller: Annotated[ActivityController, Depends(get_activity_controller)],
+    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
 ):
     return await dispatch_create(
         request,
@@ -148,7 +148,7 @@ def list_milestone_activities(
     offset: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100, alias="pageSize"),
     include_deleted: bool = Query(False, alias="includeDeleted"),
-    controller: ActivityController = Depends(get_activity_controller),
+    controller: Annotated[ActivityController, Depends(get_activity_controller)],
 ):
     return controller.list_for_milestone(
         milestone_id, offset=offset, page_size=page_size,
@@ -168,7 +168,7 @@ router = APIRouter(prefix="/activities", tags=["activities"])
 )
 def get_activity(
     activity_id: str,
-    controller: ActivityController = Depends(get_activity_controller),
+    controller: Annotated[ActivityController, Depends(get_activity_controller)],
 ):
     return controller.get(activity_id)
 
@@ -183,8 +183,8 @@ def update_activity(
     activity_id: str,
     payload: ActivityUpdateRequest,
     request: Request,
-    controller: ActivityController = Depends(get_activity_controller),
-    caller_user_id: Optional[str] = Depends(get_optional_current_user_id),
+    controller: Annotated[ActivityController, Depends(get_activity_controller)],
+    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
 ):
     return controller.update(
         activity_id, payload,
@@ -200,8 +200,8 @@ def update_activity(
 )
 def delete_activity(
     activity_id: str,
-    controller: ActivityController = Depends(get_activity_controller),
-    caller_user_id: Optional[str] = Depends(get_optional_current_user_id),
+    controller: Annotated[ActivityController, Depends(get_activity_controller)],
+    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
 ):
     controller.delete(activity_id, caller_user_id=caller_user_id)
 
@@ -214,7 +214,7 @@ def delete_activity(
 )
 def restore_activity(
     activity_id: str,
-    controller: ActivityController = Depends(get_activity_controller),
-    caller_user_id: Optional[str] = Depends(get_optional_current_user_id),
+    controller: Annotated[ActivityController, Depends(get_activity_controller)],
+    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
 ):
     return controller.restore(activity_id, caller_user_id=caller_user_id)

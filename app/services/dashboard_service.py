@@ -643,9 +643,8 @@ class DashboardService:
             if not any(needle in (p or "").lower() for p in haystack):
                 return False
 
-        if vendor_id:
-            if not any(v[0] == vendor_id for v in vendors):
-                return False
+        if vendor_id and not any(v[0] == vendor_id for v in vendors):
+            return False
 
         if division:
             target = division.lower()

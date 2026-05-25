@@ -17,7 +17,8 @@ from app.controllers.subtask_controller import SubtaskController
 from app.controllers.task_controller import TaskController
 from app.controllers.team_controller import TeamController
 from app.controllers.tree_controller import TreeController
-from app.core.errors import UnauthorizedError
+from app.core.rbac import AUTH_REQUIRED_MESSAGE
+.errors import UnauthorizedError
 from app.db import get_db
 
 
@@ -26,7 +27,7 @@ from app.db import get_db
 def get_current_user_id(request: Request) -> str:
     uid = getattr(request.state, "user_id", None)
     if not uid:
-        raise UnauthorizedError("Authentication required", code="auth_required")
+        raise UnauthorizedError(AUTH_REQUIRED_MESSAGE, code="auth_required")
     return uid
 
 

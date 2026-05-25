@@ -12,6 +12,8 @@ from fastapi import Request
 from app.core.errors import ForbiddenError, UnauthorizedError
 
 
+AUTH_REQUIRED_MESSAGE = AUTH_REQUIRED_MESSAGE
+
 def _user_id(request: Request) -> Optional[str]:
     return getattr(request.state, "user_id", None)
 
@@ -36,7 +38,7 @@ def require_authenticated() -> Callable:
     def _checker(request: Request) -> str:
         uid = _user_id(request)
         if not uid:
-            raise UnauthorizedError("Authentication required", code="auth_required")
+            raise UnauthorizedError(AUTH_REQUIRED_MESSAGE, code="auth_required")
         return uid
 
     return _checker
@@ -48,7 +50,7 @@ def require_permission(permission_code: Union[str, object]) -> Callable:
     def _checker(request: Request) -> str:
         uid = _user_id(request)
         if not uid:
-            raise UnauthorizedError("Authentication required", code="auth_required")
+            raise UnauthorizedError(AUTH_REQUIRED_MESSAGE, code="auth_required")
         if _is_admin(request):
             return uid
         if code not in _user_permissions(request):
@@ -70,7 +72,7 @@ def require_any_permission(*permission_codes: Union[str, object]) -> Callable:
     def _checker(request: Request) -> str:
         uid = _user_id(request)
         if not uid:
-            raise UnauthorizedError("Authentication required", code="auth_required")
+            raise UnauthorizedError(AUTH_REQUIRED_MESSAGE, code="auth_required")
         if _is_admin(request):
             return uid
         held = _user_permissions(request)
@@ -89,7 +91,7 @@ def require_admin() -> Callable:
     def _checker(request: Request) -> str:
         uid = _user_id(request)
         if not uid:
-            raise UnauthorizedError("Authentication required", code="auth_required")
+            raise UnauthorizedError(AUTH_REQUIRED_MESSAGE, code="auth_required")
         if not _is_admin(request):
             raise ForbiddenError("Admin role required", code="admin_required")
         return uid
@@ -217,7 +219,7 @@ def require_project_permission(permission_code: Union[str, object]) -> Callable:
     def _checker(request: Request) -> str:
         uid = _user_id(request)
         if not uid:
-            raise UnauthorizedError("Authentication required", code="auth_required")
+            raise UnauthorizedError(AUTH_REQUIRED_MESSAGE, code="auth_required")
         # Admin short-circuit: bypasses the project-id resolution (and
         # its SQL ancestor walk) since admin / super_admin already pass
         # every per-project check.
@@ -247,7 +249,7 @@ def require_org_permission(permission_code: Union[str, object]) -> Callable:
     def _checker(request: Request) -> str:
         uid = _user_id(request)
         if not uid:
-            raise UnauthorizedError("Authentication required", code="auth_required")
+            raise UnauthorizedError(AUTH_REQUIRED_MESSAGE, code="auth_required")
         org_id = _resolve_org_id_from_path(request)
         if org_id is None:
             raise ForbiddenError(
@@ -291,7 +293,7 @@ def assert_field_writes_allowed(
     """
     uid = _user_id(request)
     if not uid:
-        raise UnauthorizedError("Authentication required", code="auth_required")
+        raise UnauthorizedError(AUTH_REQUIRED_MESSAGE, code="auth_required")
     if _is_admin(request):
         return
 
@@ -344,7 +346,7 @@ def assert_action_allowed(
     """
     uid = _user_id(request)
     if not uid:
-        raise UnauthorizedError("Authentication required", code="auth_required")
+        raise UnauthorizedError(AUTH_REQUIRED_MESSAGE, code="auth_required")
     if _is_admin(request):
         return
     target_scope = scope_key or ("global", None)

@@ -50,10 +50,42 @@ def _days_needed(act: Dict[str, Any]) -> int:
 
 
 def _days_delayed(act: Dict[str, Any]) -> int:
+    """Two-case delay calculation:
+
+    1. Completed late — actual_end_date is set AND exceeds planned end_date.
+       Delay = actual_end - planned_end.
+    2. Running late — activity is not yet completed AND today is past the
+       planned end_date. Delay = today - planned_end (calendar-date math).
+
+    On-time / not-yet-due / completed-on-time all return 0.
+    """
+    from datetime import datetime, date
+    from app.utilities.timezones import IST
+
     ed = act.get("end_date")
     aed = act.get("actual_end_date")
+    status = (act.get("status") or "").lower()
+
+    # Case 1: completed late (actual exceeded planned)
     if ed and aed and aed > ed:
         return (aed - ed).days
+
+    # Case 2: still running and past planned end_date — accrue delay daily.
+    # Skip when status is already "completed" (data anomaly where actual_end
+    # wasn't recorded — don't double-count against today's date).
+    # Normalize both sides to IST before extracting the date component so
+    # UTC-stored end_dates (with +05:30 offset) don't slip back a calendar
+    # day during the comparison.
+    if ed and status != "completed":
+        today = datetime.now(IST)
+        if hasattr(ed, "tzinfo") and ed.tzinfo is not None:
+            ed_d = ed.astimezone(IST).date()
+        else:
+            ed_d = ed.date() if hasattr(ed, "date") else ed
+        today_d = today.date()
+        if isinstance(ed_d, date) and today_d > ed_d:
+            return (today_d - ed_d).days
+
     return 0
 
 

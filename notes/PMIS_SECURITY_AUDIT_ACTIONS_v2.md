@@ -138,13 +138,3 @@ grep -rIn "10\.1\.131\.199" PMIS-user-management PMIS-master PMIS-project-manage
 ```
 
 Both commands returning no output means every SonarQube security finding from the original four reports is now resolved in source. The X-7 re-scan then confirms it from Sonar's end and gives notification-service its first real scan.
-
----
-
-## 6 · Files referenced
-
-| Path | Purpose |
-|---|---|
-| `C:\Users\WC544QK\Downloads\Security Assessment Report_PMIS\Assessment Report\PMIS_SECURITY_AUDIT_ACTIONS.md` | v1 audit (full list, all severities) |
-| `C:\Users\WC544QK\AppData\Local\Temp\um_SecHotspots.tsv`, `ms_SecHotspots.tsv`, `ns_SecHotspots.tsv`, `pmis_pm_SecHotspots.tsv` | Raw security hotspot listings per report |
-| `C:\Users\WC544QK\AppData\Local\Temp\*_Issues_dedup.tsv` | Raw issue listings per report (deduped) |

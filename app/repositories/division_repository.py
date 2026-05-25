@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from sqlalchemy import select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from app.models.division import Division
@@ -24,7 +24,13 @@ class DivisionRepository:
         stmt = select(Division)
         if not include_inactive:
             stmt = stmt.where(Division.active.is_(True))
-        stmt = stmt.order_by(Division.label.asc())
+        # Pin "Others" to the bottom regardless of alphabetical position; sort
+        # everything else by label ascending.
+        others_last = case(
+            (func.lower(Division.label) == "others", 1),
+            else_=0,
+        )
+        stmt = stmt.order_by(others_last.asc(), Division.label.asc())
         return list(self.db.execute(stmt).scalars().all())
 
     def create(self, **kwargs) -> Division:

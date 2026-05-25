@@ -27,7 +27,7 @@ router = APIRouter(prefix="/resource_types", tags=["resource_types"])
 )
 def list_resource_types(
     include_inactive: bool = Query(False, description="Include deactivated rows"),
-    controller: Annotated[ResourceTypeController, Depends(get_resource_type_controller)],
+    controller: Annotated[ResourceTypeController, Depends(get_resource_type_controller)] = Depends(get_resource_type_controller),
 ) -> List[ResourceTypeResponse]:
     return controller.list_(include_inactive=include_inactive)
 
@@ -40,7 +40,7 @@ def list_resource_types(
 )
 def get_resource_type_details(
     rt_id: str,
-    controller: Annotated[ResourceTypeController, Depends(get_resource_type_controller)],
+    controller: Annotated[ResourceTypeController, Depends(get_resource_type_controller)] = Depends(get_resource_type_controller),
 ) -> ResourceTypeResponse:
     return controller.get_details(rt_id)
 
@@ -55,7 +55,7 @@ def get_resource_type_details(
 )
 def create_resource_type(
     payload: ResourceTypeCreateRequest,
-    controller: Annotated[ResourceTypeController, Depends(get_resource_type_controller)],
+    controller: Annotated[ResourceTypeController, Depends(get_resource_type_controller)] = Depends(get_resource_type_controller),
 ) -> ResourceTypeResponse:
     return controller.create(payload)
 
@@ -69,7 +69,7 @@ def create_resource_type(
 def update_resource_type(
     rt_id: str,
     payload: ResourceTypeUpdateRequest,
-    controller: Annotated[ResourceTypeController, Depends(get_resource_type_controller)],
+    controller: Annotated[ResourceTypeController, Depends(get_resource_type_controller)] = Depends(get_resource_type_controller),
 ) -> ResourceTypeResponse:
     return controller.update(rt_id, payload)
 
@@ -82,7 +82,7 @@ def update_resource_type(
 )
 def delete_resource_type(
     rt_id: str,
-    controller: Annotated[ResourceTypeController, Depends(get_resource_type_controller)],
+    controller: Annotated[ResourceTypeController, Depends(get_resource_type_controller)] = Depends(get_resource_type_controller),
 ) -> ResourceTypeResponse:
     return controller.delete(rt_id)
 
@@ -95,6 +95,6 @@ def delete_resource_type(
 )
 def restore_resource_type(
     rt_id: str,
-    controller: Annotated[ResourceTypeController, Depends(get_resource_type_controller)],
+    controller: Annotated[ResourceTypeController, Depends(get_resource_type_controller)] = Depends(get_resource_type_controller),
 ) -> ResourceTypeResponse:
     return controller.restore(rt_id)

@@ -36,7 +36,7 @@ router = APIRouter(prefix="/divisions", tags=["divisions"])
 )
 def list_divisions(
     include_inactive: bool = Query(False, description="Include deactivated rows"),
-    controller: Annotated[DivisionController, Depends(get_division_controller)],
+    controller: Annotated[DivisionController, Depends(get_division_controller)] = Depends(get_division_controller),
 ) -> List[DivisionResponse]:
     return controller.list_(include_inactive=include_inactive)
 
@@ -51,7 +51,7 @@ def list_divisions(
 )
 def get_division_details(
     code: str,
-    controller: Annotated[DivisionController, Depends(get_division_controller)],
+    controller: Annotated[DivisionController, Depends(get_division_controller)] = Depends(get_division_controller),
 ) -> DivisionResponse:
     return controller.get_details(code)
 
@@ -71,7 +71,7 @@ def get_division_details(
 )
 def create_division(
     payload: DivisionCreateRequest,
-    controller: Annotated[DivisionController, Depends(get_division_controller)],
+    controller: Annotated[DivisionController, Depends(get_division_controller)] = Depends(get_division_controller),
 ) -> DivisionResponse:
     return controller.create(payload)
 
@@ -90,7 +90,7 @@ def create_division(
 def update_division(
     code: str,
     payload: DivisionUpdateRequest,
-    controller: Annotated[DivisionController, Depends(get_division_controller)],
+    controller: Annotated[DivisionController, Depends(get_division_controller)] = Depends(get_division_controller),
 ) -> DivisionResponse:
     return controller.update(code, payload)
 
@@ -108,7 +108,7 @@ def update_division(
 )
 def delete_division(
     code: str,
-    controller: Annotated[DivisionController, Depends(get_division_controller)],
+    controller: Annotated[DivisionController, Depends(get_division_controller)] = Depends(get_division_controller),
 ) -> DivisionResponse:
     return controller.delete(code)
 
@@ -126,6 +126,6 @@ def delete_division(
 )
 def restore_division(
     code: str,
-    controller: Annotated[DivisionController, Depends(get_division_controller)],
+    controller: Annotated[DivisionController, Depends(get_division_controller)] = Depends(get_division_controller),
 ) -> DivisionResponse:
     return controller.restore(code)

@@ -27,7 +27,7 @@ router = APIRouter(prefix="/project_categories", tags=["project_categories"])
 )
 def list_project_categories(
     include_inactive: bool = Query(False, description="Include deactivated rows"),
-    controller: Annotated[ProjectCategoryController, Depends(get_project_category_controller)],
+    controller: Annotated[ProjectCategoryController, Depends(get_project_category_controller)] = Depends(get_project_category_controller),
 ) -> List[ProjectCategoryResponse]:
     return controller.list_(include_inactive=include_inactive)
 
@@ -40,7 +40,7 @@ def list_project_categories(
 )
 def get_project_category_details(
     code: str,
-    controller: Annotated[ProjectCategoryController, Depends(get_project_category_controller)],
+    controller: Annotated[ProjectCategoryController, Depends(get_project_category_controller)] = Depends(get_project_category_controller),
 ) -> ProjectCategoryResponse:
     return controller.get_details(code)
 
@@ -54,7 +54,7 @@ def get_project_category_details(
 )
 def create_project_category(
     payload: ProjectCategoryCreateRequest,
-    controller: Annotated[ProjectCategoryController, Depends(get_project_category_controller)],
+    controller: Annotated[ProjectCategoryController, Depends(get_project_category_controller)] = Depends(get_project_category_controller),
 ) -> ProjectCategoryResponse:
     return controller.create(payload)
 
@@ -68,7 +68,7 @@ def create_project_category(
 def update_project_category(
     code: str,
     payload: ProjectCategoryUpdateRequest,
-    controller: Annotated[ProjectCategoryController, Depends(get_project_category_controller)],
+    controller: Annotated[ProjectCategoryController, Depends(get_project_category_controller)] = Depends(get_project_category_controller),
 ) -> ProjectCategoryResponse:
     return controller.update(code, payload)
 
@@ -81,7 +81,7 @@ def update_project_category(
 )
 def delete_project_category(
     code: str,
-    controller: Annotated[ProjectCategoryController, Depends(get_project_category_controller)],
+    controller: Annotated[ProjectCategoryController, Depends(get_project_category_controller)] = Depends(get_project_category_controller),
 ) -> ProjectCategoryResponse:
     return controller.delete(code)
 
@@ -94,6 +94,6 @@ def delete_project_category(
 )
 def restore_project_category(
     code: str,
-    controller: Annotated[ProjectCategoryController, Depends(get_project_category_controller)],
+    controller: Annotated[ProjectCategoryController, Depends(get_project_category_controller)] = Depends(get_project_category_controller),
 ) -> ProjectCategoryResponse:
     return controller.restore(code)

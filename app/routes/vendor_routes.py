@@ -43,7 +43,7 @@ def list_vendors(
         False,
         description="When true, return only active vendors. Default false shows all (active + inactive).",
     ),
-    controller: Annotated[VendorController, Depends(get_vendor_controller)],
+    controller: Annotated[VendorController, Depends(get_vendor_controller)] = Depends(get_vendor_controller),
 ) -> Dict[str, Any]:
     return controller.list_(
         active_only=active_only,
@@ -61,7 +61,7 @@ def list_vendors(
 )
 def get_vendor_details(
     vendor_id: str,
-    controller: Annotated[VendorController, Depends(get_vendor_controller)],
+    controller: Annotated[VendorController, Depends(get_vendor_controller)] = Depends(get_vendor_controller),
 ) -> Dict[str, Any]:
     return controller.get_details(vendor_id)
 
@@ -78,7 +78,7 @@ def get_vendor_details(
 )
 def list_users_for_vendor(
     vendor_id: str,
-    controller: Annotated[VendorController, Depends(get_vendor_controller)],
+    controller: Annotated[VendorController, Depends(get_vendor_controller)] = Depends(get_vendor_controller),
 ) -> List[VendorUserSummary]:
     return controller.list_users(vendor_id)
 
@@ -95,7 +95,7 @@ def list_users_for_vendor(
 )
 def list_projects_for_vendor(
     vendor_id: str,
-    controller: Annotated[VendorController, Depends(get_vendor_controller)],
+    controller: Annotated[VendorController, Depends(get_vendor_controller)] = Depends(get_vendor_controller),
 ) -> Dict[str, Any]:
     return controller.list_projects(vendor_id)
 
@@ -113,7 +113,7 @@ def list_projects_for_vendor(
 )
 def create_vendor(
     payload: VendorCreateRequest,
-    controller: Annotated[VendorController, Depends(get_vendor_controller)],
+    controller: Annotated[VendorController, Depends(get_vendor_controller)] = Depends(get_vendor_controller),
 ) -> Dict[str, Any]:
     return controller.create(payload)
 
@@ -135,7 +135,7 @@ def create_vendor(
 def update_vendor(
     vendor_id: str,
     payload: VendorUpdateRequest,
-    controller: Annotated[VendorController, Depends(get_vendor_controller)],
+    controller: Annotated[VendorController, Depends(get_vendor_controller)] = Depends(get_vendor_controller),
 ) -> Dict[str, Any]:
     return controller.update(vendor_id, payload)
 
@@ -154,7 +154,7 @@ def update_vendor(
 def delete_vendor(
     vendor_id: str,
     request: Request,
-    controller: Annotated[VendorController, Depends(get_vendor_controller)],
+    controller: Annotated[VendorController, Depends(get_vendor_controller)] = Depends(get_vendor_controller),
 ) -> None:
     deleted_by_user_id = getattr(request.state, "user_id", None) or ""
     controller.delete(vendor_id, deleted_by_user_id=deleted_by_user_id)
@@ -172,6 +172,6 @@ def delete_vendor(
 )
 def restore_vendor(
     vendor_id: str,
-    controller: Annotated[VendorController, Depends(get_vendor_controller)],
+    controller: Annotated[VendorController, Depends(get_vendor_controller)] = Depends(get_vendor_controller),
 ) -> Dict[str, Any]:
     return controller.restore(vendor_id)

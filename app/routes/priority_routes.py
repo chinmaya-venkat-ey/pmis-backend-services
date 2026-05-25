@@ -27,7 +27,7 @@ router = APIRouter(prefix="/priorities", tags=["priorities"])
 )
 def list_priorities(
     include_inactive: bool = Query(False, description="Include deactivated rows"),
-    controller: Annotated[PriorityController, Depends(get_priority_controller)],
+    controller: Annotated[PriorityController, Depends(get_priority_controller)] = Depends(get_priority_controller),
 ) -> List[PriorityResponse]:
     return controller.list_(include_inactive=include_inactive)
 
@@ -40,7 +40,7 @@ def list_priorities(
 )
 def get_priority_details(
     code: str,
-    controller: Annotated[PriorityController, Depends(get_priority_controller)],
+    controller: Annotated[PriorityController, Depends(get_priority_controller)] = Depends(get_priority_controller),
 ) -> PriorityResponse:
     return controller.get_details(code)
 
@@ -55,7 +55,7 @@ def get_priority_details(
 )
 def create_priority(
     payload: PriorityCreateRequest,
-    controller: Annotated[PriorityController, Depends(get_priority_controller)],
+    controller: Annotated[PriorityController, Depends(get_priority_controller)] = Depends(get_priority_controller),
 ) -> PriorityResponse:
     return controller.create(payload)
 
@@ -69,7 +69,7 @@ def create_priority(
 def update_priority(
     code: str,
     payload: PriorityUpdateRequest,
-    controller: Annotated[PriorityController, Depends(get_priority_controller)],
+    controller: Annotated[PriorityController, Depends(get_priority_controller)] = Depends(get_priority_controller),
 ) -> PriorityResponse:
     return controller.update(code, payload)
 
@@ -82,7 +82,7 @@ def update_priority(
 )
 def delete_priority(
     code: str,
-    controller: Annotated[PriorityController, Depends(get_priority_controller)],
+    controller: Annotated[PriorityController, Depends(get_priority_controller)] = Depends(get_priority_controller),
 ) -> PriorityResponse:
     return controller.delete(code)
 
@@ -95,6 +95,6 @@ def delete_priority(
 )
 def restore_priority(
     code: str,
-    controller: Annotated[PriorityController, Depends(get_priority_controller)],
+    controller: Annotated[PriorityController, Depends(get_priority_controller)] = Depends(get_priority_controller),
 ) -> PriorityResponse:
     return controller.restore(code)

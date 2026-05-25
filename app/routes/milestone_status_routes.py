@@ -27,7 +27,7 @@ router = APIRouter(prefix="/milestone_statuses", tags=["milestone_statuses"])
 )
 def list_milestone_statuses(
     include_inactive: bool = Query(False, description="Include deactivated rows"),
-    controller: Annotated[MilestoneStatusController, Depends(get_milestone_status_controller)],
+    controller: Annotated[MilestoneStatusController, Depends(get_milestone_status_controller)] = Depends(get_milestone_status_controller),
 ) -> List[MilestoneStatusResponse]:
     return controller.list_(include_inactive=include_inactive)
 
@@ -40,7 +40,7 @@ def list_milestone_statuses(
 )
 def get_milestone_status_details(
     code: str,
-    controller: Annotated[MilestoneStatusController, Depends(get_milestone_status_controller)],
+    controller: Annotated[MilestoneStatusController, Depends(get_milestone_status_controller)] = Depends(get_milestone_status_controller),
 ) -> MilestoneStatusResponse:
     return controller.get_details(code)
 
@@ -54,7 +54,7 @@ def get_milestone_status_details(
 )
 def create_milestone_status(
     payload: MilestoneStatusCreateRequest,
-    controller: Annotated[MilestoneStatusController, Depends(get_milestone_status_controller)],
+    controller: Annotated[MilestoneStatusController, Depends(get_milestone_status_controller)] = Depends(get_milestone_status_controller),
 ) -> MilestoneStatusResponse:
     return controller.create(payload)
 
@@ -68,7 +68,7 @@ def create_milestone_status(
 def update_milestone_status(
     code: str,
     payload: MilestoneStatusUpdateRequest,
-    controller: Annotated[MilestoneStatusController, Depends(get_milestone_status_controller)],
+    controller: Annotated[MilestoneStatusController, Depends(get_milestone_status_controller)] = Depends(get_milestone_status_controller),
 ) -> MilestoneStatusResponse:
     return controller.update(code, payload)
 
@@ -81,7 +81,7 @@ def update_milestone_status(
 )
 def delete_milestone_status(
     code: str,
-    controller: Annotated[MilestoneStatusController, Depends(get_milestone_status_controller)],
+    controller: Annotated[MilestoneStatusController, Depends(get_milestone_status_controller)] = Depends(get_milestone_status_controller),
 ) -> MilestoneStatusResponse:
     return controller.delete(code)
 
@@ -94,6 +94,6 @@ def delete_milestone_status(
 )
 def restore_milestone_status(
     code: str,
-    controller: Annotated[MilestoneStatusController, Depends(get_milestone_status_controller)],
+    controller: Annotated[MilestoneStatusController, Depends(get_milestone_status_controller)] = Depends(get_milestone_status_controller),
 ) -> MilestoneStatusResponse:
     return controller.restore(code)

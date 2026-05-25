@@ -10,6 +10,8 @@ from app.schemas.team import (
     ActivityAssignmentsWrite,
     OwnershipRead,
     OwnershipWrite,
+    TeamPageRequest,
+    TeamPageResponse,
     TeamReadResponse,
     TeamWriteRequest,
     TeamWriteResponse,
@@ -53,3 +55,14 @@ class TeamController:
         caller_id: Optional[str],
     ) -> ActivityAssignmentsRead:
         return self.service.save_activity_assignments(activity_id, payload, caller_id)
+
+    def get_team_page(self, project_id: str) -> TeamPageResponse:
+        return self.service.get_team_page(project_id)
+
+    def save_team_page(
+        self,
+        project_id: str,
+        payload: TeamPageRequest,
+        caller_id: Optional[str],
+    ) -> TeamPageResponse:
+        return self.service.save_team_page(project_id, payload, caller_id)

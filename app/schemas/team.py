@@ -7,12 +7,15 @@ Endpoints served:
   PUT  /api/v3/projects/{id}/ownership             — set project owner/approver
   GET  /api/v3/activities/{id}/assignments         — per-activity assignments read
   PUT  /api/v3/activities/{id}/assignments         — per-activity assignments write
+  GET  /api/v3/projects/{id}/team-page             — UI-shaped snapshot (Manage Team page load)
+  PUT  /api/v3/projects/{id}/team-page             — UI-shaped bulk save (Submit button)
 """
 from __future__ import annotations
 
 from typing import Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
+from pydantic.alias_generators import to_camel
 
 # ── Sample user chips reused across schema examples ─────────────────────────
 _EX_USER1 = {"id": "usr-0001", "login": "rajesh.kumar",  "email": "rajesh.kumar@uidai.gov.in",  "first_name": "Rajesh", "last_name": "Kumar"}
@@ -288,3 +291,142 @@ class TeamWriteResponse(BaseModel):
     project_id: str
     updated_ownership: bool
     updated_activities: List[str] = Field(default_factory=list, description="activity IDs updated")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# UI-shaped schemas for GET/PUT /projects/{id}/team-page
+#
+# These mirror the JS `state` + `USER_DIRECTORY` objects in Manage Team.html
+# exactly so the frontend can use the response with no transformation.
+#
+# Wire keys are camelCase (alias_generator=to_camel).
+# ─────────────────────────────────────────────────────────────────────────────
+
+class UserDirectoryEntry(BaseModel):
+    """One entry in the userDirectory array: { id, name } — same shape as
+    USER_DIRECTORY in the HTML. `name` is formatted as 'First Last (login)'."""
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        populate_by_name=True,
+    )
+    id: str
+    name: str
+
+
+class OrgUserRow(BaseModel):
+    """One row of state.orgUser: { roleLabel, users: [id, ...] }.
+    Read-only from the UI; orgUser changes are managed by user-management."""
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        populate_by_name=True,
+        extra="ignore",
+    )
+    role_label: str
+    users: List[str] = Field(default_factory=list, description="User IDs")
+
+
+class ProjectOwnerRow(BaseModel):
+    """One row of state.projectOwner: { roleLabel, users, single? }.
+    single=true marks the Approver row (single-select in UI)."""
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        populate_by_name=True,
+        extra="ignore",
+    )
+    role_label: str
+    users: List[str] = Field(default_factory=list, description="User IDs")
+    single: bool = False
+
+
+class TeamPageActivity(BaseModel):
+    """One entry of state.activities — mirrors the JS activity object exactly."""
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        populate_by_name=True,
+        extra="ignore",
+    )
+    id: str
+    name: str
+    milestone: str = Field(description="Milestone name (not ID)")
+    concerned_divisions: List[str] = Field(default_factory=list)
+    owner: List[str] = Field(default_factory=list, description="User IDs")
+    owner_approver: List[str] = Field(
+        default_factory=list, description="User IDs (single approver; first wins)"
+    )
+    division_users: Dict[str, List[str]] = Field(
+        default_factory=dict,
+        description="division_code → user IDs",
+    )
+    division_approvers: Dict[str, List[str]] = Field(
+        default_factory=dict,
+        description="division_code → approver user IDs (single; first wins)",
+    )
+
+
+class TeamPageResponse(BaseModel):
+    """GET /projects/{id}/team-page response — the full UI state + userDirectory.
+
+    Drop this directly into the Manage Team page: assign `projectId` / `projectName`
+    to the context banner, replace `USER_DIRECTORY` with `userDirectory`, and
+    set the JS `state` object to `{ orgUser, projectOwner, activities }`.
+    """
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        populate_by_name=True,
+        json_schema_extra={
+            "example": {
+                "projectId": "proj-1111-2222-3333-4444",
+                "projectName": "Aadhaar Service Onboarding",
+                "userDirectory": [
+                    {"id": "usr-0001", "name": "Rajesh Kumar (rajesh.kumar)"},
+                    {"id": "usr-0002", "name": "Priya Sharma (priya.sharma)"},
+                ],
+                "orgUser": [
+                    {"roleLabel": "project_admin",  "users": ["usr-0001"]},
+                    {"roleLabel": "project_member", "users": ["usr-0002"]},
+                ],
+                "projectOwner": [
+                    {"roleLabel": "Approver",      "users": ["usr-0002"], "single": True},
+                    {"roleLabel": "Project Owner", "users": ["usr-0001"]},
+                ],
+                "activities": [
+                    {
+                        "id": "act-a101",
+                        "name": "Requirements Gathering",
+                        "milestone": "Planning",
+                        "concernedDivisions": ["IT_DIV", "LEGAL_DIV"],
+                        "owner": ["usr-0001"],
+                        "ownerApprover": ["usr-0002"],
+                        "divisionUsers": {"IT_DIV": ["usr-0001"], "LEGAL_DIV": ["usr-0002"]},
+                        "divisionApprovers": {"IT_DIV": ["usr-0002"], "LEGAL_DIV": ["usr-0001"]},
+                    }
+                ],
+            }
+        },
+    )
+    project_id: str
+    project_name: str
+    user_directory: List[UserDirectoryEntry] = Field(default_factory=list)
+    org_user: List[OrgUserRow] = Field(default_factory=list)
+    project_owner: List[ProjectOwnerRow] = Field(default_factory=list)
+    activities: List[TeamPageActivity] = Field(default_factory=list)
+
+
+class TeamPageRequest(BaseModel):
+    """PUT /projects/{id}/team-page body — the JS `state` object verbatim.
+
+    orgUser is accepted for schema symmetry but is read-only on the backend:
+    org-level role assignments live in user-management and cannot be written
+    through this endpoint. Only projectOwner and activities are persisted.
+    """
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        populate_by_name=True,
+        extra="ignore",
+    )
+    org_user: List[OrgUserRow] = Field(
+        default_factory=list,
+        description="Read-only: org role assignments are managed by user-management service.",
+    )
+    project_owner: List[ProjectOwnerRow] = Field(default_factory=list)
+    activities: List[TeamPageActivity] = Field(default_factory=list)

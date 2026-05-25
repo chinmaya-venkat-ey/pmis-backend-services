@@ -37,6 +37,8 @@ from app.schemas.team import (
     ActivityAssignmentsWrite,
     OwnershipRead,
     OwnershipWrite,
+    TeamPageRequest,
+    TeamPageResponse,
     TeamReadResponse,
     TeamWriteRequest,
     TeamWriteResponse,
@@ -479,3 +481,47 @@ def save_activity_assignments(
     controller: Annotated[TeamController, Depends(get_team_controller)] = Depends(get_team_controller),
 ):
     return controller.save_activity_assignments(activity_id, body, caller_id)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# UI-shaped team page  (prepopulate + save in one call each)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@project_team_router.get(
+    "/{project_id}/team-page",
+    response_model=TeamPageResponse,
+    summary="Prepopulate Manage-Team page (UI-shaped)",
+    description=(
+        "Returns the exact `state` + `userDirectory` objects the Manage-Team HTML "
+        "needs — no frontend transformation required. "
+        "`orgUser` rows come from user-role-assignments (read-only). "
+        "`projectOwner` and `activities` reflect saved ownership and assignments."
+    ),
+    dependencies=[Depends(require_permission(PROJECT_MEMBERS_READ))],
+)
+def get_team_page(
+    project_id: str,
+    controller: TeamController = Depends(get_team_controller),
+):
+    return controller.get_team_page(project_id)
+
+
+@project_team_router.put(
+    "/{project_id}/team-page",
+    response_model=TeamPageResponse,
+    summary="Save Manage-Team page (UI Submit button)",
+    description=(
+        "Accepts the `state` object verbatim from the Manage-Team HTML Submit button. "
+        "`orgUser` is ignored (read-only). "
+        "`projectOwner` and `activities` are persisted (full replace per scope). "
+        "Returns the refreshed page state identical to GET team-page."
+    ),
+    dependencies=[Depends(require_permission(PROJECT_MEMBERS_UPDATE))],
+)
+def save_team_page(
+    project_id: str,
+    body: TeamPageRequest,
+    caller_id: str = Depends(get_current_user_id),
+    controller: TeamController = Depends(get_team_controller),
+):
+    return controller.save_team_page(project_id, body, caller_id)

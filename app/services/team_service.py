@@ -33,13 +33,19 @@ from app.schemas.team import (
     ActivityAssignmentsRead,
     ActivityAssignmentsWrite,
     OrgMemberBucket,
+    OrgUserRow,
     OwnershipRead,
     OwnershipWrite,
+    ProjectOwnerRow,
     TeamActivityRow,
+    TeamPageActivity,
+    TeamPageRequest,
+    TeamPageResponse,
     TeamReadResponse,
     TeamUserChip,
     TeamWriteRequest,
     TeamWriteResponse,
+    UserDirectoryEntry,
 )
 
 
@@ -338,3 +344,133 @@ class TeamService:
         self._write_activity_assignments(activity_id, act.project_id, entry, caller_id)
         self.db.commit()
         return self._read_activity_assignments(activity_id)
+
+    # ── UI-shaped team-page endpoints ────────────────────────────────────────
+
+    @staticmethod
+    def _format_display_name(user_dict: Dict[str, Any]) -> str:
+        """'First Last (login)' — same compact format as USER_DIRECTORY in HTML."""
+        parts = " ".join(
+            x for x in [user_dict.get("first_name"), user_dict.get("last_name")] if x
+        ).strip()
+        login = user_dict.get("login", "")
+        return f"{parts} ({login})" if parts else login
+
+    def get_team_page(self, project_id: str) -> TeamPageResponse:
+        """Full UI state for GET /projects/{id}/team-page.
+
+        Returns projectId/projectName, userDirectory (assignable users formatted
+        for USER_DIRECTORY), and the three state sections (orgUser, projectOwner,
+        activities) with user IDs — not full user objects — matching the JS state
+        shape exactly so the frontend needs zero transformation.
+        """
+        proj = self._get_project_or_404(project_id)
+
+        # userDirectory — assignable users formatted for the user picker
+        raw_users = self.assignable_repo.list_assignable_users_for_project(project_id)
+        user_directory = [
+            UserDirectoryEntry(id=u["id"], name=self._format_display_name(u))
+            for u in raw_users
+        ]
+
+        # orgUser — read from user_role_assignments (read-only on this endpoint)
+        org_members = self._read_org_members(project_id)
+        org_user = [
+            OrgUserRow(role_label=bucket.role_name, users=[c.id for c in bucket.users])
+            for bucket in org_members
+        ]
+
+        # projectOwner — Approver row always first (single=True), then Project Owner
+        ownership = self._read_ownership(project_id)
+        project_owner = [
+            ProjectOwnerRow(
+                role_label="Approver",
+                users=[c.id for c in ownership.approver],
+                single=True,
+            ),
+            ProjectOwnerRow(
+                role_label="Project Owner",
+                users=[c.id for c in ownership.project_owner],
+            ),
+        ]
+
+        # activities — flat list ordered milestone.position → activity.position
+        team_activities = self._read_team_activities(project_id)
+        activities = [
+            TeamPageActivity(
+                id=row.id,
+                name=row.name,
+                milestone=row.milestone_name,
+                concerned_divisions=row.concerned_divisions,
+                owner=[c.id for c in row.assignments.owner],
+                owner_approver=[c.id for c in row.assignments.owner_approver],
+                division_users={
+                    div: [c.id for c in chips]
+                    for div, chips in row.assignments.division_users.items()
+                },
+                division_approvers={
+                    div: [c.id for c in chips]
+                    for div, chips in row.assignments.division_approvers.items()
+                },
+            )
+            for row in team_activities
+        ]
+
+        return TeamPageResponse(
+            project_id=proj.id,
+            project_name=proj.name,
+            user_directory=user_directory,
+            org_user=org_user,
+            project_owner=project_owner,
+            activities=activities,
+        )
+
+    def save_team_page(
+        self,
+        project_id: str,
+        payload: TeamPageRequest,
+        caller_id: Optional[str],
+    ) -> TeamPageResponse:
+        """Bulk save for PUT /projects/{id}/team-page (the Submit button).
+
+        Persists projectOwner and all activities. orgUser is accepted in the
+        body for schema symmetry but is NOT written here — org-level role
+        assignments are owned by the user-management service.
+        """
+        self._get_project_or_404(project_id)
+
+        # Save project ownership: match rows by roleLabel
+        owner_ids: List[str] = []
+        approver_ids: List[str] = []
+        for row in payload.project_owner:
+            label = row.role_label.lower()
+            if row.single or label == "approver":
+                approver_ids = row.users[:1]
+            else:
+                owner_ids = row.users
+
+        self._write_ownership(
+            project_id,
+            OwnershipWrite(project_owner=owner_ids, approver=approver_ids),
+            caller_id,
+        )
+
+        # Save every activity's assignments
+        for act_payload in payload.activities:
+            act = self.db.get(Activity, act_payload.id)
+            if act is None or act.deleted_at is not None or act.project_id != project_id:
+                continue
+            self._write_activity_assignments(
+                act_payload.id,
+                project_id,
+                ActivityAssignmentEntry(
+                    owner=act_payload.owner,
+                    owner_approver=act_payload.owner_approver,
+                    division_users=act_payload.division_users,
+                    division_approvers=act_payload.division_approvers,
+                ),
+                caller_id,
+            )
+
+        self.db.commit()
+        return self.get_team_page(project_id)

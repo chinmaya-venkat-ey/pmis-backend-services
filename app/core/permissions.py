@@ -477,3 +477,21 @@ LOCKED_ROLE_NAMES: Final[frozenset[str]] = frozenset({
     SUPER_ADMIN_ROLE,
     ADMIN_ROLE,
 })
+
+
+# Org-tier role names ordered highest → lowest. The user-mgmt `org_role`
+# string (column + API field) is restricted to one of these — `test_role`
+# and any custom roles are NOT valid org tiers.
+#
+# Used for:
+#   * UserController._derive_org_role priority resolution
+#   * UserService.update org_role write-side validation
+#   * monolith-parity fallback in _derive_org_role to users.org_role column
+ORG_TIER_ROLES: Final[tuple[str, ...]] = (
+    SUPER_ADMIN_ROLE,
+    ADMIN_ROLE,
+    ORG_ADMIN_ROLE,
+    PROJECT_ADMIN_ROLE,
+    PROJECT_MEMBER_ROLE,
+    DIVISION_MEMBER_ROLE,
+)

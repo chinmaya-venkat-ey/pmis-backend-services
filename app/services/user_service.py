@@ -24,7 +24,7 @@ from app.core.errors import (
     UserLoginAlreadyInUseError,
     UserNotFoundError,
 )
-from app.core.permissions import SUPER_ADMIN_ROLE
+from app.core.permissions import ORG_TIER_ROLES, SUPER_ADMIN_ROLE
 from app.core.security import hash_password
 from app.repositories.rbac_repository import RbacRepository
 from app.repositories.user_repository import UserRepository
@@ -241,9 +241,119 @@ class UserService:
                 )
             updates["email"] = email
 
+        # Doc-45 round-9b extension: when the PATCH supplies org_role, also
+        # sync the GLOBAL org-tier role-assignment so the user actually gets
+        # the permissions. The column on its own is decorative; the matching
+        # row in user_role_assignments is what authorizes. Existing scoped
+        # assignments (org / project) are left untouched — only globally-
+        # scoped org-tier rows are managed by this sync.
+        if "org_role" in updates:
+            self._sync_org_role_assignment(
+                target=target,
+                new_org_role=updates["org_role"],
+                caller_user_id=caller_user_id,
+                caller_is_admin=caller_is_admin,
+            )
+
         self.repo.update(target, **updates)
         self.db.commit()
         return target
+
+    def _sync_org_role_assignment(
+        self,
+        *,
+        target,
+        new_org_role,
+        caller_user_id: str,
+        caller_is_admin: bool,
+    ) -> None:
+        """Keep the global org-tier user_role_assignment in sync with the
+        user's org_role column on PATCH /users/{id}.
+
+        Behavior:
+          * new_org_role normalized to lowercase string; null/empty → "clear"
+          * Non-empty value must be one of ORG_TIER_ROLES (the 6 builtins).
+            test_role and any other custom role → 422 ValidationError.
+          * Permission gate: reuses RoleAssignmentService._assert_caller_can_grant
+            so the same caller-tier rules apply (only super_admin can grant
+            super_admin / admin, etc.).
+          * Last-super-admin lockout: if the target is the only super_admin
+            and the new value is NOT super_admin, refuse to avoid locking the
+            instance out of admin access.
+          * Atomic delete-then-create within the surrounding update()
+            transaction: remove every globally-scoped org-tier row for the
+            target, then insert one fresh row for the new tier (if any).
+        """
+        from app.core.errors import ValidationError
+        from app.repositories.user_role_assignment_repository import UserRoleAssignmentRepository
+        from app.services.role_assignment_service import RoleAssignmentService
+
+        normalized = (new_org_role or "").strip().lower() or None
+
+        if normalized is not None and normalized not in ORG_TIER_ROLES:
+            raise ValidationError(
+                f"org_role must be one of {list(ORG_TIER_ROLES)} (or null to clear). "
+                f"Got {new_org_role!r}.",
+                details={"field": "org_role", "value": new_org_role,
+                         "allowed": list(ORG_TIER_ROLES)},
+            )
+
+        # Last-super-admin lockout: target currently is super_admin (via any
+        # path) and the new value isn't super_admin → refuse.
+        if normalized != SUPER_ADMIN_ROLE and self._is_only_super_admin(target.id):
+            raise LastSuperAdminLockoutError(
+                "Cannot strip the last remaining super_admin of their tier.",
+                details={"target_user_id": target.id},
+            )
+
+        # Permission gate — only run when actually assigning a new tier.
+        # Reuses the existing matrix + caller-tier rules so we don't drift.
+        if normalized is not None:
+            ra_service = RoleAssignmentService(self.db)
+            ra_service._assert_caller_can_grant(
+                role_name=normalized,
+                organization_id=None,
+                project_id=None,
+                caller_user_id=caller_user_id,
+                caller_is_admin=caller_is_admin,
+            )
+
+        # Delete every globally-scoped org-tier assignment the target currently
+        # holds. Scoped assignments (org_id / project_id set) are NOT touched —
+        # those represent per-project membership and live independently.
+        ra_repo = UserRoleAssignmentRepository(self.db)
+        existing_pairs = ra_repo.list_by_user(target.id)
+        for assignment, role in existing_pairs:
+            is_global = assignment.organization_id is None and assignment.project_id is None
+            if is_global and role.name in ORG_TIER_ROLES:
+                ra_repo.delete(assignment)
+
+        # Insert the new globally-scoped assignment for the requested tier
+        # (skip when clearing).
+        if normalized is not None:
+            new_role = self.rbac.get_role_by_name(normalized)
+            if new_role is None:
+                # ORG_TIER_ROLES is the bootstrap-seeded set; if the row is
+                # missing the install is broken — treat as 500-class.
+                raise ValidationError(
+                    f"Role {normalized!r} is in the allowlist but not present "
+                    f"in users.roles. Bootstrap migration may have been "
+                    f"skipped.",
+                )
+            ra_repo.create(
+                user_id=target.id,
+                role_id=new_role.id,
+                organization_id=None,
+                project_id=None,
+                created_by_user_id=caller_user_id,
+            )
+
+        # Clear-case workaround: UserRepository.update() silently skips
+        # None-valued kwargs (only writes non-None fields), so org_role=null
+        # in the PATCH body wouldn't otherwise reach the DB. Set the ORM
+        # attribute directly here; SQLAlchemy emits the UPDATE on flush.
+        if normalized is None:
+            target.org_role = None
 
     def update_password(
         self,

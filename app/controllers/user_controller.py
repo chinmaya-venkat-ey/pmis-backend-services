@@ -25,10 +25,9 @@ from app.services.user_service import UserService
 
 
 # Ordered highest → lowest; first match is the canonical org_role label.
-_ROLE_PRIORITY = (
-    "super_admin", "admin", "org_admin",
-    "project_admin", "project_member", "division_member",
-)
+# Sourced from core/permissions.py so the same allowlist is used by both
+# the read (derive_org_role) and write (UserService.update) paths.
+from app.core.permissions import ORG_TIER_ROLES as _ROLE_PRIORITY
 
 
 class UserController:
@@ -64,8 +63,12 @@ class UserController:
 
     def _derive_org_role(self, user_id: str) -> Optional[str]:
         """Return the highest-tier role the user currently holds (both legacy
-        user_roles and scoped user_role_assignments). Used to populate the
-        org_role label — the DB column value is decoration only."""
+        user_roles and scoped user_role_assignments). When no role
+        assignment matches, fall back to the ``users.org_role`` column for
+        monolith parity (the column is then the authoritative label).
+        Only the 6 builtin tier names are valid org-role labels — any
+        other column value (e.g., ``test_role``, legacy typos) is ignored.
+        """
         db = self.user_service.db
         legacy = set(db.execute(
             select(Role.name)
@@ -82,6 +85,12 @@ class UserController:
         for tier in _ROLE_PRIORITY:
             if tier in held:
                 return tier
+        # Monolith parity fallback: users.org_role column. Only return if
+        # the stored value is one of the recognized builtin tiers.
+        user_row = self.user_service.repo.get_by_id(user_id)
+        col_value = (getattr(user_row, "org_role", None) or "").strip().lower() if user_row else None
+        if col_value in _ROLE_PRIORITY:
+            return col_value
         return None
 
     def _build_user_response(self, user) -> UserResponse:

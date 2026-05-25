@@ -223,6 +223,7 @@ class TeamReadResponse(BaseModel):
         }
     })
     project_id: str
+    project_code: Optional[str] = None
     project_name: str
     org_members: List[OrgMemberBucket] = Field(default_factory=list)
     ownership: OwnershipRead
@@ -284,11 +285,13 @@ class TeamWriteResponse(BaseModel):
     model_config = ConfigDict(json_schema_extra={
         "example": {
             "project_id": "proj-1111-2222-3333-4444",
+            "project_code": "UIDAI-PR260525124245137",
             "updated_ownership": True,
             "updated_activities": ["act-a101", "act-a102"],
         }
     })
     project_id: str
+    project_code: Optional[str] = None
     updated_ownership: bool
     updated_activities: List[str] = Field(default_factory=list, description="activity IDs updated")
 
@@ -405,6 +408,7 @@ class TeamPageResponse(BaseModel):
         },
     )
     project_id: str
+    project_code: Optional[str] = None
     project_name: str
     user_directory: List[UserDirectoryEntry] = Field(default_factory=list)
     org_user: List[OrgUserRow] = Field(default_factory=list)

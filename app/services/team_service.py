@@ -274,6 +274,7 @@ class TeamService:
 
         return TeamReadResponse(
             project_id=proj.id,
+            project_code=proj.project_code,
             project_name=proj.name,
             org_members=org_members,
             ownership=ownership,
@@ -287,7 +288,7 @@ class TeamService:
         payload: TeamWriteRequest,
         caller_id: Optional[str],
     ) -> TeamWriteResponse:
-        self._get_project_or_404(project_id)
+        proj = self._get_project_or_404(project_id)
 
         updated_ownership = False
         if payload.ownership is not None:
@@ -305,6 +306,7 @@ class TeamService:
         self.db.commit()
         return TeamWriteResponse(
             project_id=project_id,
+            project_code=proj.project_code,
             updated_ownership=updated_ownership,
             updated_activities=updated_activities,
         )
@@ -418,6 +420,7 @@ class TeamService:
 
         return TeamPageResponse(
             project_id=proj.id,
+            project_code=proj.project_code,
             project_name=proj.name,
             user_directory=user_directory,
             org_user=org_user,

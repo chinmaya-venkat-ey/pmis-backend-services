@@ -25,7 +25,6 @@ router = APIRouter(prefix="/divisions", tags=["divisions"])
 
 @router.get(
     "",
-    response_model=List[DivisionResponse],
     response_model_by_alias=True,
     summary="List divisions",
     description=(
@@ -37,14 +36,13 @@ router = APIRouter(prefix="/divisions", tags=["divisions"])
 )
 def list_divisions(
     include_inactive: bool = Query(False, description="Include deactivated rows"),
-    controller: DivisionController = Depends(get_division_controller),
+    controller: Annotated[DivisionController, Depends(get_division_controller)],
 ) -> List[DivisionResponse]:
     return controller.list_(include_inactive=include_inactive)
 
 
 @router.get(
     "/{code}",
-    response_model=DivisionResponse,
     response_model_by_alias=True,
     summary="Get division details",
     description="Returns one division by code. 404 if not found. Requires divisions:read.",
@@ -53,14 +51,13 @@ def list_divisions(
 )
 def get_division_details(
     code: str,
-    controller: DivisionController = Depends(get_division_controller),
+    controller: Annotated[DivisionController, Depends(get_division_controller)],
 ) -> DivisionResponse:
     return controller.get_details(code)
 
 
 @router.post(
     "/create",
-    response_model=DivisionResponse,
     response_model_by_alias=True,
     status_code=status.HTTP_201_CREATED,
     summary="Create a division",
@@ -74,14 +71,13 @@ def get_division_details(
 )
 def create_division(
     payload: DivisionCreateRequest,
-    controller: DivisionController = Depends(get_division_controller),
+    controller: Annotated[DivisionController, Depends(get_division_controller)],
 ) -> DivisionResponse:
     return controller.create(payload)
 
 
 @router.patch(
     "/{code}",
-    response_model=DivisionResponse,
     response_model_by_alias=True,
     summary="Update a division",
     description=(
@@ -94,14 +90,13 @@ def create_division(
 def update_division(
     code: str,
     payload: DivisionUpdateRequest,
-    controller: DivisionController = Depends(get_division_controller),
+    controller: Annotated[DivisionController, Depends(get_division_controller)],
 ) -> DivisionResponse:
     return controller.update(code, payload)
 
 
 @router.delete(
     "/{code}",
-    response_model=DivisionResponse,
     response_model_by_alias=True,
     summary="Delete (deactivate) a division",
     description=(
@@ -113,14 +108,13 @@ def update_division(
 )
 def delete_division(
     code: str,
-    controller: DivisionController = Depends(get_division_controller),
+    controller: Annotated[DivisionController, Depends(get_division_controller)],
 ) -> DivisionResponse:
     return controller.delete(code)
 
 
 @router.post(
     "/{code}/restore",
-    response_model=DivisionResponse,
     response_model_by_alias=True,
     summary="Restore (reactivate) a division",
     description=(
@@ -132,6 +126,6 @@ def delete_division(
 )
 def restore_division(
     code: str,
-    controller: DivisionController = Depends(get_division_controller),
+    controller: Annotated[DivisionController, Depends(get_division_controller)],
 ) -> DivisionResponse:
     return controller.restore(code)

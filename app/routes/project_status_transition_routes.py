@@ -32,7 +32,6 @@ router = APIRouter(
 
 @router.get(
     "",
-    response_model=List[ProjectStatusTransitionResponse],
     summary="List project status transitions",
     description=(
         "Returns the legal state-machine edges. project-svc reads these to "
@@ -51,7 +50,6 @@ def list_project_status_transitions(
 
 @router.get(
     "/{row_id}",
-    response_model=ProjectStatusTransitionResponse,
     summary="Get project status transition details",
     dependencies=[Depends(require_permission(PROJECT_STATUS_TRANSITIONS_READ))],
     responses={404: {"description": "ProjectStatusTransition not found"}},
@@ -67,7 +65,6 @@ def get_project_status_transition_details(
 
 @router.post(
     "/create",
-    response_model=ProjectStatusTransitionResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create a project status transition edge",
     description="`from_status=null` for the initial-status seed; otherwise both required.",
@@ -85,7 +82,6 @@ def create_project_status_transition(
 
 @router.patch(
     "/{row_id}",
-    response_model=ProjectStatusTransitionResponse,
     summary="Update a project status transition",
     description="`from_status` and `to_status` are immutable.",
     dependencies=[Depends(require_permission(PROJECT_STATUS_TRANSITIONS_MANAGE))],
@@ -103,7 +99,6 @@ def update_project_status_transition(
 
 @router.delete(
     "/{row_id}",
-    response_model=ProjectStatusTransitionResponse,
     summary="Delete (deactivate) a project status transition",
     dependencies=[Depends(require_permission(PROJECT_STATUS_TRANSITIONS_MANAGE))],
     responses={404: {"description": "ProjectStatusTransition not found"}},
@@ -119,7 +114,6 @@ def delete_project_status_transition(
 
 @router.post(
     "/{row_id}/restore",
-    response_model=ProjectStatusTransitionResponse,
     summary="Restore (reactivate) a project status transition",
     dependencies=[Depends(require_permission(PROJECT_STATUS_TRANSITIONS_MANAGE))],
     responses={404: {"description": "ProjectStatusTransition not found"}},

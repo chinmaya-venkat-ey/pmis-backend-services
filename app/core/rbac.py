@@ -25,6 +25,8 @@ from fastapi import Request
 from app.core.errors import ForbiddenError, UnauthorizedError
 
 
+AUTH_REQUIRED_MESSAGE = AUTH_REQUIRED_MESSAGE
+
 def _user_id_from_state(request: Request) -> str | None:
     return getattr(request.state, "user_id", None)
 
@@ -44,7 +46,7 @@ def require_authenticated() -> Callable:
     def _checker(request: Request) -> str:
         user_id = _user_id_from_state(request)
         if not user_id:
-            raise UnauthorizedError("Authentication required", code="AUTH_REQUIRED")
+            raise UnauthorizedError(AUTH_REQUIRED_MESSAGE, code="AUTH_REQUIRED")
         return user_id
 
     return _checker
@@ -60,7 +62,7 @@ def require_permission(permission_code: str) -> Callable:
     def _checker(request: Request) -> str:
         user_id = _user_id_from_state(request)
         if not user_id:
-            raise UnauthorizedError("Authentication required", code="AUTH_REQUIRED")
+            raise UnauthorizedError(AUTH_REQUIRED_MESSAGE, code="AUTH_REQUIRED")
         if _is_admin_from_state(request):
             return user_id
         if permission_code not in _user_permissions_from_state(request):
@@ -83,7 +85,7 @@ def require_any_permission(*permission_codes: str) -> Callable:
     def _checker(request: Request) -> str:
         user_id = _user_id_from_state(request)
         if not user_id:
-            raise UnauthorizedError("Authentication required", code="AUTH_REQUIRED")
+            raise UnauthorizedError(AUTH_REQUIRED_MESSAGE, code="AUTH_REQUIRED")
         if _is_admin_from_state(request):
             return user_id
         held = _user_permissions_from_state(request)
@@ -104,7 +106,7 @@ def require_admin() -> Callable:
     def _checker(request: Request) -> str:
         user_id = _user_id_from_state(request)
         if not user_id:
-            raise UnauthorizedError("Authentication required", code="AUTH_REQUIRED")
+            raise UnauthorizedError(AUTH_REQUIRED_MESSAGE, code="AUTH_REQUIRED")
         if not _is_admin_from_state(request):
             raise ForbiddenError(
                 "Admin role required",

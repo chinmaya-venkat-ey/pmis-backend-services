@@ -21,35 +21,32 @@ router = APIRouter(prefix="/priorities", tags=["priorities"])
 
 @router.get(
     "",
-    response_model=List[PriorityResponse],
     summary="List priorities",
     description="Returns priorities ordered by position. Requires priorities:read.",
     dependencies=[Depends(require_permission(PRIORITIES_READ))],
 )
 def list_priorities(
     include_inactive: bool = Query(False, description="Include deactivated rows"),
-    controller: PriorityController = Depends(get_priority_controller),
+    controller: Annotated[PriorityController, Depends(get_priority_controller)],
 ) -> List[PriorityResponse]:
     return controller.list_(include_inactive=include_inactive)
 
 
 @router.get(
     "/{code}",
-    response_model=PriorityResponse,
     summary="Get priority details",
     dependencies=[Depends(require_permission(PRIORITIES_READ))],
     responses={404: {"description": "Priority not found"}},
 )
 def get_priority_details(
     code: str,
-    controller: PriorityController = Depends(get_priority_controller),
+    controller: Annotated[PriorityController, Depends(get_priority_controller)],
 ) -> PriorityResponse:
     return controller.get_details(code)
 
 
 @router.post(
     "/create",
-    response_model=PriorityResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create a priority",
     description="`code` is normalized to UPPERCASE server-side. Requires priorities:manage.",
@@ -58,14 +55,13 @@ def get_priority_details(
 )
 def create_priority(
     payload: PriorityCreateRequest,
-    controller: PriorityController = Depends(get_priority_controller),
+    controller: Annotated[PriorityController, Depends(get_priority_controller)],
 ) -> PriorityResponse:
     return controller.create(payload)
 
 
 @router.patch(
     "/{code}",
-    response_model=PriorityResponse,
     summary="Update a priority",
     dependencies=[Depends(require_permission(PRIORITIES_MANAGE))],
     responses={404: {"description": "Priority not found"}},
@@ -73,34 +69,32 @@ def create_priority(
 def update_priority(
     code: str,
     payload: PriorityUpdateRequest,
-    controller: PriorityController = Depends(get_priority_controller),
+    controller: Annotated[PriorityController, Depends(get_priority_controller)],
 ) -> PriorityResponse:
     return controller.update(code, payload)
 
 
 @router.delete(
     "/{code}",
-    response_model=PriorityResponse,
     summary="Delete (deactivate) a priority",
     dependencies=[Depends(require_permission(PRIORITIES_MANAGE))],
     responses={404: {"description": "Priority not found"}},
 )
 def delete_priority(
     code: str,
-    controller: PriorityController = Depends(get_priority_controller),
+    controller: Annotated[PriorityController, Depends(get_priority_controller)],
 ) -> PriorityResponse:
     return controller.delete(code)
 
 
 @router.post(
     "/{code}/restore",
-    response_model=PriorityResponse,
     summary="Restore (reactivate) a priority",
     dependencies=[Depends(require_permission(PRIORITIES_MANAGE))],
     responses={404: {"description": "Priority not found"}},
 )
 def restore_priority(
     code: str,
-    controller: PriorityController = Depends(get_priority_controller),
+    controller: Annotated[PriorityController, Depends(get_priority_controller)],
 ) -> PriorityResponse:
     return controller.restore(code)

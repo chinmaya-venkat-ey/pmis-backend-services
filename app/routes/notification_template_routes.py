@@ -32,7 +32,6 @@ router = APIRouter(prefix="/notification_templates", tags=["notification_templat
 
 @router.get(
     "",
-    response_model=List[NotificationTemplateResponse],
     summary="List notification templates",
     dependencies=[Depends(require_permission(NOTIFICATION_TEMPLATES_READ))],
 )
@@ -47,7 +46,6 @@ def list_notification_templates(
 
 @router.get(
     "/{template_id}",
-    response_model=NotificationTemplateResponse,
     summary="Get notification template details",
     dependencies=[Depends(require_permission(NOTIFICATION_TEMPLATES_READ))],
     responses={404: {"description": "NotificationTemplate not found"}},
@@ -63,7 +61,6 @@ def get_notification_template_details(
 
 @router.post(
     "/create",
-    response_model=NotificationTemplateResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create a notification template",
     description=(
@@ -85,7 +82,6 @@ def create_notification_template(
 
 @router.patch(
     "/{template_id}",
-    response_model=NotificationTemplateResponse,
     summary="Update a notification template",
     description="`template_kind` and `channel` are immutable.",
     dependencies=[Depends(require_permission(NOTIFICATION_TEMPLATES_MANAGE))],
@@ -103,7 +99,6 @@ def update_notification_template(
 
 @router.delete(
     "/{template_id}",
-    response_model=NotificationTemplateResponse,
     summary="Delete (deactivate) a notification template",
     dependencies=[Depends(require_permission(NOTIFICATION_TEMPLATES_MANAGE))],
     responses={404: {"description": "NotificationTemplate not found"}},
@@ -119,7 +114,6 @@ def delete_notification_template(
 
 @router.post(
     "/{template_id}/restore",
-    response_model=NotificationTemplateResponse,
     summary="Restore (reactivate) a notification template",
     description=(
         "Restore is REJECTED if another row for the same (template_kind, "

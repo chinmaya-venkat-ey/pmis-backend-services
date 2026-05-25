@@ -25,7 +25,7 @@ from fastapi import Request
 from app.core.errors import ForbiddenError, UnauthorizedError
 
 
-AUTH_REQUIRED_MESSAGE = AUTH_REQUIRED_MESSAGE
+AUTH_REQUIRED_MESSAGE = "Authentication required"
 
 def _user_id_from_state(request: Request) -> str | None:
     return getattr(request.state, "user_id", None)

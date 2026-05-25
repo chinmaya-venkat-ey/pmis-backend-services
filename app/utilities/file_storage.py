@@ -3,9 +3,6 @@
 Ported from PMIS-OpenProject/app/infrastructure/storage/file_storage.py.
 
 The "local folder" is parameterised by ``settings.attachments_storage_base_path``:
-  - In production it is an NFS mount point (10.1.131.199) wired into the
-    container via ``/etc/fstab``; the OS handles the network transport
-    transparently and the app sees only a folder.
   - In development it is a plain folder under the repo root.
 
 The code path is identical either way. Switching backend (S3 / MinIO /

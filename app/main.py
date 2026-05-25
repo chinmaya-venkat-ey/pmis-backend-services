@@ -40,9 +40,7 @@ async def lifespan(app: FastAPI):
         settings.service_name, settings.env,
     )
 
-    # Fail-fast probe on attachment storage. In prod the base path is an
-    # NFS mount (10.1.131.199); if it's missing / unmounted / read-only we
-    # want to know at startup, not on the first upload. In dev the base
+    # Fail-fast probe on attachment storage.. In dev the base
     # path may simply not be configured yet — log a warning but don't
     # block app boot, since /health and the non-attachment routes still
     # work fine.

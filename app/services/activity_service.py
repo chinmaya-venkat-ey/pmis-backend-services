@@ -81,6 +81,19 @@ class ActivityService:
         self._validate_priority(payload.priority)
         self._validate_owner_division(payload.owner_division)
         self._validate_concerned_divisions(payload.concerned_divisions)
+        # Owner/concerned division "others" requires a free-text companion.
+        from app.utilities.division_other_pair import (
+            validate_owner_division_pair,
+            validate_concerned_divisions_pair,
+        )
+        validate_owner_division_pair(
+            owner_division=payload.owner_division,
+            owner_division_other=payload.owner_division_other,
+        )
+        validate_concerned_divisions_pair(
+            concerned_divisions=payload.concerned_divisions,
+            concerned_division_other=payload.concerned_division_other,
+        )
         # Vendor (when supplied) must be attached to the parent project.
         if payload.vendor_id:
             assert_vendor_in_project(
@@ -115,7 +128,9 @@ class ActivityService:
             status=payload.status,
             priority=payload.priority,
             owner_division=payload.owner_division,
+            owner_division_other=payload.owner_division_other,
             concerned_divisions=payload.concerned_divisions,
+            concerned_division_other=payload.concerned_division_other,
             vendor_id=payload.vendor_id,
             position=position,
             created_by=caller_user_id,
@@ -168,6 +183,31 @@ class ActivityService:
         if "owner_division" in updates:
             self._validate_owner_division(updates["owner_division"])
         # concerned_divisions accepted silently (no catalog check).
+        # Owner/concerned division "others" pair revalidation. Use the
+        # UNTOUCHED sentinel for sides not present in the PATCH payload —
+        # falls back to the existing DB value, so users can flip just one
+        # side at a time without sending the other.
+        if (
+            "owner_division" in updates or "owner_division_other" in updates
+            or "concerned_divisions" in updates or "concerned_division_other" in updates
+        ):
+            from app.utilities.division_other_pair import (
+                UNTOUCHED,
+                validate_owner_division_pair,
+                validate_concerned_divisions_pair,
+            )
+            validate_owner_division_pair(
+                owner_division=updates.get("owner_division", UNTOUCHED),
+                owner_division_other=updates.get("owner_division_other", UNTOUCHED),
+                existing_owner_division=row.owner_division,
+                existing_owner_division_other=row.owner_division_other,
+            )
+            validate_concerned_divisions_pair(
+                concerned_divisions=updates.get("concerned_divisions", UNTOUCHED),
+                concerned_division_other=updates.get("concerned_division_other", UNTOUCHED),
+                existing_concerned_divisions=row.concerned_divisions,
+                existing_concerned_division_other=row.concerned_division_other,
+            )
         if "vendor_id" in updates and updates["vendor_id"]:
             assert_vendor_in_project(
                 self.db, project_id=row.project_id,

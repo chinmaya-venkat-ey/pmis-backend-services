@@ -408,10 +408,7 @@ class TeamPageResponse(BaseModel):
         },
     )
     project_id: str
-<<<<<<< HEAD
     project_code: Optional[str] = None
-=======
->>>>>>> d69cf5c (Update team management changes)
     project_name: str
     user_directory: List[UserDirectoryEntry] = Field(default_factory=list)
     org_user: List[OrgUserRow] = Field(default_factory=list)

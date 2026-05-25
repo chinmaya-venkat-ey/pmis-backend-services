@@ -10,7 +10,8 @@ from app.controllers.role_assignment_controller import RoleAssignmentController
 from app.controllers.role_controller import RoleController
 from app.controllers.role_grants_controller import RoleGrantsController
 from app.controllers.user_controller import UserController
-from app.core.errors import UnauthorizedError
+from app.core.rbac import AUTH_REQUIRED_MESSAGE
+.errors import UnauthorizedError
 from app.db import get_db
 from app.repositories.rbac_repository import RbacRepository
 from app.services.auth_service import AuthService
@@ -73,7 +74,7 @@ def get_current_user_id(request: Request) -> str:
     need the caller's id."""
     user_id = getattr(request.state, "user_id", None)
     if not user_id:
-        raise UnauthorizedError("Authentication required", code="AUTH_REQUIRED")
+        raise UnauthorizedError(AUTH_REQUIRED_MESSAGE, code="AUTH_REQUIRED")
     return user_id
 
 

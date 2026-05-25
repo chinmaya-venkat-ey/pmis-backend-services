@@ -28,6 +28,8 @@ from app.core.errors import ForbiddenError, UnauthorizedError
 # request.state helpers
 # ---------------------------------------------------------------------------
 
+AUTH_REQUIRED_MESSAGE = AUTH_REQUIRED_MESSAGE
+
 def _user_id(request: Request) -> Optional[str]:
     return getattr(request.state, "user_id", None)
 
@@ -58,7 +60,7 @@ def require_authenticated() -> Callable:
     def _checker(request: Request) -> str:
         uid = _user_id(request)
         if not uid:
-            raise UnauthorizedError("Authentication required", code="AUTH_REQUIRED")
+            raise UnauthorizedError(AUTH_REQUIRED_MESSAGE, code="AUTH_REQUIRED")
         return uid
 
     return _checker
@@ -75,7 +77,7 @@ def require_permission(permission_code: Union[str, object]) -> Callable:
     def _checker(request: Request) -> str:
         uid = _user_id(request)
         if not uid:
-            raise UnauthorizedError("Authentication required", code="AUTH_REQUIRED")
+            raise UnauthorizedError(AUTH_REQUIRED_MESSAGE, code="AUTH_REQUIRED")
         if _is_admin(request):
             return uid
         if code not in _user_permissions(request):
@@ -98,7 +100,7 @@ def require_any_permission(*permission_codes: Union[str, object]) -> Callable:
     def _checker(request: Request) -> str:
         uid = _user_id(request)
         if not uid:
-            raise UnauthorizedError("Authentication required", code="AUTH_REQUIRED")
+            raise UnauthorizedError(AUTH_REQUIRED_MESSAGE, code="AUTH_REQUIRED")
         if _is_admin(request):
             return uid
         held = _user_permissions(request)
@@ -119,7 +121,7 @@ def require_admin() -> Callable:
     def _checker(request: Request) -> str:
         uid = _user_id(request)
         if not uid:
-            raise UnauthorizedError("Authentication required", code="AUTH_REQUIRED")
+            raise UnauthorizedError(AUTH_REQUIRED_MESSAGE, code="AUTH_REQUIRED")
         if not _is_admin(request):
             raise ForbiddenError("Admin role required", code="ADMIN_REQUIRED")
         return uid
@@ -182,7 +184,7 @@ def require_project_permission(permission_code: Union[str, object]) -> Callable:
     def _checker(request: Request) -> str:
         uid = _user_id(request)
         if not uid:
-            raise UnauthorizedError("Authentication required", code="AUTH_REQUIRED")
+            raise UnauthorizedError(AUTH_REQUIRED_MESSAGE, code="AUTH_REQUIRED")
         project_id = _resolve_project_id_from_path(request)
         if project_id is None:
             raise ForbiddenError(
@@ -208,7 +210,7 @@ def require_org_permission(permission_code: Union[str, object]) -> Callable:
     def _checker(request: Request) -> str:
         uid = _user_id(request)
         if not uid:
-            raise UnauthorizedError("Authentication required", code="AUTH_REQUIRED")
+            raise UnauthorizedError(AUTH_REQUIRED_MESSAGE, code="AUTH_REQUIRED")
         org_id = _resolve_org_id_from_path(request)
         if org_id is None:
             raise ForbiddenError(
@@ -262,7 +264,7 @@ def assert_field_writes_allowed(
     """
     uid = _user_id(request)
     if not uid:
-        raise UnauthorizedError("Authentication required", code="AUTH_REQUIRED")
+        raise UnauthorizedError(AUTH_REQUIRED_MESSAGE, code="AUTH_REQUIRED")
     if _is_admin(request):
         return
 
@@ -315,7 +317,7 @@ def assert_action_allowed(
     """
     uid = _user_id(request)
     if not uid:
-        raise UnauthorizedError("Authentication required", code="AUTH_REQUIRED")
+        raise UnauthorizedError(AUTH_REQUIRED_MESSAGE, code="AUTH_REQUIRED")
     if _is_admin(request):
         return
     target_scope = scope_key or ("global", None)

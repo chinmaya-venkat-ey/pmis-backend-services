@@ -27,7 +27,7 @@ router = APIRouter(prefix="/permissions", tags=["permissions"])
     dependencies=[Depends(require_permission(PERMISSIONS_READ))],
 )
 def list_permissions(
-    controller: PermissionController = Depends(get_permission_controller),
+    controller: Annotated[PermissionController, Depends(get_permission_controller)],
 ):
     return controller.list_()
 
@@ -40,7 +40,7 @@ def list_permissions(
     dependencies=[Depends(require_permission(PERMISSIONS_READ))],
 )
 def list_permissions_by_module(
-    controller: PermissionController = Depends(get_permission_controller),
+    controller: Annotated[PermissionController, Depends(get_permission_controller)],
 ):
     return controller.by_module()
 
@@ -54,7 +54,7 @@ def list_permissions_by_module(
 )
 def get_permission(
     code: str,
-    controller: PermissionController = Depends(get_permission_controller),
+    controller: Annotated[PermissionController, Depends(get_permission_controller)],
 ):
     return controller.get_details(code)
 
@@ -69,7 +69,7 @@ def get_permission(
 )
 def create_permission_restful(
     payload: PermissionCreateRequest,
-    controller: PermissionController = Depends(get_permission_controller),
+    controller: Annotated[PermissionController, Depends(get_permission_controller)],
 ):
     return controller.create(payload)
 
@@ -84,7 +84,7 @@ def create_permission_restful(
 )
 def create_permission(
     payload: PermissionCreateRequest,
-    controller: PermissionController = Depends(get_permission_controller),
+    controller: Annotated[PermissionController, Depends(get_permission_controller)],
 ):
     return controller.create(payload)
 
@@ -98,7 +98,7 @@ def create_permission(
 def update_permission(
     code: str,
     payload: PermissionUpdateRequest,
-    controller: PermissionController = Depends(get_permission_controller),
+    controller: Annotated[PermissionController, Depends(get_permission_controller)],
 ):
     return controller.update(code, payload)
 
@@ -112,6 +112,6 @@ def update_permission(
 )
 def delete_permission(
     code: str,
-    controller: PermissionController = Depends(get_permission_controller),
+    controller: Annotated[PermissionController, Depends(get_permission_controller)],
 ):
     return controller.delete(code)

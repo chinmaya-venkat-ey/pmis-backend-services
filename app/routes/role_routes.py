@@ -35,7 +35,7 @@ router = APIRouter(prefix="/roles", tags=["roles"])
 def list_roles(
     offset: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100, alias="pageSize"),
-    controller: RoleController = Depends(get_role_controller),
+    controller: Annotated[RoleController, Depends(get_role_controller)],
 ):
     all_roles = controller.list_()
     total = len(all_roles)
@@ -54,7 +54,7 @@ def list_roles(
 )
 def create_role(
     payload: RoleCreateRequest,
-    controller: RoleController = Depends(get_role_controller),
+    controller: Annotated[RoleController, Depends(get_role_controller)],
 ):
     return controller.create(payload)
 
@@ -68,7 +68,7 @@ def create_role(
 )
 def get_role(
     role_id: int,
-    controller: RoleController = Depends(get_role_controller),
+    controller: Annotated[RoleController, Depends(get_role_controller)],
 ):
     return controller.get_details(role_id)
 
@@ -82,7 +82,7 @@ def get_role(
 def update_role(
     role_id: int,
     payload: RoleUpdateRequest,
-    controller: RoleController = Depends(get_role_controller),
+    controller: Annotated[RoleController, Depends(get_role_controller)],
 ):
     return controller.update(role_id, payload)
 
@@ -99,7 +99,7 @@ def update_role(
 )
 def delete_role(
     role_id: int,
-    controller: RoleController = Depends(get_role_controller),
+    controller: Annotated[RoleController, Depends(get_role_controller)],
 ):
     return controller.delete(role_id)
 
@@ -116,7 +116,7 @@ def delete_role(
 )
 def list_role_permissions(
     role_id: int,
-    controller: RoleController = Depends(get_role_controller),
+    controller: Annotated[RoleController, Depends(get_role_controller)],
 ):
     return controller.list_role_permissions(role_id)
 
@@ -131,7 +131,7 @@ def list_role_permissions(
 def replace_role_permissions(
     role_id: int,
     payload: RolePermissionsReplaceRequest,
-    controller: RoleController = Depends(get_role_controller),
+    controller: Annotated[RoleController, Depends(get_role_controller)],
 ):
     return controller.replace_role_permissions(role_id, payload)
 
@@ -145,7 +145,7 @@ def replace_role_permissions(
 def grant_role_permission(
     role_id: int,
     code: str,
-    controller: RoleController = Depends(get_role_controller),
+    controller: Annotated[RoleController, Depends(get_role_controller)],
 ):
     return controller.grant_permission(role_id, code)
 
@@ -159,6 +159,6 @@ def grant_role_permission(
 def revoke_role_permission(
     role_id: int,
     code: str,
-    controller: RoleController = Depends(get_role_controller),
+    controller: Annotated[RoleController, Depends(get_role_controller)],
 ):
     return controller.revoke_permission(role_id, code)

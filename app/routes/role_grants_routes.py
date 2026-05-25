@@ -24,6 +24,6 @@ router = APIRouter(prefix="/role-grants", tags=["role_grants"])
 )
 def get_role_grants_matrix(
     role_name: str,
-    controller: RoleGrantsController = Depends(get_role_grants_controller),
+    controller: Annotated[RoleGrantsController, Depends(get_role_grants_controller)],
 ):
     return controller.get_matrix(role_name)

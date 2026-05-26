@@ -6,6 +6,8 @@ Ported from C:\\Programming\\PMIS\\PMIS-notification-service\\app\\routes\\sms_r
 """
 from __future__ import annotations
 
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, status
 
 from app.controllers.sms_controller import SMSController
@@ -29,6 +31,6 @@ router = APIRouter(prefix="/sms", tags=["sms"])
 )
 def send_sms(
     payload: SMSRequest,
-    controller: Annotated[SMSController, Depends(get_sms_controller)] = Depends(get_sms_controller),
+    controller: Annotated[SMSController, Depends(get_sms_controller)],
 ) -> SMSResponse:
     return controller.send(payload)

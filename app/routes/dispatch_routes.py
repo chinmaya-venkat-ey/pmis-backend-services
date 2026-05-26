@@ -10,6 +10,8 @@ route logic).
 """
 from __future__ import annotations
 
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, status
 
 from app.controllers.dispatch_controller import DispatchController
@@ -34,6 +36,6 @@ router = APIRouter(tags=["dispatch"])
 )
 def dispatch_templated(
     payload: DispatchRequest,
-    controller: Annotated[DispatchController, Depends(get_dispatch_controller)] = Depends(get_dispatch_controller),
+    controller: Annotated[DispatchController, Depends(get_dispatch_controller)],
 ) -> DispatchResponse:
     return controller.dispatch(payload)

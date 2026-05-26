@@ -8,6 +8,8 @@ Ported from C:\\Programming\\PMIS\\PMIS-notification-service\\app\\routes\\email
 """
 from __future__ import annotations
 
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, status
 
 from app.controllers.email_controller import EmailController
@@ -32,6 +34,6 @@ router = APIRouter(prefix="/email", tags=["email"])
 )
 def send_email(
     payload: EmailRequest,
-    controller: Annotated[EmailController, Depends(get_email_controller)] = Depends(get_email_controller),
+    controller: Annotated[EmailController, Depends(get_email_controller)],
 ) -> EmailResponse:
     return controller.send(payload)

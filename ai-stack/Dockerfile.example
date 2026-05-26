@@ -1,0 +1,40 @@
+##############################################################
+# Dockerfile  –  Template for your FastAPI application
+# Place this in the ROOT of your FastAPI git repository.
+#
+# This is a starting template. Your team's repo may already
+# have a Dockerfile — if so, use that one instead.
+##############################################################
+
+FROM python:3.11-slim
+
+# Set working directory inside the container
+WORKDIR /app
+
+# Install system dependencies (add more if your app needs them)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    libpq-dev \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements first (Docker caches this layer — faster rebuilds)
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the rest of your application code
+COPY . .
+
+# The port your FastAPI app listens on
+EXPOSE 8080
+
+# Health check endpoint — your app must have a GET /health route
+# that returns HTTP 200. Example:
+#   @app.get("/health")
+#   def health(): return {"status": "ok"}
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
+  CMD curl -f http://localhost:8080/health || exit 1
+
+# Start the app
+# Replace "main:app" with your actual module:app_variable
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "2"]

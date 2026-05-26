@@ -1,0 +1,60 @@
+##############################################################
+# n8n – Workflow automation
+#
+# Standalone stack. Joins the AI stack's network as "external"
+# so it can reach ollama, qdrant, embedding, paddleocr by name.
+#
+# Start:   docker compose up -d
+# Logs:    docker compose logs -f n8n
+# Stop:    docker compose stop
+# Upgrade: docker compose pull && docker compose up -d
+##############################################################
+
+networks:
+  ai-net:
+    name: ${AI_NETWORK:-ai-stack_ai-net}
+    external: true
+
+volumes:
+  n8n_data:
+
+services:
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: n8n
+    restart: unless-stopped
+    networks:
+      - ai-net
+    ports:
+      - "${N8N_PORT:-5678}:5678"
+    environment:
+      - N8N_HOST=${N8N_HOST:-localhost}
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=${N8N_PROTOCOL:-http}
+      - NODE_ENV=production
+      - WEBHOOK_URL=${N8N_PROTOCOL:-http}://${N8N_HOST:-localhost}:${N8N_PORT:-5678}/
+      - GENERIC_TIMEZONE=${TZ:-Asia/Kolkata}
+      - TZ=${TZ:-Asia/Kolkata}
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+      - N8N_DIAGNOSTICS_ENABLED=false
+      - N8N_PERSONALIZATION_ENABLED=false
+      - N8N_HIRING_BANNER_ENABLED=false
+      - N8N_SECURE_COOKIE=${N8N_SECURE_COOKIE:-true}
+      - DB_SQLITE_POOL_SIZE=5
+      # Pre-set endpoints so workflows can use {{$env.OLLAMA_HOST}} etc.
+      - OLLAMA_HOST=http://ollama:11434
+      - EMBEDDING_HOST=http://embedding:11434
+      - QDRANT_HOST=http://qdrant:6333
+      - OCR_HOST=http://paddleocr:8002
+    volumes:
+      - n8n_data:/home/node/.n8n
+    deploy:
+      resources:
+        limits:
+          memory: ${N8N_MEM_LIMIT:-2g}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:5678/healthz >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s

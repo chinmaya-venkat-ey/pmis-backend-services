@@ -11,7 +11,7 @@ on both create and PATCH bodies.
 """
 from __future__ import annotations
 
-from typing import Optional
+from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, Query, Request, status
 from fastapi.responses import JSONResponse
@@ -116,8 +116,8 @@ async def _create_multipart(
 async def create_task(
     request: Request,
     activity_id: str,
-    controller: Annotated[TaskController, Depends(get_task_controller)] = Depends(get_task_controller),
-    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)] = Depends(get_optional_current_user_id),
+    controller: Annotated[TaskController, Depends(get_task_controller)],
+    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
 ):
     return await dispatch_create(
         request,
@@ -138,10 +138,10 @@ async def create_task(
 )
 def list_activity_tasks(
     activity_id: str,
+    controller: Annotated[TaskController, Depends(get_task_controller)],
     offset: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100, alias="pageSize"),
     include_deleted: bool = Query(False, alias="includeDeleted"),
-    controller: Annotated[TaskController, Depends(get_task_controller)] = Depends(get_task_controller),
 ):
     return controller.list_for_activity(
         activity_id, offset=offset, page_size=page_size,
@@ -161,7 +161,7 @@ router = APIRouter(prefix="/tasks", tags=["tasks"])
 )
 def get_task(
     task_id: str,
-    controller: Annotated[TaskController, Depends(get_task_controller)] = Depends(get_task_controller),
+    controller: Annotated[TaskController, Depends(get_task_controller)],
 ):
     return controller.get(task_id)
 
@@ -182,8 +182,8 @@ def update_task(
     task_id: str,
     payload: TaskUpdateRequest,
     request: Request,
-    controller: Annotated[TaskController, Depends(get_task_controller)] = Depends(get_task_controller),
-    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)] = Depends(get_optional_current_user_id),
+    controller: Annotated[TaskController, Depends(get_task_controller)],
+    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
 ):
     return controller.update(
         task_id, payload,
@@ -199,8 +199,8 @@ def update_task(
 )
 def delete_task(
     task_id: str,
-    controller: Annotated[TaskController, Depends(get_task_controller)] = Depends(get_task_controller),
-    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)] = Depends(get_optional_current_user_id),
+    controller: Annotated[TaskController, Depends(get_task_controller)],
+    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
 ):
     controller.delete(task_id, caller_user_id=caller_user_id)
 
@@ -213,7 +213,7 @@ def delete_task(
 )
 def restore_task(
     task_id: str,
-    controller: Annotated[TaskController, Depends(get_task_controller)] = Depends(get_task_controller),
-    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)] = Depends(get_optional_current_user_id),
+    controller: Annotated[TaskController, Depends(get_task_controller)],
+    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
 ):
     return controller.restore(task_id, caller_user_id=caller_user_id)

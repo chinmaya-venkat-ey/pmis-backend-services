@@ -27,6 +27,8 @@ Permission gates:
 """
 from __future__ import annotations
 
+from typing import Annotated
+
 from fastapi import APIRouter, Depends
 
 from app.core.permissions import PROJECT_MEMBERS_READ, PROJECT_MEMBERS_UPDATE
@@ -139,7 +141,7 @@ activity_team_router = APIRouter(prefix="/activities", tags=["team"])
 )
 def get_team(
     project_id: str,
-    controller: Annotated[TeamController, Depends(get_team_controller)] = Depends(get_team_controller),
+    controller: Annotated[TeamController, Depends(get_team_controller)],
 ):
     return controller.get_team(project_id)
 
@@ -231,8 +233,8 @@ def get_team(
 def save_team(
     project_id: str,
     body: TeamWriteRequest,
-    caller_id: Annotated[str, Depends(get_current_user_id)] = Depends(get_current_user_id),
-    controller: Annotated[TeamController, Depends(get_team_controller)] = Depends(get_team_controller),
+    caller_id: Annotated[str, Depends(get_current_user_id)],
+    controller: Annotated[TeamController, Depends(get_team_controller)],
 ):
     return controller.save_team(project_id, body, caller_id)
 
@@ -275,7 +277,7 @@ def save_team(
 )
 def get_ownership(
     project_id: str,
-    controller: Annotated[TeamController, Depends(get_team_controller)] = Depends(get_team_controller),
+    controller: Annotated[TeamController, Depends(get_team_controller)],
 ):
     return controller.get_ownership(project_id)
 
@@ -334,8 +336,8 @@ def get_ownership(
 def save_ownership(
     project_id: str,
     body: OwnershipWrite,
-    caller_id: Annotated[str, Depends(get_current_user_id)] = Depends(get_current_user_id),
-    controller: Annotated[TeamController, Depends(get_team_controller)] = Depends(get_team_controller),
+    caller_id: Annotated[str, Depends(get_current_user_id)],
+    controller: Annotated[TeamController, Depends(get_team_controller)],
 ):
     return controller.save_ownership(project_id, body, caller_id)
 
@@ -395,7 +397,7 @@ def save_ownership(
 )
 def get_activity_assignments(
     activity_id: str,
-    controller: Annotated[TeamController, Depends(get_team_controller)] = Depends(get_team_controller),
+    controller: Annotated[TeamController, Depends(get_team_controller)],
 ):
     return controller.get_activity_assignments(activity_id)
 
@@ -477,8 +479,8 @@ def get_activity_assignments(
 def save_activity_assignments(
     activity_id: str,
     body: ActivityAssignmentsWrite,
-    caller_id: Annotated[str, Depends(get_current_user_id)] = Depends(get_current_user_id),
-    controller: Annotated[TeamController, Depends(get_team_controller)] = Depends(get_team_controller),
+    caller_id: Annotated[str, Depends(get_current_user_id)],
+    controller: Annotated[TeamController, Depends(get_team_controller)],
 ):
     return controller.save_activity_assignments(activity_id, body, caller_id)
 
@@ -501,7 +503,7 @@ def save_activity_assignments(
 )
 def get_team_page(
     project_id: str,
-    controller: TeamController = Depends(get_team_controller),
+    controller: Annotated[TeamController, Depends(get_team_controller)],
 ):
     return controller.get_team_page(project_id)
 
@@ -521,7 +523,7 @@ def get_team_page(
 def save_team_page(
     project_id: str,
     body: TeamPageRequest,
-    caller_id: str = Depends(get_current_user_id),
-    controller: TeamController = Depends(get_team_controller),
+    caller_id: Annotated[str, Depends(get_current_user_id)],
+    controller: Annotated[TeamController, Depends(get_team_controller)],
 ):
     return controller.save_team_page(project_id, body, caller_id)

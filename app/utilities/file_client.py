@@ -179,7 +179,7 @@ class HttpExternalFileClient:
         original_filename: str,
         mime_type: str,
     ) -> StoredFile:
-        # TODO: real implementation lands when the file-server contract
+        # Deferred: real implementation lands when the file-server contract
         # (endpoint, auth, response shape) is finalised. Today we route
         # through the local fallback so the BE ships and the FE-facing
         # contract (URL on the row) stays correct.

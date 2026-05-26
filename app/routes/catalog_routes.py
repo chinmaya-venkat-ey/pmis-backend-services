@@ -13,7 +13,7 @@ Endpoints:
 from __future__ import annotations
 
 import uuid
-from typing import List
+from typing import Annotated, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
@@ -47,8 +47,8 @@ router = APIRouter(tags=["catalog"])
     dependencies=[Depends(require_authenticated())],
 )
 def list_divisions(
+    db: Annotated[Session, Depends(get_db)],
     include_inactive: bool = Query(False),
-    db: Annotated[Session, Depends(get_db)] = Depends(get_db),
 ) -> List[DivisionResponse]:
     stmt = select(Division)
     if not include_inactive:
@@ -66,8 +66,8 @@ def list_divisions(
     dependencies=[Depends(require_authenticated())],
 )
 def list_priorities(
+    db: Annotated[Session, Depends(get_db)],
     include_inactive: bool = Query(False),
-    db: Annotated[Session, Depends(get_db)] = Depends(get_db),
 ) -> List[PriorityResponse]:
     stmt = select(Priority)
     if not include_inactive:
@@ -92,8 +92,8 @@ def list_priorities(
     dependencies=[Depends(require_authenticated())],
 )
 def list_resource_types(
+    db: Annotated[Session, Depends(get_db)],
     include_inactive: bool = Query(False),
-    db: Annotated[Session, Depends(get_db)] = Depends(get_db),
 ) -> List[ResourceTypeResponse]:
     stmt = select(ResourceType)
     if not include_inactive:
@@ -112,7 +112,7 @@ def list_resource_types(
 )
 def create_resource_type(
     payload: ResourceTypeCreateRequest,
-    db: Annotated[Session, Depends(get_db)] = Depends(get_db),
+    db: Annotated[Session, Depends(get_db)],
 ) -> ResourceTypeResponse:
     existing = db.execute(
         select(ResourceType).where(ResourceType.code == payload.code)
@@ -138,7 +138,7 @@ def create_resource_type(
     dependencies=[Depends(require_authenticated())],
 )
 def list_project_status_transitions(
-    db: Annotated[Session, Depends(get_db)] = Depends(get_db),
+    db: Annotated[Session, Depends(get_db)],
 ) -> List[ProjectStatusTransitionResponse]:
     rows = db.execute(
         select(ProjectStatusTransition).where(ProjectStatusTransition.active.is_(True))

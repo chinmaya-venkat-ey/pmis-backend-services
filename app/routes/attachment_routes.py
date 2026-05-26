@@ -21,7 +21,7 @@ Two routers:
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse
@@ -76,9 +76,9 @@ def _make_upload_endpoint(target_kind: str):
     async def handler(
         target_id: str,
         request: Request,
+        controller: Annotated[AttachmentController, Depends(get_attachment_controller)],
+        caller_user_id: Annotated[str, Depends(get_current_user_id)],
         file: UploadFile = File(..., description="A file to attach."),
-        controller: Annotated[AttachmentController, Depends(get_attachment_controller)] = Depends(get_attachment_controller),
-        caller_user_id: Annotated[str, Depends(get_current_user_id)] = Depends(get_current_user_id),
     ):
         # Round-8: resolve parent project_id and scope-check ATTACHMENTS_CREATE.
         project_id = _project_id_for_target(target_kind, target_id)
@@ -100,9 +100,9 @@ def _make_list_endpoint(target_kind: str):
     def handler(
         target_id: str,
         request: Request,
+        controller: Annotated[AttachmentController, Depends(get_attachment_controller)],
         offset: int = Query(1, ge=1),
         page_size: int = Query(20, ge=1, le=100, alias="pageSize"),
-        controller: Annotated[AttachmentController, Depends(get_attachment_controller)] = Depends(get_attachment_controller),
     ):
         # Round-8: scope-check COMMENTS_READ at the parent project.
         project_id = _project_id_for_target(target_kind, target_id)
@@ -180,9 +180,9 @@ for _path, _kind in _KIND_BY_PATH.items():
 )
 def delete_attachment(
     attachment_id: str,
-    controller: Annotated[AttachmentController, Depends(get_attachment_controller)] = Depends(get_attachment_controller),
-    caller_user_id: Annotated[str, Depends(get_current_user_id)] = Depends(get_current_user_id),
-    caller_is_admin: Annotated[bool, Depends(get_caller_is_admin)] = Depends(get_caller_is_admin),
+    controller: Annotated[AttachmentController, Depends(get_attachment_controller)],
+    caller_user_id: Annotated[str, Depends(get_current_user_id)],
+    caller_is_admin: Annotated[bool, Depends(get_caller_is_admin)],
 ) -> CommentDeleteSuccess:
     return controller.delete(
         attachment_id,

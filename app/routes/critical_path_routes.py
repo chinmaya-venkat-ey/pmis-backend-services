@@ -16,7 +16,7 @@ POST /api/v3/projects/{project_id}/critical-path/analysis
 """
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Annotated, Any, Dict, Optional
 
 from fastapi import APIRouter, Depends
 
@@ -45,7 +45,7 @@ router = APIRouter(
 )
 def get_dependencies(
     project_id: str,
-    controller: Annotated[CriticalPathController, Depends(get_critical_path_controller)] = Depends(get_critical_path_controller),
+    controller: Annotated[CriticalPathController, Depends(get_critical_path_controller)],
 ) -> Dict[str, Any]:
     return controller.dependencies(project_id)
 
@@ -65,8 +65,8 @@ def get_dependencies(
 )
 def get_analysis(
     project_id: str,
+    controller: Annotated[CriticalPathController, Depends(get_critical_path_controller)],
     body: Optional[CpaAnalysisRequest] = None,
-    controller: Annotated[CriticalPathController, Depends(get_critical_path_controller)] = Depends(get_critical_path_controller),
 ) -> Dict[str, Any]:
     overrides = body.overrides if body else None
     return controller.analysis(project_id, overrides=overrides)

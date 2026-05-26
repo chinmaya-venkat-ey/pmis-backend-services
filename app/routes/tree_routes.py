@@ -6,7 +6,7 @@ plan vs. actual dates.
 """
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Annotated, Any, Dict
 
 from fastapi import APIRouter, Depends, Query
 
@@ -32,7 +32,7 @@ router = APIRouter(prefix="/projects", tags=["tree"])
 )
 def get_project_tree(
     project_uuid: str,
+    controller: Annotated[TreeController, Depends(get_tree_controller)],
     include_deleted: bool = Query(False, alias="includeDeleted"),
-    controller: Annotated[TreeController, Depends(get_tree_controller)] = Depends(get_tree_controller),
 ) -> Dict[str, Any]:
     return controller.get_tree(project_uuid, include_deleted=include_deleted)

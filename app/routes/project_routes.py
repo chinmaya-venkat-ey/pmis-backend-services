@@ -8,7 +8,7 @@ project attachment listing).
 """
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Annotated, List, Optional
 
 from fastapi import (
     APIRouter,
@@ -159,8 +159,8 @@ async def _create_multipart(
 )
 async def create_project(
     request: Request,
-    controller: Annotated[ProjectController, Depends(get_project_controller)] = Depends(get_project_controller),
-    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)] = Depends(get_optional_current_user_id),
+    controller: Annotated[ProjectController, Depends(get_project_controller)],
+    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
 ):
     return await dispatch_create(
         request,
@@ -192,8 +192,8 @@ async def create_project(
 def upsert_project(
     project_uuid: str,
     payload: ProjectUpsertRequest,
-    controller: Annotated[ProjectController, Depends(get_project_controller)] = Depends(get_project_controller),
-    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)] = Depends(get_optional_current_user_id),
+    controller: Annotated[ProjectController, Depends(get_project_controller)],
+    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
 ):
     response, created = controller.upsert(
         project_uuid, payload, caller_user_id=caller_user_id,
@@ -222,12 +222,12 @@ def upsert_project(
     dependencies=[Depends(require_permission(PROJECTS_READ))],
 )
 def list_projects(
+    controller: Annotated[ProjectController, Depends(get_project_controller)],
+    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
+    caller_is_admin: Annotated[bool, Depends(get_caller_is_admin)],
     offset: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100, alias="pageSize"),
     active: Optional[bool] = Query(None),
-    controller: Annotated[ProjectController, Depends(get_project_controller)] = Depends(get_project_controller),
-    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)] = Depends(get_optional_current_user_id),
-    caller_is_admin: Annotated[bool, Depends(get_caller_is_admin)] = Depends(get_caller_is_admin),
 ):
     # Monolith parity (Doc-38): query schema is offset / pageSize / active
     # / includeDeleted ONLY — ``public`` + ``status`` were dropped.
@@ -245,12 +245,12 @@ def list_projects(
     dependencies=[Depends(require_permission(PROJECTS_READ))],
 )
 def list_all_projects(
+    controller: Annotated[ProjectController, Depends(get_project_controller)],
+    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
+    caller_is_admin: Annotated[bool, Depends(get_caller_is_admin)],
     offset: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100, alias="pageSize"),
     active: Optional[bool] = Query(None),
-    controller: Annotated[ProjectController, Depends(get_project_controller)] = Depends(get_project_controller),
-    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)] = Depends(get_optional_current_user_id),
-    caller_is_admin: Annotated[bool, Depends(get_caller_is_admin)] = Depends(get_caller_is_admin),
 ):
     return controller.list_(
         offset=offset, page_size=page_size,
@@ -277,8 +277,8 @@ def list_all_projects(
 )
 def get_project(
     project_uuid: str,
-    controller: Annotated[ProjectController, Depends(get_project_controller)] = Depends(get_project_controller),
-    caller_is_admin: Annotated[bool, Depends(get_caller_is_admin)] = Depends(get_caller_is_admin),
+    controller: Annotated[ProjectController, Depends(get_project_controller)],
+    caller_is_admin: Annotated[bool, Depends(get_caller_is_admin)],
 ):
     return controller.get(project_uuid, caller_is_admin=caller_is_admin)
 
@@ -293,8 +293,8 @@ def update_project(
     project_uuid: str,
     payload: ProjectUpdateRequest,
     request: Request,
-    controller: Annotated[ProjectController, Depends(get_project_controller)] = Depends(get_project_controller),
-    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)] = Depends(get_optional_current_user_id),
+    controller: Annotated[ProjectController, Depends(get_project_controller)],
+    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
 ):
     return controller.update(
         project_uuid, payload,
@@ -310,8 +310,8 @@ def update_project(
 )
 def delete_project(
     project_uuid: str,
-    controller: Annotated[ProjectController, Depends(get_project_controller)] = Depends(get_project_controller),
-    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)] = Depends(get_optional_current_user_id),
+    controller: Annotated[ProjectController, Depends(get_project_controller)],
+    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
 ):
     controller.delete(project_uuid, caller_user_id=caller_user_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -333,8 +333,8 @@ def delete_project(
 )
 def save_project(
     project_uuid: str,
-    controller: Annotated[ProjectController, Depends(get_project_controller)] = Depends(get_project_controller),
-    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)] = Depends(get_optional_current_user_id),
+    controller: Annotated[ProjectController, Depends(get_project_controller)],
+    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
 ):
     return controller.save(project_uuid, caller_user_id=caller_user_id)
 
@@ -347,8 +347,8 @@ def save_project(
 )
 def publish_project(
     project_uuid: str,
-    controller: Annotated[ProjectController, Depends(get_project_controller)] = Depends(get_project_controller),
-    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)] = Depends(get_optional_current_user_id),
+    controller: Annotated[ProjectController, Depends(get_project_controller)],
+    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
 ):
     return controller.publish(project_uuid, caller_user_id=caller_user_id)
 
@@ -361,9 +361,9 @@ def publish_project(
 )
 def close_project(
     project_uuid: str,
+    controller: Annotated[ProjectController, Depends(get_project_controller)],
+    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
     payload: Optional[ProjectCloseRequest] = Body(default=None),
-    controller: Annotated[ProjectController, Depends(get_project_controller)] = Depends(get_project_controller),
-    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)] = Depends(get_optional_current_user_id),
 ):
     return controller.close(project_uuid, payload, caller_user_id=caller_user_id)
 
@@ -383,7 +383,7 @@ def close_project(
 )
 def list_project_role_assignments(
     project_uuid: str,
-    controller: Annotated[ProjectController, Depends(get_project_controller)] = Depends(get_project_controller),
+    controller: Annotated[ProjectController, Depends(get_project_controller)],
 ):
     return controller.role_assignments(project_uuid)
 
@@ -402,7 +402,7 @@ def list_project_role_assignments(
 )
 def list_project_assignable_users(
     project_uuid: str,
-    controller: Annotated[ProjectController, Depends(get_project_controller)] = Depends(get_project_controller),
+    controller: Annotated[ProjectController, Depends(get_project_controller)],
 ):
     return controller.assignable_users(project_uuid)
 
@@ -421,12 +421,12 @@ def list_project_assignable_users(
 )
 def list_project_audit_logs(
     project_uuid: str,
+    controller: Annotated[ProjectController, Depends(get_project_controller)],
     offset: int = Query(1, ge=1, description="Page number (1-indexed)."),
     page_size: int = Query(
         50, ge=1, le=200, alias="pageSize",
         description="Items per page (max 200).",
     ),
-    controller: Annotated[ProjectController, Depends(get_project_controller)] = Depends(get_project_controller),
 ):
     return controller.audit_logs(
         project_uuid, offset=offset, page_size=page_size,
@@ -448,12 +448,12 @@ def list_project_audit_logs(
 )
 def list_project_discussion_feed(
     project_uuid: str,
+    controller: Annotated[ProjectController, Depends(get_project_controller)],
     offset: int = Query(1, ge=1, description="Page number (1-indexed)."),
     page_size: int = Query(
         50, ge=1, le=200, alias="pageSize",
         description="Items per page (max 200).",
     ),
-    controller: Annotated[ProjectController, Depends(get_project_controller)] = Depends(get_project_controller),
 ):
     return controller.discussion_feed(
         project_uuid, offset=offset, page_size=page_size,
@@ -471,7 +471,7 @@ def list_project_discussion_feed(
 )
 def list_project_attachments(
     project_uuid: str,
-    controller: Annotated[ProjectController, Depends(get_project_controller)] = Depends(get_project_controller),
+    controller: Annotated[ProjectController, Depends(get_project_controller)],
 ):
     return controller.list_attachments(project_uuid)
 
@@ -497,9 +497,9 @@ def list_project_attachments(
 )
 async def upload_project_attachments(
     project_uuid: str,
+    controller: Annotated[ProjectController, Depends(get_project_controller)],
+    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
     files: List[UploadFile] = File(...),
-    controller: Annotated[ProjectController, Depends(get_project_controller)] = Depends(get_project_controller),
-    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)] = Depends(get_optional_current_user_id),
 ):
     return controller.attachments.upload(
         "project", project_uuid, files,

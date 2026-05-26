@@ -5,6 +5,8 @@ forwards externally as /health/masters, /ready/masters.
 """
 from __future__ import annotations
 
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, status
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -37,7 +39,7 @@ def health() -> dict:
     ),
     responses={503: {"description": "DB unreachable"}},
 )
-def ready(db: Session = Depends(get_db)) -> dict:
+def ready(db: Annotated[Session, Depends(get_db)]) -> dict:
     try:
         db.execute(text("SELECT 1"))
         return {"status": "ready", "service": settings.service_name, "db": "ok"}

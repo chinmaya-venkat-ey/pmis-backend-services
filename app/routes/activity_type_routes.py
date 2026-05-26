@@ -1,7 +1,7 @@
 """Routes for the activity_types catalog (doc 37)."""
 from __future__ import annotations
 
-from typing import List
+from typing import Annotated, List
 
 from fastapi import APIRouter, Depends, Query, status
 
@@ -25,8 +25,8 @@ router = APIRouter(prefix="/activity_types", tags=["activity_types"])
     dependencies=[Depends(require_permission(ACTIVITY_TYPES_READ))],
 )
 def list_activity_types(
+    controller: Annotated[ActivityTypeController, Depends(get_activity_type_controller)],
     include_inactive: bool = Query(False, description="Include deactivated rows"),
-    controller: Annotated[ActivityTypeController, Depends(get_activity_type_controller)] = Depends(get_activity_type_controller),
 ) -> List[ActivityTypeResponse]:
     return controller.list_(include_inactive=include_inactive)
 
@@ -39,7 +39,7 @@ def list_activity_types(
 )
 def get_activity_type_details(
     code: str,
-    controller: Annotated[ActivityTypeController, Depends(get_activity_type_controller)] = Depends(get_activity_type_controller),
+    controller: Annotated[ActivityTypeController, Depends(get_activity_type_controller)],
 ) -> ActivityTypeResponse:
     return controller.get_details(code)
 
@@ -53,7 +53,7 @@ def get_activity_type_details(
 )
 def create_activity_type(
     payload: ActivityTypeCreateRequest,
-    controller: Annotated[ActivityTypeController, Depends(get_activity_type_controller)] = Depends(get_activity_type_controller),
+    controller: Annotated[ActivityTypeController, Depends(get_activity_type_controller)],
 ) -> ActivityTypeResponse:
     return controller.create(payload)
 
@@ -67,7 +67,7 @@ def create_activity_type(
 def update_activity_type(
     code: str,
     payload: ActivityTypeUpdateRequest,
-    controller: Annotated[ActivityTypeController, Depends(get_activity_type_controller)] = Depends(get_activity_type_controller),
+    controller: Annotated[ActivityTypeController, Depends(get_activity_type_controller)],
 ) -> ActivityTypeResponse:
     return controller.update(code, payload)
 
@@ -80,7 +80,7 @@ def update_activity_type(
 )
 def delete_activity_type(
     code: str,
-    controller: Annotated[ActivityTypeController, Depends(get_activity_type_controller)] = Depends(get_activity_type_controller),
+    controller: Annotated[ActivityTypeController, Depends(get_activity_type_controller)],
 ) -> ActivityTypeResponse:
     return controller.delete(code)
 
@@ -93,6 +93,6 @@ def delete_activity_type(
 )
 def restore_activity_type(
     code: str,
-    controller: Annotated[ActivityTypeController, Depends(get_activity_type_controller)] = Depends(get_activity_type_controller),
+    controller: Annotated[ActivityTypeController, Depends(get_activity_type_controller)],
 ) -> ActivityTypeResponse:
     return controller.restore(code)

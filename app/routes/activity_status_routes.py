@@ -1,7 +1,7 @@
 """Routes for the activity_statuses catalog (doc 37)."""
 from __future__ import annotations
 
-from typing import List
+from typing import Annotated, List
 
 from fastapi import APIRouter, Depends, Query, status
 
@@ -26,8 +26,8 @@ router = APIRouter(prefix="/activity_statuses", tags=["activity_statuses"])
     dependencies=[Depends(require_permission(ACTIVITY_STATUSES_READ))],
 )
 def list_activity_statuses(
+    controller: Annotated[ActivityStatusController, Depends(get_activity_status_controller)],
     include_inactive: bool = Query(False, description="Include deactivated rows"),
-    controller: Annotated[ActivityStatusController, Depends(get_activity_status_controller)] = Depends(get_activity_status_controller),
 ) -> List[ActivityStatusResponse]:
     return controller.list_(include_inactive=include_inactive)
 
@@ -40,7 +40,7 @@ def list_activity_statuses(
 )
 def get_activity_status_details(
     code: str,
-    controller: Annotated[ActivityStatusController, Depends(get_activity_status_controller)] = Depends(get_activity_status_controller),
+    controller: Annotated[ActivityStatusController, Depends(get_activity_status_controller)],
 ) -> ActivityStatusResponse:
     return controller.get_details(code)
 
@@ -54,7 +54,7 @@ def get_activity_status_details(
 )
 def create_activity_status(
     payload: ActivityStatusCreateRequest,
-    controller: Annotated[ActivityStatusController, Depends(get_activity_status_controller)] = Depends(get_activity_status_controller),
+    controller: Annotated[ActivityStatusController, Depends(get_activity_status_controller)],
 ) -> ActivityStatusResponse:
     return controller.create(payload)
 
@@ -68,7 +68,7 @@ def create_activity_status(
 def update_activity_status(
     code: str,
     payload: ActivityStatusUpdateRequest,
-    controller: Annotated[ActivityStatusController, Depends(get_activity_status_controller)] = Depends(get_activity_status_controller),
+    controller: Annotated[ActivityStatusController, Depends(get_activity_status_controller)],
 ) -> ActivityStatusResponse:
     return controller.update(code, payload)
 
@@ -81,7 +81,7 @@ def update_activity_status(
 )
 def delete_activity_status(
     code: str,
-    controller: Annotated[ActivityStatusController, Depends(get_activity_status_controller)] = Depends(get_activity_status_controller),
+    controller: Annotated[ActivityStatusController, Depends(get_activity_status_controller)],
 ) -> ActivityStatusResponse:
     return controller.delete(code)
 
@@ -94,6 +94,6 @@ def delete_activity_status(
 )
 def restore_activity_status(
     code: str,
-    controller: Annotated[ActivityStatusController, Depends(get_activity_status_controller)] = Depends(get_activity_status_controller),
+    controller: Annotated[ActivityStatusController, Depends(get_activity_status_controller)],
 ) -> ActivityStatusResponse:
     return controller.restore(code)

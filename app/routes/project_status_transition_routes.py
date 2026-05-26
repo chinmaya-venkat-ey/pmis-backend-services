@@ -5,7 +5,7 @@ represents the initial-status seed (status accepted on a fresh create).
 """
 from __future__ import annotations
 
-from typing import List
+from typing import Annotated, List
 
 from fastapi import APIRouter, Depends, Query, status
 
@@ -40,10 +40,8 @@ router = APIRouter(
     dependencies=[Depends(require_permission(PROJECT_STATUS_TRANSITIONS_READ))],
 )
 def list_project_status_transitions(
+    controller: Annotated[ProjectStatusTransitionController, Depends(get_project_status_transition_controller)],
     include_inactive: bool = Query(False, description="Include deactivated rows"),
-    controller: ProjectStatusTransitionController = Depends(
-        get_project_status_transition_controller
-    ),
 ) -> List[ProjectStatusTransitionResponse]:
     return controller.list_(include_inactive=include_inactive)
 
@@ -56,9 +54,7 @@ def list_project_status_transitions(
 )
 def get_project_status_transition_details(
     row_id: int,
-    controller: ProjectStatusTransitionController = Depends(
-        get_project_status_transition_controller
-    ),
+    controller: Annotated[ProjectStatusTransitionController, Depends(get_project_status_transition_controller)],
 ) -> ProjectStatusTransitionResponse:
     return controller.get_details(row_id)
 
@@ -73,9 +69,7 @@ def get_project_status_transition_details(
 )
 def create_project_status_transition(
     payload: ProjectStatusTransitionCreateRequest,
-    controller: ProjectStatusTransitionController = Depends(
-        get_project_status_transition_controller
-    ),
+    controller: Annotated[ProjectStatusTransitionController, Depends(get_project_status_transition_controller)],
 ) -> ProjectStatusTransitionResponse:
     return controller.create(payload)
 
@@ -90,9 +84,7 @@ def create_project_status_transition(
 def update_project_status_transition(
     row_id: int,
     payload: ProjectStatusTransitionUpdateRequest,
-    controller: ProjectStatusTransitionController = Depends(
-        get_project_status_transition_controller
-    ),
+    controller: Annotated[ProjectStatusTransitionController, Depends(get_project_status_transition_controller)],
 ) -> ProjectStatusTransitionResponse:
     return controller.update(row_id, payload)
 
@@ -105,9 +97,7 @@ def update_project_status_transition(
 )
 def delete_project_status_transition(
     row_id: int,
-    controller: ProjectStatusTransitionController = Depends(
-        get_project_status_transition_controller
-    ),
+    controller: Annotated[ProjectStatusTransitionController, Depends(get_project_status_transition_controller)],
 ) -> ProjectStatusTransitionResponse:
     return controller.delete(row_id)
 
@@ -120,8 +110,6 @@ def delete_project_status_transition(
 )
 def restore_project_status_transition(
     row_id: int,
-    controller: ProjectStatusTransitionController = Depends(
-        get_project_status_transition_controller
-    ),
+    controller: Annotated[ProjectStatusTransitionController, Depends(get_project_status_transition_controller)],
 ) -> ProjectStatusTransitionResponse:
     return controller.restore(row_id)

@@ -7,7 +7,7 @@ and the user's confirmation (option A).
 """
 from __future__ import annotations
 
-from typing import List
+from typing import Annotated, List
 
 from fastapi import APIRouter, Depends, Query, status
 
@@ -36,10 +36,8 @@ router = APIRouter(prefix="/notification_templates", tags=["notification_templat
     dependencies=[Depends(require_permission(NOTIFICATION_TEMPLATES_READ))],
 )
 def list_notification_templates(
+    controller: Annotated[NotificationTemplateController, Depends(get_notification_template_controller)],
     include_inactive: bool = Query(False, description="Include deactivated rows"),
-    controller: NotificationTemplateController = Depends(
-        get_notification_template_controller
-    ),
 ) -> List[NotificationTemplateResponse]:
     return controller.list_(include_inactive=include_inactive)
 
@@ -52,9 +50,7 @@ def list_notification_templates(
 )
 def get_notification_template_details(
     template_id: int,
-    controller: NotificationTemplateController = Depends(
-        get_notification_template_controller
-    ),
+    controller: Annotated[NotificationTemplateController, Depends(get_notification_template_controller)],
 ) -> NotificationTemplateResponse:
     return controller.get_details(template_id)
 
@@ -73,9 +69,7 @@ def get_notification_template_details(
 )
 def create_notification_template(
     payload: NotificationTemplateCreateRequest,
-    controller: NotificationTemplateController = Depends(
-        get_notification_template_controller
-    ),
+    controller: Annotated[NotificationTemplateController, Depends(get_notification_template_controller)],
 ) -> NotificationTemplateResponse:
     return controller.create(payload)
 
@@ -90,9 +84,7 @@ def create_notification_template(
 def update_notification_template(
     template_id: int,
     payload: NotificationTemplateUpdateRequest,
-    controller: NotificationTemplateController = Depends(
-        get_notification_template_controller
-    ),
+    controller: Annotated[NotificationTemplateController, Depends(get_notification_template_controller)],
 ) -> NotificationTemplateResponse:
     return controller.update(template_id, payload)
 
@@ -105,9 +97,7 @@ def update_notification_template(
 )
 def delete_notification_template(
     template_id: int,
-    controller: NotificationTemplateController = Depends(
-        get_notification_template_controller
-    ),
+    controller: Annotated[NotificationTemplateController, Depends(get_notification_template_controller)],
 ) -> NotificationTemplateResponse:
     return controller.delete(template_id)
 
@@ -127,8 +117,6 @@ def delete_notification_template(
 )
 def restore_notification_template(
     template_id: int,
-    controller: NotificationTemplateController = Depends(
-        get_notification_template_controller
-    ),
+    controller: Annotated[NotificationTemplateController, Depends(get_notification_template_controller)],
 ) -> NotificationTemplateResponse:
     return controller.restore(template_id)

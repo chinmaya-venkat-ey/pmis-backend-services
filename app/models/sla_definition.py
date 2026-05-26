@@ -52,6 +52,9 @@ class SlaDefinition(Base):
     baseline_type: Mapped[str] = mapped_column(String(30), nullable=False, default="STATIC")
     compound_metric_rule: Mapped[str] = mapped_column(String(30), nullable=False, default="INDEPENDENT")
     ld_aggregation_method: Mapped[str] = mapped_column(String(20), nullable=False, default="SUM")
+    # G21: controls the INR base the computed_ld_percent is applied against.
+    # QUARTERLY_PAYMENT | DELIVERABLE_COST | MILESTONE_INVOICE | FIRST_PAYMENT
+    ld_computation_base: Mapped[str] = mapped_column(String(30), nullable=False, default="QUARTERLY_PAYMENT")
 
     metadata_: Mapped[dict] = mapped_column("metadata", JSONB, nullable=False, default=dict)
 

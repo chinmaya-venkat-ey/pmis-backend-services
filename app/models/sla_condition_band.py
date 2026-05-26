@@ -40,4 +40,7 @@ class SlaConditionBand(Base):
     points_contribution: Mapped[Optional[Decimal]] = mapped_column(Numeric(6, 2))
     fixed_amount: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 4))
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # G19: compound 2D bands — rows sharing the same band_group_id must ALL be satisfied
+    # simultaneously for that severity to fire (AND logic within group, OR between groups).
+    band_group_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), server_default=text("now()"))

@@ -30,6 +30,8 @@ class Contract(Base):
     end_date: Mapped[Optional[date]] = mapped_column(Date)
     total_value: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 4))
     currency: Mapped[str] = mapped_column(String(10), nullable=False, default="INR")
+    # G18: valid values: ACTIVE | PROBATION | SUSPENDED | EXPIRED | TERMINATED
+    # PROBATION: BSP SLA 001/003 — all transactions non-payable; used for accuracy measurement only.
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="ACTIVE")
     quarterly_ld_cap_percent: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2))
     metadata_: Mapped[dict] = mapped_column("metadata", JSONB, nullable=False, default=dict)

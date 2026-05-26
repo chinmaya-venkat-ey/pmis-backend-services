@@ -11,7 +11,7 @@ from decimal import Decimal
 from typing import Optional
 from uuid import uuid4
 
-from sqlalchemy import DateTime, ForeignKey, Index, Numeric, String, Text, text
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, Numeric, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -36,4 +36,6 @@ class SlaGuardCondition(Base):
     threshold_unit: Mapped[Optional[str]] = mapped_column(String(30))
     action: Mapped[str] = mapped_column(String(30), nullable=False)
     action_description: Mapped[Optional[str]] = mapped_column(Text)
+    # G17: AND-grouped guards — rows sharing the same guard_group_id are ANDed; groups are OR'd.
+    guard_group_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), server_default=text("now()"))

@@ -32,6 +32,8 @@ class SlaMetric(Base):
     )
     metric_key: Mapped[str] = mapped_column(String(100), nullable=False)
     display_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    # G16: valid values: PERCENT | COUNT | DAYS | BUSINESS_DAYS | DATE | RATIO | HOURS | MINUTES | BUSINESS_WEEKS | INSTANCES
+    # BUSINESS_DAYS: resource availability SLAs (BSP 007, MSAP 023, PMU 007) — differs from calendar DAYS.
     unit: Mapped[str] = mapped_column(String(30), nullable=False)
     target_numeric: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 6))
     target_date: Mapped[Optional[date]] = mapped_column(Date)

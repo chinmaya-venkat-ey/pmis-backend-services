@@ -1,7 +1,7 @@
 """Routes for the auth flow (anonymous + authenticated)."""
 from __future__ import annotations
 
-from typing import Union
+from typing import Annotated, Union
 
 from fastapi import APIRouter, Depends, status
 
@@ -48,7 +48,7 @@ router = APIRouter(prefix="/users", tags=["auth"])
 )
 def login(
     payload: LoginRequest,
-    controller: Annotated[AuthController, Depends(get_auth_controller)] = Depends(get_auth_controller),
+    controller: Annotated[AuthController, Depends(get_auth_controller)],
 ):
     return controller.login(payload)
 
@@ -61,7 +61,7 @@ def login(
 )
 def send_otp(
     payload: OtpSendRequest,
-    controller: Annotated[AuthController, Depends(get_auth_controller)] = Depends(get_auth_controller),
+    controller: Annotated[AuthController, Depends(get_auth_controller)],
 ):
     return controller.send_otp(payload)
 
@@ -78,7 +78,7 @@ def send_otp(
 )
 def verify_otp(
     payload: OtpVerifyRequest,
-    controller: Annotated[AuthController, Depends(get_auth_controller)] = Depends(get_auth_controller),
+    controller: Annotated[AuthController, Depends(get_auth_controller)],
 ):
     return controller.verify_otp(payload)
 
@@ -92,7 +92,7 @@ def verify_otp(
 )
 def refresh(
     payload: RefreshRequest,
-    controller: Annotated[AuthController, Depends(get_auth_controller)] = Depends(get_auth_controller),
+    controller: Annotated[AuthController, Depends(get_auth_controller)],
 ):
     return controller.refresh_tokens(payload)
 
@@ -103,9 +103,9 @@ def refresh(
     summary="Logout — revoke access token + clear refresh state",
 )
 def logout(
-    controller: Annotated[AuthController, Depends(get_auth_controller)] = Depends(get_auth_controller),
-    user_id: Annotated[str, Depends(get_current_user_id)] = Depends(get_current_user_id),
-    jti: Annotated[str, Depends(get_caller_jti)] = Depends(get_caller_jti),
+    controller: Annotated[AuthController, Depends(get_auth_controller)],
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    jti: Annotated[str, Depends(get_caller_jti)],
 ):
     return controller.logout(user_id=user_id, jti=jti)
 
@@ -118,7 +118,7 @@ def logout(
 )
 def introspect(
     payload: IntrospectRequest,
-    controller: Annotated[AuthController, Depends(get_auth_controller)] = Depends(get_auth_controller),
+    controller: Annotated[AuthController, Depends(get_auth_controller)],
 ):
     return controller.introspect(payload)
 
@@ -130,7 +130,7 @@ def introspect(
 )
 def forgot_password(
     payload: ForgotPasswordRequest,
-    controller: Annotated[AuthController, Depends(get_auth_controller)] = Depends(get_auth_controller),
+    controller: Annotated[AuthController, Depends(get_auth_controller)],
 ):
     return controller.forgot_password(payload)
 
@@ -143,7 +143,7 @@ def forgot_password(
 )
 def reset_password(
     payload: ResetPasswordRequest,
-    controller: Annotated[AuthController, Depends(get_auth_controller)] = Depends(get_auth_controller),
+    controller: Annotated[AuthController, Depends(get_auth_controller)],
 ):
     return controller.reset_password(payload)
 
@@ -154,7 +154,7 @@ def reset_password(
     summary="Current user details",
 )
 def get_me(
-    controller: Annotated[AuthController, Depends(get_auth_controller)] = Depends(get_auth_controller),
-    user_id: Annotated[str, Depends(get_current_user_id)] = Depends(get_current_user_id),
+    controller: Annotated[AuthController, Depends(get_auth_controller)],
+    user_id: Annotated[str, Depends(get_current_user_id)],
 ):
     return controller.get_me(user_id)

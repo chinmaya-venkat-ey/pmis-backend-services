@@ -602,10 +602,9 @@ class MilestoneService:
         self.audit.write(
             project_id=row.project_id,
             target_kind="milestone", target_id=row.id,
-            action="update", actor_user_id=caller_user_id,
+            action="auto_complete", actor_user_id=caller_user_id,
             changes={
                 "status": {"before": before, "after": "completed"},
-                "auto_triggered": True,
                 "by_child": triggering_child_id,
             },
         )
@@ -665,10 +664,9 @@ class MilestoneService:
         self.audit.write(
             project_id=project.id,
             target_kind="project", target_id=project.id,
-            action="update", actor_user_id=caller_user_id,
+            action="auto_complete", actor_user_id=caller_user_id,
             changes={
                 "status": {"before": before, "after": "closed"},
-                "auto_triggered": True,
                 "by_child": triggering_child_id,
             },
             note=self.AUTO_COMPLETE_REASON,

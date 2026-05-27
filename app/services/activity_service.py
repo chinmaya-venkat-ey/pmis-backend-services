@@ -599,10 +599,9 @@ class ActivityService:
         self.audit.write(
             project_id=row.project_id,
             target_kind="activity", target_id=row.id,
-            action="update", actor_user_id=caller_user_id,
+            action="auto_complete", actor_user_id=caller_user_id,
             changes={
                 "status": {"before": before, "after": "completed"},
-                "auto_triggered": True,
                 "by_child": triggering_child_id,
             },
         )

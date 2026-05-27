@@ -872,10 +872,9 @@ class SubtaskService:
         self.audit.write(
             project_id=parent.project_id,
             target_kind="subtask", target_id=parent.id,
-            action="update", actor_user_id=caller_user_id,
+            action="auto_complete", actor_user_id=caller_user_id,
             changes={
                 "status": {"before": before, "after": "completed"},
-                "auto_triggered": True,
                 "by_child": triggering_child_id,
             },
         )

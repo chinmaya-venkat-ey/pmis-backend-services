@@ -109,7 +109,7 @@ class TestProjectEndpoints:
 
     def test_create_returns_201_with_project_data(self, client, project_ctrl_override):
         r = client.post(
-            "/project/projects/create",
+            "/api/v3/projects/create",
             json={"name": "P1", "owner": "tmd1", "vendor_ids": []},
         )
         assert r.status_code == 201
@@ -124,47 +124,47 @@ class TestProjectEndpoints:
         assert "isPublic" in data
 
     def test_get_returns_project_camelcase(self, client, project_ctrl_override):
-        r = client.get("/project/projects/p1")
+        r = client.get("/api/v3/projects/p1")
         assert r.status_code == 200
         data = r.json()["data"]
         assert data["_type"] == "Project"
         assert data["id"] == "p1"
 
     def test_list_returns_hal_collection(self, client, project_ctrl_override):
-        r = client.get("/project/projects")
+        r = client.get("/api/v3/projects")
         assert r.status_code == 200
         data = r.json()["data"]
         assert data["_type"] == "Collection"
         assert data["_embedded"]["elements"] == []
 
     def test_list_all_returns_hal_collection(self, client, project_ctrl_override):
-        r = client.get("/project/projects/all")
+        r = client.get("/api/v3/projects/all")
         assert r.status_code == 200
         assert r.json()["data"]["_type"] == "Collection"
 
     def test_save_returns_project(self, client, project_ctrl_override):
-        r = client.post("/project/projects/p1/save")
+        r = client.post("/api/v3/projects/p1/save")
         assert r.status_code == 200
         assert r.json()["data"]["_type"] == "Project"
 
     def test_publish_returns_project(self, client, project_ctrl_override):
-        r = client.post("/project/projects/p1/publish")
+        r = client.post("/api/v3/projects/p1/publish")
         assert r.status_code == 200
 
     def test_close_with_reason_returns_project(self, client, project_ctrl_override):
-        r = client.post("/project/projects/p1/close", json={"reason": "done"})
+        r = client.post("/api/v3/projects/p1/close", json={"reason": "done"})
         assert r.status_code == 200
         assert r.json()["data"]["_type"] == "Project"
 
     def test_close_no_body_returns_project(self, client, project_ctrl_override):
-        r = client.post("/project/projects/p1/close")
+        r = client.post("/api/v3/projects/p1/close")
         assert r.status_code == 200
 
     def test_upsert_insert_returns_201_with_created_true(
         self, client, project_ctrl_override,
     ):
         r = client.put(
-            "/project/projects/p-new",
+            "/api/v3/projects/p-new",
             json={"name": "PN", "owner": "tmd1"},
         )
         assert r.status_code == 201
@@ -176,14 +176,14 @@ class TestProjectEndpoints:
     ):
         project_ctrl_override.upsert.return_value = (_project(), False)
         r = client.put(
-            "/project/projects/p1",
+            "/api/v3/projects/p1",
             json={"name": "P1", "owner": "tmd1"},
         )
         assert r.status_code == 200
         assert r.json()["data"]["_created"] is False
 
     def test_audit_logs_returns_envelope(self, client, project_ctrl_override):
-        r = client.get("/project/projects/p1/audit-logs")
+        r = client.get("/api/v3/projects/p1/audit-logs")
         assert r.status_code == 200
         data = r.json()["data"]
         # camelCase: project_id -> projectId
@@ -191,27 +191,27 @@ class TestProjectEndpoints:
         assert "elements" in data
 
     def test_discussion_feed_returns_envelope(self, client, project_ctrl_override):
-        r = client.get("/project/projects/p1/discussion-feed")
+        r = client.get("/api/v3/projects/p1/discussion-feed")
         assert r.status_code == 200
 
     def test_role_assignments(self, client, project_ctrl_override):
-        r = client.get("/project/projects/p1/role-assignments")
+        r = client.get("/api/v3/projects/p1/role-assignments")
         assert r.status_code == 200
         data = r.json()["data"]
         assert data["projectId"] == "p1"
         assert data["roles"] == []
 
     def test_assignable_users(self, client, project_ctrl_override):
-        r = client.get("/project/projects/p1/assignable-users")
+        r = client.get("/api/v3/projects/p1/assignable-users")
         assert r.status_code == 200
         assert r.json()["data"]["users"] == []
 
     def test_attachments_list(self, client, project_ctrl_override):
-        r = client.get("/project/projects/p1/attachments")
+        r = client.get("/api/v3/projects/p1/attachments")
         assert r.status_code == 200
 
     def test_delete_returns_204(self, client, project_ctrl_override):
-        r = client.delete("/project/projects/p1")
+        r = client.delete("/api/v3/projects/p1")
         assert r.status_code == 204
 
 
@@ -237,7 +237,7 @@ class TestMilestoneEndpoints:
 
     def test_create_returns_201(self, client, milestone_ctrl_override):
         r = client.post(
-            "/project/projects/p1/milestones/create",
+            "/api/v3/projects/p1/milestones/create",
             json={
                 "name": "M1",
                 "start_date": "2026-05-15T00:00:00+05:30",
@@ -254,27 +254,34 @@ class TestMilestoneEndpoints:
         assert "startDate" in data
 
     def test_list(self, client, milestone_ctrl_override):
-        r = client.get("/project/projects/p1/milestones")
+        r = client.get("/api/v3/projects/p1/milestones")
         assert r.status_code == 200
 
     def test_get(self, client, milestone_ctrl_override):
-        r = client.get("/project/milestones/m1")
+        r = client.get("/api/v3/milestones/m1")
         assert r.status_code == 200
 
     def test_delete_returns_204(self, client, milestone_ctrl_override):
-        r = client.delete("/project/milestones/m1")
+        r = client.delete("/api/v3/milestones/m1")
         assert r.status_code == 204
 
     def test_restore(self, client, milestone_ctrl_override):
-        r = client.post("/project/milestones/m1/restore")
+        r = client.post("/api/v3/milestones/m1/restore")
         assert r.status_code == 200
 
 
 # ----- Comments + Attachments --------------------------------------------
 
 @pytest.fixture
-def comment_ctrl_override(app):
+def comment_ctrl_override(app, monkeypatch):
     from app.dependencies import get_comment_controller
+
+    # Round-8: comment routes resolve the parent project_id via
+    # _ancestor_project_id (which opens a real SessionLocal). For these
+    # endpoint smoke tests we stub it to a fixed value so the scope-check
+    # runs without hitting the live DB.
+    import app.core.rbac as rbac_mod
+    monkeypatch.setattr(rbac_mod, "_ancestor_project_id", lambda *a, **kw: "p1")
 
     fake = MagicMock()
     payload = _comment()
@@ -297,7 +304,7 @@ class TestCommentEndpoints:
 
     def test_create_multipart_body_only(self, client, comment_ctrl_override):
         r = client.post(
-            "/project/milestones/m1/comments",
+            "/api/v3/milestones/m1/comments",
             data={"body": "hello"},
         )
         assert r.status_code == 201
@@ -306,17 +313,23 @@ class TestCommentEndpoints:
         assert "targetKind" in data
 
     def test_list(self, client, comment_ctrl_override):
-        r = client.get("/project/milestones/m1/comments")
+        r = client.get("/api/v3/milestones/m1/comments")
         assert r.status_code == 200
 
     def test_delete(self, client, comment_ctrl_override):
-        r = client.delete("/project/comments/c1")
+        r = client.delete("/api/v3/comments/c1")
         assert r.status_code == 200
 
 
 @pytest.fixture
-def attachment_ctrl_override(app):
+def attachment_ctrl_override(app, monkeypatch):
     from app.dependencies import get_attachment_controller
+
+    # Same Round-8 _ancestor_project_id stub as comment_ctrl_override above
+    # — attachment endpoints share the same scope-check pattern and need it
+    # too to avoid hitting SessionLocal.
+    import app.core.rbac as rbac_mod
+    monkeypatch.setattr(rbac_mod, "_ancestor_project_id", lambda *a, **kw: "p1")
 
     fake = MagicMock()
     # Monolith parity: DELETE /attachments/{id} returns the same Success
@@ -334,11 +347,11 @@ def attachment_ctrl_override(app):
 class TestAttachmentEndpoints:
 
     def test_list_for_milestone(self, client, attachment_ctrl_override):
-        r = client.get("/project/milestones/m1/attachments")
+        r = client.get("/api/v3/milestones/m1/attachments")
         assert r.status_code == 200
 
     def test_delete(self, client, attachment_ctrl_override):
-        r = client.delete("/project/attachments/c1")
+        r = client.delete("/api/v3/attachments/c1")
         assert r.status_code == 200
 
 
@@ -354,7 +367,7 @@ def test_tree_get(client, app):
     }
     app.dependency_overrides[get_tree_controller] = lambda: fake
     try:
-        r = client.get("/project/projects/p1/tree")
+        r = client.get("/api/v3/projects/p1/tree")
         assert r.status_code == 200
     finally:
         app.dependency_overrides.pop(get_tree_controller, None)
@@ -370,7 +383,7 @@ def test_dashboard_summary(client, app):
     }
     app.dependency_overrides[get_dashboard_controller] = lambda: fake
     try:
-        r = client.get("/project/dashboard/summary")
+        r = client.get("/api/v3/dashboard/summary")
         assert r.status_code == 200
     finally:
         app.dependency_overrides.pop(get_dashboard_controller, None)

@@ -14,14 +14,14 @@ def _err_code(payload: dict) -> str:
 
 
 def test_anonymous_cannot_list_projects(anonymous_client):
-    resp = anonymous_client.get("/project/projects")
+    resp = anonymous_client.get("/api/v3/projects")
     assert resp.status_code == 401
     assert _err_code(resp.json()) == "auth_required"
 
 
 def test_anonymous_cannot_create_project(anonymous_client):
     resp = anonymous_client.post(
-        "/project/projects/create",
+        "/api/v3/projects/create",
         json={"name": "P", "public": False, "vendor_ids": []},
     )
     assert resp.status_code == 401
@@ -37,7 +37,7 @@ def test_reader_can_list_projects(reader_client, app):
     }
     app.dependency_overrides[get_project_controller] = lambda: fake_controller
     try:
-        resp = reader_client.get("/project/projects")
+        resp = reader_client.get("/api/v3/projects")
         assert resp.status_code == 200
         # HAL Collection envelope under data.
         body = resp.json()["data"]
@@ -51,7 +51,7 @@ def test_reader_can_list_projects(reader_client, app):
 def test_reader_cannot_create_project(reader_client):
     """reader_client holds only `projects:read`; `projects:create` is required."""
     resp = reader_client.post(
-        "/project/projects/create",
+        "/api/v3/projects/create",
         json={"name": "P", "public": False, "vendor_ids": []},
     )
     assert resp.status_code == 403
@@ -59,7 +59,7 @@ def test_reader_cannot_create_project(reader_client):
 
 
 def test_reader_cannot_delete_project(reader_client):
-    resp = reader_client.delete("/project/projects/some-uuid")
+    resp = reader_client.delete("/api/v3/projects/some-uuid")
     assert resp.status_code == 403
 
 
@@ -72,7 +72,7 @@ def test_admin_can_list_projects(client, app):
     }
     app.dependency_overrides[get_project_controller] = lambda: fake_controller
     try:
-        resp = client.get("/project/projects")
+        resp = client.get("/api/v3/projects")
         assert resp.status_code == 200
     finally:
         app.dependency_overrides.pop(get_project_controller, None)

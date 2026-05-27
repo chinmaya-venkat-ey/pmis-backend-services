@@ -32,8 +32,10 @@ class SlaMetric(Base):
     )
     metric_key: Mapped[str] = mapped_column(String(100), nullable=False)
     display_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    # G16: valid values: PERCENT | COUNT | DAYS | BUSINESS_DAYS | DATE | RATIO | HOURS | MINUTES | BUSINESS_WEEKS | INSTANCES
+    # G16/G22/G23: valid values: PERCENT | COUNT | DAYS | BUSINESS_DAYS | DATE | RATIO | HOURS | MINUTES | SECONDS | MILLISECONDS | BUSINESS_WEEKS | INSTANCES
     # BUSINESS_DAYS: resource availability SLAs (BSP 007, MSAP 023, PMU 007) — differs from calendar DAYS.
+    # SECONDS: MSIP SLA 07 container provisioning (≤30s bands), MSIP SLA 15 replication lag (<5s/<30s).
+    # MILLISECONDS: MSIP SLA 12 storage response time (<5ms SSD, <20ms SAS/SATA), MSIP SLA 17 network latency (<5ms LAN, <60ms WAN).
     unit: Mapped[str] = mapped_column(String(30), nullable=False)
     target_numeric: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 6))
     target_date: Mapped[Optional[date]] = mapped_column(Date)

@@ -205,6 +205,10 @@ class ProjectController:
         row = self.service.close(project_id, payload, caller_user_id=caller_user_id)
         return self._to_response(row)
 
+    def reopen(self, project_id: str, *, caller_user_id: Optional[str]) -> ProjectResponse:
+        row = self.service.reopen(project_id, caller_user_id=caller_user_id)
+        return self._to_response(row)
+
     # ---------------------------------------------------- sub-route reads
 
     def audit_logs(

@@ -187,6 +187,10 @@ class SubtaskService:
                 "parent_subtask_id": row.parent_subtask_id,
             },
         )
+        # Reverse cascade: a brand-new (not_completed) child invalidates
+        # any auto-completed ancestor. Walk up and revert terminal
+        # parents back to not_completed.
+        self._cascade_revert_from_new_child(row, caller_user_id=caller_user_id)
         self.db.commit()
         return row
 
@@ -895,3 +899,52 @@ class SubtaskService:
         if not rows:
             return False
         return all(is_terminal_status(status) for (status,) in rows)
+
+    # --------------------------------------- reverse cascade (Q9) ---------
+
+    def _cascade_revert_from_new_child(
+        self, child_row, *, caller_user_id: Optional[str],
+    ) -> None:
+        """A newly-created subtask is not_completed. If its immediate
+        parent (subtask or task) is currently terminal, auto-revert that
+        parent to not_completed and recurse upward. Stops at any
+        non-terminal level or at the project boundary.
+        """
+        if child_row.parent_subtask_id is not None:
+            parent = self.repo.get_by_id(child_row.parent_subtask_id)
+            if parent is not None and is_terminal_status(parent.status):
+                self._auto_revert_subtask(
+                    parent, caller_user_id=caller_user_id,
+                    triggering_child_id=child_row.id,
+                )
+        else:
+            from app.services.task_service import TaskService
+            ts = TaskService(self.db)
+            task = ts.repo.get_by_id(child_row.task_id)
+            if task is not None and is_terminal_status(task.status):
+                ts._auto_revert(
+                    task, caller_user_id=caller_user_id,
+                    triggering_child_id=child_row.id,
+                )
+
+    def _auto_revert_subtask(
+        self, row, *, caller_user_id: Optional[str],
+        triggering_child_id: Optional[str],
+    ) -> None:
+        """Flip a terminal subtask back to not_completed, audit, recurse
+        upward. Idempotent: skips if already not_completed.
+        """
+        if not is_terminal_status(row.status):
+            return
+        before = row.status
+        self.repo.update(row, status="not_completed", updated_by=caller_user_id)
+        self.audit.write(
+            project_id=row.project_id,
+            target_kind="subtask", target_id=row.id,
+            action="auto_revert", actor_user_id=caller_user_id,
+            changes={
+                "status": {"before": before, "after": "not_completed"},
+                "by_child": triggering_child_id,
+            },
+        )
+        self._cascade_revert_from_new_child(row, caller_user_id=caller_user_id)

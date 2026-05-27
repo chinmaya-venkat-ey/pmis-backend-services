@@ -82,6 +82,13 @@ class MilestoneService:
             raise ProjectNotFoundError("The project could not be found.")
         # Project must be live and writable (monolith ``project_lock.py``).
         assert_milestone_activity_writable(project)
+        # Closed projects are frozen: no new milestones until reopened.
+        # (Pairs with the new ``POST /projects/{id}/reopen`` endpoint.)
+        if (getattr(project, "status", None) or "").lower() == "closed":
+            raise ValidationError(
+                "Project is closed. Reopen project first to add milestones.",
+                details={"project_id": project_id, "project_status": "closed"},
+            )
         # Project must have a start date — milestone dates floor against it.
         if project.start_date is None:
             raise ValidationError(
@@ -670,4 +677,30 @@ class MilestoneService:
                 "by_child": triggering_child_id,
             },
             note=self.AUTO_COMPLETE_REASON,
+        )
+
+    # --------------------------------------- reverse cascade (Q9) ---------
+
+    def _auto_revert(
+        self, row, *, caller_user_id: Optional[str],
+        triggering_child_id: Optional[str],
+    ) -> None:
+        """Flip a terminal milestone back to not_completed, audit.
+        Stops here — the project boundary does NOT participate in the
+        reverse cascade. (Milestone create on a closed project is
+        blocked by the reopen gate; on published / draft / new the
+        project is not 'completed' and needs no revert.)
+        """
+        if not is_terminal_status(row.status):
+            return
+        before = row.status
+        self.repo.update(row, updated_by=caller_user_id, status="not_completed")
+        self.audit.write(
+            project_id=row.project_id,
+            target_kind="milestone", target_id=row.id,
+            action="auto_revert", actor_user_id=caller_user_id,
+            changes={
+                "status": {"before": before, "after": "not_completed"},
+                "by_child": triggering_child_id,
+            },
         )

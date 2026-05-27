@@ -74,6 +74,13 @@ class ActivityService:
             raise MilestoneNotFoundError("The milestone could not be found.")
         project = self.projects.get_by_id(milestone.project_id)
         assert_milestone_activity_writable(project)
+        # Closed projects are frozen: no new activities until reopened
+        # (mirrors the milestone-create gate).
+        if (getattr(project, "status", None) or "").lower() == "closed":
+            raise ValidationError(
+                "Project is closed. Reopen project first to add activities.",
+                details={"project_id": milestone.project_id, "project_status": "closed"},
+            )
         # Status validation is schema-level (2-value hardcoded set per
         # monolith parity); priority + ownerDivision are service-level
         # catalog checks; concerned_divisions accepted silently (no
@@ -164,6 +171,9 @@ class ActivityService:
             action="create", actor_user_id=caller_user_id,
             changes={"name": row.name, "milestone_id": row.milestone_id},
         )
+        # Reverse cascade: new (not_completed) activity invalidates a
+        # terminal milestone.
+        self._cascade_revert_from_new_child(row, caller_user_id=caller_user_id)
         self.db.commit()
         return row
 
@@ -619,3 +629,44 @@ class ActivityService:
                 ms, caller_user_id=caller_user_id,
                 triggering_child_id=row.id,
             )
+
+    # --------------------------------------- reverse cascade (Q9) ---------
+
+    def _cascade_revert_from_new_child(
+        self, child_row, *, caller_user_id: Optional[str],
+    ) -> None:
+        """A new not_completed activity invalidates a terminal parent
+        milestone. Stops at milestone — project-level revert is not
+        performed (closed projects block milestone create via the
+        reopen gate; if project is published, milestone revert leaves
+        it published).
+        """
+        from app.services.milestone_service import MilestoneService
+        ms_service = MilestoneService(self.db)
+        ms = ms_service.repo.get_by_id(child_row.milestone_id)
+        if ms is not None and is_terminal_status(ms.status):
+            ms_service._auto_revert(
+                ms, caller_user_id=caller_user_id,
+                triggering_child_id=child_row.id,
+            )
+
+    def _auto_revert(
+        self, row, *, caller_user_id: Optional[str],
+        triggering_child_id: Optional[str],
+    ) -> None:
+        """Flip a terminal activity back to not_completed, audit, recurse
+        up via the milestone."""
+        if not is_terminal_status(row.status):
+            return
+        before = row.status
+        self.repo.update(row, status="not_completed", updated_by=caller_user_id)
+        self.audit.write(
+            project_id=row.project_id,
+            target_kind="activity", target_id=row.id,
+            action="auto_revert", actor_user_id=caller_user_id,
+            changes={
+                "status": {"before": before, "after": "not_completed"},
+                "by_child": triggering_child_id,
+            },
+        )
+        self._cascade_revert_from_new_child(row, caller_user_id=caller_user_id)

@@ -443,6 +443,41 @@ class ProjectService:
         self.db.commit()
         return row
 
+    def reopen(self, project_id: str, *, caller_user_id: Optional[str]):
+        """``closed -> published``. Inverse of ``close``. Refuses if the
+        project is not currently closed (no-op semantics would be more
+        forgiving but a 409 here surfaces stale FE state).
+
+        Clears ``status_explanation`` unconditionally so a stale
+        auto-complete marker or manual close reason doesn't linger after
+        the reopen. The audit row captures the prior reason in ``note``
+        for traceability.
+        """
+        row = self.get_by_id(project_id)
+        if row.status != "closed":
+            raise ConflictError(
+                "Project is not closed.",
+                code="invalid_transition",
+                details={"from_status": row.status, "to_status": "published"},
+            )
+        before = row.status
+        prior_reason = (row.status_explanation or "").strip() or None
+        self.repo.update(
+            row,
+            status="published",
+            status_explanation=None,
+            updated_by=caller_user_id,
+        )
+        self.audit.write(
+            project_id=row.id,
+            target_kind="project", target_id=row.id,
+            action="reopen", actor_user_id=caller_user_id,
+            changes={"from": before, "to": "published"},
+            note=prior_reason,
+        )
+        self.db.commit()
+        return row
+
     # ------------------------------------------------------------ helpers
 
     def _validate_status(self, status: Optional[str]) -> None:

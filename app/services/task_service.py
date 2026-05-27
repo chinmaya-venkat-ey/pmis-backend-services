@@ -136,6 +136,9 @@ class TaskService:
             action="create", actor_user_id=caller_user_id,
             changes={"name": row.name, "activity_id": row.activity_id},
         )
+        # Reverse cascade: new (not_completed) task invalidates any
+        # auto-completed ancestor.
+        self._cascade_revert_from_new_child(row, caller_user_id=caller_user_id)
         self.db.commit()
         return row
 
@@ -603,3 +606,43 @@ class TaskService:
         if not rows:
             return False
         return all(is_terminal_status(status) for (status,) in rows)
+
+    # --------------------------------------- reverse cascade (Q9) ---------
+
+    def _cascade_revert_from_new_child(
+        self, child_row, *, caller_user_id: Optional[str],
+    ) -> None:
+        """A newly-created task is not_completed. If its parent activity
+        is terminal, auto-revert that activity and recurse upward.
+        """
+        from app.services.activity_service import ActivityService
+        act_service = ActivityService(self.db)
+        act = act_service.repo.get_by_id(child_row.activity_id)
+        if act is not None and is_terminal_status(act.status):
+            act_service._auto_revert(
+                act, caller_user_id=caller_user_id,
+                triggering_child_id=child_row.id,
+            )
+
+    def _auto_revert(
+        self, row, *, caller_user_id: Optional[str],
+        triggering_child_id: Optional[str],
+    ) -> None:
+        """Flip a terminal task back to not_completed, audit, recurse up.
+        Called by SubtaskService when a new subtask is added under a
+        completed task.
+        """
+        if not is_terminal_status(row.status):
+            return
+        before = row.status
+        self.repo.update(row, status="not_completed", updated_by=caller_user_id)
+        self.audit.write(
+            project_id=row.project_id,
+            target_kind="task", target_id=row.id,
+            action="auto_revert", actor_user_id=caller_user_id,
+            changes={
+                "status": {"before": before, "after": "not_completed"},
+                "by_child": triggering_child_id,
+            },
+        )
+        self._cascade_revert_from_new_child(row, caller_user_id=caller_user_id)

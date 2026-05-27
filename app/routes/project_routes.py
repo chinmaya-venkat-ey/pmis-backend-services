@@ -26,6 +26,7 @@ from fastapi.responses import Response, JSONResponse
 from app.controllers.project_controller import ProjectController
 from app.core.permissions import (
     PROJECTS_CLOSE,
+    PROJECTS_REOPEN,
     PROJECTS_CREATE,
     PROJECTS_DELETE_ALL,
     PROJECTS_PUBLISH,
@@ -366,6 +367,29 @@ def close_project(
     payload: Optional[ProjectCloseRequest] = Body(default=None),
 ):
     return controller.close(project_uuid, payload, caller_user_id=caller_user_id)
+
+
+@router.post(
+    "/{project_uuid}/reopen",
+    response_model=ProjectResponse,
+    summary="Reopen a closed project (closed -> published)",
+    description=(
+        "Inverse of ``/close``. Flips a closed project back to "
+        "``published``, clears ``statusExplanation`` (including any "
+        "auto-complete marker from the rollup cascade), and writes an "
+        "audit row with ``action='reopen'`` capturing the prior reason."
+    ),
+    dependencies=[Depends(require_project_permission(PROJECTS_REOPEN))],
+    responses={
+        409: {"description": "Project is not closed (invalid_transition)."},
+    },
+)
+def reopen_project(
+    project_uuid: str,
+    controller: Annotated[ProjectController, Depends(get_project_controller)],
+    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
+):
+    return controller.reopen(project_uuid, caller_user_id=caller_user_id)
 
 
 # ---------------------------------------------------------------- role-assignments

@@ -6,6 +6,7 @@ from app.models.contract import Contract  # noqa: F401
 from app.models.contract_scoring_config import ContractScoringConfig  # noqa: F401
 from app.models.contract_phase import ContractPhase  # noqa: F401
 from app.models.sla_definition import SlaDefinition  # noqa: F401
+from app.models.sla_template import SlaTemplate  # noqa: F401
 from app.models.sla_metric import SlaMetric  # noqa: F401
 from app.models.sla_guard_condition import SlaGuardCondition  # noqa: F401
 from app.models.sla_parameter_value import SlaParameterValue  # noqa: F401

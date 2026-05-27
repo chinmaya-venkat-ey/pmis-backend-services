@@ -24,6 +24,8 @@ class SlaDefinition(Base):
         Index("ix_sla_def_formula_id", "formula_id"),
         Index("ix_sla_def_status", "status"),
         Index("ix_sla_def_phase_id", "phase_id"),
+        Index("ix_sla_def_project_id", "project_id"),
+        Index("ix_sla_def_activity_id", "activity_id"),
         {"schema": "contract"},
     )
 
@@ -37,6 +39,11 @@ class SlaDefinition(Base):
         String(36),
         ForeignKey("contract.contract_phases.id", ondelete="SET NULL"),
     )
+    # G25: soft cross-service references — no DB FK constraint (cross-service boundary)
+    project_id: Mapped[Optional[str]] = mapped_column(String(36))
+    activity_id: Mapped[Optional[str]] = mapped_column(String(36))
+    milestone_id: Mapped[Optional[str]] = mapped_column(String(36))
+
     formula_id: Mapped[str] = mapped_column(
         String(36),
         ForeignKey("contract.formula_library.id"),

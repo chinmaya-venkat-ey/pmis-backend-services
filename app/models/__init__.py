@@ -2,9 +2,7 @@
 from __future__ import annotations
 
 from app.models.formula_library import FormulaLibrary  # noqa: F401
-from app.models.contract import Contract  # noqa: F401
-from app.models.contract_scoring_config import ContractScoringConfig  # noqa: F401
-from app.models.contract_phase import ContractPhase  # noqa: F401
+from app.models.project_ld_config import ProjectLdConfig  # noqa: F401
 from app.models.sla_definition import SlaDefinition  # noqa: F401
 from app.models.sla_template import SlaTemplate  # noqa: F401
 from app.models.sla_metric import SlaMetric  # noqa: F401

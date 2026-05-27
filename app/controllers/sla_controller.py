@@ -23,59 +23,58 @@ class SlaController:
 
     # ---------------------------------------------------------------- SLA CRUD
 
-    def get(self, contract_id: str, sla_id: str) -> SlaDetailResponse:
-        sla, formula_type = self._get_with_formula(contract_id, sla_id)
+    def get(self, project_id: str, sla_id: str) -> SlaDetailResponse:
+        sla, formula_type = self._get_with_formula(project_id, sla_id)
         return self._to_detail(sla, formula_type)
 
     def list_(
         self,
-        contract_id: str,
+        project_id: str,
         *,
         status: Optional[str] = None,
-        phase_id: Optional[str] = None,
+        milestone_id: Optional[str] = None,
+        activity_id: Optional[str] = None,
     ) -> List[SlaResponse]:
-        rows = self.service.list_for_contract(contract_id, status=status, phase_id=phase_id)
+        rows = self.service.list_for_project(
+            project_id, status=status, milestone_id=milestone_id, activity_id=activity_id
+        )
         return [self._to_flat(sla, ft) for sla, ft in rows]
 
     def create(
-        self, contract_id: str, payload: SlaCreateRequest, *, caller_user_id: Optional[str]
+        self, project_id: str, payload: SlaCreateRequest, *, caller_user_id: Optional[str]
     ) -> SlaDetailResponse:
-        sla = self.service.create(contract_id, payload, caller_user_id=caller_user_id)
-        _, formula_type = self._get_with_formula(contract_id, sla.id)
+        sla = self.service.create(project_id, payload, caller_user_id=caller_user_id)
+        _, formula_type = self._get_with_formula(project_id, sla.id)
         return self._to_detail(sla, formula_type)
 
     def create_from_template(
         self,
-        contract_id: str,
+        project_id: str,
         payload: SlaCreateFromTemplateRequest,
         *,
         caller_user_id: Optional[str],
     ) -> SlaDetailResponse:
-        sla = self.service.create_from_template(
-            contract_id, payload, caller_user_id=caller_user_id
-        )
-        _, formula_type = self._get_with_formula(contract_id, sla.id)
+        sla = self.service.create_from_template(project_id, payload, caller_user_id=caller_user_id)
+        _, formula_type = self._get_with_formula(project_id, sla.id)
         return self._to_detail(sla, formula_type)
 
     def update(
         self,
-        contract_id: str,
+        project_id: str,
         sla_id: str,
         payload: SlaUpdateRequest,
         *,
         caller_user_id: Optional[str],
     ) -> SlaDetailResponse:
-        sla = self.service.update(
-            contract_id, sla_id, payload, caller_user_id=caller_user_id
-        )
-        _, formula_type = self._get_with_formula(contract_id, sla.id)
+        sla = self.service.update(project_id, sla_id, payload, caller_user_id=caller_user_id)
+        _, formula_type = self._get_with_formula(project_id, sla.id)
         return self._to_detail(sla, formula_type)
 
-    def get_dsl(self, contract_id: str, sla_id: str) -> str:
-        return self.service.get_dsl_text(contract_id, sla_id)
+    def get_dsl(self, project_id: str, sla_id: str) -> str:
+        return self.service.get_dsl_text(project_id, sla_id)
 
-    def get_asl(self, contract_id: str, sla_id: str) -> Dict[str, Any]:
-        return self.service.get_asl(contract_id, sla_id)
+    def get_asl(self, project_id: str, sla_id: str) -> Dict[str, Any]:
+        return self.service.get_asl(project_id, sla_id)
 
     # ---------------------------------------------------------------- templates
 
@@ -83,22 +82,16 @@ class SlaController:
         rows = self.service.list_templates(applicable_to=applicable_to)
         return [
             TemplateResponse(
-                id=tmpl.id,
-                template_ref=tmpl.template_ref,
-                title=tmpl.title,
-                description=tmpl.description,
-                formula_id=tmpl.formula_id,
-                formula_type=ft,
-                applicable_to=tmpl.applicable_to or [],
-                is_active=tmpl.is_active,
+                id=tmpl.id, template_ref=tmpl.template_ref, title=tmpl.title,
+                description=tmpl.description, formula_id=tmpl.formula_id,
+                formula_type=ft, applicable_to=tmpl.applicable_to or [], is_active=tmpl.is_active,
             )
             for tmpl, ft in rows
         ]
 
     # ---------------------------------------------------------------- response shaping
 
-    def _get_with_formula(self, contract_id: str, sla_id: str):
-        """Return (SlaDefinition, formula_type) — used after create/update."""
+    def _get_with_formula(self, project_id: str, sla_id: str):
         from app.models.formula_library import FormulaLibrary
         from sqlalchemy import select
         sla = self.repo.get_by_id(sla_id)
@@ -110,11 +103,9 @@ class SlaController:
     def _to_flat(self, sla, formula_type: Optional[str]) -> SlaResponse:
         return SlaResponse(
             id=sla.id,
-            contract_id=sla.contract_id,
-            phase_id=sla.phase_id,
             project_id=sla.project_id,
-            activity_id=sla.activity_id,
             milestone_id=sla.milestone_id,
+            activity_id=sla.activity_id,
             formula_id=sla.formula_id,
             formula_type=formula_type,
             sla_ref=sla.sla_ref,
@@ -141,18 +132,13 @@ class SlaController:
             LookupRowResponse, MetricResponse,
         )
         sla_id = sla.id
-
         metrics = [MetricResponse.model_validate(m) for m in self.repo.get_metrics(sla_id)]
-        guards = [
-            GuardConditionResponse.model_validate(g) for g in self.repo.get_guards(sla_id)
-        ]
+        guards = [GuardConditionResponse.model_validate(g) for g in self.repo.get_guards(sla_id)]
         params = {p.param_key: p.param_value for p in self.repo.get_parameters(sla_id)}
         bands = [ConditionBandResponse.model_validate(b) for b in self.repo.get_bands(sla_id)]
         lookups = [LookupRowResponse.model_validate(r) for r in self.repo.get_lookup_rows(sla_id)]
-
         dsl_row = self.repo.get_current_dsl(sla_id, sla.dsl_version)
         asl_snap = self.repo.get_current_asl(sla_id)
-
         return SlaDetailResponse(
             **self._to_flat(sla, formula_type).model_dump(),
             parameters=params,

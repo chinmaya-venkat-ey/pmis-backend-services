@@ -16,10 +16,8 @@ class SlaCreateRequest(BaseModel):
     dsl: str = Field(..., description="DSL YAML text defining the SLA")
     effective_from: date
     effective_until: Optional[date] = None
-    phase_id: Optional[str] = None
-    project_id: Optional[str] = None
-    activity_id: Optional[str] = None
-    milestone_id: Optional[str] = None
+    milestone_id: Optional[str] = None   # soft FK to project.milestones.id
+    activity_id: Optional[str] = None    # soft FK to project.activities.id
     change_reason: Optional[str] = None
 
 
@@ -27,10 +25,8 @@ class SlaCreateFromTemplateRequest(BaseModel):
     template_ref: str
     effective_from: date
     effective_until: Optional[date] = None
-    phase_id: Optional[str] = None
-    project_id: Optional[str] = None
-    activity_id: Optional[str] = None
     milestone_id: Optional[str] = None
+    activity_id: Optional[str] = None
     # Top-level DSL key overrides merged before parsing
     overrides: Dict[str, Any] = Field(default_factory=dict)
     change_reason: Optional[str] = None
@@ -99,11 +95,9 @@ class LookupRowResponse(BaseModel):
 class SlaResponse(BaseModel):
     """Flat SLA definition — used in list endpoint."""
     id: str
-    contract_id: str
-    phase_id: Optional[str]
-    project_id: Optional[str]
-    activity_id: Optional[str]
+    project_id: str
     milestone_id: Optional[str]
+    activity_id: Optional[str]
     formula_id: str
     formula_type: Optional[str]   # hydrated from formula_library join
     sla_ref: str

@@ -39,31 +39,34 @@ class SlaRepository:
             select(SlaDefinition).where(SlaDefinition.id == sla_id)
         ).scalar_one_or_none()
 
-    def get_by_ref(self, contract_id: str, sla_ref: str) -> Optional[SlaDefinition]:
+    def get_by_ref(self, project_id: str, sla_ref: str) -> Optional[SlaDefinition]:
         return self.db.execute(
             select(SlaDefinition).where(
-                SlaDefinition.contract_id == contract_id,
+                SlaDefinition.project_id == project_id,
                 SlaDefinition.sla_ref == sla_ref,
             )
         ).scalar_one_or_none()
 
-    def list_for_contract(
+    def list_for_project(
         self,
-        contract_id: str,
+        project_id: str,
         *,
         status: Optional[str] = None,
-        phase_id: Optional[str] = None,
+        milestone_id: Optional[str] = None,
+        activity_id: Optional[str] = None,
     ) -> List[Tuple[SlaDefinition, str]]:
         """Return list of (SlaDefinition, formula_type) tuples."""
         stmt = (
             select(SlaDefinition, FormulaLibrary.formula_type)
             .join(FormulaLibrary, SlaDefinition.formula_id == FormulaLibrary.id)
-            .where(SlaDefinition.contract_id == contract_id)
+            .where(SlaDefinition.project_id == project_id)
         )
         if status:
             stmt = stmt.where(SlaDefinition.status == status)
-        if phase_id:
-            stmt = stmt.where(SlaDefinition.phase_id == phase_id)
+        if milestone_id:
+            stmt = stmt.where(SlaDefinition.milestone_id == milestone_id)
+        if activity_id:
+            stmt = stmt.where(SlaDefinition.activity_id == activity_id)
         stmt = stmt.order_by(SlaDefinition.sla_ref)
         return list(self.db.execute(stmt).all())
 
@@ -164,7 +167,6 @@ class SlaRepository:
     def list_templates(
         self, *, applicable_to: Optional[str] = None
     ) -> List[Tuple[SlaTemplate, str]]:
-        """Return list of (SlaTemplate, formula_type) tuples."""
         stmt = (
             select(SlaTemplate, FormulaLibrary.formula_type)
             .join(FormulaLibrary, SlaTemplate.formula_id == FormulaLibrary.id)

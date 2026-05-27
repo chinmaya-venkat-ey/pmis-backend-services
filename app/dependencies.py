@@ -6,8 +6,8 @@ from typing import Optional
 from fastapi import Depends, Request
 from sqlalchemy.orm import Session
 
-from app.controllers.contract_controller import ContractController
 from app.controllers.observation_controller import ObservationController
+from app.controllers.project_ld_config_controller import ProjectLdConfigController
 from app.controllers.sla_controller import SlaController
 from app.core.errors import UnauthorizedError
 from app.core.rbac import AUTH_REQUIRED_MESSAGE
@@ -33,8 +33,8 @@ def get_caller_is_admin(request: Request) -> bool:
 
 # ---------------------------------------------------------------- controllers
 
-def get_contract_controller(db: Session = Depends(get_db)) -> ContractController:
-    return ContractController(db)
+def get_project_ld_config_controller(db: Session = Depends(get_db)) -> ProjectLdConfigController:
+    return ProjectLdConfigController(db)
 
 
 def get_sla_controller(db: Session = Depends(get_db)) -> SlaController:

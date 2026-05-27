@@ -1,7 +1,7 @@
-"""SlaDefinition — one row per SLA within a contract.
+"""SlaDefinition — one row per SLA within a project.
 
-Links to formula_library for the evaluation formula type. All formula
-parameters, metrics, bands, and lookup tables hang off this row via FKs.
+Roots at project_ld_config.project_id (within contract schema).
+All formula parameters, metrics, bands, and lookup tables hang off this row via FKs.
 """
 from __future__ import annotations
 
@@ -19,28 +19,26 @@ from app.db import Base
 class SlaDefinition(Base):
     __tablename__ = "sla_definitions"
     __table_args__ = (
-        Index("ix_sla_def_contract_id", "contract_id"),
-        Index("ix_sla_def_contract_sla_ref", "contract_id", "sla_ref", unique=True),
+        Index("ix_sla_def_project_id", "project_id"),
+        Index("ix_sla_def_project_sla_ref", "project_id", "sla_ref", unique=True),
         Index("ix_sla_def_formula_id", "formula_id"),
         Index("ix_sla_def_status", "status"),
-        Index("ix_sla_def_phase_id", "phase_id"),
-        Index("ix_sla_def_project_id", "project_id"),
+        # G25 soft-FK indexes
         Index("ix_sla_def_activity_id", "activity_id"),
+        Index("ix_sla_def_milestone_id", "milestone_id"),
         {"schema": "contract"},
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
-    contract_id: Mapped[str] = mapped_column(
+
+    # Root anchor: FK to project_ld_config.project_id (within contract schema)
+    project_id: Mapped[str] = mapped_column(
         String(36),
-        ForeignKey("contract.contracts.id", ondelete="CASCADE"),
+        ForeignKey("contract.project_ld_config.project_id", ondelete="CASCADE"),
         nullable=False,
     )
-    phase_id: Mapped[Optional[str]] = mapped_column(
-        String(36),
-        ForeignKey("contract.contract_phases.id", ondelete="SET NULL"),
-    )
-    # G25: soft cross-service references — no DB FK constraint (cross-service boundary)
-    project_id: Mapped[Optional[str]] = mapped_column(String(36))
+
+    # G25: soft cross-service references to project module (no DB FK — cross-service)
     activity_id: Mapped[Optional[str]] = mapped_column(String(36))
     milestone_id: Mapped[Optional[str]] = mapped_column(String(36))
 
@@ -59,8 +57,6 @@ class SlaDefinition(Base):
     baseline_type: Mapped[str] = mapped_column(String(30), nullable=False, default="STATIC")
     compound_metric_rule: Mapped[str] = mapped_column(String(30), nullable=False, default="INDEPENDENT")
     ld_aggregation_method: Mapped[str] = mapped_column(String(20), nullable=False, default="SUM")
-    # G21: controls the INR base the computed_ld_percent is applied against.
-    # QUARTERLY_PAYMENT | DELIVERABLE_COST | MILESTONE_INVOICE | FIRST_PAYMENT
     ld_computation_base: Mapped[str] = mapped_column(String(30), nullable=False, default="QUARTERLY_PAYMENT")
 
     metadata_: Mapped[dict] = mapped_column("metadata", JSONB, nullable=False, default=dict)

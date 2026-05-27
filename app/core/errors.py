@@ -35,10 +35,7 @@ class ValidationError(DomainError):
     status_code = 422
     default_code = "validation_error"
 
-class ContractNotFoundError(NotFoundError):
-    default_code = "not_found"
-
-class PhaseNotFoundError(NotFoundError):
+class ProjectLdConfigNotFoundError(NotFoundError):
     default_code = "not_found"
 
 class SlaNotFoundError(NotFoundError):

@@ -25,15 +25,15 @@ class ObservationController:
     # ---------------------------------------------------------------- reads
 
     def get(
-        self, contract_id: str, sla_id: str, observation_id: str
+        self, project_id: str, sla_id: str, observation_id: str
     ) -> ObservationDetailResponse:
-        obs = self.service.get_by_id(contract_id, sla_id, observation_id)
-        band_counts = self.service.get_band_counts(contract_id, sla_id, observation_id)
+        obs = self.service.get_by_id(project_id, sla_id, observation_id)
+        band_counts = self.service.get_band_counts(project_id, sla_id, observation_id)
         return self._to_detail(obs, band_counts)
 
     def list_(
         self,
-        contract_id: str,
+        project_id: str,
         sla_id: str,
         *,
         status: Optional[str] = None,
@@ -44,7 +44,7 @@ class ObservationController:
         page_size: int = 20,
     ) -> Tuple[List[ObservationResponse], int]:
         rows, total = self.service.list_for_sla(
-            contract_id,
+            project_id,
             sla_id,
             status=status,
             metric_key=metric_key,
@@ -59,21 +59,21 @@ class ObservationController:
 
     def create(
         self,
-        contract_id: str,
+        project_id: str,
         sla_id: str,
         payload: ObservationCreateRequest,
         *,
         caller_user_id: Optional[str],
     ) -> ObservationDetailResponse:
         obs = self.service.create(
-            contract_id, sla_id, payload, caller_user_id=caller_user_id
+            project_id, sla_id, payload, caller_user_id=caller_user_id
         )
-        band_counts = self.service.get_band_counts(contract_id, sla_id, obs.id)
+        band_counts = self.service.get_band_counts(project_id, sla_id, obs.id)
         return self._to_detail(obs, band_counts)
 
     def update(
         self,
-        contract_id: str,
+        project_id: str,
         sla_id: str,
         observation_id: str,
         payload: ObservationUpdateRequest,
@@ -81,56 +81,56 @@ class ObservationController:
         caller_user_id: Optional[str],
     ) -> ObservationDetailResponse:
         obs = self.service.update(
-            contract_id, sla_id, observation_id, payload, caller_user_id=caller_user_id
+            project_id, sla_id, observation_id, payload, caller_user_id=caller_user_id
         )
-        band_counts = self.service.get_band_counts(contract_id, sla_id, observation_id)
+        band_counts = self.service.get_band_counts(project_id, sla_id, observation_id)
         return self._to_detail(obs, band_counts)
 
     def approve(
         self,
-        contract_id: str,
+        project_id: str,
         sla_id: str,
         observation_id: str,
         *,
         caller_user_id: Optional[str],
     ) -> ObservationResponse:
         obs = self.service.approve(
-            contract_id, sla_id, observation_id, caller_user_id=caller_user_id
+            project_id, sla_id, observation_id, caller_user_id=caller_user_id
         )
         return ObservationResponse.model_validate(obs)
 
     def reject(
         self,
-        contract_id: str,
+        project_id: str,
         sla_id: str,
         observation_id: str,
         *,
         caller_user_id: Optional[str],
     ) -> ObservationResponse:
         obs = self.service.reject(
-            contract_id, sla_id, observation_id, caller_user_id=caller_user_id
+            project_id, sla_id, observation_id, caller_user_id=caller_user_id
         )
         return ObservationResponse.model_validate(obs)
 
     def exclude(
         self,
-        contract_id: str,
+        project_id: str,
         sla_id: str,
         observation_id: str,
         payload: ObservationExcludeRequest,
     ) -> ObservationResponse:
-        obs = self.service.exclude(contract_id, sla_id, observation_id, payload)
+        obs = self.service.exclude(project_id, sla_id, observation_id, payload)
         return ObservationResponse.model_validate(obs)
 
     def submit_band_counts(
         self,
-        contract_id: str,
+        project_id: str,
         sla_id: str,
         observation_id: str,
         payload: BandCountSubmitRequest,
     ) -> List[BandCountResponse]:
         band_counts = self.service.submit_band_counts(
-            contract_id, sla_id, observation_id, payload
+            project_id, sla_id, observation_id, payload
         )
         return [BandCountResponse.model_validate(bc) for bc in band_counts]
 

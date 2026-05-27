@@ -1,8 +1,4 @@
-"""EvaluationResult — one evaluation run for a contract over a reporting period.
-
-A single evaluation run produces one EvaluationResult with N EvaluationSlaResults
-(one per SLA evaluated). Evaluation goes through DRAFT → PENDING_APPROVAL → APPROVED.
-"""
+"""EvaluationResult — one evaluation run for a project over a reporting period."""
 from __future__ import annotations
 
 from datetime import date, datetime
@@ -18,16 +14,16 @@ from app.db import Base
 class EvaluationResult(Base):
     __tablename__ = "evaluation_results"
     __table_args__ = (
-        Index("ix_eval_results_contract_id", "contract_id"),
+        Index("ix_eval_results_project_id", "project_id"),
         Index("ix_eval_results_status", "status"),
         Index("ix_eval_results_period", "period_start", "period_end"),
         {"schema": "contract"},
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
-    contract_id: Mapped[str] = mapped_column(
+    project_id: Mapped[str] = mapped_column(
         String(36),
-        ForeignKey("contract.contracts.id"),
+        ForeignKey("contract.project_ld_config.project_id"),
         nullable=False,
     )
     period_start: Mapped[date] = mapped_column(Date, nullable=False)

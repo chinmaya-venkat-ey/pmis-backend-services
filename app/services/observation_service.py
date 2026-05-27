@@ -1,7 +1,7 @@
 """ObservationService — business logic for metric observations.
 
 Create flow:
-  1. Verify SLA exists and belongs to contract
+  1. Verify SLA exists and belongs to project
   2. Guard: SLA must be ACTIVE (Gap 3)
   3. Guard: period within SLA effective dates (Gap 3)
   4. Guard: metric_key exists in sla_metrics; observed_unit matches (Gap 2)
@@ -54,9 +54,9 @@ class ObservationService:
     # ---------------------------------------------------------------- reads
 
     def get_by_id(
-        self, contract_id: str, sla_id: str, observation_id: str
+        self, project_id: str, sla_id: str, observation_id: str
     ) -> MetricObservation:
-        self._require_sla(contract_id, sla_id)
+        self._require_sla(project_id, sla_id)
         obs = self.repo.get_by_id(observation_id)
         if obs is None or obs.sla_id != sla_id:
             raise ObservationNotFoundError(
@@ -66,7 +66,7 @@ class ObservationService:
 
     def list_for_sla(
         self,
-        contract_id: str,
+        project_id: str,
         sla_id: str,
         *,
         status: Optional[str] = None,
@@ -76,7 +76,7 @@ class ObservationService:
         offset: int = 1,
         page_size: int = 20,
     ) -> Tuple[List[MetricObservation], int]:
-        self._require_sla(contract_id, sla_id)
+        self._require_sla(project_id, sla_id)
         return self.repo.list_for_sla(
             sla_id,
             status=status,
@@ -91,13 +91,13 @@ class ObservationService:
 
     def create(
         self,
-        contract_id: str,
+        project_id: str,
         sla_id: str,
         payload: ObservationCreateRequest,
         *,
         caller_user_id: Optional[str],
     ) -> MetricObservation:
-        sla = self._require_sla(contract_id, sla_id)
+        sla = self._require_sla(project_id, sla_id)
 
         # Gap 3: SLA must be ACTIVE
         if sla.status != "ACTIVE":
@@ -161,14 +161,14 @@ class ObservationService:
 
     def update(
         self,
-        contract_id: str,
+        project_id: str,
         sla_id: str,
         observation_id: str,
         payload: ObservationUpdateRequest,
         *,
         caller_user_id: Optional[str],
     ) -> MetricObservation:
-        obs = self.get_by_id(contract_id, sla_id, observation_id)
+        obs = self.get_by_id(project_id, sla_id, observation_id)
         self._require_pending(obs)
         updates = payload.model_dump(exclude_unset=True)
         if not updates:
@@ -187,13 +187,13 @@ class ObservationService:
 
     def approve(
         self,
-        contract_id: str,
+        project_id: str,
         sla_id: str,
         observation_id: str,
         *,
         caller_user_id: Optional[str],
     ) -> MetricObservation:
-        obs = self.get_by_id(contract_id, sla_id, observation_id)
+        obs = self.get_by_id(project_id, sla_id, observation_id)
         self._require_pending(obs)
         return self.repo.update(
             obs,
@@ -204,13 +204,13 @@ class ObservationService:
 
     def reject(
         self,
-        contract_id: str,
+        project_id: str,
         sla_id: str,
         observation_id: str,
         *,
         caller_user_id: Optional[str],
     ) -> MetricObservation:
-        obs = self.get_by_id(contract_id, sla_id, observation_id)
+        obs = self.get_by_id(project_id, sla_id, observation_id)
         self._require_pending(obs)
         return self.repo.update(obs, status="REJECTED")
 
@@ -218,12 +218,12 @@ class ObservationService:
 
     def exclude(
         self,
-        contract_id: str,
+        project_id: str,
         sla_id: str,
         observation_id: str,
         payload: ObservationExcludeRequest,
     ) -> MetricObservation:
-        obs = self.get_by_id(contract_id, sla_id, observation_id)
+        obs = self.get_by_id(project_id, sla_id, observation_id)
         # Gap 6: REJECTED observations cannot be modified
         if obs.status == "REJECTED":
             raise ValidationError(
@@ -239,12 +239,12 @@ class ObservationService:
 
     def submit_band_counts(
         self,
-        contract_id: str,
+        project_id: str,
         sla_id: str,
         observation_id: str,
         payload: BandCountSubmitRequest,
     ) -> List[SlaObservationBandCount]:
-        obs = self.get_by_id(contract_id, sla_id, observation_id)
+        obs = self.get_by_id(project_id, sla_id, observation_id)
         # Gap 4: only PENDING observations accept band count changes
         self._require_pending(obs)
         # Gap 1: formula must be band_accumulation
@@ -252,18 +252,18 @@ class ObservationService:
         return self._replace_band_counts(sla_id, observation_id, payload.band_counts)
 
     def get_band_counts(
-        self, contract_id: str, sla_id: str, observation_id: str
+        self, project_id: str, sla_id: str, observation_id: str
     ) -> List[SlaObservationBandCount]:
-        self.get_by_id(contract_id, sla_id, observation_id)
+        self.get_by_id(project_id, sla_id, observation_id)
         return self.repo.get_band_counts(observation_id)
 
     # ---------------------------------------------------------------- internals
 
-    def _require_sla(self, contract_id: str, sla_id: str):
+    def _require_sla(self, project_id: str, sla_id: str):
         sla = self.sla_repo.get_by_id(sla_id)
-        if sla is None or sla.contract_id != contract_id:
+        if sla is None or sla.project_id != project_id:
             raise SlaNotFoundError(
-                f"SLA '{sla_id}' not found on contract '{contract_id}'"
+                f"SLA '{sla_id}' not found on project '{project_id}'"
             )
         return sla
 

@@ -616,7 +616,7 @@ def upgrade() -> None:
             sa.text(
                 "INSERT INTO contract.formula_library "
                 "(id, formula_type, display_name, description, parameter_schema, requires_bands, requires_lookup, is_active) "
-                "VALUES (:id, :ft, :dn, :desc, :ps::jsonb, :rb, :rl, true)"
+                "VALUES (:id, :ft, :dn, :desc, CAST(:ps AS jsonb), :rb, :rl, true)"
             ),
             {
                 "id": str(uuid4()),

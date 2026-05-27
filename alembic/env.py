@@ -59,6 +59,14 @@ def run_migrations_online() -> None:
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
     )
+    # Create the contract schema outside any transaction so it persists even
+    # if the migration transaction rolls back mid-run.
+    with connectable.connect() as _bootstrap:
+        from sqlalchemy import text as _text
+        _bootstrap.execution_options(isolation_level="AUTOCOMMIT").execute(
+            _text("CREATE SCHEMA IF NOT EXISTS contract")
+        )
+
     with connectable.connect() as connection:
         context.configure(
             connection=connection,

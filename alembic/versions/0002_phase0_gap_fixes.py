@@ -110,7 +110,7 @@ def upgrade() -> None:
     op.execute(
         sa.text(
             "UPDATE contract.formula_library "
-            "SET parameter_schema = :schema::jsonb "
+            "SET parameter_schema = CAST(:schema AS jsonb) "
             "WHERE formula_type = 'fixed_escalation'"
         ).bindparams(schema=json.dumps(_FIXED_ESCALATION_SCHEMA_V2))
     )
@@ -136,7 +136,7 @@ def downgrade() -> None:
     op.execute(
         sa.text(
             "UPDATE contract.formula_library "
-            "SET parameter_schema = :schema::jsonb "
+            "SET parameter_schema = CAST(:schema AS jsonb) "
             "WHERE formula_type = 'fixed_escalation'"
         ).bindparams(schema=json.dumps(_original_schema))
     )

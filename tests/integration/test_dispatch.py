@@ -65,17 +65,38 @@ def test_dispatch_email_renders_template_and_sends(
         app.dependency_overrides.pop(get_sms_service, None)
 
 
-def test_dispatch_validation_rejects_unknown_channel(client):
-    resp = client.post(
-        "/notification/dispatch",
-        json={
-            "channel": "telegram",  # not in Literal["email","sms"]
-            "recipient": "x",
-            "template_kind": "x",
-            "payload": {},
-        },
-    )
-    assert resp.status_code == 422
+def test_dispatch_validation_rejects_unknown_channel(
+    client, app, fake_db_session, mock_email_service, mock_sms_service,
+):
+    """Validation runs after dependency resolution. SMS/email services must
+    be overridden because their __init__ raises when the provider env var is
+    empty (e.g. in dev .env) — otherwise the request fails 502 at dependency
+    resolution before Pydantic validation runs."""
+    from app.db import get_db
+    from app.services.email_service import get_email_service
+    from app.services.sms_service import get_sms_service
+
+    def _db_override():
+        yield fake_db_session
+
+    app.dependency_overrides[get_db] = _db_override
+    app.dependency_overrides[get_email_service] = lambda: mock_email_service
+    app.dependency_overrides[get_sms_service] = lambda: mock_sms_service
+    try:
+        resp = client.post(
+            "/notification/dispatch",
+            json={
+                "channel": "telegram",  # not in Literal["email","sms"]
+                "recipient": "x",
+                "template_kind": "x",
+                "payload": {},
+            },
+        )
+        assert resp.status_code == 422
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(get_email_service, None)
+        app.dependency_overrides.pop(get_sms_service, None)
 
 
 def test_dispatch_falls_back_when_no_template(

@@ -44,7 +44,7 @@ def test_doc44_gate_self_edit_allowed():
     svc = UserService(MagicMock())
     target = _make_user(user_id="u-1", vendor_id="vend-A")
     # Should not raise.
-    svc._assert_caller_can_modify("u-1", target, caller_is_admin=False)
+    svc._assert_caller_can_modify_user("u-1", target, caller_is_admin=False)
 
 
 def test_doc44_gate_admin_allowed():
@@ -52,7 +52,7 @@ def test_doc44_gate_admin_allowed():
 
     svc = UserService(MagicMock())
     target = _make_user(user_id="u-2", vendor_id="vend-A")
-    svc._assert_caller_can_modify("u-9", target, caller_is_admin=True)
+    svc._assert_caller_can_modify_user("u-9", target, caller_is_admin=True)
 
 
 def test_doc44_gate_cross_vendor_blocked():
@@ -65,11 +65,14 @@ def test_doc44_gate_cross_vendor_blocked():
     svc.repo.get_by_id = MagicMock(return_value=caller)
 
     with pytest.raises(CallerCannotModifyTargetError) as exc_info:
-        svc._assert_caller_can_modify("u-9", target, caller_is_admin=False)
+        svc._assert_caller_can_modify_user("u-9", target, caller_is_admin=False)
     assert exc_info.value.details["target_user_id"] == "u-2"
 
 
-def test_doc44_gate_same_vendor_allowed():
+def test_doc44_gate_same_vendor_blocked():
+    """Round-7 Q1: same-vendor non-admin can NO LONGER modify a peer's row.
+    Only self-edit or admin/super_admin is allowed. org_admin / project_admin
+    manage role-assignments — not user-row fields."""
     from app.services.user_service import UserService
 
     svc = UserService(MagicMock())
@@ -77,8 +80,8 @@ def test_doc44_gate_same_vendor_allowed():
     caller = _make_user(user_id="u-9", vendor_id="vend-A")
     svc.repo.get_by_id = MagicMock(return_value=caller)
 
-    # Should not raise.
-    svc._assert_caller_can_modify("u-9", target, caller_is_admin=False)
+    with pytest.raises(CallerCannotModifyTargetError):
+        svc._assert_caller_can_modify_user("u-9", target, caller_is_admin=False)
 
 
 def test_delete_blocks_last_super_admin():
@@ -88,7 +91,7 @@ def test_delete_blocks_last_super_admin():
     svc = UserService(MagicMock())
     target = _make_user(user_id="u-super")
     svc.repo.get_by_id = MagicMock(return_value=target)
-    svc._assert_caller_can_modify = MagicMock()  # bypass Doc-44
+    svc._assert_caller_can_modify_user = MagicMock()  # bypass Doc-44
     svc._is_only_super_admin = MagicMock(return_value=True)
 
     with pytest.raises(LastSuperAdminLockoutError):
@@ -101,7 +104,7 @@ def test_delete_proceeds_when_other_super_admins_exist():
     svc = UserService(MagicMock())
     target = _make_user(user_id="u-super")
     svc.repo.get_by_id = MagicMock(return_value=target)
-    svc._assert_caller_can_modify = MagicMock()
+    svc._assert_caller_can_modify_user = MagicMock()
     svc._is_only_super_admin = MagicMock(return_value=False)
     svc.repo.soft_delete = MagicMock()
     svc.repo.rotate_refresh_token = MagicMock()

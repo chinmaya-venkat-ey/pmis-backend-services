@@ -38,26 +38,28 @@ def test_create_role_name_conflict():
 
 
 def test_delete_builtin_role_blocked():
-    from app.services.role_service import RoleBuiltinImmutableError, RoleService
+    """Round-8: deleting 'admin' is blocked by the locked-role guard, which
+    fires before the builtin check. A custom builtin role would still raise
+    RoleBuiltinImmutableError; admin/super_admin raise LockedRoleError."""
+    from app.services.role_service import LockedRoleError, RoleService
 
     svc = RoleService(MagicMock())
     svc.repo.get_role = MagicMock(return_value=_make_role(name="admin", builtin=True))
 
-    with pytest.raises(RoleBuiltinImmutableError):
+    with pytest.raises(LockedRoleError):
         svc.delete(1)
 
 
 def test_replace_permissions_blocks_super_admin_grant_on_non_super_admin():
-    """Granting users:grant_superadmin to the `admin` role must raise."""
-    from app.services.role_service import (
-        RoleService,
-        SuperAdminGrantRestrictedError,
-    )
+    """Round-8: `admin` is now a locked role — its permission set can't be
+    mutated at runtime at all. The locked-role guard fires first, so the
+    legacy SuperAdminGrantRestrictedError path is unreachable for admin."""
+    from app.services.role_service import LockedRoleError, RoleService
 
     svc = RoleService(MagicMock())
     svc.repo.get_role = MagicMock(return_value=_make_role(name=ADMIN_ROLE))
 
-    with pytest.raises(SuperAdminGrantRestrictedError):
+    with pytest.raises(LockedRoleError):
         svc.replace_role_permissions(
             1,
             RolePermissionsReplaceRequest(
@@ -66,31 +68,35 @@ def test_replace_permissions_blocks_super_admin_grant_on_non_super_admin():
         )
 
 
-def test_replace_permissions_allows_super_admin_grant_on_super_admin():
-    from app.services.role_service import RoleService
+def test_replace_permissions_on_super_admin_blocked_by_lock():
+    """Round-8: the super_admin row is also locked at runtime — its permission
+    set is maintained only by the bootstrap data-migration. Even granting
+    USERS_GRANT_SUPERADMIN (a code super_admin already holds) is refused."""
+    from app.services.role_service import LockedRoleError, RoleService
 
     svc = RoleService(MagicMock())
     super_role = _make_role(role_id=99, name=SUPER_ADMIN_ROLE)
     svc.repo.get_role = MagicMock(return_value=super_role)
-    svc.repo.replace_role_permissions = MagicMock()
-    svc.repo.list_role_permissions = MagicMock(return_value=[USERS_GRANT_SUPERADMIN])
 
-    role, perms = svc.replace_role_permissions(
-        99,
-        RolePermissionsReplaceRequest(permissions=[USERS_GRANT_SUPERADMIN]),
-    )
-    assert role is super_role
-    assert USERS_GRANT_SUPERADMIN in perms
+    with pytest.raises(LockedRoleError):
+        svc.replace_role_permissions(
+            99,
+            RolePermissionsReplaceRequest(permissions=[USERS_GRANT_SUPERADMIN]),
+        )
 
 
-def test_grant_single_permission_blocks_super_admin_grant_on_non_super_admin():
+def test_grant_single_permission_blocks_reserved_grant_on_non_super_admin():
+    """Round-8: USERS_GRANT_SUPERADMIN is now in RESERVED_DIRECT_GRANT_CODES,
+    so it can't be placed on any role at runtime. The legacy
+    SuperAdminGrantRestrictedError path is subsumed by ReservedPermissionError
+    (for non-locked roles) and LockedRoleError (for admin/super_admin)."""
     from app.services.role_service import (
+        ReservedPermissionError,
         RoleService,
-        SuperAdminGrantRestrictedError,
     )
 
     svc = RoleService(MagicMock())
     svc.repo.get_role = MagicMock(return_value=_make_role(name="org_admin"))
 
-    with pytest.raises(SuperAdminGrantRestrictedError):
+    with pytest.raises(ReservedPermissionError):
         svc.grant_permission_to_role(1, USERS_GRANT_SUPERADMIN)

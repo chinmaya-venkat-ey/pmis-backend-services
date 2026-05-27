@@ -16,8 +16,9 @@ def test_root_returns_service_info(client):
     resp = client.get("/")
     assert resp.status_code == 200
     body = resp.json()
-    assert body["service"] == "pmis-user-management"
-    assert "docs_url" in body
+    # GET / goes through HAL envelope: {data, message, error, status}
+    assert body["data"]["service"] == "pmis-user-management"
+    assert "docs_url" in body["data"]
 
 
 def test_ready_503_when_db_unreachable(client, app, fake_db_session):

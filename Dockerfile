@@ -18,13 +18,15 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app/ ./app/
 COPY alembic/ ./alembic/
 COPY alembic.ini ./
+COPY entrypoint.sh ./
 
 RUN groupadd --system app && useradd --system --gid app --home /app --no-create-home appuser \
-    && chown -R appuser:app /app
+    && chown -R appuser:app /app \
+    && chmod +x entrypoint.sh
 
 USER appuser
 
 EXPOSE 8002
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD curl -fsS http://localhost:8002/health || exit 1
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8002"]
+CMD ["./entrypoint.sh"]

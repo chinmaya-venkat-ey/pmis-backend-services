@@ -126,10 +126,8 @@ def upgrade() -> None:
         ondelete="CASCADE",
     )
 
-    # New unique index: (project_id, sla_ref)
-    op.create_index(
-        "ix_sla_def_project_id", "sla_definitions", ["project_id"], schema="contract",
-    )
+    # ix_sla_def_project_id already exists from migration 0003 — don't recreate it.
+    # Add the new unique composite index: (project_id, sla_ref)
     op.create_index(
         "ix_sla_def_project_sla_ref", "sla_definitions", ["project_id", "sla_ref"],
         unique=True, schema="contract",
@@ -222,7 +220,7 @@ def downgrade() -> None:
     # Restore sla_definitions columns
     op.drop_constraint("fk_sla_def_project_id", "sla_definitions", schema="contract", type_="foreignkey")
     op.drop_index("ix_sla_def_project_sla_ref", table_name="sla_definitions", schema="contract")
-    op.drop_index("ix_sla_def_project_id", table_name="sla_definitions", schema="contract")
+    # ix_sla_def_project_id is owned by migration 0003 — leave it for 0003's downgrade.
     op.add_column("sla_definitions", sa.Column("contract_id", sa.String(36), sa.ForeignKey("contract.contracts.id", ondelete="CASCADE"), nullable=False, server_default=""), schema="contract")
     op.add_column("sla_definitions", sa.Column("phase_id", sa.String(36), sa.ForeignKey("contract.contract_phases.id", ondelete="SET NULL")), schema="contract")
     op.create_index("ix_sla_def_contract_id", "sla_definitions", ["contract_id"], schema="contract")

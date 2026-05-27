@@ -2,10 +2,18 @@
 guard + inline-comment / files."""
 from __future__ import annotations
 
+import re
 from typing import List, Optional
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
+
+# FE normalizes task node.id to the WBS display code (e.g. "T1.2.3") after
+# normalizeProject runs, so depends_on arrives as display codes rather than
+# UUIDs. Mirror of the milestone + activity resolvers; tasks use
+# T{milestone_position}.{activity_position}.{task_position} format.
+_TASK_DISPLAY_CODE_RE = re.compile(r"^T(\d+)\.(\d+)\.(\d+)$", re.IGNORECASE)
 
 from app.core.errors import (
     ActivityNotFoundError,
@@ -101,10 +109,11 @@ class TaskService:
             updated_by=caller_user_id,
         )
         if payload.depends_on:
-            self._guard_dependency_cycle(row.id, payload.depends_on)
-            self._assert_deps_in_same_project(row.project_id, payload.depends_on)
-            self._assert_dep_dates_outlasting(row, payload.depends_on)
-            self.repo.replace_dependencies(row.id, payload.depends_on)
+            resolved_deps = self._resolve_depends_on(row.project_id, payload.depends_on)
+            self._guard_dependency_cycle(row.id, resolved_deps)
+            self._assert_deps_in_same_project(row.project_id, resolved_deps)
+            self._assert_dep_dates_outlasting(row, resolved_deps)
+            self.repo.replace_dependencies(row.id, resolved_deps)
 
         # Inline comment / attachments — written under the new task.
         # Captured on ``_inline_comment`` so the controller can echo the
@@ -206,16 +215,17 @@ class TaskService:
                 },
             )
         if depends_on is not None:
-            self._guard_dependency_cycle(row.id, depends_on)
-            if depends_on:
-                self._assert_deps_in_same_project(row.project_id, depends_on)
-                self._assert_dep_dates_outlasting(row, depends_on)
-            self.repo.replace_dependencies(row.id, depends_on)
+            resolved_deps = self._resolve_depends_on(row.project_id, depends_on)
+            self._guard_dependency_cycle(row.id, resolved_deps)
+            if resolved_deps:
+                self._assert_deps_in_same_project(row.project_id, resolved_deps)
+                self._assert_dep_dates_outlasting(row, resolved_deps)
+            self.repo.replace_dependencies(row.id, resolved_deps)
             self.audit.write(
                 project_id=row.project_id,
                 target_kind="task", target_id=row.id,
                 action="update", actor_user_id=caller_user_id,
-                changes={"depends_on": depends_on},
+                changes={"depends_on": resolved_deps},
             )
         self.db.commit()
         return row
@@ -396,6 +406,53 @@ class TaskService:
             f"activity '{a.name}' is still completed. Revert the parent "
             f"activity first."
         )
+
+    # ------------------------------------------ display-code resolver -----
+
+    def _resolve_depends_on(
+        self, project_id: str, raw_ids: List[str],
+    ) -> List[str]:
+        """Resolve display codes (e.g. 'T1.2.3') mixed with UUIDs to UUIDs.
+
+        The FE normalizes task node.id to serverDisplayCode (T{ms}.{act}.{tsk})
+        via normalizeProject, so depends_on arrives as display codes. Mirror
+        of MilestoneService / ActivityService — tasks use
+        T{milestone_position}.{activity_position}.{task_position} format.
+        """
+        if not raw_ids:
+            return []
+        from app.models.activity import Activity
+        from app.models.milestone import Milestone
+        from app.models.task import Task
+
+        lookups: List[tuple] = []
+        uuid_ids: List[str] = []
+        for dep_id in raw_ids:
+            match = _TASK_DISPLAY_CODE_RE.match(dep_id)
+            if match:
+                lookups.append(
+                    (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+                )
+            else:
+                uuid_ids.append(dep_id)
+
+        resolved = list(uuid_ids)
+        for ms_pos, act_pos, task_pos in lookups:
+            row = self.db.execute(
+                select(Task.id)
+                .join(Activity, Activity.id == Task.activity_id)
+                .join(Milestone, Milestone.id == Activity.milestone_id)
+                .where(Milestone.project_id == project_id)
+                .where(Milestone.position == ms_pos)
+                .where(Milestone.deleted_at.is_(None))
+                .where(Activity.position == act_pos)
+                .where(Activity.deleted_at.is_(None))
+                .where(Task.position == task_pos)
+                .where(Task.deleted_at.is_(None))
+            ).scalar_one_or_none()
+            if row:
+                resolved.append(row)
+        return resolved
 
     # ----------------------------------------------------- dep cycle -----
 

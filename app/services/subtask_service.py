@@ -8,10 +8,21 @@ safe for the cascade soft-delete / restore paths.
 """
 from __future__ import annotations
 
+import re
 from typing import List, Optional
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
+
+# FE normalizes subtask node.id to the WBS display code
+# (e.g. "S1.2.3.4" for top-level, "S1.2.3.4.5" for nested) after
+# normalizeProject runs, so depends_on arrives as display codes rather
+# than UUIDs. Variable depth: must have at least 4 segments (M.A.T.S_root)
+# and may have arbitrarily many more for nested subtasks.
+_SUBTASK_DISPLAY_CODE_RE = re.compile(
+    r"^S(\d+(?:\.\d+){3,})$", re.IGNORECASE
+)
 
 from app.core.errors import (
     CallerCannotModifyTargetError,
@@ -145,10 +156,11 @@ class SubtaskService:
             updated_by=caller_user_id,
         )
         if payload.depends_on:
-            self._guard_dependency_cycle(row.id, payload.depends_on)
-            self._assert_deps_in_same_project(row.project_id, payload.depends_on)
-            self._assert_dep_dates_outlasting(row, payload.depends_on)
-            self.repo.replace_dependencies(row.id, payload.depends_on)
+            resolved_deps = self._resolve_depends_on(row.project_id, payload.depends_on)
+            self._guard_dependency_cycle(row.id, resolved_deps)
+            self._assert_deps_in_same_project(row.project_id, resolved_deps)
+            self._assert_dep_dates_outlasting(row, resolved_deps)
+            self.repo.replace_dependencies(row.id, resolved_deps)
 
         # Inline comment / attachments — written under the new subtask.
         # Captured on ``_inline_comment`` so the controller can echo the
@@ -263,16 +275,17 @@ class SubtaskService:
                 },
             )
         if depends_on is not None:
-            self._guard_dependency_cycle(row.id, depends_on)
-            if depends_on:
-                self._assert_deps_in_same_project(row.project_id, depends_on)
-                self._assert_dep_dates_outlasting(row, depends_on)
-            self.repo.replace_dependencies(row.id, depends_on)
+            resolved_deps = self._resolve_depends_on(row.project_id, depends_on)
+            self._guard_dependency_cycle(row.id, resolved_deps)
+            if resolved_deps:
+                self._assert_deps_in_same_project(row.project_id, resolved_deps)
+                self._assert_dep_dates_outlasting(row, resolved_deps)
+            self.repo.replace_dependencies(row.id, resolved_deps)
             self.audit.write(
                 project_id=row.project_id,
                 target_kind="subtask", target_id=row.id,
                 action="update", actor_user_id=caller_user_id,
-                changes={"depends_on": depends_on},
+                changes={"depends_on": resolved_deps},
             )
         self.db.commit()
         return row
@@ -471,6 +484,83 @@ class SubtaskService:
             parts = [f"S{m_pos}", str(a_pos), str(t_pos)] + [str(p) for p in positions]
             out[sid] = ".".join(parts)
         return out
+
+    # ------------------------------------------ display-code resolver -----
+
+    def _resolve_depends_on(
+        self, project_id: str, raw_ids: List[str],
+    ) -> List[str]:
+        """Resolve display codes (e.g. 'S1.2.3.4' top-level or
+        'S1.2.3.4.5' nested) mixed with UUIDs to UUIDs.
+
+        The FE normalizes subtask node.id to serverDisplayCode via
+        normalizeProject, so depends_on arrives as display codes.
+        Variable-depth: walks M -> A -> T by position, then through the
+        parent_subtask_id chain by position for each nesting level.
+        Mirror of MilestoneService / ActivityService / TaskService
+        resolvers — this is the only one that handles unbounded depth.
+        """
+        if not raw_ids:
+            return []
+        from app.models.activity import Activity
+        from app.models.milestone import Milestone
+        from app.models.subtask import Subtask
+        from app.models.task import Task
+
+        positional_lookups: List[List[int]] = []
+        uuid_ids: List[str] = []
+        for dep_id in raw_ids:
+            match = _SUBTASK_DISPLAY_CODE_RE.match(dep_id)
+            if match:
+                positional_lookups.append(
+                    [int(p) for p in match.group(1).split(".")]
+                )
+            else:
+                uuid_ids.append(dep_id)
+
+        resolved = list(uuid_ids)
+        for ranks in positional_lookups:
+            # Ranks layout: [m, a, t, s_root, ...nested_levels]
+            m_pos, a_pos, t_pos, s_root_pos = ranks[0], ranks[1], ranks[2], ranks[3]
+            nested_positions = ranks[4:]
+
+            # Walk M -> A -> T -> root subtask.
+            root_subtask_id = self.db.execute(
+                select(Subtask.id)
+                .join(Task, Task.id == Subtask.task_id)
+                .join(Activity, Activity.id == Task.activity_id)
+                .join(Milestone, Milestone.id == Activity.milestone_id)
+                .where(Milestone.project_id == project_id)
+                .where(Milestone.position == m_pos)
+                .where(Milestone.deleted_at.is_(None))
+                .where(Activity.position == a_pos)
+                .where(Activity.deleted_at.is_(None))
+                .where(Task.position == t_pos)
+                .where(Task.deleted_at.is_(None))
+                .where(Subtask.parent_subtask_id.is_(None))
+                .where(Subtask.position == s_root_pos)
+                .where(Subtask.deleted_at.is_(None))
+            ).scalar_one_or_none()
+            if not root_subtask_id:
+                continue
+
+            # Descend through nested levels by parent_subtask_id + position.
+            cursor = root_subtask_id
+            ok = True
+            for nested_pos in nested_positions:
+                next_id = self.db.execute(
+                    select(Subtask.id)
+                    .where(Subtask.parent_subtask_id == cursor)
+                    .where(Subtask.position == nested_pos)
+                    .where(Subtask.deleted_at.is_(None))
+                ).scalar_one_or_none()
+                if not next_id:
+                    ok = False
+                    break
+                cursor = next_id
+            if ok:
+                resolved.append(cursor)
+        return resolved
 
     # ----------------------------------------------- catalog + gates -----
 

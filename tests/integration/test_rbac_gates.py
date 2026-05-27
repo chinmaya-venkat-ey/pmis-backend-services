@@ -14,19 +14,19 @@ from unittest.mock import MagicMock
 
 
 def test_anonymous_cannot_list_divisions(anonymous_client):
-    resp = anonymous_client.get("/masters/divisions/list")
+    resp = anonymous_client.get("/api/v3/master/divisions")
     assert resp.status_code == 401
-    assert resp.json()["code"] == "AUTH_REQUIRED"
+    assert resp.json()["error"]["errorIdentifier"] in {"AUTH_REQUIRED", "auth_required"}
 
 
 def test_anonymous_cannot_list_vendors(anonymous_client):
-    resp = anonymous_client.get("/masters/vendors/list")
+    resp = anonymous_client.get("/api/v3/master/vendors")
     assert resp.status_code == 401
 
 
 def test_anonymous_cannot_create_division(anonymous_client):
     resp = anonymous_client.post(
-        "/masters/divisions/create",
+        "/api/v3/master/divisions/create",
         json={
             "code": "test_div",
             "label": "Test",
@@ -53,7 +53,7 @@ def test_reader_can_list_divisions(reader_client, app, fake_db_session):
 
     app.dependency_overrides[get_db] = _override
     try:
-        resp = reader_client.get("/masters/divisions/list")
+        resp = reader_client.get("/api/v3/master/divisions")
         assert resp.status_code == 200
         assert resp.json() == []
     finally:
@@ -63,7 +63,7 @@ def test_reader_can_list_divisions(reader_client, app, fake_db_session):
 def test_reader_cannot_create_division(reader_client):
     """Reader does NOT hold divisions:manage → 403 on create."""
     resp = reader_client.post(
-        "/masters/divisions/create",
+        "/api/v3/master/divisions/create",
         json={
             "code": "test_div",
             "label": "Test",
@@ -72,12 +72,12 @@ def test_reader_cannot_create_division(reader_client):
         },
     )
     assert resp.status_code == 403
-    assert resp.json()["code"] == "PERMISSION_DENIED"
+    assert resp.json()["error"]["errorIdentifier"] in {"PERMISSION_DENIED", "permission_denied"}
 
 
 def test_reader_cannot_list_vendors(reader_client):
     """Reader holds divisions:read only, NOT vendors:read → 403."""
-    resp = reader_client.get("/masters/vendors/list")
+    resp = reader_client.get("/api/v3/master/vendors")
     assert resp.status_code == 403
 
 
@@ -95,7 +95,7 @@ def test_admin_can_list_vendors(client, app, fake_db_session):
 
     app.dependency_overrides[get_db] = _override
     try:
-        resp = client.get("/masters/vendors/list")
+        resp = client.get("/api/v3/master/vendors")
         assert resp.status_code == 200
     finally:
         app.dependency_overrides.pop(get_db, None)

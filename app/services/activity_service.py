@@ -284,6 +284,12 @@ class ActivityService:
                 action="update", actor_user_id=caller_user_id,
                 changes={"depends_on": resolved_deps},
             )
+        # Cascade: if status transitioned to terminal, try to roll up.
+        if (
+            "status" in updates and updates["status"] is not None
+            and is_terminal_status(updates["status"])
+        ):
+            self._cascade_to_parent(row, caller_user_id=caller_user_id)
         self.db.commit()
         return row
 
@@ -560,3 +566,57 @@ class ActivityService:
                     f"Adding dependency on '{offender}' would create a cycle."
                 )
             frontier.extend(self.repo.list_dependencies_for(current))
+
+    # ------------------------------------------ auto-complete cascade ----
+
+    def _attempt_auto_complete(
+        self, row, *, caller_user_id: Optional[str],
+        triggering_child_id: Optional[str],
+    ) -> None:
+        """Best-effort auto-complete of this activity when invoked by a
+        child task's cascade. Silent no-op if already terminal, any live
+        child task is non-terminal, or own deps not satisfied. On
+        success, propagates upward to the milestone.
+        """
+        from sqlalchemy import select
+        from app.models.task import Task
+        if is_terminal_status(row.status):
+            return
+        # All live tasks under this activity must be terminal.
+        rows = list(self.db.execute(
+            select(Task.status)
+            .where(Task.activity_id == row.id)
+            .where(Task.deleted_at.is_(None))
+        ).all())
+        if not rows or not all(is_terminal_status(s) for (s,) in rows):
+            return
+        try:
+            self._assert_deps_completed(row.id)
+        except ValidationError:
+            return
+        before = row.status
+        self.repo.update(row, status="completed", updated_by=caller_user_id)
+        self.audit.write(
+            project_id=row.project_id,
+            target_kind="activity", target_id=row.id,
+            action="update", actor_user_id=caller_user_id,
+            changes={
+                "status": {"before": before, "after": "completed"},
+                "auto_triggered": True,
+                "by_child": triggering_child_id,
+            },
+        )
+        self._cascade_to_parent(row, caller_user_id=caller_user_id)
+
+    def _cascade_to_parent(self, row, *, caller_user_id: Optional[str]) -> None:
+        """Walk one step up: activity -> parent milestone. Defers to
+        MilestoneService for the actual auto-complete attempt.
+        """
+        from app.services.milestone_service import MilestoneService
+        ms_service = MilestoneService(self.db)
+        ms = ms_service.repo.get_by_id(row.milestone_id)
+        if ms is not None:
+            ms_service._attempt_auto_complete(
+                ms, caller_user_id=caller_user_id,
+                triggering_child_id=row.id,
+            )

@@ -278,6 +278,13 @@ class MilestoneService:
                 action="update", actor_user_id=caller_user_id,
                 changes={"vendor_ids": canonical_vendor_ids},
             )
+        # Cascade: if status transitioned to terminal, try to roll up
+        # to the project.
+        if (
+            "status" in updates and updates["status"] is not None
+            and is_terminal_status(updates["status"])
+        ):
+            self._cascade_to_parent(row, caller_user_id=caller_user_id)
 
         self.db.commit()
         return row
@@ -561,3 +568,102 @@ class MilestoneService:
                     f"create a cycle."
                 )
             frontier.extend(self.repo.list_dependencies_for(current))
+
+    # ------------------------------------------ auto-complete cascade ----
+
+    AUTO_COMPLETE_REASON = "Auto-completed: all milestones completed."
+
+    def _attempt_auto_complete(
+        self, row, *, caller_user_id: Optional[str],
+        triggering_child_id: Optional[str],
+    ) -> None:
+        """Best-effort auto-complete of this milestone when invoked by a
+        child activity's cascade. Silent no-op if already terminal, any
+        live child activity is non-terminal, or own deps not satisfied.
+        On success, propagates upward to the project.
+        """
+        from sqlalchemy import select
+        from app.models.activity import Activity
+        if is_terminal_status(row.status):
+            return
+        rows = list(self.db.execute(
+            select(Activity.status)
+            .where(Activity.milestone_id == row.id)
+            .where(Activity.deleted_at.is_(None))
+        ).all())
+        if not rows or not all(is_terminal_status(s) for (s,) in rows):
+            return
+        try:
+            self._assert_deps_completed(row.id)
+        except ValidationError:
+            return
+        before = row.status
+        self.repo.update(row, updated_by=caller_user_id, status="completed")
+        self.audit.write(
+            project_id=row.project_id,
+            target_kind="milestone", target_id=row.id,
+            action="update", actor_user_id=caller_user_id,
+            changes={
+                "status": {"before": before, "after": "completed"},
+                "auto_triggered": True,
+                "by_child": triggering_child_id,
+            },
+        )
+        self._cascade_to_parent(row, caller_user_id=caller_user_id)
+
+    def _cascade_to_parent(self, row, *, caller_user_id: Optional[str]) -> None:
+        """Walk one step up: milestone -> parent project. The project
+        rollup uses status='closed' with a system-generated
+        ``status_explanation`` (no separate 'completed' state exists in
+        the project lifecycle catalog).
+        """
+        self._attempt_auto_complete_project(
+            project_id=row.project_id,
+            caller_user_id=caller_user_id,
+            triggering_child_id=row.id,
+        )
+
+    def _attempt_auto_complete_project(
+        self, *, project_id: str, caller_user_id: Optional[str],
+        triggering_child_id: Optional[str],
+    ) -> None:
+        """Mark the project closed when all its live milestones are
+        terminal. ``status_explanation`` is set to the auto-complete
+        marker only when previously empty — manual close reasons are
+        preserved. Skips if project is already at a terminal lifecycle
+        state ('closed').
+        """
+        from app.models.milestone import Milestone
+        from app.models.project import Project
+        from sqlalchemy import select
+
+        project = self.db.execute(
+            select(Project).where(Project.id == project_id)
+        ).scalar_one_or_none()
+        if project is None:
+            return
+        if project.status == "closed":
+            return
+        rows = list(self.db.execute(
+            select(Milestone.status)
+            .where(Milestone.project_id == project_id)
+            .where(Milestone.deleted_at.is_(None))
+        ).all())
+        if not rows or not all(is_terminal_status(s) for (s,) in rows):
+            return
+        before = project.status
+        update_kwargs = {"status": "closed", "updated_by": caller_user_id}
+        if not (project.status_explanation or "").strip():
+            update_kwargs["status_explanation"] = self.AUTO_COMPLETE_REASON
+        self.projects.update(project, **update_kwargs)
+        self.audit.write(
+            project_id=project.id,
+            target_kind="project", target_id=project.id,
+            action="update", actor_user_id=caller_user_id,
+            changes={
+                "status": {"before": before, "after": "closed"},
+                "auto_triggered": True,
+                "by_child": triggering_child_id,
+            },
+            note=self.AUTO_COMPLETE_REASON,
+        )

@@ -287,6 +287,15 @@ class SubtaskService:
                 action="update", actor_user_id=caller_user_id,
                 changes={"depends_on": resolved_deps},
             )
+        # Cascade: if this subtask just transitioned to terminal and its
+        # siblings are all terminal, auto-complete the parent (subtask or
+        # task), then propagate upward. Runs in-session pre-commit so the
+        # whole chain is atomic.
+        if (
+            "status" in updates and updates["status"] is not None
+            and is_terminal_status(updates["status"])
+        ):
+            self._cascade_to_parent(row, caller_user_id=caller_user_id)
         self.db.commit()
         return row
 
@@ -815,3 +824,75 @@ class SubtaskService:
                 "project_id": project_id,
             },
         )
+
+    # ------------------------------------------ auto-complete cascade ----
+
+    def _cascade_to_parent(self, row, *, caller_user_id: Optional[str]) -> None:
+        """Walk one step up from this subtask and try to auto-complete the
+        parent. For nested subtasks the parent is another subtask; for
+        top-level subtasks the parent is a Task.
+        """
+        if row.parent_subtask_id is not None:
+            parent = self.repo.get_by_id(row.parent_subtask_id)
+            if parent is not None:
+                self._attempt_auto_complete_subtask(
+                    parent, caller_user_id=caller_user_id,
+                    triggering_child_id=row.id,
+                )
+        else:
+            # Top-level subtask: parent is the task. Defer to TaskService.
+            from app.services.task_service import TaskService
+            task_service = TaskService(self.db)
+            task = task_service.repo.get_by_id(row.task_id)
+            if task is not None:
+                task_service._attempt_auto_complete(
+                    task, caller_user_id=caller_user_id,
+                    triggering_child_id=row.id,
+                )
+
+    def _attempt_auto_complete_subtask(
+        self, parent, *, caller_user_id: Optional[str],
+        triggering_child_id: Optional[str],
+    ) -> None:
+        """Best-effort auto-complete of a parent subtask when all its live
+        direct children are terminal. Skips silently if already terminal,
+        if any live child is non-terminal, or if the subtask has open
+        dependencies. On success, recurses upward.
+        """
+        if is_terminal_status(parent.status):
+            return
+        if not self._all_live_children_terminal(parent.id):
+            return
+        try:
+            self._assert_deps_completed(parent.id)
+        except ValidationError:
+            return
+        before = parent.status
+        self.repo.update(parent, status="completed", updated_by=caller_user_id)
+        self.audit.write(
+            project_id=parent.project_id,
+            target_kind="subtask", target_id=parent.id,
+            action="update", actor_user_id=caller_user_id,
+            changes={
+                "status": {"before": before, "after": "completed"},
+                "auto_triggered": True,
+                "by_child": triggering_child_id,
+            },
+        )
+        self._cascade_to_parent(parent, caller_user_id=caller_user_id)
+
+    def _all_live_children_terminal(self, parent_subtask_id: str) -> bool:
+        """True iff the parent subtask has at least one live direct child
+        AND every live direct child is terminal. False on empty (no
+        children) — a leaf subtask should never be auto-completed by an
+        empty rollup.
+        """
+        from app.models.subtask import Subtask
+        rows = list(self.db.execute(
+            select(Subtask.status)
+            .where(Subtask.parent_subtask_id == parent_subtask_id)
+            .where(Subtask.deleted_at.is_(None))
+        ).all())
+        if not rows:
+            return False
+        return all(is_terminal_status(status) for (status,) in rows)

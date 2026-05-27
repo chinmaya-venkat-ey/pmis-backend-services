@@ -227,6 +227,12 @@ class TaskService:
                 action="update", actor_user_id=caller_user_id,
                 changes={"depends_on": resolved_deps},
             )
+        # Cascade: if status transitioned to terminal, try to roll up.
+        if (
+            "status" in updates and updates["status"] is not None
+            and is_terminal_status(updates["status"])
+        ):
+            self._cascade_to_parent(row, caller_user_id=caller_user_id)
         self.db.commit()
         return row
 
@@ -536,3 +542,65 @@ class TaskService:
                 "project_id": project_id,
             },
         )
+
+    # ------------------------------------------ auto-complete cascade ----
+
+    def _attempt_auto_complete(
+        self, row, *, caller_user_id: Optional[str],
+        triggering_child_id: Optional[str],
+    ) -> None:
+        """Best-effort auto-complete of this task when invoked by a child
+        subtask's cascade. Silent no-op if already terminal, any live
+        top-level subtask is non-terminal, or own deps not satisfied.
+        On success, propagates upward to the activity.
+        """
+        if is_terminal_status(row.status):
+            return
+        if not self._all_live_top_level_subtasks_terminal(row.id):
+            return
+        try:
+            self._assert_deps_completed(row.id)
+        except ValidationError:
+            return
+        before = row.status
+        self.repo.update(row, status="completed", updated_by=caller_user_id)
+        self.audit.write(
+            project_id=row.project_id,
+            target_kind="task", target_id=row.id,
+            action="update", actor_user_id=caller_user_id,
+            changes={
+                "status": {"before": before, "after": "completed"},
+                "auto_triggered": True,
+                "by_child": triggering_child_id,
+            },
+        )
+        self._cascade_to_parent(row, caller_user_id=caller_user_id)
+
+    def _cascade_to_parent(self, row, *, caller_user_id: Optional[str]) -> None:
+        """Walk one step up: task -> parent activity. Defers to
+        ActivityService for the actual auto-complete attempt.
+        """
+        from app.services.activity_service import ActivityService
+        act_service = ActivityService(self.db)
+        act = act_service.repo.get_by_id(row.activity_id)
+        if act is not None:
+            act_service._attempt_auto_complete(
+                act, caller_user_id=caller_user_id,
+                triggering_child_id=row.id,
+            )
+
+    def _all_live_top_level_subtasks_terminal(self, task_id: str) -> bool:
+        """True iff the task has at least one live top-level subtask AND
+        every live top-level subtask is terminal. False on empty (a task
+        without any subtasks should NOT auto-complete from an empty
+        rollup — the user has to mark it manually)."""
+        from app.models.subtask import Subtask
+        rows = list(self.db.execute(
+            select(Subtask.status)
+            .where(Subtask.task_id == task_id)
+            .where(Subtask.parent_subtask_id.is_(None))
+            .where(Subtask.deleted_at.is_(None))
+        ).all())
+        if not rows:
+            return False
+        return all(is_terminal_status(status) for (status,) in rows)

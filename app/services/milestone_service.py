@@ -630,8 +630,14 @@ class MilestoneService:
         """Mark the project closed when all its live milestones are
         terminal. ``status_explanation`` is set to the auto-complete
         marker only when previously empty — manual close reasons are
-        preserved. Skips if project is already at a terminal lifecycle
-        state ('closed').
+        preserved.
+
+        Lifecycle gate: auto-close only fires for projects in
+        ``status='published'``. Projects in ``new`` / ``draft`` are
+        still being configured (the user hasn't launched them yet),
+        so even if every milestone is marked completed during setup
+        the project must NOT be force-closed. Projects already in
+        ``closed`` are terminal and skipped.
         """
         from app.models.milestone import Milestone
         from app.models.project import Project
@@ -642,7 +648,7 @@ class MilestoneService:
         ).scalar_one_or_none()
         if project is None:
             return
-        if project.status == "closed":
+        if project.status != "published":
             return
         rows = list(self.db.execute(
             select(Milestone.status)

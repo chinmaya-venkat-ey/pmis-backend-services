@@ -38,6 +38,9 @@ class ValidationError(DomainError):
 class ContractNotFoundError(NotFoundError):
     default_code = "not_found"
 
+class PhaseNotFoundError(NotFoundError):
+    default_code = "not_found"
+
 class SlaNotFoundError(NotFoundError):
     default_code = "not_found"
 

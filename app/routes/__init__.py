@@ -8,7 +8,5 @@ from fastapi import APIRouter
 
 contract_router = APIRouter(prefix="/api/v3")
 
-# Routes are included here as each phase is implemented.
-# Example (Phase 1):
-#   from app.routes import contract_routes, sla_routes, formula_routes
-#   contract_router.include_router(contract_routes.router)
+from app.routes import contract_routes  # noqa: E402
+contract_router.include_router(contract_routes.router)

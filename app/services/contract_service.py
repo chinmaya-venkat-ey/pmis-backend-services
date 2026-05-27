@@ -71,7 +71,16 @@ class ContractService:
             metadata_=payload.metadata,
             created_by=caller_user_id,
         )
-        return self.repo.create(contract)
+        self.repo.create(contract)
+        if payload.scoring_config:
+            sc = payload.scoring_config
+            self.repo.upsert_scoring_config(
+                contract.id,
+                sc.severity_points_map,
+                sc.points_ld_map,
+                sc.applies_to_formulas,
+            )
+        return contract
 
     def update(
         self,
@@ -85,9 +94,18 @@ class ContractService:
         # schema uses "metadata" but model column is "metadata_"
         if "metadata" in updates:
             updates["metadata_"] = updates.pop("metadata")
-        if not updates:
-            return contract
-        return self.repo.update(contract, **updates)
+        # scoring_config is handled separately — not a direct column
+        sc_payload = updates.pop("scoring_config", None)
+        if updates:
+            self.repo.update(contract, **updates)
+        if sc_payload:
+            self.repo.upsert_scoring_config(
+                contract_id,
+                sc_payload["severity_points_map"],
+                sc_payload["points_ld_map"],
+                sc_payload.get("applies_to_formulas", ["point_accumulation", "wac"]),
+            )
+        return contract
 
     # ---------------------------------------------------------------- phases
 

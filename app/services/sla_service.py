@@ -150,6 +150,26 @@ class SlaService:
                 f"Existing: '{sla.sla_ref}', DSL has: '{parsed.sla_ref}'"
             )
 
+        # Re-run formula validation on the new DSL
+        formula = self.repo.get_formula_by_type(parsed.formula_type)
+        if formula is None:
+            raise DslParseError(f"Unknown formula type '{parsed.formula_type}'")
+        if formula.requires_bands and not parsed.bands:
+            raise DslParseError(
+                f"Formula '{parsed.formula_type}' requires 'bands' but none were provided"
+            )
+        if formula.requires_lookup and not parsed.lookup_table:
+            raise DslParseError(
+                f"Formula '{parsed.formula_type}' requires 'lookup_table' but none was provided"
+            )
+        schema_required = (formula.parameter_schema or {}).get("required", [])
+        missing_params = [k for k in schema_required if k not in parsed.parameters]
+        if missing_params:
+            raise DslParseError(
+                f"Formula '{parsed.formula_type}' requires parameters: "
+                + ", ".join(missing_params)
+            )
+
         # Remove old sub-tables
         for model in (
             SlaMetric, SlaGuardCondition, SlaParameterValue,
@@ -257,6 +277,25 @@ class SlaService:
         formula = self.repo.get_formula_by_type(parsed.formula_type)
         if formula is None:
             raise DslParseError(f"Unknown formula type '{parsed.formula_type}'")
+
+        # Validate bands/lookup requirements against formula_library flags
+        if formula.requires_bands and not parsed.bands:
+            raise DslParseError(
+                f"Formula '{parsed.formula_type}' requires 'bands' but none were provided"
+            )
+        if formula.requires_lookup and not parsed.lookup_table:
+            raise DslParseError(
+                f"Formula '{parsed.formula_type}' requires 'lookup_table' but none was provided"
+            )
+
+        # Validate required parameters against formula_library.parameter_schema.required
+        schema_required = (formula.parameter_schema or {}).get("required", [])
+        missing_params = [k for k in schema_required if k not in parsed.parameters]
+        if missing_params:
+            raise DslParseError(
+                f"Formula '{parsed.formula_type}' requires parameters: "
+                + ", ".join(missing_params)
+            )
 
         sla_id = str(uuid4())
 

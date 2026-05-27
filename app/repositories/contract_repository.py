@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.models.contract import Contract
 from app.models.contract_phase import ContractPhase
+from app.models.contract_scoring_config import ContractScoringConfig
 
 
 class ContractRepository:
@@ -104,3 +105,40 @@ class ContractRepository:
         self.db.flush()
         self.db.refresh(phase)
         return phase
+
+    # ---------------------------------------------------------------- scoring config
+
+    def get_scoring_config(self, contract_id: str) -> Optional[ContractScoringConfig]:
+        return self.db.execute(
+            select(ContractScoringConfig).where(
+                ContractScoringConfig.contract_id == contract_id
+            )
+        ).scalar_one_or_none()
+
+    def upsert_scoring_config(
+        self,
+        contract_id: str,
+        severity_points_map: list,
+        points_ld_map: list,
+        applies_to_formulas: list,
+    ) -> ContractScoringConfig:
+        existing = self.get_scoring_config(contract_id)
+        if existing:
+            existing.severity_points_map = severity_points_map
+            existing.points_ld_map = points_ld_map
+            existing.applies_to_formulas = applies_to_formulas
+            self.db.flush()
+            self.db.refresh(existing)
+            return existing
+        from uuid import uuid4
+        cfg = ContractScoringConfig(
+            id=str(uuid4()),
+            contract_id=contract_id,
+            severity_points_map=severity_points_map,
+            points_ld_map=points_ld_map,
+            applies_to_formulas=applies_to_formulas,
+        )
+        self.db.add(cfg)
+        self.db.flush()
+        self.db.refresh(cfg)
+        return cfg

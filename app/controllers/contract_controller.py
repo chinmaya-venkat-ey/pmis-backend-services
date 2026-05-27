@@ -25,7 +25,8 @@ class ContractController:
 
     def get(self, contract_id: str) -> ContractResponse:
         row = self.service.get_by_id(contract_id)
-        return ContractResponse.from_orm(row)
+        sc = self.service.repo.get_scoring_config(contract_id)
+        return ContractResponse.from_orm(row, scoring_config=sc)
 
     def list_(
         self,
@@ -42,7 +43,13 @@ class ContractController:
             vendor_name=vendor_name,
         )
         return {
-            "items": [ContractResponse.from_orm(r) for r in rows],
+            "items": [
+                ContractResponse.from_orm(
+                    r,
+                    scoring_config=self.service.repo.get_scoring_config(r.id),
+                )
+                for r in rows
+            ],
             "total": total,
             "offset": offset,
             "page_size": page_size,
@@ -52,7 +59,8 @@ class ContractController:
         self, payload: ContractCreateRequest, *, caller_user_id: Optional[str]
     ) -> ContractResponse:
         row = self.service.create(payload, caller_user_id=caller_user_id)
-        return ContractResponse.from_orm(row)
+        sc = self.service.repo.get_scoring_config(row.id)
+        return ContractResponse.from_orm(row, scoring_config=sc)
 
     def update(
         self,
@@ -62,7 +70,8 @@ class ContractController:
         caller_user_id: Optional[str],
     ) -> ContractResponse:
         row = self.service.update(contract_id, payload, caller_user_id=caller_user_id)
-        return ContractResponse.from_orm(row)
+        sc = self.service.repo.get_scoring_config(contract_id)
+        return ContractResponse.from_orm(row, scoring_config=sc)
 
     # ---------------------------------------------------------------- phases
 

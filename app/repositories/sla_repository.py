@@ -55,6 +55,55 @@ class SlaRepository:
         rows = self.db.execute(stmt).all()
         return [(row[0], row[1]) for row in rows]
 
+    def find_by_title_and_contract_type(
+        self, contract_type: str, title: str
+    ) -> Optional[SlaDefinition]:
+        """Exact duplicate check — same title in same contract_type."""
+        return self.db.execute(
+            select(SlaDefinition).where(
+                SlaDefinition.contract_type == contract_type,
+                SlaDefinition.title == title,
+                SlaDefinition.status != "DELETED",
+            ).limit(1)
+        ).scalar_one_or_none()
+
+    def find_by_primary_metric_and_formula(
+        self, contract_type: str, formula_type: str, metric_key: str
+    ) -> Optional[SlaDefinition]:
+        """Duplicate check — same primary metric + formula in same contract_type."""
+        stmt = (
+            select(SlaDefinition)
+            .join(FormulaLibrary, SlaDefinition.formula_id == FormulaLibrary.id)
+            .join(SlaMetric, SlaMetric.sla_id == SlaDefinition.id)
+            .where(
+                SlaDefinition.contract_type == contract_type,
+                FormulaLibrary.formula_type == formula_type,
+                SlaMetric.metric_key == metric_key,
+                SlaMetric.is_primary.is_(True),
+                SlaDefinition.status != "DELETED",
+            )
+            .limit(1)
+        )
+        return self.db.execute(stmt).scalar_one_or_none()
+
+    def find_similar_by_formula(
+        self, contract_type: str, formula_type: str, exclude_id: str
+    ) -> List[Tuple["SlaDefinition", str]]:
+        """Similar SLA warning — same contract_type + formula_type (excluding given id)."""
+        stmt = (
+            select(SlaDefinition, FormulaLibrary.formula_type)
+            .join(FormulaLibrary, SlaDefinition.formula_id == FormulaLibrary.id)
+            .where(
+                SlaDefinition.contract_type == contract_type,
+                FormulaLibrary.formula_type == formula_type,
+                SlaDefinition.id != exclude_id,
+                SlaDefinition.status != "DELETED",
+            )
+            .order_by(SlaDefinition.sla_ref)
+        )
+        rows = self.db.execute(stmt).all()
+        return [(row[0], row[1]) for row in rows]
+
     def count_definitions(
         self,
         *,

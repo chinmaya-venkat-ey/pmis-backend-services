@@ -25,6 +25,7 @@ from app.schemas.sla import (
     SlaLookupRowResponse,
     SlaMetricResponse,
     SlaOnboardRequest,
+    SlaOnboardResponse,
     SlaParameterResponse,
     SlaUpdateRequest,
 )
@@ -192,7 +193,7 @@ class SlaService:
 
     def create_from_form(
         self, payload: SlaOnboardRequest, created_by: Optional[str] = None
-    ) -> SlaDetailResponse:
+    ) -> SlaOnboardResponse:
         # Validate formula exists
         formula = self.master_repo.get_formula_by_type(payload.formula_type)
         if formula is None:
@@ -206,6 +207,13 @@ class SlaService:
             raise ConflictError(
                 f"SLA with ref '{payload.sla_ref}' already exists",
                 code="duplicate_sla_ref",
+            )
+
+        # Duplicate check 1 — same title in same contract_type
+        if self.repo.find_by_title_and_contract_type(payload.contract_type, payload.title) is not None:
+            raise ConflictError(
+                f"An SLA with title '{payload.title}' already exists for contract_type '{payload.contract_type}'",
+                code="duplicate_sla_title",
             )
 
         # Formula-specific validation
@@ -324,7 +332,14 @@ class SlaService:
         dsl_text = _generate_dsl(defn, formula.formula_type, metrics, params, bands, lookup_rows, guards)
         self.repo.update_dsl(defn, dsl_text, 1)
 
-        return self._build_detail(defn, formula.formula_type, metrics, params, bands, lookup_rows, guards)
+        # Similar SLA warning — same contract_type + formula_type (non-blocking)
+        similar_rows = self.repo.find_similar_by_formula(
+            payload.contract_type, formula.formula_type, defn.id
+        )
+        similar_slas = [self._build_flat(d, ft) for d, ft in similar_rows]
+
+        detail = self._build_detail(defn, formula.formula_type, metrics, params, bands, lookup_rows, guards)
+        return SlaOnboardResponse(**detail.model_dump(), similar_slas=similar_slas)
 
     # ---------------------------------------------------------------- list
 

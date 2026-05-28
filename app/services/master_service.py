@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.errors import ConflictError, NotFoundError, ValidationError
 from app.models.contract_type_master import ContractTypeMaster
+from app.models.data_field_master import DataFieldMaster
 from app.models.severity_master import SeverityMaster
 from app.repositories.master_repository import MasterRepository
 from app.schemas.master import (
@@ -78,6 +79,44 @@ class MasterService:
 
     def list_data_fields(self, *, contract_type: Optional[str] = None):
         return self.repo.list_data_fields(contract_type=contract_type)
+
+    def create_data_field(self, payload) -> DataFieldMaster:
+        existing = self.repo.get_data_field(payload.field_name)
+        if existing is not None:
+            raise ConflictError(
+                f"Data field '{payload.field_name}' already exists",
+                code="duplicate_data_field",
+            )
+        row = DataFieldMaster(
+            field_name=payload.field_name,
+            display_name=payload.display_name,
+            data_type=payload.data_type,
+            unit=payload.unit,
+            example_value=payload.example_value,
+            applicable_to=payload.applicable_to,
+            is_active=True,
+        )
+        return self.repo.create_data_field(row)
+
+    def update_data_field(self, field_name: str, payload) -> DataFieldMaster:
+        row = self.repo.get_data_field(field_name)
+        if row is None:
+            raise NotFoundError(f"Data field '{field_name}' not found")
+        updates = payload.model_dump(exclude_unset=True)
+        if not updates:
+            return row
+        return self.repo.update_data_field(row, **updates)
+
+    def delete_data_field(self, field_name: str) -> DataFieldMaster:
+        row = self.repo.get_data_field(field_name)
+        if row is None:
+            raise NotFoundError(f"Data field '{field_name}' not found")
+        if not row.is_active:
+            raise ConflictError(
+                f"Data field '{field_name}' is already inactive",
+                code="already_inactive",
+            )
+        return self.repo.update_data_field(row, is_active=False)
 
     # ---------------------------------------------------------------- formula library
 

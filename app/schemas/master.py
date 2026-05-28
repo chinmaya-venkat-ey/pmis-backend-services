@@ -7,6 +7,66 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
+# --------------------------------------------------------------------------- Enum catalog
+# Single source of truth for all dropdown values used in SLA onboarding.
+# These are tied to evaluation logic — new values require eval engine changes too.
+
+SLA_ENUMS: Dict[str, List[Dict[str, str]]] = {
+    "measurement_interval": [
+        {"code": "DAILY",     "label": "Daily"},
+        {"code": "WEEKLY",    "label": "Weekly"},
+        {"code": "MONTHLY",   "label": "Monthly"},
+        {"code": "QUARTERLY", "label": "Quarterly"},
+        {"code": "ONE_TIME",  "label": "One-time (milestone / validation event)"},
+    ],
+    "reporting_interval": [
+        {"code": "WEEKLY",    "label": "Weekly"},
+        {"code": "MONTHLY",   "label": "Monthly"},
+        {"code": "QUARTERLY", "label": "Quarterly"},
+        {"code": "ANNUAL",    "label": "Annual"},
+    ],
+    "baseline_type": [
+        {"code": "STATIC",  "label": "Static — fixed target, never changes"},
+        {"code": "ROLLING", "label": "Rolling — baseline updates when performance improves"},
+    ],
+    "compound_metric_rule": [
+        {"code": "INDEPENDENT", "label": "Independent — each metric's LD computed and summed separately"},
+        {"code": "COMBINED",    "label": "Combined — all metrics must breach together"},
+    ],
+    "ld_aggregation_method": [
+        {"code": "SUM",      "label": "Sum — add all period LDs"},
+        {"code": "MAX",      "label": "Max — take the highest period LD"},
+        {"code": "WEIGHTED", "label": "Weighted — weighted average of period LDs"},
+    ],
+    "ld_computation_base": [
+        {"code": "QUARTERLY_PAYMENT", "label": "Quarterly payment due to vendor"},
+        {"code": "ANNUAL_PAYMENT",    "label": "Annual contract value"},
+        {"code": "FIXED_AMOUNT",      "label": "Fixed rupee amount (defined in parameters)"},
+    ],
+    "guard_action": [
+        {"code": "EXCLUDE",   "label": "Exclude — drop observation from LD calculation"},
+        {"code": "SUSPEND",   "label": "Suspend — halt LD computation for the period"},
+        {"code": "PROBATION", "label": "Probation — mark period as non-payable"},
+    ],
+    "metric_direction": [
+        {"code": "LOWER_BETTER",  "label": "Lower is better (e.g. error rate)"},
+        {"code": "HIGHER_BETTER", "label": "Higher is better (e.g. uptime)"},
+    ],
+    "guard_operator": [
+        {"code": "LT",  "label": "Less than (<)"},
+        {"code": "LTE", "label": "Less than or equal (≤)"},
+        {"code": "GT",  "label": "Greater than (>)"},
+        {"code": "GTE", "label": "Greater than or equal (≥)"},
+        {"code": "EQ",  "label": "Equal to (=)"},
+        {"code": "NEQ", "label": "Not equal to (≠)"},
+    ],
+    "sla_status": [
+        {"code": "ACTIVE",   "label": "Active"},
+        {"code": "INACTIVE", "label": "Inactive"},
+    ],
+}
+
+
 # --------------------------------------------------------------------------- Contract Types
 
 class ContractTypeCreateRequest(BaseModel):
@@ -29,6 +89,26 @@ class ContractTypeResponse(BaseModel):
 
 
 # --------------------------------------------------------------------------- Data Fields
+
+class DataFieldCreateRequest(BaseModel):
+    field_name: str = Field(..., min_length=1, max_length=100, pattern=r"^[a-z][a-z0-9_]*$")
+    display_name: str = Field(..., min_length=1, max_length=200)
+    data_type: str = Field(..., pattern=r"^(INTEGER|DECIMAL|DATE|BOOLEAN)$")
+    unit: str = Field(..., max_length=50)
+    example_value: Optional[str] = Field(None, max_length=50)
+    applicable_to: Optional[List[str]] = Field(
+        None,
+        description="Contract type codes this field applies to. NULL = applies to all.",
+    )
+
+
+class DataFieldUpdateRequest(BaseModel):
+    display_name: Optional[str] = Field(None, min_length=1, max_length=200)
+    unit: Optional[str] = Field(None, max_length=50)
+    example_value: Optional[str] = Field(None, max_length=50)
+    applicable_to: Optional[List[str]] = None
+    is_active: Optional[bool] = None
+
 
 class DataFieldResponse(BaseModel):
     field_name: str

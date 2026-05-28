@@ -71,7 +71,7 @@ class SlaOnboardRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=500)
     description: Optional[str] = None
     measurement_interval: str = Field(
-        "MONTHLY", pattern=r"^(DAILY|WEEKLY|MONTHLY|QUARTERLY)$"
+        "MONTHLY", pattern=r"^(DAILY|WEEKLY|MONTHLY|QUARTERLY|ONE_TIME)$"
     )
     reporting_interval: str = Field(
         "QUARTERLY", pattern=r"^(WEEKLY|MONTHLY|QUARTERLY|ANNUAL)$"
@@ -99,7 +99,7 @@ class SlaUpdateRequest(BaseModel):
     title: Optional[str] = Field(None, max_length=500)
     description: Optional[str] = None
     measurement_interval: Optional[str] = Field(
-        None, pattern=r"^(DAILY|WEEKLY|MONTHLY|QUARTERLY)$"
+        None, pattern=r"^(DAILY|WEEKLY|MONTHLY|QUARTERLY|ONE_TIME)$"
     )
     reporting_interval: Optional[str] = Field(
         None, pattern=r"^(WEEKLY|MONTHLY|QUARTERLY|ANNUAL)$"
@@ -218,6 +218,14 @@ class SlaDetailResponse(SlaDefinitionResponse):
     condition_bands: List[SlaConditionBandResponse] = Field(default_factory=list)
     lookup_table: List[SlaLookupRowResponse] = Field(default_factory=list)
     guard_conditions: List[SlaGuardConditionResponse] = Field(default_factory=list)
+
+
+class SlaOnboardResponse(SlaDetailResponse):
+    """Returned only from POST /sla-masters — includes similar_slas warning list."""
+    similar_slas: List[SlaDefinitionResponse] = Field(
+        default_factory=list,
+        description="Existing SLAs with the same contract_type + formula_type — review before using this SLA.",
+    )
 
 
 class SlaDslResponse(BaseModel):

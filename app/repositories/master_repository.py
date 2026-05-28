@@ -45,11 +45,20 @@ class MasterRepository:
 
     def get_data_field(self, field_name: str) -> Optional[DataFieldMaster]:
         return self.db.execute(
-            select(DataFieldMaster).where(
-                DataFieldMaster.field_name == field_name,
-                DataFieldMaster.is_active.is_(True),
-            )
+            select(DataFieldMaster).where(DataFieldMaster.field_name == field_name)
         ).scalar_one_or_none()
+
+    def create_data_field(self, row: DataFieldMaster) -> DataFieldMaster:
+        self.db.add(row)
+        self.db.flush()
+        self.db.refresh(row)
+        return row
+
+    def update_data_field(self, row: DataFieldMaster, **kwargs) -> DataFieldMaster:
+        for k, v in kwargs.items():
+            setattr(row, k, v)
+        self.db.flush()
+        return row
 
     def list_data_fields(
         self, *, contract_type: Optional[str] = None, active_only: bool = True

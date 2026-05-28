@@ -9,7 +9,9 @@ from app.schemas.master import (
     ContractTypeCreateRequest,
     ContractTypeResponse,
     ContractTypeUpdateRequest,
+    DataFieldCreateRequest,
     DataFieldResponse,
+    DataFieldUpdateRequest,
     FormulaLibraryResponse,
     SeverityLevelResponse,
     SeverityLevelUpdateRequest,
@@ -49,6 +51,19 @@ class MasterController:
             DataFieldResponse.model_validate(r)
             for r in self.service.list_data_fields(contract_type=contract_type)
         ]
+
+    def create_data_field(self, payload: DataFieldCreateRequest) -> DataFieldResponse:
+        return DataFieldResponse.model_validate(self.service.create_data_field(payload))
+
+    def update_data_field(
+        self, field_name: str, payload: DataFieldUpdateRequest
+    ) -> DataFieldResponse:
+        return DataFieldResponse.model_validate(
+            self.service.update_data_field(field_name, payload)
+        )
+
+    def delete_data_field(self, field_name: str) -> DataFieldResponse:
+        return DataFieldResponse.model_validate(self.service.delete_data_field(field_name))
 
     def set_severity_levels(
         self, project_id: str, payload: SeverityMasterSetRequest

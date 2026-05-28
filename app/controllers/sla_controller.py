@@ -10,6 +10,7 @@ from app.schemas.sla import (
     SlaDetailResponse,
     SlaDslResponse,
     SlaOnboardRequest,
+    SlaOnboardResponse,
     SlaUpdateRequest,
 )
 from app.services.sla_service import SlaService
@@ -21,7 +22,7 @@ class SlaController:
 
     def onboard(
         self, payload: SlaOnboardRequest, created_by: Optional[str] = None
-    ) -> SlaDetailResponse:
+    ) -> SlaOnboardResponse:
         return self.service.create_from_form(payload, created_by=created_by)
 
     def list_slas(

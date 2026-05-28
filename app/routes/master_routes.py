@@ -18,8 +18,11 @@ from app.dependencies import get_master_controller
 from app.schemas.master import (
     ContractTypeCreateRequest,
     ContractTypeUpdateRequest,
+    DataFieldCreateRequest,
+    DataFieldUpdateRequest,
     SeverityLevelUpdateRequest,
     SeverityMasterSetRequest,
+    SLA_ENUMS,
 )
 
 router = APIRouter(tags=["Masters"])
@@ -95,6 +98,22 @@ def list_contract_types(ctrl: MasterController = Depends(get_master_controller))
 
 
 # ---------------------------------------------------------------------------
+# SLA enum catalog — all dropdown values for SLA onboarding form
+# ---------------------------------------------------------------------------
+
+@router.get("/sla-enums", summary="All allowed enum values for SLA onboarding dropdowns")
+def list_sla_enums():
+    return api_response(
+        data=hal_resource(
+            "SlaEnums",
+            SLA_ENUMS,
+            self_link="/api/v3/sla-enums",
+        ),
+        status=200,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Formula library — SLA formula catalogue (read-only, seeded at migration)
 # ---------------------------------------------------------------------------
 
@@ -118,6 +137,22 @@ def list_formula_library(ctrl: MasterController = Depends(get_master_controller)
 # Data fields — observable variable catalog (SLA condition builder)
 # ---------------------------------------------------------------------------
 
+@router.post("/data-fields", status_code=201, summary="Add a new observable data field")
+def create_data_field(
+    payload: DataFieldCreateRequest,
+    ctrl: MasterController = Depends(get_master_controller),
+):
+    result = ctrl.create_data_field(payload)
+    return api_response(
+        data=hal_resource(
+            "DataField", result.model_dump(),
+            self_link=f"/api/v3/data-fields/{result.field_name}",
+        ),
+        message=f"Data field '{result.field_name}' created",
+        status=201,
+    )
+
+
 @router.get(
     "/data-fields",
     summary="List observable data fields for the SLA condition builder",
@@ -140,6 +175,39 @@ def list_data_fields(
     ]
     return api_response(
         data=hal_collection(elements, total=len(elements), page_size=len(elements) or 1),
+        status=200,
+    )
+
+
+@router.patch("/data-fields/{field_name}", summary="Update a data field")
+def update_data_field(
+    field_name: str,
+    payload: DataFieldUpdateRequest,
+    ctrl: MasterController = Depends(get_master_controller),
+):
+    result = ctrl.update_data_field(field_name, payload)
+    return api_response(
+        data=hal_resource(
+            "DataField", result.model_dump(),
+            self_link=f"/api/v3/data-fields/{result.field_name}",
+        ),
+        message=f"Data field '{field_name}' updated",
+        status=200,
+    )
+
+
+@router.delete("/data-fields/{field_name}", summary="Soft-delete a data field (sets is_active=false)")
+def delete_data_field(
+    field_name: str,
+    ctrl: MasterController = Depends(get_master_controller),
+):
+    result = ctrl.delete_data_field(field_name)
+    return api_response(
+        data=hal_resource(
+            "DataField", result.model_dump(),
+            self_link=f"/api/v3/data-fields/{result.field_name}",
+        ),
+        message=f"Data field '{field_name}' deactivated",
         status=200,
     )
 

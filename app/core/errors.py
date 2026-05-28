@@ -34,27 +34,3 @@ class UnauthorizedError(DomainError):
 class ValidationError(DomainError):
     status_code = 422
     default_code = "validation_error"
-
-class ProjectLdConfigNotFoundError(NotFoundError):
-    default_code = "not_found"
-
-class SlaNotFoundError(NotFoundError):
-    default_code = "not_found"
-
-class FormulaNotFoundError(NotFoundError):
-    default_code = "not_found"
-
-class ObservationNotFoundError(NotFoundError):
-    default_code = "not_found"
-
-class EvaluationNotFoundError(NotFoundError):
-    default_code = "not_found"
-
-class DslParseError(ValidationError):
-    default_code = "dsl_parse_error"
-
-class AslValidationError(ValidationError):
-    default_code = "asl_validation_error"
-
-class DuplicateObservationError(ConflictError):
-    default_code = "duplicate_observation"

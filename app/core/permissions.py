@@ -112,6 +112,7 @@ ACTIVITIES_UPDATE_POSITION: Final[str] = "activities:update:position"
 ACTIVITIES_UPDATE_OWNER_DIVISION: Final[str] = "activities:update:owner_division"
 ACTIVITIES_UPDATE_CONCERNED_DIVISIONS: Final[str] = "activities:update:concerned_divisions"
 ACTIVITIES_UPDATE_VENDOR_ID: Final[str] = "activities:update:vendor_id"
+ACTIVITIES_UPDATE_ACTIVITY_STARTED: Final[str] = "activities:update:activity_started"
 ACTIVITIES_UPDATE_RESOURCE: Final[str] = "activities:update:resource"
 ACTIVITIES_UPDATE_DEPENDENCIES: Final[str] = "activities:update:dependencies"
 
@@ -186,6 +187,7 @@ ACTIVITY_FIELD_CODES: Final[dict[str, str]] = {
     "owner_division": ACTIVITIES_UPDATE_OWNER_DIVISION,
     "concerned_divisions": ACTIVITIES_UPDATE_CONCERNED_DIVISIONS,
     "vendor_id": ACTIVITIES_UPDATE_VENDOR_ID,
+    "activity_started": ACTIVITIES_UPDATE_ACTIVITY_STARTED,
     "resource": ACTIVITIES_UPDATE_RESOURCE,
 }
 

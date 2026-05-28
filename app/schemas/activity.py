@@ -90,6 +90,7 @@ class ActivityResponse(ResponseModel):
     resource_mode: Optional[str] = None
     resource_count: Optional[int] = None
     status: Optional[str] = None
+    activity_started: bool = False
     depends_on: List[str] = Field(default_factory=list)
     # UUIDs from depends_on resolved to display codes (e.g., ["A1.1"]).
     depends_on_display: List[str] = Field(default_factory=list)
@@ -123,6 +124,7 @@ class ActivityCreateRequest(BaseModel):
     actual_start_date: Optional[datetime] = None
     actual_end_date: Optional[datetime] = None
     status: Annotated[Optional[str], Field(default=None, max_length=32)]
+    activity_started: Optional[bool] = False
     priority: Annotated[Optional[str], Field(default=None, max_length=16)]
     position: Optional[int] = None
     owner_division: Annotated[Optional[str], Field(default=None, max_length=32)]
@@ -188,6 +190,7 @@ class ActivityUpdateRequest(BaseModel):
     actual_start_date: Optional[datetime] = None
     actual_end_date: Optional[datetime] = None
     status: Annotated[Optional[str], Field(default=None, max_length=32)]
+    activity_started: Optional[bool] = None
     priority: Annotated[Optional[str], Field(default=None, max_length=16)]
     owner_division: Annotated[Optional[str], Field(default=None, max_length=32)]
     owner_division_other: Annotated[Optional[str], Field(default=None, max_length=255)]

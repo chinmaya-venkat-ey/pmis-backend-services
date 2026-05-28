@@ -133,6 +133,7 @@ class ActivityService:
             actual_start_date=payload.actual_start_date,
             actual_end_date=payload.actual_end_date,
             status=payload.status,
+            activity_started=bool(payload.activity_started),
             priority=payload.priority,
             owner_division=payload.owner_division,
             owner_division_other=payload.owner_division_other,

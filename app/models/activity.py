@@ -16,6 +16,7 @@ from typing import Any, Optional
 from uuid import uuid4
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -103,6 +104,9 @@ class Activity(Base):
     resource_count: Mapped[Optional[int]] = mapped_column(Integer)
 
     status: Mapped[Optional[str]] = mapped_column(String(32))
+    activity_started: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false"), default=False,
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=datetime.utcnow

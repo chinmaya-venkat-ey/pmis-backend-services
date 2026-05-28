@@ -14,5 +14,8 @@ from app.models.sla_guard_condition import SlaGuardCondition  # noqa: F401
 from app.models.sla_parameter_value import SlaParameterValue  # noqa: F401
 from app.models.sla_lookup_row import SlaLookupRow  # noqa: F401
 
+# Activity binding
+from app.models.sla_activity_mapping import SlaActivityMapping  # noqa: F401
+
 # Mirror declarations (read-only; excluded from alembic autogenerate by env.py:include_object)
 from app.models import _cross_schema  # noqa: F401

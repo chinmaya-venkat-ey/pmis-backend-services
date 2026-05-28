@@ -7,6 +7,9 @@ from fastapi import Depends, Request
 from sqlalchemy.orm import Session
 
 from app.controllers.master_controller import MasterController
+from app.controllers.sla_activity_mapping_controller import (
+    SlaActivityMappingController,
+)
 from app.controllers.sla_controller import SlaController
 from app.core.errors import UnauthorizedError
 from app.core.rbac import AUTH_REQUIRED_MESSAGE
@@ -38,3 +41,9 @@ def get_master_controller(db: Session = Depends(get_db)) -> MasterController:
 
 def get_sla_controller(db: Session = Depends(get_db)) -> SlaController:
     return SlaController(db)
+
+
+def get_sla_activity_mapping_controller(
+    db: Session = Depends(get_db),
+) -> SlaActivityMappingController:
+    return SlaActivityMappingController(db)

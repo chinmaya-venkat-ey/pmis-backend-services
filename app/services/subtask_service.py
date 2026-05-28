@@ -184,7 +184,6 @@ class SubtaskService:
             changes={
                 "name": row.name,
                 "task_id": row.task_id,
-                "parent_subtask_id": row.parent_subtask_id,
             },
         )
         # Reverse cascade: a brand-new (not_completed) child invalidates

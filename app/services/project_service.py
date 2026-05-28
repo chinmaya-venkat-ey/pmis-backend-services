@@ -179,6 +179,18 @@ class ProjectService:
             )
         if "parent_id" in updates:
             self._validate_parent_exists(updates["parent_id"], own_id=row.id)
+        # Date-window guard: moving project dates inward of an existing
+        # child's dates breaks the parent-floor invariant the FORWARD
+        # date check enforces on child create. If any live milestone /
+        # activity / task / subtask falls outside the merged new
+        # window, reject the project update with a 422 listing the
+        # offending children.
+        if "start_date" in updates or "end_date" in updates:
+            self._assert_dates_compatible_with_children(
+                project_id=row.id,
+                new_start=updates.get("start_date", row.start_date),
+                new_end=updates.get("end_date", row.end_date),
+            )
         # Resolve vendor tokens early so callers see a clean error before
         # the column updates commit.
         canonical_vendor_ids = None
@@ -479,6 +491,114 @@ class ProjectService:
         return row
 
     # ------------------------------------------------------------ helpers
+
+    def _assert_dates_compatible_with_children(
+        self, *, project_id: str, new_start, new_end,
+    ) -> None:
+        """Bug #145: when project start/end dates move inward of any
+        live milestone/activity/task/subtask's planned or actual dates,
+        reject with a 422 listing up to 3 offenders.
+
+          - new_start later than a child's start_date / actual_start_date
+            → violation (child would now start before its parent project)
+          - new_end earlier than a child's end_date / actual_end_date
+            → violation (child would now end after its parent project)
+
+        Inverse of the FORWARD ``validate_entity_dates`` check that runs
+        on child create. Without this guard the user could move the
+        project window inward and silently leave children dangling
+        outside the parent's date range.
+
+        All comparisons happen on the IST calendar date so naive vs.
+        offset-aware datetimes compare cleanly (matches the project-wide
+        convention in ``date_rules._to_ist_calendar_midnight``).
+        """
+        from datetime import date as _date
+        from datetime import datetime as _datetime
+        from app.models.activity import Activity
+        from app.models.milestone import Milestone
+        from app.models.subtask import Subtask
+        from app.models.task import Task
+        from app.utilities.date_rules import _to_ist_calendar_midnight
+
+        def _norm(v):
+            if v is None:
+                return None
+            if isinstance(v, _datetime):
+                return _to_ist_calendar_midnight(v)
+            if isinstance(v, _date):
+                return _to_ist_calendar_midnight(
+                    _datetime(v.year, v.month, v.day)
+                )
+            return v
+
+        n_start = _norm(new_start)
+        n_end = _norm(new_end)
+
+        violations: List[str] = []
+
+        def _scan(model, kind: str):
+            rows = self.db.execute(
+                select(
+                    model.name,
+                    model.start_date,
+                    model.end_date,
+                    model.actual_start_date,
+                    model.actual_end_date,
+                )
+                .where(model.project_id == project_id)
+                .where(model.deleted_at.is_(None))
+            ).all()
+            for name, start, end, a_start, a_end in rows:
+                start_n = _norm(start)
+                end_n = _norm(end)
+                a_start_n = _norm(a_start)
+                a_end_n = _norm(a_end)
+                if n_start is not None:
+                    if start_n is not None and start_n < n_start:
+                        violations.append(
+                            f"{kind} '{name}' starts {start_n.date()} "
+                            f"(before new project start {n_start.date()})"
+                        )
+                    elif a_start_n is not None and a_start_n < n_start:
+                        violations.append(
+                            f"{kind} '{name}' actually started "
+                            f"{a_start_n.date()} (before new project start)"
+                        )
+                if n_end is not None:
+                    if end_n is not None and end_n > n_end:
+                        violations.append(
+                            f"{kind} '{name}' ends {end_n.date()} "
+                            f"(after new project end {n_end.date()})"
+                        )
+                    elif a_end_n is not None and a_end_n > n_end:
+                        violations.append(
+                            f"{kind} '{name}' actually ended "
+                            f"{a_end_n.date()} (after new project end)"
+                        )
+
+        _scan(Milestone, "Milestone")
+        _scan(Activity, "Activity")
+        _scan(Task, "Task")
+        _scan(Subtask, "Subtask")
+
+        if not violations:
+            return
+
+        listed = "; ".join(violations[:3])
+        more = (
+            f" (+{len(violations) - 3} more)"
+            if len(violations) > 3 else ""
+        )
+        raise ValidationError(
+            f"Cannot change project dates — the new window conflicts "
+            f"with existing children: {listed}{more}.",
+            details={
+                "errorIdentifier": "project_dates_conflict_with_children",
+                "violation_count": len(violations),
+                "violations": violations[:10],
+            },
+        )
 
     def _validate_status(self, status: Optional[str]) -> None:
         """Reject statuses outside the catalog / fallback set.

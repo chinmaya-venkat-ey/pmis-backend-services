@@ -49,7 +49,7 @@ def _serialize_entry(row, actor_map: dict) -> Dict[str, Any]:
         else:
             actor_code = row.actor_user_id
 
-    return {
+    entry: Dict[str, Any] = {
         "id": row.id,
         "project_id": row.project_id,
         "target_kind": row.target_kind,
@@ -61,9 +61,15 @@ def _serialize_entry(row, actor_map: dict) -> Dict[str, Any]:
         "before": before,
         "after": after,
         "changes": changes,
-        "note": row.note,
         "created_at": row.created_at.isoformat() if row.created_at else None,
     }
+    # Drop ``note`` from the response when null — emit only when actually
+    # populated (e.g. close action with a reason, reopen carrying the
+    # prior reason, auto_complete carrying the marker message). Avoids
+    # the blank ``"note": null`` field on every create/update row.
+    if row.note is not None:
+        entry["note"] = row.note
+    return entry
 
 
 class AuditLogService:

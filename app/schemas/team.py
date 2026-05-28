@@ -434,3 +434,101 @@ class TeamPageRequest(BaseModel):
     )
     project_owner: List[ProjectOwnerRow] = Field(default_factory=list)
     activities: List[TeamPageActivity] = Field(default_factory=list)
+
+
+# ── Associated-users filter (POST .../associated-users) ─────────────────────
+
+class AssociatedUsersFilter(BaseModel):
+    """Body for POST /projects/{id}/associated-users.
+
+    Flag semantics:
+      - include_organizations / include_divisions both False (default):
+        return the union of (a) users in every organization associated with
+        the project, (b) users in the project's owner division, (c) users in
+        every concerned division across the project's activities.
+      - At least one flag True: only the toggled-on sources contribute.
+        A provided list narrows that source to the listed subset; an omitted
+        or empty list means "all of that source from the project".
+
+    `organizations` must be a subset of the project's vendor IDs (from
+    project_vendors). `divisions` must be a subset of {owner division} ∪
+    {concerned divisions across all project activities}. Invalid values
+    cause a 400.
+    """
+    model_config = ConfigDict(
+        extra="ignore",
+        json_schema_extra={
+            "example": {
+                "include_organizations": True,
+                "organizations": ["ven-aaaa-1111", "ven-bbbb-2222"],
+                "include_divisions": True,
+                "divisions": ["IT_DIV", "LEGAL_DIV"],
+            }
+        },
+    )
+    include_organizations: bool = False
+    organizations: Optional[List[str]] = Field(
+        default=None,
+        description="Subset of the project's organization (vendor) IDs. "
+                    "Omit or pass [] to include all project organizations.",
+    )
+    include_divisions: bool = False
+    divisions: Optional[List[str]] = Field(
+        default=None,
+        description="Subset of {owner_division} ∪ concerned_divisions. "
+                    "Omit or pass [] to include all project divisions.",
+    )
+
+
+class AssociatedUserEntry(BaseModel):
+    """One user in the union, with the source(s) that matched."""
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "id": "usr-0001",
+            "login": "rajesh.kumar",
+            "email": "rajesh.kumar@uidai.gov.in",
+            "first_name": "Rajesh",
+            "last_name": "Kumar",
+            "source_organizations": ["ven-aaaa-1111"],
+            "source_divisions": ["IT_DIV"],
+        }
+    })
+    id: str
+    login: str
+    email: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    source_organizations: List[str] = Field(
+        default_factory=list,
+        description="Vendor IDs the user matched via users.vendor_id.",
+    )
+    source_divisions: List[str] = Field(
+        default_factory=list,
+        description="Division codes the user matched via users.division.",
+    )
+
+
+class AssociatedUsersResponse(BaseModel):
+    """Response for POST /projects/{id}/associated-users."""
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "project_id": "proj-1111-2222-3333-4444",
+            "project_code": "UIDAI-P250528120000",
+            "effective_organizations": ["ven-aaaa-1111"],
+            "effective_divisions": ["IT_DIV"],
+            "users": [
+                {
+                    "id": "usr-0001", "login": "rajesh.kumar",
+                    "email": "rajesh.kumar@uidai.gov.in",
+                    "first_name": "Rajesh", "last_name": "Kumar",
+                    "source_organizations": ["ven-aaaa-1111"],
+                    "source_divisions": ["IT_DIV"],
+                }
+            ],
+        }
+    })
+    project_id: str
+    project_code: str
+    effective_organizations: List[str] = Field(default_factory=list)
+    effective_divisions: List[str] = Field(default_factory=list)
+    users: List[AssociatedUserEntry] = Field(default_factory=list)

@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import select, delete
 from sqlalchemy.orm import Session
 
-from app.core.errors import NotFoundError
+from app.core.errors import NotFoundError, ValidationError
 from app.models._cross_schema import (
     User,
     UserRoleAssignment,
@@ -28,10 +28,14 @@ from app.models.milestone import Milestone
 from app.models.project import Project
 from app.models.project_ownership import ProjectOwnership
 from app.repositories.assignable_users_repository import AssignableUsersRepository
+from app.repositories.associated_users_repository import AssociatedUsersRepository
 from app.schemas.team import (
     ActivityAssignmentEntry,
     ActivityAssignmentsRead,
     ActivityAssignmentsWrite,
+    AssociatedUserEntry,
+    AssociatedUsersFilter,
+    AssociatedUsersResponse,
     OrgMemberBucket,
     OrgUserRow,
     OwnershipRead,
@@ -53,6 +57,7 @@ class TeamService:
     def __init__(self, db: Session):
         self.db = db
         self.assignable_repo = AssignableUsersRepository(db)
+        self.associated_repo = AssociatedUsersRepository(db)
 
     # ── helpers ─────────────────────────────────────────────────────────────
 
@@ -346,6 +351,96 @@ class TeamService:
         self._write_activity_assignments(activity_id, act.project_id, entry, caller_id)
         self.db.commit()
         return self._read_activity_assignments(activity_id)
+
+    # ── associated users (POST .../associated-users) ─────────────────────────
+
+    def get_associated_users(
+        self,
+        project_id: str,
+        payload: AssociatedUsersFilter,
+    ) -> AssociatedUsersResponse:
+        """Return users associated with the project via organization
+        (vendor) membership and/or division membership.
+
+        Flag semantics — see AssociatedUsersFilter docstring. Briefly:
+          - both flags False: union of all three sources (orgs, owner
+            division, concerned divisions)
+          - flag True + list omitted/empty: include all of that source
+            from the project
+          - flag True + non-empty list: subset must be ⊆ the project's
+            set for that source; otherwise 422 with the offending values
+        """
+        proj = self._get_project_or_404(project_id)
+
+        project_org_ids = self.associated_repo.get_project_organization_ids(project_id)
+        owner_div, concerned_divs = self.associated_repo.get_project_division_codes(project_id)
+        project_div_codes: List[str] = sorted(
+            set(concerned_divs) | ({owner_div} if owner_div else set())
+        )
+
+        include_orgs = payload.include_organizations
+        include_divs = payload.include_divisions
+        both_flags_off = not include_orgs and not include_divs
+
+        # Resolve effective organizations.
+        if both_flags_off or include_orgs:
+            requested_orgs = payload.organizations or []
+            if requested_orgs:
+                invalid = sorted(set(requested_orgs) - set(project_org_ids))
+                if invalid:
+                    raise ValidationError(
+                        f"organizations contains values not associated with project {project_id}",
+                        code="invalid_organizations",
+                        details={"invalid": invalid, "allowed": project_org_ids},
+                    )
+                effective_orgs = list(dict.fromkeys(requested_orgs))
+            else:
+                effective_orgs = list(project_org_ids)
+        else:
+            effective_orgs = []
+
+        # Resolve effective divisions.
+        if both_flags_off or include_divs:
+            requested_divs = payload.divisions or []
+            if requested_divs:
+                invalid = sorted(set(requested_divs) - set(project_div_codes))
+                if invalid:
+                    raise ValidationError(
+                        f"divisions contains values not associated with project {project_id}",
+                        code="invalid_divisions",
+                        details={"invalid": invalid, "allowed": project_div_codes},
+                    )
+                effective_divs = list(dict.fromkeys(requested_divs))
+            else:
+                effective_divs = list(project_div_codes)
+        else:
+            effective_divs = []
+
+        # Fetch and attach provenance.
+        rows = self.associated_repo.fetch_users(effective_orgs, effective_divs)
+        org_set = set(effective_orgs)
+        div_set = set(effective_divs)
+        users: List[AssociatedUserEntry] = []
+        for u in rows:
+            src_orgs = [u.vendor_id] if u.vendor_id and u.vendor_id in org_set else []
+            src_divs = [u.division] if u.division and u.division in div_set else []
+            users.append(AssociatedUserEntry(
+                id=u.id,
+                login=u.login,
+                email=u.email,
+                first_name=u.first_name,
+                last_name=u.last_name,
+                source_organizations=src_orgs,
+                source_divisions=src_divs,
+            ))
+
+        return AssociatedUsersResponse(
+            project_id=proj.id,
+            project_code=proj.project_code,
+            effective_organizations=effective_orgs,
+            effective_divisions=effective_divs,
+            users=users,
+        )
 
     # ── UI-shaped team-page endpoints ────────────────────────────────────────
 

@@ -32,11 +32,13 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 
 from app.core.permissions import PROJECT_MEMBERS_READ, PROJECT_MEMBERS_UPDATE
-from app.core.rbac import require_permission
+from app.core.rbac import require_authenticated, require_permission
 from app.dependencies import get_current_user_id, get_team_controller
 from app.schemas.team import (
     ActivityAssignmentsRead,
     ActivityAssignmentsWrite,
+    AssociatedUsersFilter,
+    AssociatedUsersResponse,
     OwnershipRead,
     OwnershipWrite,
     TeamPageRequest,
@@ -527,3 +529,73 @@ def save_team_page(
     controller: Annotated[TeamController, Depends(get_team_controller)],
 ):
     return controller.save_team_page(project_id, body, caller_id)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Associated users (project organizations + divisions)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@project_team_router.post(
+    "/{project_id}/associated-users",
+    response_model=AssociatedUsersResponse,
+    summary="List users associated with a project via organization and/or division",
+    description=(
+        "Returns the union of (a) users whose vendor matches one of the "
+        "project's organizations and (b) users whose division matches the "
+        "project's owner division or any of its activities' concerned "
+        "divisions. The two flags toggle which sources contribute; the "
+        "optional lists narrow each source to a subset.\n\n"
+        "If both flags are false (default), every source contributes — "
+        "i.e. the response is the full union.\n\n"
+        "Authenticated-only: the response is filtered by the project's "
+        "associations, not by the caller's role or permissions, so any "
+        "logged-in user sees the same data for the same project."
+    ),
+    dependencies=[Depends(require_authenticated())],
+    openapi_extra={
+        "requestBody": {
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "union_default": {
+                            "summary": "Both flags off — return the full union",
+                            "value": {
+                                "include_organizations": False,
+                                "include_divisions": False,
+                            },
+                        },
+                        "orgs_only_subset": {
+                            "summary": "Only one organization, no divisions",
+                            "value": {
+                                "include_organizations": True,
+                                "organizations": ["ven-aaaa-1111"],
+                                "include_divisions": False,
+                            },
+                        },
+                        "divs_only_subset": {
+                            "summary": "Owner + one concerned division, no orgs",
+                            "value": {
+                                "include_organizations": False,
+                                "include_divisions": True,
+                                "divisions": ["IT_DIV"],
+                            },
+                        },
+                        "all_orgs_all_divs": {
+                            "summary": "Both flags on, no subset lists — same as union default",
+                            "value": {
+                                "include_organizations": True,
+                                "include_divisions": True,
+                            },
+                        },
+                    }
+                }
+            }
+        },
+    },
+)
+def get_associated_users(
+    project_id: str,
+    body: AssociatedUsersFilter,
+    controller: Annotated[TeamController, Depends(get_team_controller)],
+) -> AssociatedUsersResponse:
+    return controller.get_associated_users(project_id, body)

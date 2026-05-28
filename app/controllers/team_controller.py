@@ -8,6 +8,8 @@ from sqlalchemy.orm import Session
 from app.schemas.team import (
     ActivityAssignmentsRead,
     ActivityAssignmentsWrite,
+    AssociatedUsersFilter,
+    AssociatedUsersResponse,
     OwnershipRead,
     OwnershipWrite,
     TeamPageRequest,
@@ -55,6 +57,13 @@ class TeamController:
         caller_id: Optional[str],
     ) -> ActivityAssignmentsRead:
         return self.service.save_activity_assignments(activity_id, payload, caller_id)
+
+    def get_associated_users(
+        self,
+        project_id: str,
+        payload: AssociatedUsersFilter,
+    ) -> AssociatedUsersResponse:
+        return self.service.get_associated_users(project_id, payload)
 
     def get_team_page(self, project_id: str) -> TeamPageResponse:
         return self.service.get_team_page(project_id)

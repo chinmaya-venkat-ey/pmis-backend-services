@@ -40,7 +40,7 @@ class User(Base):
         String(36), primary_key=True, default=lambda: str(uuid4())
     )
     # Doc-25: human-readable code separate from the UUID
-    user_code: Mapped[Optional[str]] = mapped_column(String(16))
+    user_code: Mapped[Optional[str]] = mapped_column(String(24))
     login: Mapped[str] = mapped_column(String(64))
     email: Mapped[str] = mapped_column(String(255))
     hashed_password: Mapped[str] = mapped_column(String(255))

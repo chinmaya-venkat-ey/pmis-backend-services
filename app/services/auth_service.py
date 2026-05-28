@@ -40,7 +40,6 @@ from app.schemas.auth import (
     LoginResponse,
     LoginUserSummary,
     LogoutResponse,
-    TokenPair,
 )
 from app.utilities.otp import generate_ephemeral_token, hash_ephemeral_token
 
@@ -102,7 +101,6 @@ class AuthService:
         """Common path: mint tokens, persist refresh_jti, build LoginResponse."""
         is_admin = self.rbac.user_has_admin_role(user.id)
         is_super = self._is_super_admin(user.id)
-        perms = sorted(self.rbac.effective_permissions_for_user(user.id))
 
         claims = {
             "sub": user.login,
@@ -124,22 +122,20 @@ class AuthService:
         self.db.commit()
 
         return LoginResponse(
-            tokens=TokenPair(
-                access_token=access_token,
-                refresh_token=refresh_token,
-                token_type="Bearer",
-                access_token_expires_at=access_expires_at,
-                refresh_token_expires_at=refresh_expires_at,
-            ),
+            access_token=access_token,
+            refresh_token=refresh_token,
+            token_type="bearer",
+            access_token_expires_at=access_expires_at,
+            refresh_token_expires_at=refresh_expires_at,
             user=LoginUserSummary(
                 id=user.id,
                 login=user.login,
                 email=user.email,
                 first_name=user.first_name,
                 last_name=user.last_name,
+                org_role=user.org_role,
                 is_admin=is_admin,
                 is_super_admin=is_super,
-                permissions=perms,
             ),
         )
 

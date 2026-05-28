@@ -6,6 +6,7 @@ from typing import List, Union
 from app.repositories.user_repository import UserRepository
 from app.repositories.user_role_assignment_repository import UserRoleAssignmentRepository
 from app.schemas.role_assignment import (
+    ProjectRolesBulkWriteRequest,
     RoleAssignmentBatchResponse,
     RoleAssignmentCreateRequest,
     RoleAssignmentResponse,
@@ -74,6 +75,21 @@ class RoleAssignmentController:
         return self.service.create(
             payload,
             target_project_id=project_uuid,
+            caller_user_id=caller_user_id,
+            caller_is_admin=caller_is_admin,
+        )
+
+    def bulk_replace_for_project(
+        self,
+        project_uuid: str,
+        payload: ProjectRolesBulkWriteRequest,
+        *,
+        caller_user_id: str,
+        caller_is_admin: bool,
+    ) -> List[RoleAssignmentResponse]:
+        return self.service.bulk_replace_for_project(
+            project_uuid,
+            payload.assignments,
             caller_user_id=caller_user_id,
             caller_is_admin=caller_is_admin,
         )

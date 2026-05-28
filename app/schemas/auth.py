@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, List, Optional
+from typing import Annotated, Optional
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
@@ -15,16 +15,6 @@ class LoginRequest(BaseModel):
     password: Annotated[str, Field(min_length=1, max_length=256)]
 
 
-class TokenPair(ResponseModel):
-    """Embedded in LoginResponse / RefreshResponse."""
-
-    access_token: str
-    refresh_token: str
-    token_type: str = "Bearer"
-    access_token_expires_at: datetime
-    refresh_token_expires_at: datetime
-
-
 class LoginUserSummary(BaseModel):
     """Bare-minimum user payload returned on a successful login."""
 
@@ -34,17 +24,29 @@ class LoginUserSummary(BaseModel):
     email: EmailStr
     first_name: Optional[str] = None
     last_name: Optional[str] = None
+    org_role: Optional[str] = None
     is_admin: bool = Field(default=False)
     is_super_admin: bool = Field(default=False)
-    permissions: List[str] = Field(default_factory=list)
 
 
 class LoginResponse(BaseModel):
-    """Successful login (no 2FA required)."""
+    """Successful login — flat token fields matching the VM wire shape.
 
-    model_config = ConfigDict(from_attributes=True)
-    tokens: TokenPair
-    user: LoginUserSummary
+    FE persistAuthFromPayload reads: access_token, refresh_token, user,
+    and accessTokenExpiresAt (via readExpiresAt). Keep these at root level.
+    """
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    access_token_expires_at: Optional[datetime] = Field(
+        default=None, serialization_alias="accessTokenExpiresAt"
+    )
+    refresh_token_expires_at: Optional[datetime] = Field(
+        default=None, serialization_alias="refreshTokenExpiresAt"
+    )
+    user: Optional[LoginUserSummary] = None
 
 
 class LoginOtpRequired(BaseModel):
@@ -52,7 +54,7 @@ class LoginOtpRequired(BaseModel):
 
     requires_otp: bool = True
     ephemeral_token: str = Field(description="Opaque one-shot token tying this attempt to the OTP flow")
-    channels_available: List[str] = Field(description="['email', 'sms'] for what the user can receive")
+    channels_available: list[str] = Field(description="['email', 'sms'] for what the user can receive")
 
 
 class RefreshRequest(BaseModel):
@@ -146,3 +148,13 @@ class IntrospectResponse(BaseModel):
     # Both-tokens shape — set only when both were submitted.
     access: Optional[IntrospectTokenInfo] = None
     refresh: Optional[IntrospectTokenInfo] = None
+
+
+# Required because `from __future__ import annotations` defers annotation
+# evaluation; Pydantic v2 TypeAdapter (used by FastAPI for Union response_model)
+# cannot resolve forward references without an explicit rebuild.
+LoginUserSummary.model_rebuild()
+LoginResponse.model_rebuild()
+LoginOtpRequired.model_rebuild()
+IntrospectTokenInfo.model_rebuild()
+IntrospectResponse.model_rebuild()

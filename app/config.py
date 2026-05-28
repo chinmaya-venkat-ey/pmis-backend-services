@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     cors_origins: str = Field(default="http://localhost:3000", description="comma-separated; used only when ENV=development")
 
     # === DB ===
-    database_url: str = Field(default="postgresql+psycopg2://pmis_app:changeme@localhost:5432/pmis")
+    database_url: str = Field(default="postgresql+psycopg2://pmis_app:CHANGE-ME@localhost:5432/pmis")
     database_url_migrations: Optional[str] = Field(default=None)
 
     # === JWT ===

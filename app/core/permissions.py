@@ -159,6 +159,7 @@ ACTIVITIES_UPDATE_POSITION: Final[str] = "activities:update:position"
 ACTIVITIES_UPDATE_OWNER_DIVISION: Final[str] = "activities:update:owner_division"
 ACTIVITIES_UPDATE_CONCERNED_DIVISIONS: Final[str] = "activities:update:concerned_divisions"
 ACTIVITIES_UPDATE_VENDOR_ID: Final[str] = "activities:update:vendor_id"
+ACTIVITIES_UPDATE_ACTIVITY_STARTED: Final[str] = "activities:update:activity_started"
 # Sidecar / sub-resource
 ACTIVITIES_UPDATE_RESOURCE: Final[str] = "activities:update:resource"
 ACTIVITIES_UPDATE_DEPENDENCIES: Final[str] = "activities:update:dependencies"
@@ -307,6 +308,7 @@ ACTIVITY_FIELD_CODES: Final[dict[str, str]] = {
     "owner_division": ACTIVITIES_UPDATE_OWNER_DIVISION,
     "concerned_divisions": ACTIVITIES_UPDATE_CONCERNED_DIVISIONS,
     "vendor_id": ACTIVITIES_UPDATE_VENDOR_ID,
+    "activity_started": ACTIVITIES_UPDATE_ACTIVITY_STARTED,
     "resource": ACTIVITIES_UPDATE_RESOURCE,
 }
 
@@ -376,6 +378,7 @@ ALL_SUBTASK_FIELD_WRITES: Final[tuple[str, ...]] = (
 # updates within scope). Per round-7: status/priority on tasks/subtasks
 # + self-assignment.
 PROJECT_MEMBER_WRITES: Final[tuple[str, ...]] = (
+    ACTIVITIES_UPDATE_ACTIVITY_STARTED,
     TASKS_UPDATE_STATUS, TASKS_UPDATE_PRIORITY, TASKS_UPDATE_ASSIGNED_TO,
     SUBTASKS_UPDATE_STATUS, SUBTASKS_UPDATE_PRIORITY, SUBTASKS_UPDATE_ASSIGNED_TO,
     COMMENTS_CREATE, COMMENTS_READ,
@@ -477,3 +480,21 @@ LOCKED_ROLE_NAMES: Final[frozenset[str]] = frozenset({
     SUPER_ADMIN_ROLE,
     ADMIN_ROLE,
 })
+
+
+# Org-tier role names ordered highest → lowest. The user-mgmt `org_role`
+# string (column + API field) is restricted to one of these — `test_role`
+# and any custom roles are NOT valid org tiers.
+#
+# Used for:
+#   * UserController._derive_org_role priority resolution
+#   * UserService.update org_role write-side validation
+#   * monolith-parity fallback in _derive_org_role to users.org_role column
+ORG_TIER_ROLES: Final[tuple[str, ...]] = (
+    SUPER_ADMIN_ROLE,
+    ADMIN_ROLE,
+    ORG_ADMIN_ROLE,
+    PROJECT_ADMIN_ROLE,
+    PROJECT_MEMBER_ROLE,
+    DIVISION_MEMBER_ROLE,
+)

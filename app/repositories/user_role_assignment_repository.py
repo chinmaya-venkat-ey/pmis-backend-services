@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import List, Optional, Tuple
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, delete as sa_delete, or_, select
 from sqlalchemy.orm import Session
 
 from app.models._cross_schema import Project, ProjectVendor, Vendor
@@ -108,6 +108,16 @@ class UserRoleAssignmentRepository:
         self.db.delete(row)
         self.db.flush()
         return 1
+
+    def delete_by_project_and_role(self, project_id: str, role_id: int) -> int:
+        """Delete all assignments for a given project_id + role_id (bulk-replace helper)."""
+        result = self.db.execute(
+            sa_delete(UserRoleAssignment)
+            .where(UserRoleAssignment.project_id == project_id)
+            .where(UserRoleAssignment.role_id == role_id)
+        )
+        self.db.flush()
+        return result.rowcount
 
     # ------------------------------------------------------------------ cross-schema queries
 

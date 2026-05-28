@@ -31,5 +31,5 @@ def _slug(name: str) -> str:
 def generate_user_code(name: str, now: datetime | None = None) -> str:
     """Build a user_code string. `now` is overridable for deterministic tests."""
     moment = (now or datetime.now(IST)).astimezone(IST)
-    timestamp = moment.strftime("%y%m%d%H%M%S")
+    timestamp = moment.strftime("%y%m%d%H%M%S") + f"{moment.microsecond // 1000:03d}"
     return f"US-{_slug(name)}-{timestamp}"

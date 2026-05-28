@@ -127,9 +127,9 @@ class UserRepository:
             base = base.where(~admin_via_user_roles).where(~admin_via_assignments)
             count_base = count_base.where(~admin_via_user_roles).where(~admin_via_assignments)
 
-        # FE convention: 1-based offset.
+        # FE convention: 1-based offset. Newest users first (Bug #2).
         zero_based = max(0, offset - 1)
-        base = base.order_by(User.login.asc()).offset(zero_based * page_size).limit(page_size)
+        base = base.order_by(User.created_at.desc()).offset(zero_based * page_size).limit(page_size)
 
         rows = list(self.db.execute(base).scalars().all())
         total = self.db.execute(count_base).scalar_one()

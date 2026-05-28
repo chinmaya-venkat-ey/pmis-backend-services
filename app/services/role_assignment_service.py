@@ -11,7 +11,7 @@ Caller-can-grant rules (simplified for first port — refine in follow-up):
 """
 from __future__ import annotations
 
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
@@ -58,7 +58,21 @@ class RoleAssignmentService:
 
     def list_for_project(self, project_id: str) -> List[RoleAssignmentResponse]:
         rows = self.repo.list_by_project(project_id)
-        return [self._to_response(a, role=r, user=u) for a, r, u in rows]
+        # Resolve project_code once per call (all rows share the same project).
+        project_code = self._project_code_for(project_id)
+        return [
+            self._to_response(a, role=r, user=u, project_code=project_code)
+            for a, r, u in rows
+        ]
+
+    def _project_code_for(self, project_id: Optional[str]) -> Optional[str]:
+        """Look up project_code via the cross-schema Project mirror. Returns
+        None for global/org-scoped grants or missing projects."""
+        if not project_id:
+            return None
+        from app.models._cross_schema import Project as ProjectMirror
+        proj = self.db.get(ProjectMirror, project_id)
+        return proj.project_code if proj is not None else None
 
     # ------------------------------------------------------------------ create
 
@@ -138,6 +152,47 @@ class RoleAssignmentService:
         if payload.project_ids:
             return RoleAssignmentBatchResponse(items=results, total=len(results))
         return results[0]
+
+    def bulk_replace_for_project(
+        self,
+        project_id: str,
+        assignments: Dict[str, List[str]],
+        *,
+        caller_user_id: str,
+        caller_is_admin: bool,
+    ) -> List[RoleAssignmentResponse]:
+        """Full-replace the specified roles for a project (Manage-Team Submit).
+
+        The route gate (PROJECT_MEMBERS_UPDATE) already verified the caller
+        is allowed to manage team members. We skip the rbac:assign / vendor-
+        linkage checks here — those are for RBAC delegation (granting
+        arbitrary roles), not for the team-management use case.
+
+        For each role_name in `assignments`:
+          1. Look up the role; raise 404 if unknown.
+          2. Delete all existing rows for (project_id, role).
+          3. Insert one row per user_id (skips unknown users silently).
+        Roles not listed are left unchanged.
+        Commits once at the end.
+        """
+        for role_name, user_ids in assignments.items():
+            role = self.rbac.get_role_by_name(role_name)
+            if role is None:
+                raise RoleAssignmentNotFoundError(f"Role {role_name!r} not found")
+
+            self.repo.delete_by_project_and_role(project_id, role.id)
+            for uid in set(user_ids):
+                if self.user_repo.get_by_id(uid) is None:
+                    continue
+                self.repo.create(
+                    user_id=uid,
+                    role_id=role.id,
+                    project_id=project_id,
+                    created_by_user_id=caller_user_id,
+                )
+
+        self.db.commit()
+        return self.list_for_project(project_id)
 
     def delete(
         self,
@@ -361,6 +416,7 @@ class RoleAssignmentService:
         *,
         role,
         user: Optional[User],
+        project_code: Optional[str] = None,
     ) -> RoleAssignmentResponse:
         if assignment.organization_id is not None:
             scope = "org"
@@ -368,6 +424,11 @@ class RoleAssignmentService:
             scope = "project"
         else:
             scope = "global"
+        # Default project_code lookup for callers that didn't pre-resolve
+        # (single-create / single-update paths). list_for_project resolves
+        # once per call and threads it through to avoid N+1 queries.
+        if project_code is None and assignment.project_id is not None:
+            project_code = self._project_code_for(assignment.project_id)
         return RoleAssignmentResponse(
             id=assignment.id,
             user_id=assignment.user_id,
@@ -377,6 +438,7 @@ class RoleAssignmentService:
             role_name=role.name,
             organization_id=assignment.organization_id,
             project_id=assignment.project_id,
+            project_code=project_code,
             scope=scope,
             created_at=assignment.created_at,
             created_by=assignment.created_by,

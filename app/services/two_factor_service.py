@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from app.config import settings
 from app.core.errors import (
@@ -41,15 +41,6 @@ from app.utilities.otp import (
     verify_otp_code,
 )
 
-
-class OtpCooldownError(DomainError):
-    """Round-8 A4 (monolith parity): caller resent OTP before cooldown
-    elapsed. PMIS-OpenProject/.../two_factor.py:157-177 maps this to a 429
-    with `{errorIdentifier: "cooldown", remaining_seconds: N}`.
-    """
-
-    status_code = 429
-    default_code = "cooldown"
 
 
 def _mask_email(email: str) -> str:
@@ -92,18 +83,6 @@ class TwoFactorService:
         # rejected with 429 + `{remaining_seconds}` so the FE can render
         # "wait N seconds" without leaking timing.
         now = datetime.now(timezone.utc)
-        cooldown = timedelta(seconds=settings.otp_resend_cooldown_seconds)
-        if row.last_sent_at is not None:
-            elapsed = now - row.last_sent_at
-            if elapsed < cooldown:
-                remaining = int((cooldown - elapsed).total_seconds())
-                raise OtpCooldownError(
-                    f"Please wait {remaining}s before requesting another OTP.",
-                    details={
-                        "errorIdentifier": "cooldown",
-                        "remaining_seconds": remaining,
-                    },
-                )
 
         recipient = self._recipient_for_channel(user, channel)
         code = generate_otp_code(settings.otp_code_length)

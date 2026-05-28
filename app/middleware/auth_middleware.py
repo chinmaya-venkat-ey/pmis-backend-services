@@ -44,13 +44,13 @@ _PUBLIC_PREFIXES = (
 _PUBLIC_EXACT = {
     "/",
     # Auth endpoints — anonymous by design
-    "/user/users/login",
-    "/user/users/refresh",
-    "/user/users/introspect",
-    "/user/users/login/send-otp",
-    "/user/users/login/verify-otp",
-    "/user/users/forgot-password",
-    "/user/users/reset-password",
+    "/api/v3/users/login",
+    "/api/v3/users/refresh",
+    "/api/v3/users/introspect",
+    "/api/v3/users/login/send-otp",
+    "/api/v3/users/login/verify-otp",
+    "/api/v3/users/forgot-password",
+    "/api/v3/users/reset-password",
 }
 
 

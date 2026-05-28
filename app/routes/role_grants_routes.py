@@ -1,6 +1,8 @@
 """Routes for /user/role-grants/{role_name}/matrix."""
 from __future__ import annotations
 
+from typing import Annotated
+
 from fastapi import APIRouter, Depends
 
 from app.controllers.role_grants_controller import RoleGrantsController
@@ -13,7 +15,7 @@ router = APIRouter(prefix="/role-grants", tags=["role_grants"])
 
 
 @router.get(
-    "/{role_name}/matrix",
+    "/{role_name}",
     response_model=RoleGrantsMatrixResponse,
     summary="Get the grantable-roles matrix for a role tier",
     description=(
@@ -24,6 +26,6 @@ router = APIRouter(prefix="/role-grants", tags=["role_grants"])
 )
 def get_role_grants_matrix(
     role_name: str,
-    controller: RoleGrantsController = Depends(get_role_grants_controller),
+    controller: Annotated[RoleGrantsController, Depends(get_role_grants_controller)],
 ):
     return controller.get_matrix(role_name)

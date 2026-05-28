@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, List, Optional
+from typing import Annotated, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -20,6 +20,11 @@ class RoleAssignmentResponse(ResponseModel):
     role_name: str
     organization_id: Optional[str] = None
     project_id: Optional[str] = None
+    # Human-readable display ID of the project this assignment is scoped to.
+    # Populated when the row's scope is "project" (resolved via cross-schema
+    # mirror); null for global / org-scoped grants. Lets the FE render the
+    # Manage-Team page header without a separate /projects/{id} call.
+    project_code: Optional[str] = None
     scope: str = Field(description="'global' | 'org' | 'project'")
     created_at: datetime
     created_by: Optional[str] = None
@@ -63,3 +68,32 @@ class RoleAssignmentBatchResponse(BaseModel):
 
     items: List[RoleAssignmentResponse]
     total: int
+
+
+class ProjectRolesBulkWriteRequest(BaseModel):
+    """PUT /user/projects/{uuid}/role-assignments — bulk-replace for Manage-Team page.
+
+    Each role_name listed is fully replaced (all existing assignments for that
+    role+project are deleted, then the supplied user_ids are inserted).
+    Roles not mentioned in the dict are left unchanged.
+    """
+
+    model_config = ConfigDict(
+        str_strip_whitespace=True,
+        extra="forbid",
+        json_schema_extra={
+            "example": {
+                "assignments": {
+                    "project_admin":  ["usr-0001"],
+                    "project_member": ["usr-0002", "usr-0005"],
+                }
+            }
+        },
+    )
+    assignments: Dict[str, List[str]] = Field(
+        description=(
+            "Map of role_name → user_id list. "
+            "Each listed role is fully replaced. "
+            "Roles not present are left unchanged."
+        )
+    )

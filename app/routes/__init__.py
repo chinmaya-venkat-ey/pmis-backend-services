@@ -10,6 +10,7 @@ from fastapi import APIRouter
 
 from app.routes import (
     activity_routes,
+    approval_inbox_routes,
     attachment_routes,
     catalog_routes,
     comment_routes,
@@ -61,6 +62,9 @@ project_router.include_router(vendor_routes.router)
 # Team management — Manage-Team page endpoints.
 project_router.include_router(team_routes.project_team_router)
 project_router.include_router(team_routes.activity_team_router)
+
+# Activity Approval Inbox — list + detail for the workflow review UI.
+project_router.include_router(approval_inbox_routes.router)
 
 
 __all__ = ["project_router", "health_routes", "attachment_routes"]

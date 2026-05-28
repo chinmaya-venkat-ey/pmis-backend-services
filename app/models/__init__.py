@@ -24,6 +24,7 @@ from app.models.subtask_resource import SubtaskResource  # noqa: F401
 from app.models.comment import Comment  # noqa: F401
 from app.models.project_ownership import ProjectOwnership  # noqa: F401
 from app.models.activity_assignment import ActivityAssignment  # noqa: F401
+from app.models.activity_workflow_tracker import ActivityWorkflowTracker  # noqa: F401
 
 # Mirror declarations (read-only)
 from app.models import _cross_schema  # noqa: F401

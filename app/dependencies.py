@@ -7,6 +7,7 @@ from fastapi import Depends, Request
 from sqlalchemy.orm import Session
 
 from app.controllers.activity_controller import ActivityController
+from app.controllers.approval_inbox_controller import ApprovalInboxController
 from app.controllers.attachment_controller import AttachmentController
 from app.controllers.comment_controller import CommentController
 from app.controllers.critical_path_controller import CriticalPathController
@@ -83,3 +84,9 @@ def get_critical_path_controller(db: Session = Depends(get_db)) -> CriticalPathC
 
 def get_team_controller(db: Session = Depends(get_db)) -> TeamController:
     return TeamController(db)
+
+
+def get_approval_inbox_controller(
+    db: Session = Depends(get_db),
+) -> ApprovalInboxController:
+    return ApprovalInboxController(db)

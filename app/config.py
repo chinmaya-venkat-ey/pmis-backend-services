@@ -67,6 +67,25 @@ class Settings(BaseSettings):
     # is provided. Callers can override per-upload.
     file_store_default_folder: str = Field(default="project-attachments")
 
+    # === Activity Workflow (external Java microservice) ===
+    # Base URL of the DIGIT-style workflow service that owns the activity
+    # approval state machine. PMIS proxies SUBMIT/APPROVE/REJECT/UPDATE
+    # to it and reads transition history for the Approval Inbox.
+    # Leave unset to operate in mock mode (synthetic responses).
+    workflow_service_url: Optional[str] = Field(default=None)
+    workflow_service_timeout_seconds: float = Field(default=10.0)
+    # Override mode: ``real`` | ``mock``. When unset, defaults to ``real``
+    # if ``workflow_service_url`` is configured, ``mock`` otherwise.
+    workflow_client: Optional[str] = Field(default=None)
+
+    # === Notification dispatch (PMIS-notification-service) ===
+    # Used by the approval-inbox transition proxy to email reviewers /
+    # the activity vendor when state changes. Leave the URL blank to
+    # operate in mock mode (dispatch is logged, not sent).
+    notification_service_url: Optional[str] = Field(default=None)
+    notification_service_timeout_seconds: float = Field(default=5.0)
+    notification_client: Optional[str] = Field(default=None)
+
     # === Frontend reference (HAL link builder) ===
     frontend_base_url: Optional[str] = Field(default=None)
 

@@ -60,10 +60,9 @@ class TeamController:
 
     def get_associated_users(
         self,
-        project_id: str,
         payload: AssociatedUsersFilter,
     ) -> AssociatedUsersResponse:
-        return self.service.get_associated_users(project_id, payload)
+        return self.service.get_associated_users(payload)
 
     def get_team_page(self, project_id: str) -> TeamPageResponse:
         return self.service.get_team_page(project_id)

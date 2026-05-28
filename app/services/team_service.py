@@ -36,6 +36,7 @@ from app.schemas.team import (
     AssociatedUserEntry,
     AssociatedUsersFilter,
     AssociatedUsersResponse,
+    DivisionRef,
     OrgMemberBucket,
     OrgUserRow,
     OwnershipRead,
@@ -50,6 +51,7 @@ from app.schemas.team import (
     TeamWriteRequest,
     TeamWriteResponse,
     UserDirectoryEntry,
+    VendorRef,
 )
 
 
@@ -352,95 +354,143 @@ class TeamService:
         self.db.commit()
         return self._read_activity_assignments(activity_id)
 
-    # ── associated users (POST .../associated-users) ─────────────────────────
+    # ── associated users (POST /associated-users) ────────────────────────────
 
     def get_associated_users(
         self,
-        project_id: str,
         payload: AssociatedUsersFilter,
     ) -> AssociatedUsersResponse:
-        """Return users associated with the project via organization
-        (vendor) membership and/or division membership.
+        """Return users matching one or more of: a project's organizations,
+        a project's owner division, or a specific division id.
 
-        Flag semantics — see AssociatedUsersFilter docstring. Briefly:
-          - both flags False: union of all three sources (orgs, owner
-            division, concerned divisions)
-          - flag True + list omitted/empty: include all of that source
-            from the project
-          - flag True + non-empty list: subset must be ⊆ the project's
-            set for that source; otherwise 422 with the offending values
+        See AssociatedUsersFilter docstring for flag semantics. Validation:
+          - at least one details flag must be true (else 422)
+          - orgDetails / ownerDetails require projectId (else 422)
+          - divisionDetails requires divisionId (else 422)
+          - projectId must point at a live project (else 404)
+          - divisionId must point at a row in masters.divisions (else 422)
         """
-        proj = self._get_project_or_404(project_id)
+        # ---- validate flag/input combinations ---------------------------------
+        if not (payload.org_details or payload.owner_details or payload.division_details):
+            raise ValidationError(
+                "At least one details flag (orgDetails / ownerDetails / divisionDetails) must be true",
+                code="no_details_flag",
+            )
 
-        project_org_ids = self.associated_repo.get_project_organization_ids(project_id)
-        owner_div, concerned_divs = self.associated_repo.get_project_division_codes(project_id)
-        project_div_codes: List[str] = sorted(
-            set(concerned_divs) | ({owner_div} if owner_div else set())
+        if (payload.org_details or payload.owner_details) and not payload.project_id:
+            raise ValidationError(
+                "orgDetails and ownerDetails require projectId",
+                code="project_id_required",
+                details={
+                    "orgDetails": payload.org_details,
+                    "ownerDetails": payload.owner_details,
+                },
+            )
+
+        if payload.division_details and payload.division_id is None:
+            raise ValidationError(
+                "divisionDetails requires divisionId",
+                code="division_id_required",
+            )
+
+        # ---- resolve sources --------------------------------------------------
+        project: Optional[Project] = None
+        if payload.project_id and (payload.org_details or payload.owner_details):
+            project = self._get_project_or_404(payload.project_id)
+
+        vendor_ids_for_orgs: List[str] = []
+        if payload.org_details and project is not None:
+            vendor_ids_for_orgs = self.associated_repo.get_project_organization_ids(project.id)
+
+        owner_division_code: Optional[str] = None
+        if payload.owner_details and project is not None:
+            owner_division_code = project.owner  # may be None
+
+        target_division = None
+        if payload.division_details:
+            target_division = self.associated_repo.get_division_by_id(payload.division_id)
+            if target_division is None:
+                raise ValidationError(
+                    f"Division id {payload.division_id} not found in masters.divisions",
+                    code="invalid_division_id",
+                    details={"division_id": payload.division_id},
+                )
+
+        # ---- build the user-lookup filters -----------------------------------
+        division_codes_for_lookup: List[str] = []
+        if owner_division_code:
+            division_codes_for_lookup.append(owner_division_code)
+        if target_division is not None and target_division.code not in division_codes_for_lookup:
+            division_codes_for_lookup.append(target_division.code)
+
+        user_rows = self.associated_repo.fetch_users(
+            vendor_ids_for_orgs, division_codes_for_lookup,
         )
 
-        include_orgs = payload.include_organizations
-        include_divs = payload.include_divisions
-        both_flags_off = not include_orgs and not include_divs
+        # ---- hydrate vendor + division metadata ------------------------------
+        vendor_meta = self.associated_repo.get_vendors_by_ids(vendor_ids_for_orgs)
+        division_codes_to_hydrate = [c for c in (owner_division_code,) if c]
+        owner_division_meta = self.associated_repo.get_divisions_by_codes(
+            division_codes_to_hydrate
+        )
 
-        # Resolve effective organizations.
-        if both_flags_off or include_orgs:
-            requested_orgs = payload.organizations or []
-            if requested_orgs:
-                invalid = sorted(set(requested_orgs) - set(project_org_ids))
-                if invalid:
-                    raise ValidationError(
-                        f"organizations contains values not associated with project {project_id}",
-                        code="invalid_organizations",
-                        details={"invalid": invalid, "allowed": project_org_ids},
-                    )
-                effective_orgs = list(dict.fromkeys(requested_orgs))
-            else:
-                effective_orgs = list(project_org_ids)
-        else:
-            effective_orgs = []
+        vendor_set = set(vendor_ids_for_orgs)
 
-        # Resolve effective divisions.
-        if both_flags_off or include_divs:
-            requested_divs = payload.divisions or []
-            if requested_divs:
-                invalid = sorted(set(requested_divs) - set(project_div_codes))
-                if invalid:
-                    raise ValidationError(
-                        f"divisions contains values not associated with project {project_id}",
-                        code="invalid_divisions",
-                        details={"invalid": invalid, "allowed": project_div_codes},
-                    )
-                effective_divs = list(dict.fromkeys(requested_divs))
-            else:
-                effective_divs = list(project_div_codes)
-        else:
-            effective_divs = []
+        users_out: List[AssociatedUserEntry] = []
+        for u in user_rows:
+            matched_orgs: List[VendorRef] = []
+            matched_owner_div: List[DivisionRef] = []
+            matched_div: List[DivisionRef] = []
 
-        # Fetch and attach provenance.
-        rows = self.associated_repo.fetch_users(effective_orgs, effective_divs)
-        org_set = set(effective_orgs)
-        div_set = set(effective_divs)
-        users: List[AssociatedUserEntry] = []
-        for u in rows:
-            src_orgs = [u.vendor_id] if u.vendor_id and u.vendor_id in org_set else []
-            src_divs = [u.division] if u.division and u.division in div_set else []
-            users.append(AssociatedUserEntry(
+            if payload.org_details and u.vendor_id and u.vendor_id in vendor_set:
+                v = vendor_meta.get(u.vendor_id)
+                matched_orgs.append(VendorRef(
+                    id=u.vendor_id,
+                    name=v.name if v else None,
+                ))
+
+            if (
+                payload.owner_details
+                and owner_division_code
+                and u.division
+                and u.division == owner_division_code
+            ):
+                d = owner_division_meta.get(u.division)
+                matched_owner_div.append(DivisionRef(
+                    id=d.id if d else None,
+                    code=u.division,
+                    name=d.label if d else None,
+                ))
+
+            if (
+                payload.division_details
+                and target_division is not None
+                and u.division
+                and u.division == target_division.code
+            ):
+                matched_div.append(DivisionRef(
+                    id=target_division.id,
+                    code=target_division.code,
+                    name=target_division.label,
+                ))
+
+            if not matched_orgs and not matched_owner_div and not matched_div:
+                # Defensive: fetch_users uses OR across vendor + division;
+                # without a match in any of the active flag buckets we drop.
+                continue
+
+            users_out.append(AssociatedUserEntry(
                 id=u.id,
                 login=u.login,
                 email=u.email,
                 first_name=u.first_name,
                 last_name=u.last_name,
-                source_organizations=src_orgs,
-                source_divisions=src_divs,
+                matched_organizations=matched_orgs,
+                matched_owner_division=matched_owner_div,
+                matched_division=matched_div,
             ))
 
-        return AssociatedUsersResponse(
-            project_id=proj.id,
-            project_code=proj.project_code,
-            effective_organizations=effective_orgs,
-            effective_divisions=effective_divs,
-            users=users,
-        )
+        return AssociatedUsersResponse(users=users_out)
 
     # ── UI-shaped team-page endpoints ────────────────────────────────────────
 
@@ -513,10 +563,30 @@ class TeamService:
             for row in team_activities
         ]
 
+        # ownerDivision / concernedDivisions — resolved against masters.divisions.
+        owner_division, concerned_codes = self.associated_repo.get_project_division_codes(
+            project_id,
+        )
+        codes_to_hydrate = sorted(set(concerned_codes) | ({owner_division} if owner_division else set()))
+        division_rows = self.associated_repo.get_divisions_by_codes(codes_to_hydrate)
+
+        def _to_ref(code: str) -> DivisionRef:
+            d = division_rows.get(code)
+            return DivisionRef(
+                id=d.id if d else None,
+                code=code,
+                name=d.label if d else None,
+            )
+
+        owner_division_ref: Optional[DivisionRef] = _to_ref(owner_division) if owner_division else None
+        concerned_divisions_refs: List[DivisionRef] = [_to_ref(c) for c in concerned_codes]
+
         return TeamPageResponse(
             project_id=proj.id,
             project_code=proj.project_code,
             project_name=proj.name,
+            owner_division=owner_division_ref,
+            concerned_divisions=concerned_divisions_refs,
             user_directory=user_directory,
             org_user=org_user,
             project_owner=project_owner,

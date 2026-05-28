@@ -55,6 +55,9 @@ project_team_router = APIRouter(prefix="/projects", tags=["team"])
 # ── activity-scoped routes (/activities/{activity_id}/...) ──────────────────
 activity_team_router = APIRouter(prefix="/activities", tags=["team"])
 
+# ── top-level routes (no path-param scope) ───────────────────────────────────
+associated_users_router = APIRouter(tags=["team"])
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Full team snapshot
@@ -532,24 +535,28 @@ def save_team_page(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Associated users (project organizations + divisions)
+# Associated users — flag-driven lookup (no path-scoped project)
 # ─────────────────────────────────────────────────────────────────────────────
 
-@project_team_router.post(
-    "/{project_id}/associated-users",
+@associated_users_router.post(
+    "/associated-users",
     response_model=AssociatedUsersResponse,
-    summary="List users associated with a project via organization and/or division",
+    summary="Look up users by a project's organizations, owner division, or a division id",
     description=(
-        "Returns the union of (a) users whose vendor matches one of the "
-        "project's organizations and (b) users whose division matches the "
-        "project's owner division or any of its activities' concerned "
-        "divisions. The two flags toggle which sources contribute; the "
-        "optional lists narrow each source to a subset.\n\n"
-        "If both flags are false (default), every source contributes — "
-        "i.e. the response is the full union.\n\n"
-        "Authenticated-only: the response is filtered by the project's "
-        "associations, not by the caller's role or permissions, so any "
-        "logged-in user sees the same data for the same project."
+        "Flag-driven lookup. Each flag turns on one match source; the "
+        "response is the union of users matching any active source. Each "
+        "user entry carries `matchedOrganizations`, `matchedOwnerDivision`, "
+        "and `matchedDivision` so the caller can see why the user was "
+        "included.\n\n"
+        "Constraints:\n"
+        "  • At least one details flag must be true (else 422).\n"
+        "  • `orgDetails` / `ownerDetails` require `projectId` (else 422).\n"
+        "  • `divisionDetails` requires `divisionId` (else 422).\n"
+        "  • `projectId` must reference a live project (else 404).\n"
+        "  • `divisionId` must reference a row in `masters.divisions` "
+        "(else 422).\n\n"
+        "Authenticated-only: data returned is filtered by the project / "
+        "division references in the body, not by the caller's role."
     ),
     dependencies=[Depends(require_authenticated())],
     openapi_extra={
@@ -557,34 +564,35 @@ def save_team_page(
             "content": {
                 "application/json": {
                     "examples": {
-                        "union_default": {
-                            "summary": "Both flags off — return the full union",
+                        "all_three": {
+                            "summary": "All three sources — orgs + owner division + specific division",
                             "value": {
-                                "include_organizations": False,
-                                "include_divisions": False,
+                                "projectId": "proj-1111-2222-3333-4444",
+                                "divisionId": 12,
+                                "orgDetails": True,
+                                "ownerDetails": True,
+                                "divisionDetails": True,
                             },
                         },
-                        "orgs_only_subset": {
-                            "summary": "Only one organization, no divisions",
+                        "orgs_only": {
+                            "summary": "Project organizations only",
                             "value": {
-                                "include_organizations": True,
-                                "organizations": ["ven-aaaa-1111"],
-                                "include_divisions": False,
+                                "projectId": "proj-1111-2222-3333-4444",
+                                "orgDetails": True,
                             },
                         },
-                        "divs_only_subset": {
-                            "summary": "Owner + one concerned division, no orgs",
+                        "owner_division_only": {
+                            "summary": "Project owner division only",
                             "value": {
-                                "include_organizations": False,
-                                "include_divisions": True,
-                                "divisions": ["IT_DIV"],
+                                "projectId": "proj-1111-2222-3333-4444",
+                                "ownerDetails": True,
                             },
                         },
-                        "all_orgs_all_divs": {
-                            "summary": "Both flags on, no subset lists — same as union default",
+                        "specific_division_only": {
+                            "summary": "Specific division id only (no project context)",
                             "value": {
-                                "include_organizations": True,
-                                "include_divisions": True,
+                                "divisionId": 12,
+                                "divisionDetails": True,
                             },
                         },
                     }
@@ -594,8 +602,7 @@ def save_team_page(
     },
 )
 def get_associated_users(
-    project_id: str,
     body: AssociatedUsersFilter,
     controller: Annotated[TeamController, Depends(get_team_controller)],
 ) -> AssociatedUsersResponse:
-    return controller.get_associated_users(project_id, body)
+    return controller.get_associated_users(body)

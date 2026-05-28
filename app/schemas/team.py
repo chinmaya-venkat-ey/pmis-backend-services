@@ -410,6 +410,16 @@ class TeamPageResponse(BaseModel):
     project_id: str
     project_code: Optional[str] = None
     project_name: str
+    owner_division: Optional["DivisionRef"] = Field(
+        default=None,
+        description="Project's owner division resolved against masters.divisions. "
+                    "None when the project has no owner division set.",
+    )
+    concerned_divisions: List["DivisionRef"] = Field(
+        default_factory=list,
+        description="Union of concerned_divisions across all live activities, "
+                    "resolved against masters.divisions and sorted by code.",
+    )
     user_directory: List[UserDirectoryEntry] = Field(default_factory=list)
     org_user: List[OrgUserRow] = Field(default_factory=list)
     project_owner: List[ProjectOwnerRow] = Field(default_factory=list)
@@ -436,99 +446,142 @@ class TeamPageRequest(BaseModel):
     activities: List[TeamPageActivity] = Field(default_factory=list)
 
 
-# ── Associated-users filter (POST .../associated-users) ─────────────────────
+# ── Shared masters references ───────────────────────────────────────────────
+
+class VendorRef(BaseModel):
+    """Vendor (organization) id + name, hydrated from masters.vendors."""
+    model_config = ConfigDict(json_schema_extra={
+        "example": {"id": "ven-aaaa-1111", "name": "Tata Consultancy Services"}
+    })
+    id: str
+    name: Optional[str] = None
+
+
+class DivisionRef(BaseModel):
+    """Division id + code + name, hydrated from masters.divisions.
+
+    `id` and `name` are null when the code does not resolve to a row in
+    masters.divisions (e.g. legacy 'others' or stale codes). `code` is
+    always populated.
+    """
+    model_config = ConfigDict(json_schema_extra={
+        "example": {"id": 12, "code": "IT_DIV", "name": "Information Technology"}
+    })
+    id: Optional[int] = None
+    code: str
+    name: Optional[str] = None
+
+
+# ── Associated-users (POST /associated-users) ───────────────────────────────
 
 class AssociatedUsersFilter(BaseModel):
-    """Body for POST /projects/{id}/associated-users.
+    """Body for POST /associated-users.
 
-    Flag semantics:
-      - include_organizations / include_divisions both False (default):
-        return the union of (a) users in every organization associated with
-        the project, (b) users in the project's owner division, (c) users in
-        every concerned division across the project's activities.
-      - At least one flag True: only the toggled-on sources contribute.
-        A provided list narrows that source to the listed subset; an omitted
-        or empty list means "all of that source from the project".
+    Flag-driven lookup. At least one details flag must be true.
 
-    `organizations` must be a subset of the project's vendor IDs (from
-    project_vendors). `divisions` must be a subset of {owner division} ∪
-    {concerned divisions across all project activities}. Invalid values
-    cause a 400.
+      - orgDetails (requires projectId):
+            return users whose users.vendor_id is in this project's
+            project_vendors. Each matching user carries the matched
+            organization in `matchedOrganizations`.
+      - ownerDetails (requires projectId):
+            return users whose users.division equals the project's owner
+            division (projects.owner). Each matching user carries the
+            owner division in `matchedOwnerDivision`.
+      - divisionDetails (requires divisionId):
+            return users whose users.division equals the code of the
+            division row identified by `divisionId`. Each matching user
+            carries that division in `matchedDivision`.
+
+    Multiple flags can be true; the response is the union. A single user
+    may have multiple `matched*` lists populated if they match multiple
+    sources.
     """
     model_config = ConfigDict(
+        alias_generator=to_camel,
+        populate_by_name=True,
         extra="ignore",
         json_schema_extra={
             "example": {
-                "include_organizations": True,
-                "organizations": ["ven-aaaa-1111", "ven-bbbb-2222"],
-                "include_divisions": True,
-                "divisions": ["IT_DIV", "LEGAL_DIV"],
+                "projectId": "proj-1111-2222-3333-4444",
+                "divisionId": 12,
+                "orgDetails": True,
+                "ownerDetails": True,
+                "divisionDetails": True,
             }
         },
     )
-    include_organizations: bool = False
-    organizations: Optional[List[str]] = Field(
+    project_id: Optional[str] = Field(
         default=None,
-        description="Subset of the project's organization (vendor) IDs. "
-                    "Omit or pass [] to include all project organizations.",
+        description="Project UUID. Required when orgDetails or ownerDetails is true.",
     )
-    include_divisions: bool = False
-    divisions: Optional[List[str]] = Field(
+    division_id: Optional[int] = Field(
         default=None,
-        description="Subset of {owner_division} ∪ concerned_divisions. "
-                    "Omit or pass [] to include all project divisions.",
+        description="masters.divisions.id (integer). Required when divisionDetails is true.",
     )
+    org_details: bool = False
+    owner_details: bool = False
+    division_details: bool = False
 
 
 class AssociatedUserEntry(BaseModel):
-    """One user in the union, with the source(s) that matched."""
-    model_config = ConfigDict(json_schema_extra={
-        "example": {
-            "id": "usr-0001",
-            "login": "rajesh.kumar",
-            "email": "rajesh.kumar@uidai.gov.in",
-            "first_name": "Rajesh",
-            "last_name": "Kumar",
-            "source_organizations": ["ven-aaaa-1111"],
-            "source_divisions": ["IT_DIV"],
-        }
-    })
+    """One user in the union, with the match buckets that included them.
+
+    Each `matched*` list is populated only when the corresponding details
+    flag in the request was true AND this user's record matched that source.
+    Lists are empty otherwise.
+    """
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        populate_by_name=True,
+        json_schema_extra={
+            "example": {
+                "id": "usr-0001",
+                "login": "rajesh.kumar",
+                "email": "rajesh.kumar@uidai.gov.in",
+                "firstName": "Rajesh",
+                "lastName": "Kumar",
+                "matchedOrganizations": [
+                    {"id": "ven-aaaa-1111", "name": "Tata Consultancy Services"},
+                ],
+                "matchedOwnerDivision": [
+                    {"id": 12, "code": "IT_DIV", "name": "Information Technology"},
+                ],
+                "matchedDivision": [],
+            }
+        },
+    )
     id: str
     login: str
     email: Optional[str] = None
     first_name: Optional[str] = None
     last_name: Optional[str] = None
-    source_organizations: List[str] = Field(
-        default_factory=list,
-        description="Vendor IDs the user matched via users.vendor_id.",
-    )
-    source_divisions: List[str] = Field(
-        default_factory=list,
-        description="Division codes the user matched via users.division.",
-    )
+    matched_organizations: List[VendorRef] = Field(default_factory=list)
+    matched_owner_division: List[DivisionRef] = Field(default_factory=list)
+    matched_division: List[DivisionRef] = Field(default_factory=list)
 
 
 class AssociatedUsersResponse(BaseModel):
-    """Response for POST /projects/{id}/associated-users."""
-    model_config = ConfigDict(json_schema_extra={
-        "example": {
-            "project_id": "proj-1111-2222-3333-4444",
-            "project_code": "UIDAI-P250528120000",
-            "effective_organizations": ["ven-aaaa-1111"],
-            "effective_divisions": ["IT_DIV"],
-            "users": [
-                {
-                    "id": "usr-0001", "login": "rajesh.kumar",
-                    "email": "rajesh.kumar@uidai.gov.in",
-                    "first_name": "Rajesh", "last_name": "Kumar",
-                    "source_organizations": ["ven-aaaa-1111"],
-                    "source_divisions": ["IT_DIV"],
-                }
-            ],
-        }
-    })
-    project_id: str
-    project_code: str
-    effective_organizations: List[str] = Field(default_factory=list)
-    effective_divisions: List[str] = Field(default_factory=list)
+    """Response for POST /associated-users."""
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        populate_by_name=True,
+        json_schema_extra={
+            "example": {
+                "users": [
+                    {
+                        "id": "usr-0001", "login": "rajesh.kumar",
+                        "email": "rajesh.kumar@uidai.gov.in",
+                        "firstName": "Rajesh", "lastName": "Kumar",
+                        "matchedOrganizations": [
+                            {"id": "ven-aaaa-1111", "name": "Tata Consultancy Services"},
+                        ],
+                        "matchedOwnerDivision": [
+                            {"id": 12, "code": "IT_DIV", "name": "Information Technology"},
+                        ],
+                        "matchedDivision": [],
+                    }
+                ]
+            }
+        },
+    )
     users: List[AssociatedUserEntry] = Field(default_factory=list)

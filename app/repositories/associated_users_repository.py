@@ -1,7 +1,8 @@
 """Cross-schema reader for users associated with a project via
 organization (vendor) membership and/or division membership.
 
-Powers ``POST /project/projects/{uuid}/associated-users``.
+Powers ``POST /associated-users`` and the owner_division / concerned_divisions
+sections of ``GET /projects/{uuid}/team-page``.
 
 Sources:
   - ``project.project_vendors``          — the project's organizations
@@ -9,15 +10,21 @@ Sources:
                                          — concerned-division set
   - ``project.projects.owner``           — owner division
   - ``users.users`` (cross-schema)       — for the actual user rows
+  - ``masters.vendors`` / ``masters.divisions`` (cross-schema)
+                                         — for hydrating names/labels
 """
 from __future__ import annotations
 
-from typing import List, Optional, Set
+from typing import Dict, List, Optional, Set
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app.models._cross_schema import User as MirrorUser
+from app.models._cross_schema import (
+    Division as MirrorDivision,
+    User as MirrorUser,
+    Vendor as MirrorVendor,
+)
 from app.models.activity import Activity
 from app.models.project import Project
 from app.models.project_vendor import ProjectVendor
@@ -92,3 +99,33 @@ class AssociatedUsersRepository:
             .order_by(MirrorUser.login.asc())
         )
         return list(self.db.execute(stmt).scalars())
+
+    # ── masters hydration ────────────────────────────────────────────────────
+
+    def get_division_by_id(self, division_id: int) -> Optional[MirrorDivision]:
+        """Single masters.divisions row by integer id, or None."""
+        return self.db.execute(
+            select(MirrorDivision).where(MirrorDivision.id == division_id)
+        ).scalar()
+
+    def get_vendors_by_ids(
+        self, vendor_ids: List[str],
+    ) -> Dict[str, MirrorVendor]:
+        """Map vendor_id → masters.vendors row for the given ids."""
+        if not vendor_ids:
+            return {}
+        rows = self.db.execute(
+            select(MirrorVendor).where(MirrorVendor.id.in_(vendor_ids))
+        ).scalars()
+        return {v.id: v for v in rows}
+
+    def get_divisions_by_codes(
+        self, codes: List[str],
+    ) -> Dict[str, MirrorDivision]:
+        """Map division code → masters.divisions row for the given codes."""
+        if not codes:
+            return {}
+        rows = self.db.execute(
+            select(MirrorDivision).where(MirrorDivision.code.in_(codes))
+        ).scalars()
+        return {d.code: d for d in rows}

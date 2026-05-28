@@ -126,3 +126,8 @@ class MasterRepository:
         return self.db.execute(
             select(FormulaLibrary).where(FormulaLibrary.formula_type == formula_type)
         ).scalar_one_or_none()
+
+    def get_formula_by_id(self, formula_id: str) -> Optional[FormulaLibrary]:
+        return self.db.execute(
+            select(FormulaLibrary).where(FormulaLibrary.id == formula_id)
+        ).scalar_one_or_none()

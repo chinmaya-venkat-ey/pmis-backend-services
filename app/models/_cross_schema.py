@@ -59,6 +59,8 @@ class User(MirrorBase):
     last_name: Mapped[Optional[str]] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(String(16))
     vendor_id: Mapped[Optional[str]] = mapped_column(String(36))
+    division: Mapped[Optional[str]] = mapped_column(String(64))
+    division_other: Mapped[Optional[str]] = mapped_column(String(255))
     deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
 

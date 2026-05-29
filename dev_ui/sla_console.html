@@ -1,0 +1,1128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>SLA Console — Onboard / Map / Evaluate</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --panel: #161922;
+    --panel-2: #1d212d;
+    --border: #2a2f3d;
+    --text: #e6e8ee;
+    --muted: #8b93a7;
+    --accent: #6aa9ff;
+    --accent-2: #4ade80;
+    --warn: #f59e0b;
+    --err: #ef4444;
+    --good: #22c55e;
+    --row-alt: #181c25;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+  }
+  header {
+    padding: 14px 24px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--panel);
+  }
+  header h1 { font-size: 16px; margin: 0; letter-spacing: 0.3px; }
+  header .api {
+    display: flex; gap: 8px; align-items: center;
+    font-size: 12px; color: var(--muted);
+  }
+  header input[type=text] {
+    background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 4px;
+    padding: 5px 8px; font-size: 12px; width: 280px;
+  }
+  nav.tabs {
+    display: flex; gap: 0;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    padding: 0 24px;
+  }
+  nav.tabs button {
+    background: none; color: var(--muted);
+    border: 0; border-bottom: 2px solid transparent;
+    padding: 12px 18px; font-size: 14px; cursor: pointer;
+  }
+  nav.tabs button.active { color: var(--accent); border-bottom-color: var(--accent); }
+  main { padding: 24px; max-width: 1400px; margin: 0 auto; }
+  section.tab { display: none; }
+  section.tab.active { display: block; }
+  .grid { display: grid; gap: 14px; }
+  .grid-2 { grid-template-columns: 1fr 1fr; }
+  .grid-3 { grid-template-columns: 1fr 1fr 1fr; }
+  .grid-4 { grid-template-columns: 1fr 1fr 1fr 1fr; }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 18px;
+    margin-bottom: 16px;
+  }
+  .card h2 {
+    margin: 0 0 10px;
+    font-size: 13px; text-transform: uppercase; letter-spacing: 1px;
+    color: var(--muted);
+  }
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .field label { font-size: 12px; color: var(--muted); }
+  .field input, .field select, .field textarea {
+    background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 4px;
+    padding: 7px 9px; font-size: 13px;
+    font-family: inherit;
+  }
+  .field textarea { font-family: ui-monospace, "JetBrains Mono", Consolas, monospace; min-height: 80px; }
+  .field input:focus, .field select:focus, .field textarea:focus {
+    outline: none; border-color: var(--accent);
+  }
+  .row-list { display: flex; flex-direction: column; gap: 8px; }
+  .row {
+    display: grid; gap: 8px; align-items: end;
+    background: var(--panel-2); padding: 10px;
+    border: 1px solid var(--border); border-radius: 6px;
+  }
+  .row .field input, .row .field select { padding: 5px 7px; font-size: 12px; }
+  .btn {
+    background: var(--accent); color: #0c1424;
+    border: 0; border-radius: 4px;
+    padding: 8px 16px; font-size: 13px; font-weight: 600;
+    cursor: pointer;
+  }
+  .btn:hover { filter: brightness(1.1); }
+  .btn.secondary { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
+  .btn.danger { background: var(--err); color: white; }
+  .btn.small { padding: 4px 10px; font-size: 12px; }
+  .actions { display: flex; gap: 8px; margin-top: 12px; align-items: center; }
+  .actions .spacer { flex: 1; }
+  pre.json {
+    background: #0a0d14; border: 1px solid var(--border); border-radius: 6px;
+    padding: 12px; overflow: auto; max-height: 360px; font-size: 12px;
+    color: #c5d3ec; font-family: ui-monospace, "JetBrains Mono", Consolas, monospace;
+  }
+  .status { padding: 10px 12px; border-radius: 6px; margin-top: 12px; font-size: 13px; }
+  .status.ok { background: rgba(34,197,94,0.12); border: 1px solid rgba(34,197,94,0.4); }
+  .status.err { background: rgba(239,68,68,0.12); border: 1px solid rgba(239,68,68,0.4); }
+  .status.info { background: rgba(106,169,255,0.12); border: 1px solid rgba(106,169,255,0.4); }
+  table.t {
+    width: 100%; border-collapse: collapse; font-size: 13px;
+  }
+  table.t th, table.t td {
+    padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--border);
+  }
+  table.t th { color: var(--muted); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+  table.t tr:hover td { background: var(--row-alt); }
+  .sev-0 { color: var(--good); }
+  .sev-1 { color: #a3e635; }
+  .sev-2 { color: var(--warn); }
+  .sev-3 { color: #fb923c; }
+  .sev-4 { color: var(--err); }
+  .kv { display: grid; grid-template-columns: 160px 1fr; gap: 6px 16px; font-size: 13px; }
+  .kv dt { color: var(--muted); }
+  .kv dd { margin: 0; }
+  .pill {
+    display: inline-block; padding: 2px 8px; border-radius: 999px;
+    font-size: 11px; background: var(--panel-2); border: 1px solid var(--border);
+    color: var(--muted);
+  }
+  .pill.active { color: var(--good); border-color: rgba(34,197,94,0.4); }
+  .pill.retired { color: var(--err); border-color: rgba(239,68,68,0.4); }
+  .muted { color: var(--muted); }
+  .hide { display: none !important; }
+  .x-btn {
+    background: transparent; color: var(--muted);
+    border: 1px solid var(--border); border-radius: 4px;
+    padding: 4px 8px; cursor: pointer; font-size: 12px;
+  }
+  .x-btn:hover { color: var(--err); border-color: var(--err); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>SLA Console — Onboard · Map · Evaluate</h1>
+  <div class="api">
+    API base
+    <input type="text" id="apiBase" value="http://localhost:8005" />
+    <span id="serverStatus" class="pill">checking…</span>
+  </div>
+</header>
+
+<nav class="tabs">
+  <button data-tab="onboard" class="active">1. Onboard SLA</button>
+  <button data-tab="map">2. Map SLA → Activity</button>
+  <button data-tab="evaluate">3. Evaluate</button>
+</nav>
+
+<main>
+
+<!-- ============================================================ ONBOARD -->
+<section class="tab active" id="tab-onboard">
+
+  <div class="card">
+    <h2>Quick start</h2>
+    <div class="actions">
+      <span class="muted">Load a worked example:</span>
+      <select id="presetPicker">
+        <option value="">— pick a preset —</option>
+        <option value="msap_mobilization">MSAP-SLA001 · Mobilization (point_accumulation, ONE_TIME)</option>
+        <option value="bsp_fpir">BSP-SLA001 · FPIR (band_accumulation, daily)</option>
+        <option value="msap_wac_prod">MSAP-SLA016 · Production Defect WAC (wac)</option>
+        <option value="bsp_milestone">BSP Milestone · Resource Onboarding (fixed_escalation)</option>
+      </select>
+      <button class="btn secondary small" onclick="applyPreset()">Apply preset</button>
+      <button class="btn secondary small" onclick="resetOnboardForm()">Clear form</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Basics</h2>
+    <div class="grid grid-3">
+      <div class="field"><label>Contract type *</label>
+        <select id="o_contract_type">
+          <option>BSP</option><option>MSAP</option><option>MSIP</option><option>PMU</option>
+        </select>
+      </div>
+      <div class="field"><label>Formula type *</label>
+        <select id="o_formula_type" onchange="toggleFormulaSections()">
+          <option value="band_accumulation">band_accumulation — daily band → rate%</option>
+          <option value="point_accumulation">point_accumulation — severity → points → LD%</option>
+          <option value="fixed_escalation">fixed_escalation — tier lookup</option>
+          <option value="wac">wac — weighted defect count</option>
+        </select>
+      </div>
+      <div class="field"><label>SLA ref * (must be unique)</label>
+        <input id="o_sla_ref" placeholder="MSAP-SLA001-MOBILIZATION" />
+      </div>
+      <div class="field" style="grid-column: span 3;"><label>Title *</label>
+        <input id="o_title" placeholder="Mobilization of all selected key resources within T+14 days" />
+      </div>
+      <div class="field" style="grid-column: span 3;"><label>Description</label>
+        <textarea id="o_description"></textarea>
+      </div>
+      <div class="field"><label>Measurement interval</label>
+        <select id="o_measurement_interval">
+          <option>DAILY</option><option>WEEKLY</option><option selected>MONTHLY</option>
+          <option>QUARTERLY</option><option>ONE_TIME</option>
+        </select>
+      </div>
+      <div class="field"><label>Reporting interval</label>
+        <select id="o_reporting_interval">
+          <option>WEEKLY</option><option>MONTHLY</option><option selected>QUARTERLY</option><option>ANNUAL</option>
+        </select>
+      </div>
+      <div class="field"><label>Baseline type</label>
+        <select id="o_baseline_type"><option selected>STATIC</option><option>ROLLING</option></select>
+      </div>
+      <div class="field"><label>Compound metric rule</label>
+        <select id="o_compound_metric_rule"><option selected>INDEPENDENT</option><option>COMBINED</option></select>
+      </div>
+      <div class="field"><label>LD aggregation method</label>
+        <select id="o_ld_aggregation_method"><option selected>SUM</option><option>MAX</option><option>WEIGHTED</option></select>
+      </div>
+      <div class="field"><label>LD computation base</label>
+        <select id="o_ld_computation_base">
+          <option selected>QUARTERLY_PAYMENT</option><option>ANNUAL_PAYMENT</option><option>FIXED_AMOUNT</option>
+        </select>
+      </div>
+      <div class="field"><label>Effective from *</label>
+        <input type="date" id="o_effective_from" />
+      </div>
+      <div class="field"><label>Effective until</label>
+        <input type="date" id="o_effective_until" />
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Metrics <span class="muted">(at least one, mark one as primary)</span></h2>
+    <div class="row-list" id="o_metrics"></div>
+    <div class="actions"><button class="btn secondary small" onclick="addMetricRow()">+ Add metric</button></div>
+  </div>
+
+  <div class="card" id="o_bands_card">
+    <h2>Condition bands <span class="muted">— defines severity / rate per measured range</span></h2>
+    <div class="row-list" id="o_bands"></div>
+    <div class="actions"><button class="btn secondary small" onclick="addBandRow()">+ Add band</button></div>
+  </div>
+
+  <div class="card" id="o_lookup_card">
+    <h2>Lookup table <span class="muted">— fixed_escalation tiers (sort_order = tier index)</span></h2>
+    <div class="row-list" id="o_lookup"></div>
+    <div class="actions"><button class="btn secondary small" onclick="addLookupRow()">+ Add lookup row</button></div>
+  </div>
+
+  <div class="card">
+    <h2>Parameters <span class="muted">— optional key/value pairs (e.g. WAC weights, variance step)</span></h2>
+    <div class="row-list" id="o_params"></div>
+    <div class="actions"><button class="btn secondary small" onclick="addParamRow()">+ Add parameter</button></div>
+  </div>
+
+  <div class="card">
+    <h2>Guard conditions <span class="muted">— optional exclude / suspend / probation rules</span></h2>
+    <div class="row-list" id="o_guards"></div>
+    <div class="actions"><button class="btn secondary small" onclick="addGuardRow()">+ Add guard</button></div>
+  </div>
+
+  <div class="actions">
+    <button class="btn" onclick="submitOnboard()">Onboard SLA</button>
+    <button class="btn secondary" onclick="previewOnboardJson()">Preview JSON</button>
+    <div class="spacer"></div>
+    <span class="muted">Posts to <code>POST /api/v3/sla-masters</code></span>
+  </div>
+
+  <div id="o_status"></div>
+  <div class="card hide" id="o_result_card">
+    <h2>Created SLA</h2>
+    <div class="kv" id="o_result_kv"></div>
+    <details><summary class="muted" style="margin-top:10px;cursor:pointer;">Raw response</summary>
+      <pre class="json" id="o_result_json"></pre>
+    </details>
+  </div>
+
+</section>
+
+<!-- ============================================================ MAP -->
+<section class="tab" id="tab-map">
+
+  <div class="card">
+    <h2>Map an SLA to an Activity</h2>
+    <div class="grid grid-3">
+      <div class="field"><label>Activity ID *</label>
+        <input id="m_activity_id" placeholder="act-msap-2026-pilot" />
+      </div>
+      <div class="field" style="grid-column: span 2;"><label>SLA *</label>
+        <select id="m_sla_id">
+          <option value="">— loading SLAs… —</option>
+        </select>
+      </div>
+      <div class="field"><label>Effective from *</label>
+        <input type="date" id="m_effective_from" />
+      </div>
+      <div class="field"><label>Effective until</label>
+        <input type="date" id="m_effective_until" />
+      </div>
+      <div></div>
+    </div>
+
+    <h2 style="margin-top: 20px;">Overrides (optional — frozen at evaluation time)</h2>
+    <div class="grid grid-2">
+      <div class="field"><label>T anchor date <span class="muted">(concrete value of SLA's T)</span></label>
+        <input type="date" id="m_t_anchor" />
+      </div>
+      <div class="field"><label>LD base amount (₹) <span class="muted">— used for ld_amount calc</span></label>
+        <input type="number" id="m_ld_base" placeholder="1000000" step="any" />
+      </div>
+      <div class="field"><label>Actual start date</label>
+        <input type="date" id="m_actual_start" />
+      </div>
+      <div class="field"><label>Actual end date</label>
+        <input type="date" id="m_actual_end" />
+      </div>
+    </div>
+
+    <div class="actions">
+      <button class="btn" onclick="submitMapping()">Create mapping</button>
+      <button class="btn secondary" onclick="refreshSlaList()">Refresh SLA list</button>
+      <button class="btn secondary" onclick="refreshActivityMappings()">List mappings on this activity</button>
+    </div>
+
+    <div id="m_status"></div>
+  </div>
+
+  <div class="card hide" id="m_list_card">
+    <h2>Mappings on activity <span id="m_list_activity_label" class="muted"></span></h2>
+    <table class="t" id="m_list">
+      <thead>
+        <tr>
+          <th>SLA ref</th><th>Contract</th><th>Formula</th>
+          <th>Effective</th><th>Status</th><th>Overrides</th><th></th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============================================================ EVALUATE -->
+<section class="tab" id="tab-evaluate">
+
+  <div class="card">
+    <h2>Evaluate a mapping</h2>
+    <div class="grid grid-3">
+      <div class="field"><label>Activity ID</label>
+        <input id="e_activity_id" placeholder="act-msap-2026-pilot" />
+      </div>
+      <div class="field" style="grid-column: span 2;"><label>Mapping</label>
+        <select id="e_mapping_id" onchange="onMappingPicked()">
+          <option value="">— enter activity_id and click "Load mappings" —</option>
+        </select>
+      </div>
+      <div class="field"><label>Period start</label><input type="date" id="e_period_start" /></div>
+      <div class="field"><label>Period end</label><input type="date" id="e_period_end" /></div>
+      <div class="field"><label>LD base override (₹)</label><input type="number" id="e_ld_base" step="any" /></div>
+    </div>
+
+    <div class="actions">
+      <button class="btn secondary" onclick="loadActivityMappingsForEval()">Load mappings</button>
+      <div class="spacer"></div>
+      <span class="muted" id="e_sla_info"></span>
+    </div>
+  </div>
+
+  <div class="card hide" id="e_obs_card">
+    <h2>Observations <span id="e_obs_hint" class="muted"></span></h2>
+    <div id="e_obs_form"></div>
+  </div>
+
+  <div class="actions">
+    <button class="btn" onclick="submitEvaluate()" id="e_eval_btn" disabled>Evaluate</button>
+    <span class="muted">Posts to <code>POST /api/v3/sla-activity-mappings/{id}/evaluate</code></span>
+  </div>
+
+  <div id="e_status"></div>
+
+  <div class="card hide" id="e_result_card">
+    <h2>Result</h2>
+    <div class="kv" id="e_result_kv"></div>
+
+    <h2 style="margin-top: 18px;">Breaches</h2>
+    <table class="t" id="e_breaches">
+      <thead><tr>
+        <th>Metric</th><th>Band</th><th>Observed</th>
+        <th>Days</th><th>Severity</th><th>Points</th><th>Rate %</th><th>Contribution %</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+
+    <h2 style="margin-top: 18px;">Guards</h2>
+    <table class="t" id="e_guards">
+      <thead><tr>
+        <th>Metric</th><th>Op</th><th>Threshold</th><th>Observed</th><th>Triggered</th><th>Action</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+
+    <details><summary class="muted" style="margin-top:10px;cursor:pointer;">Raw response</summary>
+      <pre class="json" id="e_result_json"></pre>
+    </details>
+  </div>
+</section>
+
+</main>
+
+<script>
+// ---------------------------------------------------------------------------
+// Tabs
+// ---------------------------------------------------------------------------
+document.querySelectorAll('nav.tabs button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('nav.tabs button').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('section.tab').forEach(s => s.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+    if (btn.dataset.tab === 'map' || btn.dataset.tab === 'evaluate') refreshSlaList();
+  });
+});
+
+const api = () => document.getElementById('apiBase').value.replace(/\/+$/,'');
+
+async function http(method, path, body) {
+  const url = api() + path;
+  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  if (body !== undefined) opts.body = JSON.stringify(body);
+  const res = await fetch(url, opts);
+  let text = await res.text();
+  let json = null;
+  try { json = JSON.parse(text); } catch (_) {}
+  return { ok: res.ok, status: res.status, body: json, raw: text };
+}
+
+async function pingServer() {
+  const tag = document.getElementById('serverStatus');
+  try {
+    const r = await fetch(api() + '/health');
+    if (r.ok) { tag.textContent = 'server up'; tag.className = 'pill active'; }
+    else { tag.textContent = 'server ' + r.status; tag.className = 'pill retired'; }
+  } catch (e) {
+    tag.textContent = 'unreachable'; tag.className = 'pill retired';
+  }
+}
+document.getElementById('apiBase').addEventListener('change', pingServer);
+
+// ---------------------------------------------------------------------------
+// ONBOARD — dynamic row builders
+// ---------------------------------------------------------------------------
+function rowDelBtn(host) {
+  const b = document.createElement('button');
+  b.className = 'x-btn'; b.textContent = '×';
+  b.onclick = () => host.remove();
+  return b;
+}
+function field(label, input) {
+  const w = document.createElement('div'); w.className = 'field';
+  const l = document.createElement('label'); l.textContent = label;
+  w.append(l, input);
+  return w;
+}
+function mkInput(opts={}) {
+  const el = document.createElement(opts.tag || 'input');
+  if (opts.type) el.type = opts.type;
+  if (opts.placeholder) el.placeholder = opts.placeholder;
+  if (opts.value !== undefined) el.value = opts.value;
+  if (opts.step) el.step = opts.step;
+  return el;
+}
+function mkSelect(options, selected) {
+  const el = document.createElement('select');
+  options.forEach(v => {
+    const o = document.createElement('option');
+    o.value = v; o.textContent = v;
+    if (v === selected) o.selected = true;
+    el.append(o);
+  });
+  return el;
+}
+
+function addMetricRow(data={}) {
+  const host = document.createElement('div');
+  host.className = 'row';
+  host.style.gridTemplateColumns = '1fr 1.4fr 0.7fr 0.7fr 0.9fr 0.6fr 32px';
+  const key = mkInput({ placeholder: 'metric_key', value: data.metric_key || '' });
+  const name = mkInput({ placeholder: 'Display name', value: data.display_name || '' });
+  const unit = mkInput({ placeholder: 'unit (e.g. days, %)', value: data.unit || '' });
+  const target = mkInput({ placeholder: 'target', value: data.target_numeric || '' });
+  const dir = mkSelect(['LOWER_BETTER','HIGHER_BETTER'], data.direction || 'LOWER_BETTER');
+  const primary = mkInput({ type: 'checkbox' }); primary.checked = data.is_primary !== false;
+  host.append(
+    field('metric_key', key),
+    field('Display name', name),
+    field('Unit', unit),
+    field('Target', target),
+    field('Direction', dir),
+    field('Primary?', primary),
+    rowDelBtn(host)
+  );
+  host._read = () => ({
+    metric_key: key.value.trim(),
+    display_name: name.value.trim(),
+    unit: unit.value.trim() || '',
+    target_numeric: target.value || null,
+    direction: dir.value,
+    is_primary: primary.checked,
+  });
+  document.getElementById('o_metrics').append(host);
+}
+
+function addBandRow(data={}) {
+  const host = document.createElement('div');
+  host.className = 'row';
+  host.style.gridTemplateColumns = '1fr 1fr 0.6fr 0.6fr 0.6fr 0.7fr 0.7fr 0.7fr 0.5fr 32px';
+  const metric = mkInput({ placeholder: 'metric_key', value: data.metric_key || '' });
+  const label = mkInput({ placeholder: 'Band label', value: data.band_label || '' });
+  const min = mkInput({ placeholder: 'min (excl)', value: data.range_min ?? '' });
+  const max = mkInput({ placeholder: 'max (incl)', value: data.range_max ?? '' });
+  const unit = mkInput({ placeholder: 'unit', value: data.range_unit || '' });
+  const sev = mkInput({ placeholder: 'severity 0–4', value: data.severity_level ?? '' });
+  const points = mkInput({ placeholder: 'points', value: data.points_contribution ?? '' });
+  const rate = mkInput({ placeholder: 'rate %', value: data.rate_percent ?? '' });
+  const sort = mkInput({ placeholder: 'sort', value: data.sort_order ?? '' });
+  host.append(
+    field('metric_key', metric),
+    field('Band label', label),
+    field('Min (>)', min),
+    field('Max (≤)', max),
+    field('Unit', unit),
+    field('Severity', sev),
+    field('Points', points),
+    field('Rate %', rate),
+    field('Sort', sort),
+    rowDelBtn(host)
+  );
+  host._read = () => ({
+    metric_key: metric.value.trim(),
+    band_label: label.value.trim(),
+    range_min: min.value === '' ? null : min.value,
+    range_max: max.value === '' ? null : max.value,
+    range_unit: unit.value.trim() || null,
+    severity_level: sev.value === '' ? null : parseInt(sev.value, 10),
+    points_contribution: points.value === '' ? null : points.value,
+    rate_percent: rate.value === '' ? null : rate.value,
+    sort_order: sort.value === '' ? 0 : parseInt(sort.value, 10),
+  });
+  document.getElementById('o_bands').append(host);
+}
+
+function addLookupRow(data={}) {
+  const host = document.createElement('div');
+  host.className = 'row';
+  host.style.gridTemplateColumns = '1.4fr 1fr 0.6fr 32px';
+  const key = mkInput({ placeholder: 'lookup_key (e.g. on_time)', value: data.lookup_key || '' });
+  const val = mkInput({ placeholder: 'LD %', value: data.lookup_value ?? '' });
+  const sort = mkInput({ placeholder: 'sort', value: data.sort_order ?? '' });
+  host.append(field('Key', key), field('Value (LD %)', val), field('Sort', sort), rowDelBtn(host));
+  host._read = () => ({
+    lookup_key: key.value.trim(),
+    lookup_value: val.value,
+    sort_order: sort.value === '' ? 0 : parseInt(sort.value, 10),
+  });
+  document.getElementById('o_lookup').append(host);
+}
+
+function addParamRow(data={}) {
+  const host = document.createElement('div');
+  host.className = 'row';
+  host.style.gridTemplateColumns = '1fr 2fr 32px';
+  const key = mkInput({ placeholder: 'param_key', value: data.param_key || '' });
+  const val = mkInput({ placeholder: 'param_value', value: data.param_value || '' });
+  host.append(field('Key', key), field('Value', val), rowDelBtn(host));
+  host._read = () => ({ param_key: key.value.trim(), param_value: val.value });
+  document.getElementById('o_params').append(host);
+}
+
+function addGuardRow(data={}) {
+  const host = document.createElement('div');
+  host.className = 'row';
+  host.style.gridTemplateColumns = '1fr 0.7fr 0.8fr 0.7fr 1fr 1.4fr 32px';
+  const metric = mkInput({ placeholder: 'metric_key', value: data.metric_key || '' });
+  const op = mkSelect(['LT','LTE','GT','GTE','EQ','NEQ'], data.operator || 'GT');
+  const thr = mkInput({ placeholder: 'threshold', value: data.threshold_value ?? '' });
+  const unit = mkInput({ placeholder: 'unit', value: data.threshold_unit || '' });
+  const action = mkSelect(['EXCLUDE','SUSPEND','PROBATION'], data.action || 'EXCLUDE');
+  const desc = mkInput({ placeholder: 'description', value: data.action_description || '' });
+  host.append(
+    field('metric_key', metric), field('Op', op), field('Threshold', thr),
+    field('Unit', unit), field('Action', action), field('Description', desc),
+    rowDelBtn(host)
+  );
+  host._read = () => ({
+    metric_key: metric.value.trim(),
+    operator: op.value,
+    threshold_value: thr.value,
+    threshold_unit: unit.value.trim() || null,
+    action: action.value,
+    action_description: desc.value.trim() || null,
+  });
+  document.getElementById('o_guards').append(host);
+}
+
+// ---------------------------------------------------------------------------
+// ONBOARD — toggle sections per formula type
+// ---------------------------------------------------------------------------
+function toggleFormulaSections() {
+  const f = document.getElementById('o_formula_type').value;
+  const showBands = (f === 'band_accumulation' || f === 'point_accumulation');
+  const showLookup = (f === 'fixed_escalation');
+  document.getElementById('o_bands_card').classList.toggle('hide', !showBands);
+  document.getElementById('o_lookup_card').classList.toggle('hide', !showLookup);
+}
+
+// ---------------------------------------------------------------------------
+// ONBOARD — build payload + submit
+// ---------------------------------------------------------------------------
+function buildOnboardPayload() {
+  const get = id => document.getElementById(id).value;
+  const metrics = [...document.getElementById('o_metrics').children].map(r => r._read()).filter(x => x.metric_key);
+  const bands = [...document.getElementById('o_bands').children].map(r => r._read()).filter(x => x.metric_key);
+  const lookup = [...document.getElementById('o_lookup').children].map(r => r._read()).filter(x => x.lookup_key);
+  const params = [...document.getElementById('o_params').children].map(r => r._read()).filter(x => x.param_key);
+  const guards = [...document.getElementById('o_guards').children].map(r => r._read()).filter(x => x.metric_key);
+  return {
+    contract_type: get('o_contract_type'),
+    formula_type: get('o_formula_type'),
+    sla_ref: get('o_sla_ref').trim(),
+    title: get('o_title').trim(),
+    description: get('o_description').trim() || null,
+    measurement_interval: get('o_measurement_interval'),
+    reporting_interval: get('o_reporting_interval'),
+    baseline_type: get('o_baseline_type'),
+    compound_metric_rule: get('o_compound_metric_rule'),
+    ld_aggregation_method: get('o_ld_aggregation_method'),
+    ld_computation_base: get('o_ld_computation_base'),
+    effective_from: get('o_effective_from'),
+    effective_until: get('o_effective_until') || null,
+    metadata: {},
+    metrics, parameters: params, condition_bands: bands,
+    lookup_table: lookup, guard_conditions: guards,
+  };
+}
+
+function previewOnboardJson() {
+  setStatus('o_status', 'info', '<pre class="json">' + escapeHtml(JSON.stringify(buildOnboardPayload(), null, 2)) + '</pre>');
+}
+
+async function submitOnboard() {
+  const payload = buildOnboardPayload();
+  setStatus('o_status', 'info', 'Submitting…');
+  const r = await http('POST', '/api/v3/sla-masters', payload);
+  if (r.ok) {
+    const d = r.body.data;
+    setStatus('o_status', 'ok', `Created SLA <strong>${d.sla_ref}</strong> (id ${d.id})`);
+    const card = document.getElementById('o_result_card');
+    card.classList.remove('hide');
+    document.getElementById('o_result_kv').innerHTML = `
+      <dt>id</dt><dd><code>${d.id}</code></dd>
+      <dt>sla_ref</dt><dd>${d.sla_ref}</dd>
+      <dt>contract_type</dt><dd>${d.contract_type}</dd>
+      <dt>formula_type</dt><dd>${d.formula_type || ''}</dd>
+      <dt>status</dt><dd><span class="pill active">${d.status}</span></dd>
+      <dt>metrics</dt><dd>${(d.metrics || []).length}</dd>
+      <dt>bands</dt><dd>${(d.condition_bands || []).length}</dd>
+      <dt>lookup rows</dt><dd>${(d.lookup_table || []).length}</dd>
+      <dt>guards</dt><dd>${(d.guard_conditions || []).length}</dd>
+    `;
+    document.getElementById('o_result_json').textContent = JSON.stringify(r.body, null, 2);
+    refreshSlaList();
+  } else {
+    setStatus('o_status', 'err',
+      `HTTP ${r.status}: <pre class="json">${escapeHtml(JSON.stringify(r.body || r.raw, null, 2))}</pre>`);
+  }
+}
+
+function resetOnboardForm() {
+  ['o_sla_ref','o_title','o_description','o_effective_from','o_effective_until']
+    .forEach(id => document.getElementById(id).value = '');
+  document.getElementById('o_metrics').innerHTML = '';
+  document.getElementById('o_bands').innerHTML = '';
+  document.getElementById('o_lookup').innerHTML = '';
+  document.getElementById('o_params').innerHTML = '';
+  document.getElementById('o_guards').innerHTML = '';
+  document.getElementById('o_result_card').classList.add('hide');
+  document.getElementById('o_status').innerHTML = '';
+  addMetricRow(); toggleFormulaSections();
+}
+
+// ---------------------------------------------------------------------------
+// ONBOARD — presets
+// ---------------------------------------------------------------------------
+function applyPreset() {
+  const key = document.getElementById('presetPicker').value;
+  if (!key || !PRESETS[key]) return;
+  resetOnboardForm();
+  const p = PRESETS[key];
+  const set = (id, v) => { const el = document.getElementById(id); if (v !== undefined && v !== null) el.value = v; };
+  set('o_contract_type', p.contract_type);
+  set('o_formula_type', p.formula_type);
+  set('o_sla_ref', p.sla_ref);
+  set('o_title', p.title);
+  set('o_description', p.description);
+  set('o_measurement_interval', p.measurement_interval);
+  set('o_reporting_interval', p.reporting_interval);
+  set('o_baseline_type', p.baseline_type);
+  set('o_compound_metric_rule', p.compound_metric_rule);
+  set('o_ld_aggregation_method', p.ld_aggregation_method);
+  set('o_ld_computation_base', p.ld_computation_base);
+  set('o_effective_from', p.effective_from);
+  set('o_effective_until', p.effective_until);
+  document.getElementById('o_metrics').innerHTML = '';
+  document.getElementById('o_bands').innerHTML = '';
+  document.getElementById('o_lookup').innerHTML = '';
+  document.getElementById('o_params').innerHTML = '';
+  (p.metrics || []).forEach(addMetricRow);
+  (p.condition_bands || []).forEach(addBandRow);
+  (p.lookup_table || []).forEach(addLookupRow);
+  (p.parameters || []).forEach(addParamRow);
+  toggleFormulaSections();
+}
+
+const PRESETS = {
+  msap_mobilization: {
+    contract_type: 'MSAP', formula_type: 'point_accumulation',
+    sla_ref: 'MSAP-SLA001-MOBILIZATION',
+    title: 'Mobilization of all selected key resources within T+14 days',
+    description: 'RFP Annexure-3E, SLA 001. Severity-based points per Clause 36.2.',
+    measurement_interval: 'ONE_TIME', reporting_interval: 'QUARTERLY',
+    baseline_type: 'STATIC', compound_metric_rule: 'INDEPENDENT',
+    ld_aggregation_method: 'SUM', ld_computation_base: 'QUARTERLY_PAYMENT',
+    effective_from: '2026-04-01', effective_until: '2027-12-31',
+    metrics: [{
+      metric_key: 'key_resource_mobilization_delay_days',
+      display_name: 'Key Resource Mobilization Delay (days)',
+      unit: 'days', target_numeric: '0', direction: 'LOWER_BETTER', is_primary: true,
+    }],
+    parameters: [
+      { param_key: 'anchor', param_value: 'T = contract signing date' },
+      { param_key: 'target_offset_days', param_value: '14' },
+    ],
+    condition_bands: [
+      { metric_key: 'key_resource_mobilization_delay_days', band_label: 'On Time',
+        range_min: null, range_max: '14', range_unit: 'days',
+        severity_level: 0, points_contribution: '-2', sort_order: 1 },
+      { metric_key: 'key_resource_mobilization_delay_days', band_label: 'Late Mobilization',
+        range_min: '14', range_max: '28', range_unit: 'days',
+        severity_level: 2, points_contribution: '4', sort_order: 2 },
+      { metric_key: 'key_resource_mobilization_delay_days', band_label: 'Severely Late',
+        range_min: '28', range_max: null, range_unit: 'days',
+        severity_level: 4, points_contribution: '8', sort_order: 3 },
+    ],
+  },
+  bsp_fpir: {
+    contract_type: 'BSP', formula_type: 'band_accumulation',
+    sla_ref: 'BSP-FPIR-PILOT',
+    title: 'False Positive Identification Rate (FPIR)',
+    description: 'BSP Annexure, SLA 001. Daily band → rate% accumulation.',
+    measurement_interval: 'DAILY', reporting_interval: 'QUARTERLY',
+    baseline_type: 'STATIC', compound_metric_rule: 'INDEPENDENT',
+    ld_aggregation_method: 'SUM', ld_computation_base: 'QUARTERLY_PAYMENT',
+    effective_from: '2026-04-01',
+    metrics: [{
+      metric_key: 'fpir', display_name: 'FPIR (%)', unit: '%',
+      target_numeric: '0.10', direction: 'LOWER_BETTER', is_primary: true,
+    }],
+    condition_bands: [
+      { metric_key: 'fpir', band_label: 'Green', range_min: null, range_max: '0.10', range_unit: '%',
+        rate_percent: '0.00', sort_order: 1 },
+      { metric_key: 'fpir', band_label: 'Yellow', range_min: '0.10', range_max: '0.50', range_unit: '%',
+        rate_percent: '0.50', sort_order: 2 },
+      { metric_key: 'fpir', band_label: 'Red', range_min: '0.50', range_max: null, range_unit: '%',
+        rate_percent: '1.00', sort_order: 3 },
+    ],
+  },
+  msap_wac_prod: {
+    contract_type: 'MSAP', formula_type: 'wac',
+    sla_ref: 'MSAP-WAC-PROD-PILOT',
+    title: 'Production Defect Weighted Average Count',
+    description: 'WAC with rolling baseline; 5% variance step → severity shift.',
+    measurement_interval: 'MONTHLY', reporting_interval: 'QUARTERLY',
+    baseline_type: 'ROLLING', compound_metric_rule: 'INDEPENDENT',
+    ld_aggregation_method: 'SUM', ld_computation_base: 'QUARTERLY_PAYMENT',
+    effective_from: '2026-04-01',
+    metrics: [{ metric_key: 'defect_wac', display_name: 'Defect WAC',
+      unit: 'WAC', target_numeric: '0.0', direction: 'LOWER_BETTER', is_primary: true }],
+    parameters: [
+      { param_key: 'severity_weights', param_value: '1:8,2:4,3:2,4:1' },
+      { param_key: 'variance_step_percent', param_value: '5' },
+      { param_key: 'baseline_window_quarters', param_value: '2' },
+    ],
+  },
+  bsp_milestone: {
+    contract_type: 'BSP', formula_type: 'fixed_escalation',
+    sla_ref: 'BSP-MILE-RESOURCE-ONBOARD-PILOT',
+    title: 'BSP Resource Onboarding Milestone',
+    description: 'Tiered LD by delay magnitude.',
+    measurement_interval: 'ONE_TIME', reporting_interval: 'QUARTERLY',
+    baseline_type: 'STATIC', compound_metric_rule: 'INDEPENDENT',
+    ld_aggregation_method: 'SUM', ld_computation_base: 'FIXED_AMOUNT',
+    effective_from: '2026-04-01',
+    metrics: [{ metric_key: 'resource_onboard_delay_days',
+      display_name: 'Resource Onboarding Delay (days)', unit: 'days',
+      target_numeric: '0', direction: 'LOWER_BETTER', is_primary: true }],
+    parameters: [{ param_key: 'fixed_ld_amount', param_value: '500000' }],
+    lookup_table: [
+      { lookup_key: 'on_time', lookup_value: '0.00', sort_order: 0 },
+      { lookup_key: 'delay_1_7', lookup_value: '0.50', sort_order: 1 },
+      { lookup_key: 'delay_8_plus', lookup_value: '1.00', sort_order: 8 },
+    ],
+  },
+};
+
+// ---------------------------------------------------------------------------
+// MAP — SLA list + create mapping
+// ---------------------------------------------------------------------------
+let _SLA_LIST = [];
+
+async function refreshSlaList() {
+  const r = await http('GET', '/api/v3/sla-masters?pageSize=200');
+  if (!r.ok) return;
+  _SLA_LIST = (r.body.data._embedded?.elements || []).map(e => ({
+    id: e.id, ref: e.sla_ref, contract_type: e.contract_type,
+    formula_type: e.formula_type, title: e.title,
+  }));
+  const sel = document.getElementById('m_sla_id');
+  sel.innerHTML = '<option value="">— pick an SLA —</option>';
+  _SLA_LIST.forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = s.id;
+    opt.textContent = `${s.ref}  ·  ${s.formula_type || '?'}  ·  ${s.contract_type || ''}  ·  ${s.title.slice(0, 60)}`;
+    sel.append(opt);
+  });
+}
+
+async function submitMapping() {
+  const overrides = {};
+  const ta = document.getElementById('m_t_anchor').value; if (ta) overrides.t_anchor_date = ta;
+  const as = document.getElementById('m_actual_start').value; if (as) overrides.actual_start_date = as;
+  const ae = document.getElementById('m_actual_end').value; if (ae) overrides.actual_end_date = ae;
+  const lb = document.getElementById('m_ld_base').value; if (lb !== '') overrides.ld_base_amount = lb;
+  const payload = {
+    activity_id: document.getElementById('m_activity_id').value.trim(),
+    sla_id: document.getElementById('m_sla_id').value,
+    effective_from: document.getElementById('m_effective_from').value,
+    effective_until: document.getElementById('m_effective_until').value || null,
+    overrides,
+  };
+  setStatus('m_status', 'info', 'Creating mapping…');
+  const r = await http('POST', '/api/v3/sla-activity-mappings', payload);
+  if (r.ok) {
+    const d = r.body.data;
+    setStatus('m_status', 'ok',
+      `Mapping created · <code>${d.id}</code> · ${d.sla_ref} on ${d.activity_id}`);
+    refreshActivityMappings();
+  } else {
+    setStatus('m_status', 'err',
+      `HTTP ${r.status}: <pre class="json">${escapeHtml(JSON.stringify(r.body || r.raw, null, 2))}</pre>`);
+  }
+}
+
+async function refreshActivityMappings() {
+  const aid = document.getElementById('m_activity_id').value.trim();
+  if (!aid) { setStatus('m_status', 'err', 'Enter an activity_id first.'); return; }
+  const r = await http('GET', `/api/v3/activities/${encodeURIComponent(aid)}/sla-mappings`);
+  if (!r.ok) { setStatus('m_status', 'err', 'List failed: ' + r.status); return; }
+  document.getElementById('m_list_card').classList.remove('hide');
+  document.getElementById('m_list_activity_label').textContent = aid;
+  const rows = (r.body.data._embedded?.elements || []);
+  const tbody = document.querySelector('#m_list tbody');
+  tbody.innerHTML = '';
+  rows.forEach(m => {
+    const tr = document.createElement('tr');
+    const pillCls = m.status === 'ACTIVE' ? 'active' : 'retired';
+    tr.innerHTML = `
+      <td>${m.sla_ref}</td>
+      <td>${m.contract_type || ''}</td>
+      <td>${m.formula_type || ''}</td>
+      <td>${m.effective_from || ''} → ${m.effective_until || '—'}</td>
+      <td><span class="pill ${pillCls}">${m.status}</span></td>
+      <td><code style="font-size:11px;">${escapeHtml(JSON.stringify(m.overrides || {}))}</code></td>
+      <td>
+        <button class="x-btn" onclick="retireMapping('${m.id}')">retire</button>
+      </td>`;
+    tbody.append(tr);
+  });
+}
+
+async function retireMapping(id) {
+  if (!confirm('Retire this mapping?')) return;
+  await http('DELETE', `/api/v3/sla-activity-mappings/${id}`);
+  refreshActivityMappings();
+}
+
+// ---------------------------------------------------------------------------
+// EVALUATE
+// ---------------------------------------------------------------------------
+let _EVAL_MAPPING = null;
+let _EVAL_SLA = null;
+
+async function loadActivityMappingsForEval() {
+  const aid = document.getElementById('e_activity_id').value.trim();
+  if (!aid) { setStatus('e_status', 'err', 'Enter an activity_id first.'); return; }
+  const r = await http('GET', `/api/v3/activities/${encodeURIComponent(aid)}/sla-mappings`);
+  if (!r.ok) { setStatus('e_status', 'err', 'List failed: ' + r.status); return; }
+  const rows = (r.body.data._embedded?.elements || []).filter(m => m.status === 'ACTIVE');
+  const sel = document.getElementById('e_mapping_id');
+  sel.innerHTML = '<option value="">— pick a mapping —</option>';
+  rows.forEach(m => {
+    const opt = document.createElement('option');
+    opt.value = m.id;
+    opt.textContent = `${m.sla_ref}  ·  ${m.formula_type || '?'}`;
+    opt._mapping = m;
+    sel.append(opt);
+  });
+  setStatus('e_status', 'info', `Loaded ${rows.length} active mapping(s).`);
+}
+
+async function onMappingPicked() {
+  const sel = document.getElementById('e_mapping_id');
+  const opt = sel.options[sel.selectedIndex];
+  _EVAL_MAPPING = opt?._mapping || null;
+  _EVAL_SLA = null;
+  document.getElementById('e_eval_btn').disabled = !_EVAL_MAPPING;
+  if (!_EVAL_MAPPING) { document.getElementById('e_obs_card').classList.add('hide'); return; }
+
+  // Load SLA detail to learn primary metric + bands.
+  const r = await http('GET', `/api/v3/sla-masters/${_EVAL_MAPPING.sla_id}`);
+  if (!r.ok) { setStatus('e_status', 'err', 'SLA detail failed: ' + r.status); return; }
+  _EVAL_SLA = r.body.data;
+
+  const primary = (_EVAL_SLA.metrics || []).find(m => m.is_primary) || (_EVAL_SLA.metrics || [])[0];
+  document.getElementById('e_sla_info').innerHTML =
+    `<code>${_EVAL_SLA.sla_ref}</code> · formula <code>${_EVAL_MAPPING.formula_type}</code> · primary metric <code>${primary?.metric_key || '—'}</code>`;
+
+  // Prefill period from overrides.
+  const ov = _EVAL_MAPPING.overrides || {};
+  if (ov.actual_start_date) document.getElementById('e_period_start').value = ov.actual_start_date;
+  if (ov.actual_end_date) document.getElementById('e_period_end').value = ov.actual_end_date;
+  if (ov.ld_base_amount) document.getElementById('e_ld_base').value = ov.ld_base_amount;
+
+  buildObservationForm(_EVAL_MAPPING.formula_type, _EVAL_SLA, primary);
+}
+
+function buildObservationForm(formula, sla, primary) {
+  const card = document.getElementById('e_obs_card');
+  const form = document.getElementById('e_obs_form');
+  card.classList.remove('hide');
+  form.innerHTML = '';
+  let hint = '';
+  if (formula === 'band_accumulation') {
+    hint = 'Enter days-in-band per band label, or paste one daily value per line.';
+    const bands = (sla.condition_bands || []).filter(b => b.metric_key === primary.metric_key);
+    const wrap = document.createElement('div');
+    wrap.className = 'grid grid-2';
+    const left = document.createElement('div');
+    left.innerHTML = '<h2 style="margin-top:0; font-size:12px;">Pre-aggregated: days per band</h2>';
+    bands.forEach(b => {
+      const f = document.createElement('div'); f.className = 'field';
+      f.innerHTML = `<label>${b.band_label} <span class="muted">(${b.range_min ?? '−∞'} – ${b.range_max ?? '+∞'} ${b.range_unit || ''})</span></label>`;
+      const inp = document.createElement('input'); inp.type = 'number'; inp.value = '0';
+      inp.dataset.bandLabel = b.band_label;
+      f.append(inp); left.append(f);
+    });
+    const right = document.createElement('div');
+    right.innerHTML = `<h2 style="margin-top:0; font-size:12px;">Or daily values (one per line, overrides band counts)</h2>
+      <div class="field"><label>Daily values</label><textarea id="e_daily" placeholder="0.05&#10;0.12&#10;…"></textarea></div>`;
+    wrap.append(left, right);
+    form.append(wrap);
+  } else if (formula === 'point_accumulation' || formula === 'fixed_escalation') {
+    hint = (formula === 'fixed_escalation') ? 'Enter the tier index / days-of-delay value.' : 'Enter the single observed value for the period.';
+    const f = document.createElement('div'); f.className = 'field';
+    f.innerHTML = `<label>${primary?.display_name || primary?.metric_key} <span class="muted">(${primary?.unit || ''})</span></label>`;
+    const inp = document.createElement('input'); inp.id = 'e_single_value'; inp.placeholder = 'observed value';
+    f.append(inp); form.append(f);
+  } else if (formula === 'wac') {
+    hint = 'Defect counts + apps + baseline drive WAC calculation.';
+    const labels = [
+      ['blocker', 'Blocker'], ['critical', 'Critical'], ['major', 'Major'], ['minor', 'Minor'],
+      ['applications', 'Applications'], ['baseline', 'Baseline WAC'], ['previous_wac', 'Previous WAC'],
+    ];
+    const grid = document.createElement('div'); grid.className = 'grid grid-4';
+    labels.forEach(([key, label]) => {
+      const f = document.createElement('div'); f.className = 'field';
+      f.innerHTML = `<label>${label}</label>`;
+      const inp = document.createElement('input'); inp.type = 'number'; inp.step = 'any';
+      inp.dataset.wacKey = key; f.append(inp); grid.append(f);
+    });
+    form.append(grid);
+  }
+  document.getElementById('e_obs_hint').textContent = hint;
+}
+
+function buildEvalPayload() {
+  const formula = _EVAL_MAPPING.formula_type;
+  const primary = (_EVAL_SLA.metrics || []).find(m => m.is_primary) || (_EVAL_SLA.metrics || [])[0];
+  const metric_key = primary.metric_key;
+
+  const obs = { metric_key };
+  if (formula === 'band_accumulation') {
+    const daily = document.getElementById('e_daily').value.trim();
+    if (daily) {
+      obs.shape = 'DAILY_VALUES';
+      obs.daily_values = daily.split(/\s+|,/).filter(Boolean);
+    } else {
+      obs.shape = 'BAND_COUNTS';
+      obs.band_counts = {};
+      document.querySelectorAll('#e_obs_form input[data-band-label]').forEach(inp => {
+        const v = parseInt(inp.value || '0', 10);
+        if (v > 0) obs.band_counts[inp.dataset.bandLabel] = v;
+      });
+    }
+  } else if (formula === 'point_accumulation' || formula === 'fixed_escalation') {
+    obs.shape = 'SINGLE_VALUE';
+    obs.single_value = document.getElementById('e_single_value').value;
+  } else if (formula === 'wac') {
+    obs.shape = 'WAC_BREAKDOWN';
+    obs.wac_breakdown = {};
+    document.querySelectorAll('#e_obs_form input[data-wac-key]').forEach(inp => {
+      if (inp.value !== '') obs.wac_breakdown[inp.dataset.wacKey] = inp.value;
+    });
+  }
+
+  const payload = {
+    period_start: document.getElementById('e_period_start').value || null,
+    period_end: document.getElementById('e_period_end').value || null,
+    metric_observations: [obs],
+  };
+  const lb = document.getElementById('e_ld_base').value;
+  if (lb !== '') payload.ld_base_amount = lb;
+  return payload;
+}
+
+async function submitEvaluate() {
+  if (!_EVAL_MAPPING) return;
+  const payload = buildEvalPayload();
+  setStatus('e_status', 'info', 'Evaluating…');
+  const r = await http('POST', `/api/v3/sla-activity-mappings/${_EVAL_MAPPING.id}/evaluate`, payload);
+  if (!r.ok) {
+    setStatus('e_status', 'err', `HTTP ${r.status}: <pre class="json">${escapeHtml(JSON.stringify(r.body || r.raw, null, 2))}</pre>`);
+    return;
+  }
+  setStatus('e_status', 'ok', 'Done.');
+  const d = r.body.data;
+  document.getElementById('e_result_card').classList.remove('hide');
+  const sevCls = d.severity_level !== null && d.severity_level !== undefined ? `sev-${d.severity_level}` : '';
+  document.getElementById('e_result_kv').innerHTML = `
+    <dt>SLA</dt><dd>${d.sla_ref}</dd>
+    <dt>Period</dt><dd>${d.period_start} → ${d.period_end}</dd>
+    <dt>Severity level</dt><dd class="${sevCls}"><strong>${d.severity_level ?? '—'}</strong></dd>
+    <dt>Accumulated points</dt><dd>${d.accumulated_points ?? '—'}</dd>
+    <dt>LD %</dt><dd><strong>${d.ld_percent ?? '—'}</strong></dd>
+    <dt>LD amount</dt><dd>${d.ld_amount !== null && d.ld_amount !== undefined ? '₹ ' + Number(d.ld_amount).toLocaleString('en-IN') : '—'}</dd>
+    <dt>Overrides used</dt><dd><code>${escapeHtml(JSON.stringify(d.overrides_applied || {}))}</code></dd>
+    <dt>Notes</dt><dd>${(d.notes || []).map(escapeHtml).join('<br>') || '—'}</dd>
+  `;
+  const bt = document.querySelector('#e_breaches tbody');
+  bt.innerHTML = '';
+  (d.breaches || []).forEach(b => {
+    const tr = document.createElement('tr');
+    const sc = b.severity_level !== null && b.severity_level !== undefined ? `sev-${b.severity_level}` : '';
+    tr.innerHTML = `
+      <td>${b.metric_key}</td>
+      <td>${b.band_label || ''}</td>
+      <td>${b.observed_value ?? ''}</td>
+      <td>${b.days_in_band ?? ''}</td>
+      <td class="${sc}">${b.severity_level ?? ''}</td>
+      <td>${b.points_contribution ?? ''}</td>
+      <td>${b.rate_percent ?? ''}</td>
+      <td>${b.contribution_percent ?? ''}</td>`;
+    bt.append(tr);
+  });
+  const gt = document.querySelector('#e_guards tbody');
+  gt.innerHTML = '';
+  (d.guards || []).forEach(g => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${g.metric_key}</td>
+      <td>${g.operator}</td>
+      <td>${g.threshold_value}</td>
+      <td>${g.observed_value ?? ''}</td>
+      <td>${g.triggered ? '✅' : '—'}</td>
+      <td>${g.action}</td>`;
+    gt.append(tr);
+  });
+  document.getElementById('e_result_json').textContent = JSON.stringify(r.body, null, 2);
+}
+
+// ---------------------------------------------------------------------------
+// Utils
+// ---------------------------------------------------------------------------
+function escapeHtml(s) {
+  return String(s ?? '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+function setStatus(id, kind, html) {
+  const box = document.getElementById(id);
+  box.innerHTML = `<div class="status ${kind}">${html}</div>`;
+}
+
+// ---------------------------------------------------------------------------
+// Boot
+// ---------------------------------------------------------------------------
+addMetricRow();
+toggleFormulaSections();
+pingServer();
+refreshSlaList();
+</script>
+
+</body>
+</html>

@@ -5,6 +5,7 @@ from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
+from app.clients import ProjectManagementClient
 from app.schemas.sla_activity_mapping import (
     SlaActivityMappingCreateRequest,
     SlaActivityMappingResponse,
@@ -21,9 +22,18 @@ from app.services.sla_evaluator import SlaEvaluatorService
 
 
 class SlaActivityMappingController:
-    def __init__(self, db: Session):
+    def __init__(
+        self,
+        db: Session,
+        project_mgmt_client: Optional[ProjectManagementClient] = None,
+    ):
         self.service = SlaActivityMappingService(db)
-        self.evaluator = SlaEvaluatorService(db)
+        # project_mgmt_client is optional so unit tests can construct the
+        # controller without DI. When None, the evaluator falls back to
+        # default RFP scoring (no project_id resolution).
+        self.evaluator = SlaEvaluatorService(
+            db, project_mgmt_client=project_mgmt_client,
+        )
 
     # ------------------------------------------------------------------ CRUD
 
@@ -50,11 +60,21 @@ class SlaActivityMappingController:
     # ------------------------------------------------------------------ evaluate
 
     def evaluate_mapping(
-        self, mapping_id: str, payload: MappingEvaluationRequest
+        self,
+        mapping_id: str,
+        payload: MappingEvaluationRequest,
+        bearer_token: Optional[str] = None,
     ) -> MappingEvaluationResponse:
-        return self.evaluator.evaluate_mapping(mapping_id, payload)
+        return self.evaluator.evaluate_mapping(
+            mapping_id, payload, bearer_token=bearer_token,
+        )
 
     def evaluate_activity(
-        self, activity_id: str, payload: ActivityEvaluationRequest
+        self,
+        activity_id: str,
+        payload: ActivityEvaluationRequest,
+        bearer_token: Optional[str] = None,
     ) -> ActivityEvaluationResponse:
-        return self.evaluator.evaluate_activity(activity_id, payload)
+        return self.evaluator.evaluate_activity(
+            activity_id, payload, bearer_token=bearer_token,
+        )

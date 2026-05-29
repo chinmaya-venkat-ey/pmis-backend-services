@@ -152,6 +152,49 @@ class SeverityMasterSetRequest(BaseModel):
     )
 
 
+# --------------------------------------------------------------------------- Project LD Bands
+
+# Symmetric to SeverityMaster, but maps accumulated points -> LD%. Used by the
+# evaluator after severity_master gives it level -> points; the two together
+# can fully replace the RFP-default scoring baked into point_accumulation.py.
+
+from decimal import Decimal as _Decimal  # local alias to avoid touching top imports
+
+
+class LdBandResponse(BaseModel):
+    id: str
+    project_id: str
+    points_threshold: _Decimal
+    ld_percent: _Decimal
+    label: Optional[str] = None
+    created_at: Optional[datetime] = None
+    model_config = {"from_attributes": True}
+
+
+class LdBandInput(BaseModel):
+    points_threshold: _Decimal = Field(
+        ...,
+        description="Inclusive lower bound. Evaluator picks the highest threshold "
+                    "the accumulated points meet.",
+    )
+    ld_percent: _Decimal = Field(..., ge=0, le=100)
+    label: Optional[str] = Field(None, max_length=100)
+
+
+class LdBandUpdateRequest(BaseModel):
+    points_threshold: Optional[_Decimal] = None
+    ld_percent: Optional[_Decimal] = Field(None, ge=0, le=100)
+    label: Optional[str] = Field(None, max_length=100)
+
+
+class LdBandSetRequest(BaseModel):
+    bands: List[LdBandInput] = Field(
+        ...,
+        min_length=1,
+        description="Replaces all existing LD bands for the project.",
+    )
+
+
 # --------------------------------------------------------------------------- Formula Library
 
 _OBS_INPUT_TYPE: Dict[str, str] = {

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from app.models.formula_library import FormulaLibrary  # noqa: F401
 from app.models.severity_master import SeverityMaster  # noqa: F401
+from app.models.project_ld_band import ProjectLdBand  # noqa: F401
 from app.models.contract_type_master import ContractTypeMaster  # noqa: F401
 from app.models.data_field_master import DataFieldMaster  # noqa: F401
 

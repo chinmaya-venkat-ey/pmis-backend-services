@@ -4,7 +4,12 @@ Endpoints:
   GET   /api/v3/contract-types                                   list contract types
   GET   /api/v3/data-fields                                      list SLA data fields (with optional filter)
   GET   /api/v3/projects/{project_id}/severity-master            list severity levels for a project
+  POST  /api/v3/projects/{project_id}/severity-master            replace severity levels
   PATCH /api/v3/projects/{project_id}/severity-master/{level}    update points or label for a level
+  GET   /api/v3/projects/{project_id}/ld-bands                   list points->LD% bands for a project
+  POST  /api/v3/projects/{project_id}/ld-bands                   replace LD bands
+  PATCH /api/v3/projects/{project_id}/ld-bands/{band_id}         update a single LD band
+  POST  /api/v3/projects/{project_id}/seed-master-defaults       seed both tables with RFP defaults
 """
 from __future__ import annotations
 
@@ -20,6 +25,8 @@ from app.schemas.master import (
     ContractTypeUpdateRequest,
     DataFieldCreateRequest,
     DataFieldUpdateRequest,
+    LdBandSetRequest,
+    LdBandUpdateRequest,
     SeverityLevelUpdateRequest,
     SeverityMasterSetRequest,
     SLA_ENUMS,
@@ -280,4 +287,107 @@ def update_severity_level(
         ),
         message=f"Severity level {level} updated",
         status=200,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Project LD bands — per-project points -> LD% chart (Phase B companion to
+# severity_master). Symmetric API surface. Together they let a project fully
+# replace the RFP defaults used by the evaluator.
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/projects/{project_id}/ld-bands",
+    status_code=201,
+    summary="Set LD bands for a project (replaces existing)",
+)
+def set_ld_bands(
+    project_id: str,
+    payload: LdBandSetRequest,
+    ctrl: MasterController = Depends(get_master_controller),
+):
+    """Replace every points->LD% band for this project. Use to customise the
+    LD curve away from the MSAP RFP defaults seeded by seed-master-defaults."""
+    items = ctrl.set_ld_bands(project_id, payload)
+    base = f"/api/v3/projects/{project_id}/ld-bands"
+    elements = [
+        hal_resource("LdBand", r.model_dump(), self_link=f"{base}/{r.id}")
+        for r in items
+    ]
+    return api_response(
+        data=hal_collection(elements, total=len(elements), page_size=len(elements) or 1),
+        message=f"{len(items)} LD band(s) set for project '{project_id}'",
+        status=201,
+    )
+
+
+@router.get(
+    "/projects/{project_id}/ld-bands",
+    summary="List LD bands for a project (sorted by points_threshold)",
+)
+def list_ld_bands(
+    project_id: str,
+    ctrl: MasterController = Depends(get_master_controller),
+):
+    items = ctrl.list_ld_bands(project_id)
+    base = f"/api/v3/projects/{project_id}/ld-bands"
+    elements = [
+        hal_resource("LdBand", r.model_dump(), self_link=f"{base}/{r.id}")
+        for r in items
+    ]
+    return api_response(
+        data=hal_collection(elements, total=len(elements), page_size=len(elements) or 1),
+        status=200,
+    )
+
+
+@router.patch(
+    "/projects/{project_id}/ld-bands/{band_id}",
+    summary="Update points_threshold, ld_percent or label for a single LD band",
+)
+def update_ld_band(
+    project_id: str,
+    band_id: str,
+    payload: LdBandUpdateRequest,
+    ctrl: MasterController = Depends(get_master_controller),
+):
+    result = ctrl.update_ld_band(project_id, band_id, payload)
+    return api_response(
+        data=hal_resource(
+            "LdBand",
+            result.model_dump(),
+            self_link=f"/api/v3/projects/{project_id}/ld-bands/{band_id}",
+        ),
+        message=f"LD band '{band_id}' updated",
+        status=200,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Combined bootstrap — seeds severity_master + project_ld_bands at once with
+# the RFP defaults. Idempotent: skips whichever table is already populated.
+# Frontend calls this once when a project is first opened in the contract UI.
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/projects/{project_id}/seed-master-defaults",
+    status_code=201,
+    summary="Seed both severity_master and ld_bands with RFP defaults (idempotent)",
+)
+def seed_master_defaults(
+    project_id: str,
+    ctrl: MasterController = Depends(get_master_controller),
+):
+    summary = ctrl.seed_master_defaults(project_id)
+    return api_response(
+        data=hal_resource(
+            "MasterSeed",
+            {"project_id": project_id, **summary},
+            self_link=f"/api/v3/projects/{project_id}/seed-master-defaults",
+        ),
+        message=(
+            f"Seeded {summary['severity_levels']} severity levels and "
+            f"{summary['ld_bands']} LD bands for project '{project_id}'"
+        ),
+        status=201,
     )

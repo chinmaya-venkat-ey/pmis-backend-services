@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.models.contract_type_master import ContractTypeMaster
 from app.models.data_field_master import DataFieldMaster
 from app.models.formula_library import FormulaLibrary
+from app.models.project_ld_band import ProjectLdBand
 from app.models.severity_master import SeverityMaster
 
 
@@ -121,6 +122,50 @@ class MasterRepository:
         from sqlalchemy import delete
         self.db.execute(
             delete(SeverityMaster).where(SeverityMaster.project_id == project_id)
+        )
+
+    # ---------------------------------------------------------------- project ld bands
+
+    def list_ld_bands_for_project(self, project_id: str) -> List[ProjectLdBand]:
+        return list(
+            self.db.execute(
+                select(ProjectLdBand)
+                .where(ProjectLdBand.project_id == project_id)
+                .order_by(ProjectLdBand.points_threshold)
+            ).scalars().all()
+        )
+
+    def get_ld_band(self, band_id: str) -> Optional[ProjectLdBand]:
+        return self.db.execute(
+            select(ProjectLdBand).where(ProjectLdBand.id == band_id)
+        ).scalar_one_or_none()
+
+    def exists_ld_bands_for_project(self, project_id: str) -> bool:
+        return (
+            self.db.execute(
+                select(ProjectLdBand)
+                .where(ProjectLdBand.project_id == project_id)
+                .limit(1)
+            ).scalar_one_or_none()
+            is not None
+        )
+
+    def bulk_create_ld_bands(self, rows: List[ProjectLdBand]) -> List[ProjectLdBand]:
+        for r in rows:
+            self.db.add(r)
+        self.db.flush()
+        return rows
+
+    def update_ld_band(self, row: ProjectLdBand, **kwargs) -> ProjectLdBand:
+        for k, v in kwargs.items():
+            setattr(row, k, v)
+        self.db.flush()
+        return row
+
+    def delete_all_ld_bands_for_project(self, project_id: str) -> None:
+        from sqlalchemy import delete
+        self.db.execute(
+            delete(ProjectLdBand).where(ProjectLdBand.project_id == project_id)
         )
 
     # ---------------------------------------------------------------- formula library

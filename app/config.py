@@ -40,6 +40,14 @@ class Settings(BaseSettings):
     default_page_size: int = Field(default=20)
     max_page_size: int = Field(default=100)
 
+    # === Cross-service: project-management ===
+    project_management_base_url: str = Field(
+        default="http://10.1.131.199/projects",
+        description="Base URL of pmis-project-management. Used by the evaluator to "
+                    "resolve an activity's project_id at evaluation time.",
+    )
+    project_management_timeout_seconds: float = Field(default=5.0)
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

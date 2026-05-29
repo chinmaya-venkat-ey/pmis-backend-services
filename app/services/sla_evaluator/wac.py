@@ -86,9 +86,11 @@ class WacEvaluator(FormulaEvaluator):
         severity = max(0, min(4, steps))
 
         # Points for severity, accumulated for the period (single measurement).
+        # Both lookups consult the project's master tables before falling back
+        # to the RFP defaults baked into point_accumulation.
         from app.services.sla_evaluator.point_accumulation import _points_for_level
-        points = _points_for_level(severity)
-        ld_percent = _ld_percent_for_points(points)
+        points = _points_for_level(severity, ctx)
+        ld_percent = _ld_percent_for_points(points, ctx)
 
         result.accumulated_points = points
         result.severity_level = severity

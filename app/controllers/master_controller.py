@@ -13,6 +13,9 @@ from app.schemas.master import (
     DataFieldResponse,
     DataFieldUpdateRequest,
     FormulaLibraryResponse,
+    LdBandResponse,
+    LdBandSetRequest,
+    LdBandUpdateRequest,
     SeverityLevelResponse,
     SeverityLevelUpdateRequest,
     SeverityMasterSetRequest,
@@ -84,3 +87,31 @@ class MasterController:
     ) -> SeverityLevelResponse:
         row = self.service.update_severity_level(project_id, level, payload)
         return SeverityLevelResponse.model_validate(row)
+
+    # ------------------------------------------------------------------ project ld bands
+
+    def list_ld_bands(self, project_id: str) -> List[LdBandResponse]:
+        return [
+            LdBandResponse.model_validate(r)
+            for r in self.service.list_ld_bands(project_id)
+        ]
+
+    def set_ld_bands(
+        self, project_id: str, payload: LdBandSetRequest
+    ) -> List[LdBandResponse]:
+        return [
+            LdBandResponse.model_validate(r)
+            for r in self.service.set_ld_bands(project_id, payload)
+        ]
+
+    def update_ld_band(
+        self, project_id: str, band_id: str, payload: LdBandUpdateRequest
+    ) -> LdBandResponse:
+        return LdBandResponse.model_validate(
+            self.service.update_ld_band(project_id, band_id, payload)
+        )
+
+    # ------------------------------------------------------------------ combined seed
+
+    def seed_master_defaults(self, project_id: str):
+        return self.service.seed_master_defaults(project_id)

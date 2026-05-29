@@ -1,11 +1,13 @@
 """FastAPI dependency factories for pmis-contract-management."""
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import Optional
 
 from fastapi import Depends, Request
 from sqlalchemy.orm import Session
 
+from app.clients import ProjectManagementClient
 from app.controllers.master_controller import MasterController
 from app.controllers.sla_activity_mapping_controller import (
     SlaActivityMappingController,
@@ -13,6 +15,7 @@ from app.controllers.sla_activity_mapping_controller import (
 from app.controllers.sla_controller import SlaController
 from app.core.errors import UnauthorizedError
 from app.core.rbac import AUTH_REQUIRED_MESSAGE
+from app.core.security import extract_bearer_token
 from app.db import get_db
 
 
@@ -33,6 +36,26 @@ def get_caller_is_admin(request: Request) -> bool:
     return bool(getattr(request.state, "is_admin", False))
 
 
+def get_bearer_token(request: Request) -> Optional[str]:
+    """Extract the raw inbound bearer token so it can be forwarded to peer services.
+
+    Returns None for unauthenticated requests — peer calls then run without
+    auth and may be rejected by the upstream's RBAC.
+    """
+    return extract_bearer_token(request.headers.get("Authorization"))
+
+
+# ---------------------------------------------------------------- clients
+
+@lru_cache(maxsize=1)
+def _project_management_client_singleton() -> ProjectManagementClient:
+    return ProjectManagementClient()
+
+
+def get_project_management_client() -> ProjectManagementClient:
+    return _project_management_client_singleton()
+
+
 # ---------------------------------------------------------------- controllers
 
 def get_master_controller(db: Session = Depends(get_db)) -> MasterController:
@@ -45,5 +68,6 @@ def get_sla_controller(db: Session = Depends(get_db)) -> SlaController:
 
 def get_sla_activity_mapping_controller(
     db: Session = Depends(get_db),
+    project_mgmt_client: ProjectManagementClient = Depends(get_project_management_client),
 ) -> SlaActivityMappingController:
-    return SlaActivityMappingController(db)
+    return SlaActivityMappingController(db, project_mgmt_client=project_mgmt_client)

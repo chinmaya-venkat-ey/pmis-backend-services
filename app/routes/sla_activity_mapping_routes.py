@@ -20,6 +20,7 @@ from app.controllers.sla_activity_mapping_controller import (
 )
 from app.core.response import api_response, hal_collection, hal_resource
 from app.dependencies import (
+    get_bearer_token,
     get_optional_current_user_id,
     get_sla_activity_mapping_controller,
 )
@@ -138,8 +139,11 @@ def evaluate_mapping(
     mapping_id: str,
     payload: MappingEvaluationRequest,
     ctrl: SlaActivityMappingController = Depends(get_sla_activity_mapping_controller),
+    bearer_token: Optional[str] = Depends(get_bearer_token),
 ):
-    result = ctrl.evaluate_mapping(mapping_id, payload)
+    # Bearer is forwarded to pmis-project-management so it can resolve the
+    # activity's project_id under the caller's permissions.
+    result = ctrl.evaluate_mapping(mapping_id, payload, bearer_token=bearer_token)
     return api_response(
         data=hal_resource(
             "MappingEvaluation",
@@ -158,8 +162,9 @@ def evaluate_activity(
     activity_id: str,
     payload: ActivityEvaluationRequest,
     ctrl: SlaActivityMappingController = Depends(get_sla_activity_mapping_controller),
+    bearer_token: Optional[str] = Depends(get_bearer_token),
 ):
-    result = ctrl.evaluate_activity(activity_id, payload)
+    result = ctrl.evaluate_activity(activity_id, payload, bearer_token=bearer_token)
     return api_response(
         data=hal_resource(
             "ActivityEvaluation",

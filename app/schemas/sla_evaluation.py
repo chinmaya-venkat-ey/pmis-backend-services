@@ -108,6 +108,9 @@ class GuardResult(BaseModel):
     action_description: Optional[str] = None
 
 
+ScoringSource = Literal["project", "default", "unavailable"]
+
+
 class MappingEvaluationResponse(BaseModel):
     mapping_id: str
     activity_id: str
@@ -123,6 +126,17 @@ class MappingEvaluationResponse(BaseModel):
     accumulated_points: Optional[Decimal] = None
     ld_percent: Optional[Decimal] = None
     ld_amount: Optional[Decimal] = None
+
+    # Project resolved from activity (via pmis-project-management). None when
+    # project-management is unreachable or doesn't know this activity.
+    project_id: Optional[str] = None
+
+    # Which scoring chart was actually applied. ``project`` = read from the
+    # project's master tables. ``default`` = no project chart configured so the
+    # RFP defaults were used. ``unavailable`` = project-management was down or
+    # the activity is unknown — also fell back to defaults.
+    severity_master_source: ScoringSource = "default"
+    ld_band_source: ScoringSource = "default"
 
     breaches: List[BreachDetail] = Field(default_factory=list)
     guards: List[GuardResult] = Field(default_factory=list)

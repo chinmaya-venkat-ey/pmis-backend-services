@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from app.models.sla_activity_mapping import SlaActivityMapping
 from app.models.sla_condition_band import SlaConditionBand
@@ -40,6 +40,13 @@ class EvaluationContext:
     ld_base_amount: Optional[Decimal]
     observations: List[MetricObservation]
     overrides_applied: Dict[str, Any] = field(default_factory=dict)
+
+    # Project-scoped scoring resolved at request time. None means "no project
+    # chart configured" → evaluator must use its baked-in RFP defaults.
+    project_id: Optional[str] = None
+    level_points_map: Optional[Dict[int, Decimal]] = None       # severity_master
+    points_to_ld_map: Optional[List[Tuple[Decimal, Decimal]]] = None  # project_ld_bands
+    # sorted ascending: [(points_threshold, ld_percent), ...]
 
 
 @dataclass

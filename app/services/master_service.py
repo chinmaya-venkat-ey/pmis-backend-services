@@ -1,7 +1,10 @@
-"""MasterService — business logic for severity_master, contract_type_master, data_field_master."""
+"""MasterService — business logic for severity_master, project_ld_bands,
+contract_type_master, data_field_master.
+"""
 from __future__ import annotations
 
-from typing import List, Optional
+from decimal import Decimal
+from typing import Dict, List, Optional
 from uuid import uuid4
 
 from sqlalchemy.orm import Session
@@ -9,22 +12,37 @@ from sqlalchemy.orm import Session
 from app.core.errors import ConflictError, NotFoundError, ValidationError
 from app.models.contract_type_master import ContractTypeMaster
 from app.models.data_field_master import DataFieldMaster
+from app.models.project_ld_band import ProjectLdBand
 from app.models.severity_master import SeverityMaster
 from app.repositories.master_repository import MasterRepository
 from app.schemas.master import (
     ContractTypeCreateRequest,
     ContractTypeUpdateRequest,
+    LdBandSetRequest,
+    LdBandUpdateRequest,
     SeverityLevelUpdateRequest,
     SeverityMasterSetRequest,
 )
 
-# Standard MSAP scoring: level → (points, label)
+# Standard MSAP scoring: level → (points, label) — RFP Annexure-3E.
 _DEFAULT_SEVERITY_LEVELS = [
     (0, -2, "Exceptional / On Time"),
     (1,  2, "Minor Deviation"),
     (2,  4, "Moderate Deviation"),
     (3,  6, "Major Deviation"),
     (4,  8, "Critical / Severe Deviation"),
+]
+
+# Standard MSAP scoring: points_threshold → (ld_percent, label).
+# Mirrors DEFAULT_POINTS_TO_LD in point_accumulation.py so a freshly-seeded
+# project produces the exact same output as a project that opts out of
+# customisation.
+_DEFAULT_LD_BANDS = [
+    (Decimal("0"), Decimal("0"),   "On Target"),
+    (Decimal("2"), Decimal("1"),   "Tier 1"),
+    (Decimal("4"), Decimal("2"),   "Tier 2"),
+    (Decimal("6"), Decimal("3"),   "Tier 3"),
+    (Decimal("8"), Decimal("4"),   "Tier 4 / Cap"),
 ]
 
 
@@ -177,3 +195,74 @@ class MasterService:
         if not updates:
             return row
         return self.repo.update_level(row, **updates)
+
+    # ---------------------------------------------------------------- project ld bands
+
+    def list_ld_bands(self, project_id: str) -> List[ProjectLdBand]:
+        return self.repo.list_ld_bands_for_project(project_id)
+
+    def seed_default_ld_bands(self, project_id: str) -> List[ProjectLdBand]:
+        """Idempotent — skips if any LD bands already exist for this project."""
+        if self.repo.exists_ld_bands_for_project(project_id):
+            return self.repo.list_ld_bands_for_project(project_id)
+        rows = [
+            ProjectLdBand(
+                id=str(uuid4()),
+                project_id=project_id,
+                points_threshold=threshold,
+                ld_percent=ld,
+                label=label,
+            )
+            for threshold, ld, label in _DEFAULT_LD_BANDS
+        ]
+        return self.repo.bulk_create_ld_bands(rows)
+
+    def set_ld_bands(
+        self, project_id: str, payload: LdBandSetRequest
+    ) -> List[ProjectLdBand]:
+        """Replace all LD bands for a project."""
+        thresholds = [item.points_threshold for item in payload.bands]
+        if len(set(thresholds)) != len(thresholds):
+            raise ValidationError("Duplicate points_threshold values in request")
+        self.repo.delete_all_ld_bands_for_project(project_id)
+        rows = [
+            ProjectLdBand(
+                id=str(uuid4()),
+                project_id=project_id,
+                points_threshold=item.points_threshold,
+                ld_percent=item.ld_percent,
+                label=item.label,
+            )
+            for item in sorted(payload.bands, key=lambda x: x.points_threshold)
+        ]
+        return self.repo.bulk_create_ld_bands(rows)
+
+    def update_ld_band(
+        self, project_id: str, band_id: str, payload: LdBandUpdateRequest
+    ) -> ProjectLdBand:
+        row = self.repo.get_ld_band(band_id)
+        if row is None or row.project_id != project_id:
+            raise NotFoundError(
+                f"LD band '{band_id}' not found for project '{project_id}'"
+            )
+        updates = payload.model_dump(exclude_unset=True)
+        if not updates:
+            return row
+        return self.repo.update_ld_band(row, **updates)
+
+    # ---------------------------------------------------------------- combined seed
+
+    def seed_master_defaults(self, project_id: str) -> Dict[str, int]:
+        """Single-shot bootstrap for a fresh project.
+
+        Seeds both severity_master and project_ld_bands with the RFP defaults
+        when they're empty, leaves them alone when they're already populated.
+        Returns a tiny summary the FE can show ("3 severity levels, 5 LD bands
+        seeded" or "already configured").
+        """
+        sev_rows = self.seed_default_severity_levels(project_id)
+        ld_rows = self.seed_default_ld_bands(project_id)
+        return {
+            "severity_levels": len(sev_rows),
+            "ld_bands": len(ld_rows),
+        }

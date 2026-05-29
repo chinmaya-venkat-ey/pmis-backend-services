@@ -547,6 +547,7 @@ class TeamService:
             TeamPageActivity(
                 id=row.id,
                 name=row.name,
+                milestone_id=row.milestone_id,
                 milestone=row.milestone_name,
                 concerned_divisions=row.concerned_divisions,
                 owner=[c.id for c in row.assignments.owner],

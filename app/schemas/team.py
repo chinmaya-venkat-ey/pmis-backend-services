@@ -350,6 +350,7 @@ class TeamPageActivity(BaseModel):
     )
     id: str
     name: str
+    milestone_id: str = Field(description="Milestone UUID (wire: milestoneId)")
     milestone: str = Field(description="Milestone name (not ID)")
     concerned_divisions: List[str] = Field(default_factory=list)
     owner: List[str] = Field(default_factory=list, description="User IDs")

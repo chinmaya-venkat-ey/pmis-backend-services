@@ -349,8 +349,10 @@ class TeamPageActivity(BaseModel):
         extra="ignore",
     )
     id: str
+    display_code: str = Field(description="Activity display code, e.g. 'A1.1' (wire: displayCode)")
     name: str
     milestone_id: str = Field(description="Milestone UUID (wire: milestoneId)")
+    milestone_display_code: str = Field(description="Milestone display code, e.g. 'M1' (wire: milestoneDisplayCode)")
     milestone: str = Field(description="Milestone name (not ID)")
     concerned_divisions: List[str] = Field(default_factory=list)
     owner: List[str] = Field(default_factory=list, description="User IDs")

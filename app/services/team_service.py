@@ -546,8 +546,10 @@ class TeamService:
         activities = [
             TeamPageActivity(
                 id=row.id,
+                display_code=row.display_code,
                 name=row.name,
                 milestone_id=row.milestone_id,
+                milestone_display_code=row.milestone_display_code,
                 milestone=row.milestone_name,
                 concerned_divisions=row.concerned_divisions,
                 owner=[c.id for c in row.assignments.owner],

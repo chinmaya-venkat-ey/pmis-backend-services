@@ -115,6 +115,23 @@ class StorageUnavailableError(DomainError):
     default_code = "storage_unavailable"
 
 
+class UserMgmtUnavailableError(DomainError):
+    """Raised when PMIS-user-management is unreachable, times out, or
+    returns a non-2xx response on a cross-service write. Maps to HTTP 502
+    (Bad Gateway) — project-mgmt is the gateway, user-mgmt is upstream.
+
+    ``details`` carries:
+      - ``upstream_status``: HTTP status from user-mgmt (or None on
+        connection/timeout failure)
+      - ``upstream_body``: the response body (truncated) when present
+      - ``stage``: free-form label of which call failed
+        (e.g. ``replace_role_assignments``)
+    """
+
+    status_code = 502
+    default_code = "user_mgmt_unavailable"
+
+
 class CommentBodyOrAttachmentRequiredError(ValidationError):
     """Doc-35 send-event invariant: comment must carry body OR attachments."""
 

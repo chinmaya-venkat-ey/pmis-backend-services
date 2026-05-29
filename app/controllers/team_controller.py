@@ -72,5 +72,6 @@ class TeamController:
         project_id: str,
         payload: TeamPageRequest,
         caller_id: Optional[str],
+        authorization: str,
     ) -> TeamPageResponse:
-        return self.service.save_team_page(project_id, payload, caller_id)
+        return self.service.save_team_page(project_id, payload, caller_id, authorization)

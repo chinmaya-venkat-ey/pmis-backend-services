@@ -29,6 +29,7 @@ from app.models.project import Project
 from app.models.project_ownership import ProjectOwnership
 from app.repositories.assignable_users_repository import AssignableUsersRepository
 from app.repositories.associated_users_repository import AssociatedUsersRepository
+from app.services.user_mgmt_client import UserMgmtClient
 from app.schemas.team import (
     ActivityAssignmentEntry,
     ActivityAssignmentsRead,
@@ -60,6 +61,7 @@ class TeamService:
         self.db = db
         self.assignable_repo = AssignableUsersRepository(db)
         self.associated_repo = AssociatedUsersRepository(db)
+        self.user_mgmt_client = UserMgmtClient()
 
     # ── helpers ─────────────────────────────────────────────────────────────
 
@@ -601,16 +603,36 @@ class TeamService:
         project_id: str,
         payload: TeamPageRequest,
         caller_id: Optional[str],
+        authorization: str,
     ) -> TeamPageResponse:
         """Bulk save for PUT /projects/{id}/team-page (the Submit button).
 
-        Persists projectOwner and all activities. orgUser is accepted in the
-        body for schema symmetry but is NOT written here — org-level role
-        assignments are owned by the user-management service.
+        Flow:
+          1. Diff the incoming ``orgUser`` against the current state. If
+             any role's user set differs, forward the changed roles to
+             user-management's ``PUT /api/v3/projects/{uuid}/role-assignments``
+             over HTTP, carrying the caller's JWT verbatim. If that call
+             fails, raise ``UserMgmtUnavailableError`` (502) and DO NOT
+             touch the local DB.
+          2. Persist ``projectOwner`` (single project_ownership rewrite).
+          3. Persist every entry in ``activities`` (one activity_assignment
+             rewrite per id).
+          4. Commit and return the refreshed page state.
+
+        The cross-service call runs BEFORE the local writes so a failed
+        upstream call leaves both sides in their pre-call state — no
+        partial application across schemas.
         """
         self._get_project_or_404(project_id)
 
-        # Save project ownership: match rows by roleLabel
+        # ---- 1. orgUser: diff + cross-service write (when needed) -----------
+        self._maybe_sync_org_user(
+            project_id=project_id,
+            requested=payload.org_user,
+            authorization=authorization,
+        )
+
+        # ---- 2. projectOwner: local write -----------------------------------
         owner_ids: List[str] = []
         approver_ids: List[str] = []
         for row in payload.project_owner:
@@ -626,7 +648,7 @@ class TeamService:
             caller_id,
         )
 
-        # Save every activity's assignments
+        # ---- 3. activities: local write -------------------------------------
         for act_payload in payload.activities:
             act = self.db.get(Activity, act_payload.id)
             if act is None or act.deleted_at is not None or act.project_id != project_id:
@@ -645,3 +667,52 @@ class TeamService:
 
         self.db.commit()
         return self.get_team_page(project_id)
+
+    def _maybe_sync_org_user(
+        self,
+        *,
+        project_id: str,
+        requested: List[OrgUserRow],
+        authorization: str,
+    ) -> None:
+        """Diff requested orgUser against current state; call user-mgmt only
+        if anything changed.
+
+        Builds two dicts of ``{role_name: set(user_ids)}`` — the requested
+        snapshot and the current snapshot — and computes the per-role diff.
+        Only roles whose user sets actually differ are forwarded; roles
+        identical between requested and current are skipped (user-mgmt's
+        bulk-replace leaves unmentioned roles untouched).
+
+        If the caller didn't include ``orgUser`` at all (empty list), no
+        upstream call is made — the FE is implicitly saying "leave
+        org-user state alone."
+        """
+        if not requested:
+            return
+
+        requested_by_role: Dict[str, set] = {}
+        for row in requested:
+            role = row.role_label
+            requested_by_role.setdefault(role, set()).update(row.users)
+
+        current_by_role: Dict[str, set] = {}
+        for bucket in self._read_org_members(project_id):
+            current_by_role.setdefault(bucket.role_name, set()).update(
+                c.id for c in bucket.users
+            )
+
+        roles_to_forward: Dict[str, List[str]] = {}
+        for role, req_users in requested_by_role.items():
+            cur_users = current_by_role.get(role, set())
+            if req_users != cur_users:
+                roles_to_forward[role] = sorted(req_users)
+
+        if not roles_to_forward:
+            return
+
+        self.user_mgmt_client.replace_project_role_assignments(
+            project_uuid=project_id,
+            assignments_by_role=roles_to_forward,
+            authorization=authorization,
+        )

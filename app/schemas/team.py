@@ -432,9 +432,18 @@ class TeamPageResponse(BaseModel):
 class TeamPageRequest(BaseModel):
     """PUT /projects/{id}/team-page body — the JS `state` object verbatim.
 
-    orgUser is accepted for schema symmetry but is read-only on the backend:
-    org-level role assignments live in user-management and cannot be written
-    through this endpoint. Only projectOwner and activities are persisted.
+    All three sections are now writable:
+      - ``orgUser`` is diffed against current state; changed roles are
+        forwarded to user-management's bulk-replace role-assignment
+        endpoint over HTTP, carrying the caller's JWT.
+      - ``projectOwner`` is persisted to project.project_ownership (full
+        replace per project).
+      - ``activities`` is persisted to project.activity_assignment (full
+        replace per activity).
+
+    If the user-management call fails, the whole save is aborted (502
+    Bad Gateway) before any local writes — no partial cross-schema state.
+    Send ``orgUser: []`` (or omit it) to skip the cross-service call.
     """
     model_config = ConfigDict(
         alias_generator=to_camel,
@@ -443,7 +452,9 @@ class TeamPageRequest(BaseModel):
     )
     org_user: List[OrgUserRow] = Field(
         default_factory=list,
-        description="Read-only: org role assignments are managed by user-management service.",
+        description="Diffed against current org-user assignments; changed "
+                    "roles are forwarded to user-management. Empty list "
+                    "skips the cross-service call.",
     )
     project_owner: List[ProjectOwnerRow] = Field(default_factory=list)
     activities: List[TeamPageActivity] = Field(default_factory=list)

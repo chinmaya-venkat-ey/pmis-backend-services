@@ -29,7 +29,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 
 from app.core.permissions import PROJECT_MEMBERS_READ, PROJECT_MEMBERS_UPDATE
 from app.core.rbac import require_authenticated, require_permission
@@ -519,8 +519,11 @@ def get_team_page(
     summary="Save Manage-Team page (UI Submit button)",
     description=(
         "Accepts the `state` object verbatim from the Manage-Team HTML Submit button. "
-        "`orgUser` is ignored (read-only). "
-        "`projectOwner` and `activities` are persisted (full replace per scope). "
+        "`projectOwner` and `activities` are persisted directly (full replace per scope). "
+        "`orgUser` is diffed against the current project role assignments; if it "
+        "differs, the changed roles are forwarded to user-management via the "
+        "caller's JWT. If the user-management call fails, the entire save is "
+        "aborted (502 Bad Gateway) so partial state is never persisted. "
         "Returns the refreshed page state identical to GET team-page."
     ),
     dependencies=[Depends(require_permission(PROJECT_MEMBERS_UPDATE))],
@@ -528,10 +531,12 @@ def get_team_page(
 def save_team_page(
     project_id: str,
     body: TeamPageRequest,
+    request: Request,
     caller_id: Annotated[str, Depends(get_current_user_id)],
     controller: Annotated[TeamController, Depends(get_team_controller)],
 ):
-    return controller.save_team_page(project_id, body, caller_id)
+    authorization = request.headers.get("authorization") or ""
+    return controller.save_team_page(project_id, body, caller_id, authorization)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

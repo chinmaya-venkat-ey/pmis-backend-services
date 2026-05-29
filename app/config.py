@@ -86,6 +86,17 @@ class Settings(BaseSettings):
     notification_service_timeout_seconds: float = Field(default=5.0)
     notification_client: Optional[str] = Field(default=None)
 
+    # === User management (PMIS-user-management) ===
+    # Used by team-page save to bulk-replace project-scoped role
+    # assignments (orgUser section). The caller's Authorization header
+    # is forwarded so user-mgmt enforces ``project_members:update``
+    # against the actual caller (no service-account elevation).
+    # Leave the URL blank to operate in mock mode (orgUser diff is
+    # logged and skipped; local writes still proceed).
+    user_management_service_url: Optional[str] = Field(default=None)
+    user_management_service_timeout_seconds: float = Field(default=5.0)
+    user_management_client: Optional[str] = Field(default=None)
+
     # === Frontend reference (HAL link builder) ===
     frontend_base_url: Optional[str] = Field(default=None)
 

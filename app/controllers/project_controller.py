@@ -55,6 +55,15 @@ class ProjectController:
         # Resolve owner_label from masters.divisions mirror so the FE has a
         # human-readable label without a separate /master/divisions call.
         resp.owner_label = self._resolve_owner_label(resp.owner)
+        # Doc-finance: derive inclusive-tax companion on every response.
+        # The model never stores this — it's computed from excl-tax + tax%
+        # by app/utilities/ccn_calc.py so the same rounding applies
+        # everywhere on the wire.
+        from app.utilities import ccn_calc
+        resp.total_project_value_incl_tax = ccn_calc.total_project_value_incl_tax(
+            getattr(row, "total_project_value_excl_tax", 0),
+            getattr(row, "tax_percent", 0),
+        )
         if with_attachments:
             resp.attachments = self._hydrate_attachments(row.id)
         return resp

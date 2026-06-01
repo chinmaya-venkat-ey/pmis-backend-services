@@ -18,17 +18,22 @@ _MILESTONE_DISPLAY_CODE_RE = re.compile(r"^M(\d+)$", re.IGNORECASE)
 
 from sqlalchemy.orm import Session
 
+from decimal import Decimal
+
 from app.core.errors import (
+    ConflictError,
     DependencyCycleError,
     MilestoneNotFoundError,
     ProjectNotFoundError,
     ValidationError,
 )
 from app.repositories.comment_repository import CommentRepository
+from app.repositories.finance_repository import FinanceRepository
 from app.repositories.milestone_repository import MilestoneRepository
 from app.repositories.project_audit_log_repository import ProjectAuditLogRepository
 from app.repositories.project_repository import ProjectRepository
 from app.schemas.milestone import MilestoneCreateRequest, MilestoneUpdateRequest
+from app.utilities import ccn_calc
 from app.utilities.catalogs import (
     active_milestone_statuses,
     active_priorities,
@@ -41,6 +46,13 @@ from app.utilities.project_lock import assert_milestone_activity_writable
 from app.utilities.vendor_resolver import resolve_and_validate_vendor_ids
 
 
+# Doc-finance: category choices for milestone / activity rows.
+_CATEGORY_ORIGINAL = "original"
+_CATEGORY_ASG = "asg"
+_CATEGORY_CCN = "ccn"
+_VALID_CATEGORIES = (_CATEGORY_ORIGINAL, _CATEGORY_ASG, _CATEGORY_CCN)
+
+
 class MilestoneService:
     def __init__(self, db: Session):
         self.db = db
@@ -48,6 +60,7 @@ class MilestoneService:
         self.projects = ProjectRepository(db)
         self.comments = CommentRepository(db)
         self.audit = ProjectAuditLogRepository(db)
+        self.finance = FinanceRepository(db)
 
     # ------------------------------------------------------------------ read
 
@@ -128,6 +141,12 @@ class MilestoneService:
             if payload.position is not None and payload.position > 0
             else self.repo.next_position_for_project(project_id)
         )
+        # Doc-finance: resolve category + ccn_value based on project state.
+        category, ccn_value = self._resolve_create_category(
+            project=project,
+            requested_category=payload.category,
+            requested_ccn_value=payload.ccn_value,
+        )
         row = self.repo.create(
             project_id=project_id,
             name=payload.name,
@@ -139,6 +158,8 @@ class MilestoneService:
             status=payload.status or "not_completed",
             priority=payload.priority,
             position=position,
+            category=category,
+            ccn_value=ccn_value,
             created_by=caller_user_id,
             updated_by=caller_user_id,
         )
@@ -173,6 +194,31 @@ class MilestoneService:
             action="create", actor_user_id=caller_user_id,
             changes={"name": row.name, "position": row.position},
         )
+        # Doc-finance: dedicated audit entry for post-publish ASG / CCN
+        # creates so the lineage is searchable separately from the
+        # generic ``create`` event.
+        if row.category == _CATEGORY_CCN:
+            self.audit.write(
+                project_id=project_id,
+                target_kind="milestone", target_id=row.id,
+                action="create_ccn", actor_user_id=caller_user_id,
+                changes={
+                    "ccn_value": str(row.ccn_value),
+                    "ccn_cap_amount": str(
+                        ccn_calc.ccn_cap_amount(
+                            project.total_project_value_excl_tax,
+                            project.ccn_cap_percent,
+                        )
+                    ),
+                },
+            )
+        elif row.category == _CATEGORY_ASG:
+            self.audit.write(
+                project_id=project_id,
+                target_kind="milestone", target_id=row.id,
+                action="create_asg", actor_user_id=caller_user_id,
+                changes={"category": _CATEGORY_ASG},
+            )
         self.db.commit()
         return row
 
@@ -187,6 +233,23 @@ class MilestoneService:
         updates = payload.model_dump(exclude_unset=True)
         depends_on = updates.pop("depends_on", None)
         vendor_ids = updates.pop("vendor_ids", None)
+        # Doc-finance: category + ccn_value have their own lifecycle rules.
+        # Pop them out of the generic ``updates`` dict and handle them
+        # before the generic field updates fire (so audit + cap checks
+        # happen in the right order). The values are merged back into
+        # ``updates`` once validated so the standard write path picks
+        # them up.
+        category_requested = updates.pop("category", None)
+        ccn_value_requested = updates.pop("ccn_value", None)
+        category_after, ccn_value_after = self._resolve_update_finance_fields(
+            row=row,
+            category_requested=category_requested,
+            ccn_value_requested=ccn_value_requested,
+        )
+        if category_after is not None:
+            updates["category"] = category_after
+        if ccn_value_after is not None:
+            updates["ccn_value"] = ccn_value_after
         if not updates and depends_on is None and vendor_ids is None:
             return row
 
@@ -704,3 +767,151 @@ class MilestoneService:
                 "by_child": triggering_child_id,
             },
         )
+
+    # ----------------------------------------- Doc-finance ---------------
+
+    def _resolve_create_category(
+        self, *, project,
+        requested_category: Optional[str],
+        requested_ccn_value: Optional[Decimal],
+    ) -> tuple[str, Decimal]:
+        """Resolve (category, ccn_value) for a milestone CREATE based on
+        project state.
+
+        Pre-publish (status != 'published'): always 'original' / 0; any
+        client-sent category/ccn_value is silently ignored (preserves
+        existing FE behavior, additive contract).
+
+        Post-publish (status == 'published'):
+          * category=None or missing → default to 'asg' (no money).
+          * category='original' → rejected 422 (not allowed post-publish).
+          * category='asg' → ccn_value forced to 0.
+          * category='ccn' → ccn_value required > 0; cap check (hard 409
+            on overflow when TPV > 0; bypassed when TPV = 0).
+        """
+        is_published = (project.status or "").lower() == "published"
+        if not is_published:
+            # Pre-publish: ignore both. Server enforces the baseline.
+            return _CATEGORY_ORIGINAL, Decimal("0")
+
+        category = (requested_category or _CATEGORY_ASG).lower()
+        if category == _CATEGORY_ORIGINAL:
+            raise ValidationError(
+                "Category 'original' is only valid for items created before "
+                "the project is published. Use 'asg' or 'ccn' for "
+                "post-publish creates.",
+                details={"project_status": project.status},
+            )
+        if category not in _VALID_CATEGORIES:
+            raise ValidationError(
+                f"Category must be one of: {', '.join(_VALID_CATEGORIES)}.",
+            )
+
+        if category == _CATEGORY_ASG:
+            return _CATEGORY_ASG, Decimal("0")
+
+        # category == _CATEGORY_CCN
+        ccn_value = requested_ccn_value if requested_ccn_value is not None else Decimal("0")
+        if Decimal(ccn_value) <= 0:
+            raise ValidationError(
+                "ccn_value must be greater than 0 when category is 'ccn'.",
+            )
+        # Cumulative cap check (Q4.1 default — hard reject 409 on overflow).
+        existing_used = self.finance.sum_ccn_used(project.id)
+        if ccn_calc.would_exceed_cap(
+            tpv_excl_tax=project.total_project_value_excl_tax,
+            ccn_cap_percent=project.ccn_cap_percent,
+            existing_ccn_used=existing_used,
+            new_ccn_value=ccn_value,
+        ):
+            details = ccn_calc.cap_exceed_details(
+                tpv_excl_tax=project.total_project_value_excl_tax,
+                ccn_cap_percent=project.ccn_cap_percent,
+                existing_ccn_used=existing_used,
+                new_ccn_value=ccn_value,
+            )
+            raise ConflictError(
+                "CCN value exceeds the project CCN cap. Cumulative CCN "
+                "usage would surpass the contractual extension limit.",
+                code="ccn_cap_exceeded",
+                details=details,
+            )
+        return _CATEGORY_CCN, Decimal(ccn_value)
+
+    def _resolve_update_finance_fields(
+        self, *, row,
+        category_requested: Optional[str],
+        ccn_value_requested: Optional[Decimal],
+    ) -> tuple[Optional[str], Optional[Decimal]]:
+        """Resolve the (category, ccn_value) deltas for a milestone PATCH.
+
+        Returns ``(category_after_or_None, ccn_value_after_or_None)``.
+        ``None`` means "don't write this column". Rules:
+
+          * ``category`` is locked once set: any attempt to change it →
+            409. (Sending the same value is a no-op.)
+          * ``ccn_value`` is only editable when the row's existing
+            category is 'ccn'. Editing on an ASG or original row → 422.
+          * Cumulative cap check applies (with displacement of the row's
+            current value) when TPV > 0; bypassed when TPV = 0.
+        """
+        category_after: Optional[str] = None
+        ccn_value_after: Optional[Decimal] = None
+
+        if category_requested is not None:
+            requested = category_requested.lower()
+            if requested != (row.category or _CATEGORY_ORIGINAL):
+                raise ConflictError(
+                    "Category is locked once the item is saved and cannot "
+                    "be changed.",
+                    code="conflict",
+                    details={
+                        "current_category": row.category,
+                        "requested_category": requested,
+                    },
+                )
+            # Same value — no-op, don't add to updates.
+
+        if ccn_value_requested is not None:
+            if (row.category or _CATEGORY_ORIGINAL) != _CATEGORY_CCN:
+                raise ValidationError(
+                    "ccn_value is only editable for items with "
+                    "category='ccn'.",
+                    details={"current_category": row.category},
+                )
+            new_value = Decimal(ccn_value_requested)
+            if new_value <= 0:
+                raise ValidationError(
+                    "ccn_value must be greater than 0 when category is 'ccn'.",
+                )
+            project = self.projects.get_by_id(row.project_id)
+            if project is None:
+                raise ProjectNotFoundError(
+                    "The parent project could not be found."
+                )
+            # Displacement — subtract the row's prior contribution before
+            # the cumulative check.
+            prior = Decimal(row.ccn_value or 0)
+            existing_used = self.finance.sum_ccn_used(project.id) - prior
+            if existing_used < 0:
+                existing_used = Decimal("0")
+            if ccn_calc.would_exceed_cap(
+                tpv_excl_tax=project.total_project_value_excl_tax,
+                ccn_cap_percent=project.ccn_cap_percent,
+                existing_ccn_used=existing_used,
+                new_ccn_value=new_value,
+            ):
+                details = ccn_calc.cap_exceed_details(
+                    tpv_excl_tax=project.total_project_value_excl_tax,
+                    ccn_cap_percent=project.ccn_cap_percent,
+                    existing_ccn_used=existing_used,
+                    new_ccn_value=new_value,
+                )
+                raise ConflictError(
+                    "CCN value update would push cumulative CCN over the "
+                    "project cap.",
+                    code="ccn_cap_exceeded",
+                    details=details,
+                )
+            ccn_value_after = new_value
+        return category_after, ccn_value_after

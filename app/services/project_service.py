@@ -33,6 +33,12 @@ from app.core.errors import (
     ProjectNotFoundError,
     ValidationError,
 )
+# Doc-finance: fields whose updates are publish-locked.
+_FINANCE_LOCKED_FIELDS = (
+    "total_project_value_excl_tax",
+    "tax_percent",
+    "ccn_cap_percent",
+)
 from app.models.activity import Activity
 from app.models.milestone import Milestone
 from app.repositories.project_audit_log_repository import ProjectAuditLogRepository
@@ -121,7 +127,7 @@ class ProjectService:
                 f"project_code {project_code!r} collided; retry create"
             )
 
-        row = self.repo.create(
+        create_kwargs = dict(
             project_code=project_code,
             name=payload.name,
             description=payload.description,
@@ -141,6 +147,13 @@ class ProjectService:
             created_by=caller_user_id,
             updated_by=caller_user_id,
         )
+        # Doc-finance: pass through any finance fields supplied on create.
+        # Omitted fields fall back to the column server defaults (0 / 0 / 25).
+        for fname in _FINANCE_LOCKED_FIELDS:
+            value = getattr(payload, fname, None)
+            if value is not None:
+                create_kwargs[fname] = value
+        row = self.repo.create(**create_kwargs)
         if canonical_vendor_ids:
             self.repo.set_vendor_mapping(row.id, canonical_vendor_ids)
         self.audit.write(
@@ -164,6 +177,22 @@ class ProjectService:
         vendor_ids = updates.pop("vendor_ids", None)
         if not updates and vendor_ids is None:
             return row
+
+        # Doc-finance: publish-lock on the three contract finance fields.
+        # If any are touched and the project is published, reject 409.
+        # (The dedicated /finance PATCH route applies the same rule.)
+        touched_finance = [f for f in _FINANCE_LOCKED_FIELDS if f in updates]
+        if touched_finance and (row.status or "").lower() == "published":
+            raise ConflictError(
+                "Finance fields are locked once the project is published. "
+                "Edits are not permitted after publish.",
+                code="conflict",
+                details={
+                    "project_id": row.id,
+                    "project_status": row.status,
+                    "locked_fields": touched_finance,
+                },
+            )
 
         # ----- validations on touched fields (monolith parity) ----------
         if "status" in updates:
@@ -277,7 +306,7 @@ class ProjectService:
                 raise ProjectCodeConflictError(
                     f"project_code {project_code!r} collided; retry upsert"
                 )
-            row = self.repo.create(
+            create_kwargs = dict(
                 id=project_id,
                 project_code=project_code,
                 name=payload.name,
@@ -298,6 +327,13 @@ class ProjectService:
                 created_by=caller_user_id,
                 updated_by=caller_user_id,
             )
+            # Doc-finance: pass-through finance fields on INSERT branch.
+            # Omitted → column server defaults.
+            for fname in _FINANCE_LOCKED_FIELDS:
+                value = getattr(payload, fname, None)
+                if value is not None:
+                    create_kwargs[fname] = value
+            row = self.repo.create(**create_kwargs)
             if canonical_vendor_ids is not None:
                 self.repo.set_vendor_mapping(row.id, canonical_vendor_ids)
             self.audit.write(
@@ -328,6 +364,26 @@ class ProjectService:
         }
         if payload.status is not None:
             fields["status"] = payload.status
+        # Doc-finance: only update finance fields when explicitly sent
+        # (not None). If they ARE sent and the project is published,
+        # reject 409 (same publish-lock as PATCH).
+        touched_finance: list[str] = []
+        for fname in _FINANCE_LOCKED_FIELDS:
+            value = getattr(payload, fname, None)
+            if value is not None:
+                fields[fname] = value
+                touched_finance.append(fname)
+        if touched_finance and (existing.status or "").lower() == "published":
+            raise ConflictError(
+                "Finance fields are locked once the project is published. "
+                "Edits are not permitted after publish.",
+                code="conflict",
+                details={
+                    "project_id": existing.id,
+                    "project_status": existing.status,
+                    "locked_fields": touched_finance,
+                },
+            )
         before = {k: getattr(existing, k) for k in fields.keys()}
         self.repo.update(existing, updated_by=caller_user_id, **fields)
         if canonical_vendor_ids is not None:

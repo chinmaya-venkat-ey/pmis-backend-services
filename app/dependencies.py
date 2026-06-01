@@ -12,6 +12,7 @@ from app.controllers.attachment_controller import AttachmentController
 from app.controllers.comment_controller import CommentController
 from app.controllers.critical_path_controller import CriticalPathController
 from app.controllers.dashboard_controller import DashboardController
+from app.controllers.finance_controller import FinanceController
 from app.controllers.milestone_controller import MilestoneController
 from app.controllers.project_controller import ProjectController
 from app.controllers.subtask_controller import SubtaskController
@@ -90,3 +91,7 @@ def get_approval_inbox_controller(
     db: Session = Depends(get_db),
 ) -> ApprovalInboxController:
     return ApprovalInboxController(db)
+
+
+def get_finance_controller(db: Session = Depends(get_db)) -> FinanceController:
+    return FinanceController(db)

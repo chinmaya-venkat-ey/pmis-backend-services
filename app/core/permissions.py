@@ -85,6 +85,11 @@ PROJECTS_UPDATE_END_DATE: Final[str] = "projects:update:end_date"
 PROJECTS_UPDATE_ACTUAL_START_DATE: Final[str] = "projects:update:actual_start_date"
 PROJECTS_UPDATE_ACTUAL_END_DATE: Final[str] = "projects:update:actual_end_date"
 PROJECTS_UPDATE_VENDORS: Final[str] = "projects:update:vendors"
+# Doc-finance: field-level gate for the contract-finance fields
+# (totalProjectValueExclTax, taxPercent, ccnCapPercent). Applies on the
+# dedicated PATCH /projects/{uuid}/finance route and to any finance-field
+# updates that arrive via the generic PATCH /projects/{uuid}/update path.
+PROJECTS_UPDATE_FINANCE: Final[str] = "projects:update:finance"
 
 # --- milestones ---
 MILESTONES_UPDATE_NAME: Final[str] = "milestones:update:name"
@@ -160,6 +165,10 @@ PROJECT_FIELD_CODES: Final[dict[str, str]] = {
     "end_date": PROJECTS_UPDATE_END_DATE,
     "actual_start_date": PROJECTS_UPDATE_ACTUAL_START_DATE,
     "actual_end_date": PROJECTS_UPDATE_ACTUAL_END_DATE,
+    # Doc-finance — all three finance fields gate on the same code.
+    "total_project_value_excl_tax": PROJECTS_UPDATE_FINANCE,
+    "tax_percent": PROJECTS_UPDATE_FINANCE,
+    "ccn_cap_percent": PROJECTS_UPDATE_FINANCE,
 }
 
 MILESTONE_FIELD_CODES: Final[dict[str, str]] = {

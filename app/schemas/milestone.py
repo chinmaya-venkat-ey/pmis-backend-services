@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Annotated, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -9,6 +10,16 @@ from pydantic.alias_generators import to_camel
 
 from app.schemas._base import ResponseModel
 from app.schemas.comment import CommentResponse
+
+
+# Category choices for milestones / activities (Doc-finance).
+#   - ``original`` — set on every pre-publish create; never user-selectable
+#     on the wire (server forces it). Default for backfilled rows.
+#   - ``asg``      — Annual Strategic Goal: post-publish addition with no
+#                    money impact.
+#   - ``ccn``      — Change Control Note: post-publish addition with a
+#                    ``ccn_value`` that consumes the project CCN cap.
+_M_A_CATEGORY_CHOICES = ("original", "asg", "ccn")
 
 
 # Shared config — accept both camelCase aliases AND snake_case names on
@@ -66,6 +77,10 @@ class MilestoneResponse(ResponseModel):
     created_by: Optional[str] = None
     updated_by: Optional[str] = None
     deleted_at: Optional[datetime] = None
+    # Category + CCN value (Doc-finance). Returned on every response;
+    # backfilled rows surface as ``category='original'`` / ``ccnValue=0``.
+    category: str = "original"
+    ccn_value: Decimal = Decimal("0")
     # Inline first comment that the MULTIPART arm of /create creates when
     # ``body`` and/or ``files`` are supplied alongside the entity fields.
     # ``None`` (and the wrap layer drops the key) on the JSON arm and on
@@ -95,6 +110,13 @@ class MilestoneCreateRequest(BaseModel):
     position: Optional[int] = None
     depends_on: List[str] = Field(default_factory=list)
     vendor_ids: List[str] = Field(default_factory=list)
+    # Finance — optional on the wire. Service layer enforces the lifecycle:
+    # pre-publish creates IGNORE category/ccnValue and force 'original'/0;
+    # post-publish creates default category to 'asg' when omitted and
+    # require ccnValue > 0 when category='ccn'. Schema-level validator
+    # rejects unknown category strings (422 raw FastAPI shape).
+    category: Annotated[Optional[str], Field(default=None, max_length=16)]
+    ccn_value: Annotated[Optional[Decimal], Field(default=None, ge=0)]
 
     @field_validator("priority", mode="before")
     @classmethod
@@ -114,6 +136,28 @@ class MilestoneCreateRequest(BaseModel):
             raise ValueError(
                 f"Milestone status must be one of: "
                 f"{', '.join(_MILESTONE_STATUS_CHOICES)}."
+            )
+        return v
+
+    @field_validator("category", mode="before")
+    @classmethod
+    def _normalize_category(cls, v):
+        # Accept any case on the wire; canonical lowercase downstream.
+        if v is None:
+            return v
+        if isinstance(v, str):
+            v = v.strip().lower()
+        return v
+
+    @field_validator("category")
+    @classmethod
+    def _validate_category(cls, v):
+        if v is None:
+            return v
+        if v not in _M_A_CATEGORY_CHOICES:
+            raise ValueError(
+                f"Category must be one of: "
+                f"{', '.join(_M_A_CATEGORY_CHOICES)}."
             )
         return v
 
@@ -145,6 +189,11 @@ class MilestoneUpdateRequest(BaseModel):
     position: Optional[int] = None
     depends_on: Optional[List[str]] = None
     vendor_ids: Optional[List[str]] = None
+    # Finance — optional on PATCH. Service layer keeps ``category`` locked
+    # once set (any attempt to change → 409) and accepts ``ccn_value``
+    # updates only when the existing row's category is 'ccn'.
+    category: Annotated[Optional[str], Field(default=None, max_length=16)]
+    ccn_value: Annotated[Optional[Decimal], Field(default=None, ge=0)]
 
     @field_validator("priority", mode="before")
     @classmethod
@@ -164,6 +213,27 @@ class MilestoneUpdateRequest(BaseModel):
             raise ValueError(
                 f"Milestone status must be one of: "
                 f"{', '.join(_MILESTONE_STATUS_CHOICES)}."
+            )
+        return v
+
+    @field_validator("category", mode="before")
+    @classmethod
+    def _normalize_category(cls, v):
+        if v is None:
+            return v
+        if isinstance(v, str):
+            v = v.strip().lower()
+        return v
+
+    @field_validator("category")
+    @classmethod
+    def _validate_category(cls, v):
+        if v is None:
+            return v
+        if v not in _M_A_CATEGORY_CHOICES:
+            raise ValueError(
+                f"Category must be one of: "
+                f"{', '.join(_M_A_CATEGORY_CHOICES)}."
             )
         return v
 

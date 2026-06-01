@@ -12,6 +12,7 @@ Position is unique per LIVE row under (milestone_id) — drives A{m}.{a} labels.
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Any, Optional
 from uuid import uuid4
 
@@ -22,6 +23,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     String,
     Text,
     text,
@@ -106,6 +108,19 @@ class Activity(Base):
     status: Mapped[Optional[str]] = mapped_column(String(32))
     activity_started: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false"), default=False,
+    )
+
+    # Category + CCN value — same semantics as Milestone.category /
+    # Milestone.ccn_value. See app/models/milestone.py for the full
+    # rationale; DB CHECK constraints + the service-layer cap check
+    # mirror the milestone rules.
+    category: Mapped[str] = mapped_column(
+        String(16), nullable=False,
+        server_default=text("'original'"), default="original",
+    )
+    ccn_value: Mapped[Decimal] = mapped_column(
+        Numeric(18, 2), nullable=False,
+        server_default=text("0"), default=Decimal("0"),
     )
 
     created_at: Mapped[datetime] = mapped_column(

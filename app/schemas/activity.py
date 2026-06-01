@@ -26,6 +26,10 @@ _REQUEST_CONFIG = ConfigDict(
 # ``not_completed`` / ``completed`` only).
 _ACTIVITY_STATUS_CHOICES = ("not_completed", "completed")
 
+# Doc-finance category choices — same semantics as
+# app/schemas/milestone.py:_M_A_CATEGORY_CHOICES.
+_M_A_CATEGORY_CHOICES = ("original", "asg", "ccn")
+
 
 class ActivityResourceSchema(ResponseModel):
     """Embedded resource sidecar (1:1 with activity)."""
@@ -100,6 +104,9 @@ class ActivityResponse(ResponseModel):
     updated_by: Optional[str] = None
     deleted_at: Optional[datetime] = None
     resource: Optional[ActivityResourceSchema] = None
+    # Category + CCN value (Doc-finance). See app/schemas/milestone.py.
+    category: str = "original"
+    ccn_value: Decimal = Decimal("0")
     # Inline first comment populated only on the multipart /create arm
     # when body/files are supplied. Dropped from the wire (by the camel
     # layer) when ``None``.
@@ -141,6 +148,12 @@ class ActivityCreateRequest(BaseModel):
     concerned_division_other: Annotated[Optional[str], Field(default=None, max_length=255)]
     vendor_id: Annotated[Optional[str], Field(default=None, max_length=36)]
     depends_on: List[str] = Field(default_factory=list)
+    # Finance — optional on the wire. Pre-publish creates IGNORE
+    # category/ccnValue and force 'original'/0; post-publish creates
+    # default category to 'asg' when omitted, and require ccnValue > 0
+    # when category='ccn'. See activity_service.create for full lifecycle.
+    category: Annotated[Optional[str], Field(default=None, max_length=16)]
+    ccn_value: Annotated[Optional[Decimal], Field(default=None, ge=0)]
 
     @field_validator("priority", mode="before")
     @classmethod
@@ -160,6 +173,27 @@ class ActivityCreateRequest(BaseModel):
             raise ValueError(
                 f"Activity status must be one of: "
                 f"{', '.join(_ACTIVITY_STATUS_CHOICES)}."
+            )
+        return v
+
+    @field_validator("category", mode="before")
+    @classmethod
+    def _normalize_category(cls, v):
+        if v is None:
+            return v
+        if isinstance(v, str):
+            v = v.strip().lower()
+        return v
+
+    @field_validator("category")
+    @classmethod
+    def _validate_category(cls, v):
+        if v is None:
+            return v
+        if v not in _M_A_CATEGORY_CHOICES:
+            raise ValueError(
+                f"Category must be one of: "
+                f"{', '.join(_M_A_CATEGORY_CHOICES)}."
             )
         return v
 
@@ -202,6 +236,11 @@ class ActivityUpdateRequest(BaseModel):
     vendor_id: Annotated[Optional[str], Field(default=None, max_length=36)]
     position: Optional[int] = None
     depends_on: Optional[List[str]] = None
+    # Finance — optional on PATCH. Service layer locks category once set
+    # (409 if changed) and accepts ccn_value updates only when the
+    # existing row's category is 'ccn'.
+    category: Annotated[Optional[str], Field(default=None, max_length=16)]
+    ccn_value: Annotated[Optional[Decimal], Field(default=None, ge=0)]
 
     @field_validator("priority", mode="before")
     @classmethod
@@ -221,6 +260,27 @@ class ActivityUpdateRequest(BaseModel):
             raise ValueError(
                 f"Activity status must be one of: "
                 f"{', '.join(_ACTIVITY_STATUS_CHOICES)}."
+            )
+        return v
+
+    @field_validator("category", mode="before")
+    @classmethod
+    def _normalize_category(cls, v):
+        if v is None:
+            return v
+        if isinstance(v, str):
+            v = v.strip().lower()
+        return v
+
+    @field_validator("category")
+    @classmethod
+    def _validate_category(cls, v):
+        if v is None:
+            return v
+        if v not in _M_A_CATEGORY_CHOICES:
+            raise ValueError(
+                f"Category must be one of: "
+                f"{', '.join(_M_A_CATEGORY_CHOICES)}."
             )
         return v
 

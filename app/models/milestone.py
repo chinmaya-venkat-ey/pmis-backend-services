@@ -9,10 +9,20 @@ Per-project position is unique among LIVE rows (partial unique index where
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Optional
 from uuid import uuid4
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, text
+from sqlalchemy import (
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -53,6 +63,25 @@ class Milestone(Base):
     position: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[str] = mapped_column(String(32), default="not_completed")
     priority: Mapped[Optional[str]] = mapped_column(String(16))
+
+    # Category + CCN value (Doc-finance).
+    #   'original' — created pre-publish; the entire baseline scope (default).
+    #   'asg'      — Annual Strategic Goal (post-publish addition, no money).
+    #   'ccn'      — Change Control Note (post-publish addition, carries
+    #                ``ccn_value`` consumed against the project CCN cap).
+    # Pre-publish creates always store 'original'; the category dropdown
+    # only appears on post-publish create (FE-driven; the BE enforces the
+    # transition). DB CHECK constraints (see migration p1a000000006) keep
+    # category restricted to the three known codes and force ccn_value=0
+    # when category != 'ccn'.
+    category: Mapped[str] = mapped_column(
+        String(16), nullable=False,
+        server_default=text("'original'"), default="original",
+    )
+    ccn_value: Mapped[Decimal] = mapped_column(
+        Numeric(18, 2), nullable=False,
+        server_default=text("0"), default=Decimal("0"),
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=datetime.utcnow

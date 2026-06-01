@@ -12,6 +12,7 @@ Wire convention (matches monolith):
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Annotated, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -92,6 +93,16 @@ class ProjectResponse(ResponseModel):
 
     parent_id: Optional[str] = None
 
+    # Finance fields (Doc-finance). All three are returned on every project
+    # response — they're stored with safe defaults (0 / 0 / 25) on existing
+    # rows so the response shape stays consistent.
+    # ``total_project_value_incl_tax`` is computed in the controller from
+    # the excl-tax value × (1 + tax_percent/100) and is read-only here.
+    total_project_value_excl_tax: Optional[Decimal] = None
+    tax_percent: Optional[Decimal] = None
+    total_project_value_incl_tax: Optional[Decimal] = None
+    ccn_cap_percent: Optional[Decimal] = None
+
     created_by: Optional[str] = None
     updated_by: Optional[str] = None
     created_at: datetime
@@ -142,6 +153,19 @@ class ProjectCreateRequest(BaseModel):
     end_date: Optional[datetime] = None
 
     vendor_ids: List[str] = Field(default_factory=list)
+
+    # Finance fields (Doc-finance) — all optional. When omitted, the DB
+    # server defaults (0 / 0 / 25) apply. Existing FE clients that don't
+    # send these fields keep working unchanged.
+    total_project_value_excl_tax: Annotated[
+        Optional[Decimal], Field(default=None, ge=0)
+    ] = None
+    tax_percent: Annotated[
+        Optional[Decimal], Field(default=None, ge=0, le=100)
+    ] = None
+    ccn_cap_percent: Annotated[
+        Optional[Decimal], Field(default=None, ge=0, le=100)
+    ] = None
 
     # Monolith parity: schema-level status validator with the 4-value
     # fallback. Raw FastAPI ``{"detail": [...]}`` error shape on failure.
@@ -199,6 +223,23 @@ class ProjectUpdateRequest(BaseModel):
     actual_end_date: Optional[datetime] = None
     vendor_ids: Optional[List[str]] = None
 
+    # Finance fields (Doc-finance) — optional on PATCH. Editing finance via
+    # ``PATCH /projects/{uuid}/update`` is intentionally allowed only for
+    # backwards compatibility with the standard project update path; the
+    # canonical entry point is ``PATCH /projects/{uuid}/finance`` which
+    # carries the publish-lock + finance-field RBAC gate. The service
+    # layer here applies the same publish-lock when finance fields are
+    # touched via the generic update route.
+    total_project_value_excl_tax: Annotated[
+        Optional[Decimal], Field(default=None, ge=0)
+    ] = None
+    tax_percent: Annotated[
+        Optional[Decimal], Field(default=None, ge=0, le=100)
+    ] = None
+    ccn_cap_percent: Annotated[
+        Optional[Decimal], Field(default=None, ge=0, le=100)
+    ] = None
+
     @field_validator("end_date")
     @classmethod
     def _end_after_start(cls, v, info):
@@ -239,6 +280,17 @@ class ProjectUpsertRequest(BaseModel):
     start_date: Optional[datetime] = None
     end_date: Optional[datetime] = None
     vendor_ids: Optional[List[str]] = None
+
+    # Finance fields — optional on UPSERT. Same rules as Create/Update.
+    total_project_value_excl_tax: Annotated[
+        Optional[Decimal], Field(default=None, ge=0)
+    ] = None
+    tax_percent: Annotated[
+        Optional[Decimal], Field(default=None, ge=0, le=100)
+    ] = None
+    ccn_cap_percent: Annotated[
+        Optional[Decimal], Field(default=None, ge=0, le=100)
+    ] = None
 
     @field_validator("status")
     @classmethod

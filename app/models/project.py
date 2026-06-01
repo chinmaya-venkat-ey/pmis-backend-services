@@ -16,10 +16,20 @@ WARNING: mirrored read-only in other services'
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Optional
 from uuid import uuid4
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Text
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    Numeric,
+    String,
+    Text,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -70,6 +80,27 @@ class Project(Base):
     end_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     actual_start_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     actual_end_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+    # Finance fields — INR rupees stored as NUMERIC(18, 2). All default to
+    # safe zero/no-op values so existing rows continue to behave as before
+    # the feature landed. ``total_project_value_excl_tax`` = 0 keeps the
+    # CCN cap dormant (cap check is skipped service-side when TPV = 0);
+    # set it > 0 to activate cap enforcement. ``tax_percent`` drives the
+    # derived inclusive-tax companion returned on the wire — the inclusive
+    # value is never stored. ``ccn_cap_percent`` defaults to 25 (the
+    # standard contractual extension percentage).
+    total_project_value_excl_tax: Mapped[Decimal] = mapped_column(
+        Numeric(18, 2), nullable=False,
+        server_default=text("0"), default=Decimal("0"),
+    )
+    tax_percent: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2), nullable=False,
+        server_default=text("0"), default=Decimal("0"),
+    )
+    ccn_cap_percent: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2), nullable=False,
+        server_default=text("25"), default=Decimal("25"),
+    )
 
     # Audit / soft-delete. user-id FKs are LOGICAL only (cross-schema).
     created_by: Mapped[Optional[str]] = mapped_column(String(36))

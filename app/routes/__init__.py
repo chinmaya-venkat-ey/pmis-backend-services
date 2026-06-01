@@ -16,6 +16,7 @@ from app.routes import (
     comment_routes,
     critical_path_routes,
     dashboard_routes,
+    finance_routes,
     health_routes,
     milestone_routes,
     project_routes,
@@ -66,6 +67,9 @@ project_router.include_router(team_routes.associated_users_router)
 
 # Activity Approval Inbox — list + detail for the workflow review UI.
 project_router.include_router(approval_inbox_routes.router)
+
+# Project finance — GET/PATCH /api/v3/projects/{uuid}/finance.
+project_router.include_router(finance_routes.router)
 
 
 __all__ = ["project_router", "health_routes", "attachment_routes"]

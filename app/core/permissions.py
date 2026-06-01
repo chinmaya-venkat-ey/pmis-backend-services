@@ -115,6 +115,11 @@ PROJECTS_UPDATE_ACTUAL_START_DATE: Final[str] = "projects:update:actual_start_da
 PROJECTS_UPDATE_ACTUAL_END_DATE: Final[str] = "projects:update:actual_end_date"
 # Sub-resource writes (separate endpoints, not in the PATCH body)
 PROJECTS_UPDATE_VENDORS: Final[str] = "projects:update:vendors"
+# Doc-finance: field-level gate for the contract-finance fields
+# (totalProjectValueExclTax, taxPercent, ccnCapPercent). Seeded by
+# alembic r004; granted to super_admin / admin / org_admin /
+# project_admin (admin tiers + the project admin).
+PROJECTS_UPDATE_FINANCE: Final[str] = "projects:update:finance"
 
 
 # =========================================================================
@@ -281,6 +286,10 @@ PROJECT_FIELD_CODES: Final[dict[str, str]] = {
     "end_date": PROJECTS_UPDATE_END_DATE,
     "actual_start_date": PROJECTS_UPDATE_ACTUAL_START_DATE,
     "actual_end_date": PROJECTS_UPDATE_ACTUAL_END_DATE,
+    # Doc-finance: all three finance fields share the same gate.
+    "total_project_value_excl_tax": PROJECTS_UPDATE_FINANCE,
+    "tax_percent": PROJECTS_UPDATE_FINANCE,
+    "ccn_cap_percent": PROJECTS_UPDATE_FINANCE,
 }
 
 MILESTONE_FIELD_CODES: Final[dict[str, str]] = {

@@ -398,6 +398,128 @@ class RbacRepository:
 
         return out
 
+    def builtin_role_assignments_for_user(self, user_id: str) -> List[Dict[str, Optional[object]]]:
+        """Return every BUILTIN role assignment the user currently holds,
+        across both legacy ``user_roles`` and scoped ``user_role_assignments``.
+
+        2026-06-02: single source of truth for the user-facing ``orgRole``
+        field. Replaces the prior hand-maintained ``ORG_TIER_ROLES`` tuple
+        — ``Role.builtin = True`` filtering means any future builtin role
+        (created via migration) appears automatically. Non-builtin custom
+        roles such as ``test_role`` are excluded.
+
+        Each returned dict has the shape::
+
+            {
+              "role_name":       str,
+              "role_id":         int,
+              "scope":           "global" | "org" | "project",
+              "organization_id": Optional[str],
+              "project_id":      Optional[str],
+              "project_code":    Optional[str],   # resolved for project scope
+              "assignment_id":   Optional[int],   # None for legacy user_roles
+              "created_at":      Optional[datetime],
+              "created_by":      Optional[str],
+            }
+
+        Duplicates across the two tier-tables are collapsed by
+        (role_name, scope, organization_id, project_id) — the SCOPED row
+        (user_role_assignments) wins because it carries a surrogate
+        ``assignment_id`` the FE may need for revocation. Output is
+        sorted for deterministic FE rendering.
+        """
+        if not user_id:
+            return []
+
+        out: List[Dict[str, Optional[object]]] = []
+        seen: set = set()
+
+        # Process the Doc-41 scoped tier FIRST so it wins on (role,scope,
+        # org_id,project_id) collisions — those rows carry assignment_id
+        # which the FE needs for revocation.
+        scoped_rows = self.db.execute(
+            select(
+                Role.name,
+                Role.id,
+                UserRoleAssignment.organization_id,
+                UserRoleAssignment.project_id,
+                UserRoleAssignment.id,
+                UserRoleAssignment.created_at,
+                UserRoleAssignment.created_by,
+            )
+            .join(UserRoleAssignment, UserRoleAssignment.role_id == Role.id)
+            .where(UserRoleAssignment.user_id == user_id)
+            .where(Role.builtin.is_(True))
+        ).all()
+        for role_name, role_id, org_id, project_id, ass_id, created_at, created_by in scoped_rows:
+            if org_id is None and project_id is None:
+                scope = "global"
+            elif org_id is not None:
+                scope = "org"
+            else:
+                scope = "project"
+            key = (role_name, scope, org_id, project_id)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append({
+                "role_name": role_name,
+                "role_id": role_id,
+                "scope": scope,
+                "organization_id": org_id,
+                "project_id": project_id,
+                "project_code": None,  # filled below for project-scoped rows
+                "assignment_id": ass_id,
+                "created_at": created_at,
+                "created_by": created_by,
+            })
+
+        # Legacy global tier (users.user_roles is global-by-design; no
+        # surrogate id since the PK is composite (user_id, role_id)).
+        for role_name, role_id, created_at, created_by in self.db.execute(
+            select(Role.name, Role.id, UserRole.created_at, UserRole.created_by)
+            .join(UserRole, UserRole.role_id == Role.id)
+            .where(UserRole.user_id == user_id)
+            .where(Role.builtin.is_(True))
+        ).all():
+            key = (role_name, "global", None, None)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append({
+                "role_name": role_name,
+                "role_id": role_id,
+                "scope": "global",
+                "organization_id": None,
+                "project_id": None,
+                "project_code": None,
+                "assignment_id": None,  # legacy table has no surrogate id
+                "created_at": created_at,
+                "created_by": created_by,
+            })
+
+        # Resolve project_code for every project-scoped row in one batch
+        # query against the cross-schema Project mirror (avoid N+1).
+        project_ids = {
+            o["project_id"] for o in out
+            if o["scope"] == "project" and o["project_id"]
+        }
+        if project_ids:
+            from app.models._cross_schema import Project as ProjectMirror
+            code_by_id = dict(self.db.execute(
+                select(ProjectMirror.id, ProjectMirror.project_code)
+                .where(ProjectMirror.id.in_(project_ids))
+            ).all())
+            for entry in out:
+                if entry["scope"] == "project" and entry["project_id"]:
+                    entry["project_code"] = code_by_id.get(entry["project_id"])
+
+        out.sort(key=lambda e: (
+            e["role_name"], e["scope"],
+            e["organization_id"] or "", e["project_id"] or "",
+        ))
+        return out
+
     def user_has_admin_role(self, user_id: str) -> bool:
         """True if the user holds `admin` or `super_admin` GLOBALLY.
 

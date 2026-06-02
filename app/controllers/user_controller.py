@@ -60,36 +60,18 @@ class UserController:
             .limit(1)
         ).first() is not None
 
-    def _derive_org_roles(self, user_id: str) -> List[str]:
-        """Return every builtin role the user currently holds (legacy
-        user_roles + scoped user_role_assignments combined). Auto-derived
-        from the DB — new roles added via migration (with ``builtin=True``
-        on the row) are picked up automatically, no Python edit needed.
+    def _derive_org_roles(self, user_id: str):
+        """Return every scoped builtin-role assignment the user holds.
 
-        Custom (non-builtin) roles such as ``test_role`` are excluded so
-        they don't pollute the user-facing tier label. The
-        ``users.users.org_role`` column is no longer consulted; it stays
-        as a legacy varchar hint that's set/maintained separately via
-        PATCH /users/{id} but isn't surfaced in the response.
-
-        Returns names sorted alphabetically (deterministic order without
-        a priority bias). Frontend decides how to render multiple roles.
+        Delegates to ``RbacRepository.builtin_role_assignments_for_user``
+        so the login response and the user-shape response share one
+        source of truth. Each entry is a dict with role_name + scope +
+        organization_id / project_id / project_code. The
+        ``users.users.org_role`` column is no longer consulted here; it
+        stays as a legacy varchar hint maintained separately by
+        PATCH /users/{id}.
         """
-        db = self.user_service.db
-        legacy = set(db.execute(
-            select(Role.name)
-            .join(UserRole, UserRole.role_id == Role.id)
-            .where(UserRole.user_id == user_id)
-            .where(Role.builtin.is_(True))
-        ).scalars())
-        scoped = set(db.execute(
-            select(Role.name)
-            .join(UserRoleAssignment, UserRoleAssignment.role_id == Role.id)
-            .where(UserRoleAssignment.user_id == user_id)
-            .where(Role.builtin.is_(True))
-            .distinct()
-        ).scalars())
-        return sorted(legacy | scoped)
+        return self.rbac.builtin_role_assignments_for_user(user_id)
 
     def _build_user_response(self, user) -> UserResponse:
         db = self.user_service.db

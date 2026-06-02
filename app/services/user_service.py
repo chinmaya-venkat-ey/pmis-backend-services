@@ -223,6 +223,31 @@ class UserService:
                             created_by_user_id=created_by_user_id,
                         )
 
+        # 2026-06-02 (CEO-class fix + multi-role create support):
+        # ALWAYS sync the global role-assignment row when ``org_role`` is
+        # set on create, regardless of project_ids / project_assignments.
+        # Symmetric with PATCH /users/{id}'s _sync_org_role_assignment.
+        #
+        # Effect:
+        #   * Pattern A (org_role only) → 1 global row.
+        #   * Pattern B (org_role + project_ids) → 1 global row + N project
+        #     rows of the same role. Effectively-redundant (global already
+        #     covers all projects) but harmless under union semantics: the
+        #     user's effective code set is the union of all granted codes,
+        #     so duplicate rows don't change behavior.
+        #   * Pattern E (org_role + project_assignments[]) → 1 global row
+        #     for org_role + N per-project rows for the project_assignments
+        #     entries (which may carry DIFFERENT role_ids). This is the
+        #     "global admin + project_member on Project X in one call"
+        #     case — now supported in a single request.
+        if payload.org_role and created_by_user_id is not None:
+            self._sync_org_role_assignment(
+                target=row,
+                new_org_role=payload.org_role,
+                caller_user_id=created_by_user_id,
+                caller_is_admin=caller_is_admin,
+            )
+
         self.db.commit()
         return row
 

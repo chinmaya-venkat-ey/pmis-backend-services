@@ -88,6 +88,10 @@ class RefreshService:
         # Build the user summary (matches LoginResponse.user shape).
         is_admin = self.rbac.user_has_admin_role(user.id)
         is_super = self._is_super_admin(user.id)
+        # 2026-06-02: orgRole is the full list of scoped builtin-role
+        # assignments (role_name + scope info per entry). DB-derived to
+        # stay consistent with the login response.
+        builtin_roles = self.rbac.builtin_role_assignments_for_user(user.id)
 
         return RefreshResponse(
             access_token=access_token,
@@ -104,7 +108,7 @@ class RefreshService:
                 email=user.email,
                 first_name=user.first_name,
                 last_name=user.last_name,
-                org_role=user.org_role,
+                org_role=builtin_roles,
                 is_admin=is_admin,
                 is_super_admin=is_super,
             ),

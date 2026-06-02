@@ -7,6 +7,7 @@ from typing import Annotated, List, Optional
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
 
 from app.schemas._base import ResponseModel
+from app.schemas.role_assignment import RoleAssignmentSummary
 
 
 class UserProjectSummary(ResponseModel):
@@ -38,14 +39,15 @@ class UserResponse(ResponseModel):
     division_label: Optional[str] = None
     division_other: Optional[str] = None
     phone_number: Optional[str] = None
-    # 2026-06-02: changed from Optional[str] to List[str]. A user can hold
-    # multiple role assignments (e.g. admin globally + project_member on
-    # project X); we now return every builtin role they hold instead of
-    # picking one via a hand-maintained priority list. Auto-derived from
-    # users.user_roles + users.user_role_assignments by the controller;
-    # the users.users.org_role column itself stays as a legacy varchar
-    # hint and is no longer surfaced here.
-    org_role: List[str] = Field(default_factory=list)
+    # 2026-06-02: changed from Optional[str] to List[RoleAssignmentSummary].
+    # A user can hold multiple role assignments scoped differently (e.g.
+    # admin globally + project_member on project X). Each entry carries
+    # role_name + scope + organization_id/project_id/project_code, so the
+    # FE knows where each role applies. Auto-derived from the DB by
+    # RbacRepository.builtin_role_assignments_for_user; the
+    # users.users.org_role column itself stays as a legacy varchar hint
+    # and is no longer surfaced here.
+    org_role: List["RoleAssignmentSummary"] = Field(default_factory=list)
     is_admin: bool = False
     is_super_admin: bool = False
     two_factor_enabled: bool = False

@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, Optional
+from typing import Annotated, List, Optional
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from app.schemas._base import ResponseModel
+from app.schemas.role_assignment import RoleAssignmentSummary
 
 
 class LoginRequest(BaseModel):
@@ -16,7 +17,13 @@ class LoginRequest(BaseModel):
 
 
 class LoginUserSummary(BaseModel):
-    """Bare-minimum user payload returned on a successful login."""
+    """Bare-minimum user payload returned on a successful login.
+
+    2026-06-02: ``org_role`` is now ``List[RoleAssignmentSummary]`` —
+    every builtin role assignment the user holds, with scope information
+    (global / org / project) so the FE knows where each role applies.
+    Derived from the DB via ``RbacRepository.builtin_role_assignments_for_user``.
+    """
 
     model_config = ConfigDict(from_attributes=True)
     id: str
@@ -24,7 +31,7 @@ class LoginUserSummary(BaseModel):
     email: EmailStr
     first_name: Optional[str] = None
     last_name: Optional[str] = None
-    org_role: Optional[str] = None
+    org_role: List["RoleAssignmentSummary"] = Field(default_factory=list)
     is_admin: bool = Field(default=False)
     is_super_admin: bool = Field(default=False)
 

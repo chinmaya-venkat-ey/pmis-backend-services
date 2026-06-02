@@ -9,6 +9,35 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from app.schemas._base import ResponseModel
 
 
+class RoleAssignmentSummary(BaseModel):
+    """Compact role-assignment shape for embedding under a user payload
+    (login response, /users/me, /users list, etc.).
+
+    Carries enough for the FE to:
+      * know what the role is (``role_name`` + ``role_id``),
+      * know where it applies (``scope`` + ``organization_id`` / ``project_id``),
+      * render scoped labels without a second call (``project_code``),
+      * call DELETE /role-assignments/{id} (``assignment_id``),
+      * show audit info (``created_at`` + ``created_by``).
+
+    2026-06-02: replaces the prior ``org_role: List[str]`` flat-names list.
+    ``assignment_id`` is null for legacy ``user_roles`` rows (composite-PK
+    table has no surrogate id) and an int for ``user_role_assignments``
+    rows.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+    role_name: str
+    role_id: int
+    scope: str = Field(description="'global' | 'org' | 'project'")
+    organization_id: Optional[str] = None
+    project_id: Optional[str] = None
+    project_code: Optional[str] = None
+    assignment_id: Optional[int] = None
+    created_at: Optional[datetime] = None
+    created_by: Optional[str] = None
+
+
 class RoleAssignmentResponse(ResponseModel):
     """Returned by GET / POST role-assignment endpoints."""
 

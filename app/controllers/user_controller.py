@@ -24,10 +24,9 @@ from app.services.permission_service import PermissionService
 from app.services.user_service import UserService
 
 
-# Ordered highest → lowest; first match is the canonical org_role label.
-# Sourced from core/permissions.py so the same allowlist is used by both
-# the read (derive_org_role) and write (UserService.update) paths.
-from app.core.permissions import ORG_TIER_ROLES as _ROLE_PRIORITY
+# 2026-06-02: ORG_TIER_ROLES tuple removed. _derive_org_roles now returns
+# every builtin role the user holds, auto-discovered from the DB. New
+# roles created via migration are recognized automatically.
 
 
 class UserController:
@@ -61,37 +60,36 @@ class UserController:
             .limit(1)
         ).first() is not None
 
-    def _derive_org_role(self, user_id: str) -> Optional[str]:
-        """Return the highest-tier role the user currently holds (both legacy
-        user_roles and scoped user_role_assignments). When no role
-        assignment matches, fall back to the ``users.org_role`` column for
-        monolith parity (the column is then the authoritative label).
-        Only the 6 builtin tier names are valid org-role labels — any
-        other column value (e.g., ``test_role``, legacy typos) is ignored.
+    def _derive_org_roles(self, user_id: str) -> List[str]:
+        """Return every builtin role the user currently holds (legacy
+        user_roles + scoped user_role_assignments combined). Auto-derived
+        from the DB — new roles added via migration (with ``builtin=True``
+        on the row) are picked up automatically, no Python edit needed.
+
+        Custom (non-builtin) roles such as ``test_role`` are excluded so
+        they don't pollute the user-facing tier label. The
+        ``users.users.org_role`` column is no longer consulted; it stays
+        as a legacy varchar hint that's set/maintained separately via
+        PATCH /users/{id} but isn't surfaced in the response.
+
+        Returns names sorted alphabetically (deterministic order without
+        a priority bias). Frontend decides how to render multiple roles.
         """
         db = self.user_service.db
         legacy = set(db.execute(
             select(Role.name)
             .join(UserRole, UserRole.role_id == Role.id)
             .where(UserRole.user_id == user_id)
+            .where(Role.builtin.is_(True))
         ).scalars())
         scoped = set(db.execute(
             select(Role.name)
             .join(UserRoleAssignment, UserRoleAssignment.role_id == Role.id)
             .where(UserRoleAssignment.user_id == user_id)
+            .where(Role.builtin.is_(True))
             .distinct()
         ).scalars())
-        held = legacy | scoped
-        for tier in _ROLE_PRIORITY:
-            if tier in held:
-                return tier
-        # Monolith parity fallback: users.org_role column. Only return if
-        # the stored value is one of the recognized builtin tiers.
-        user_row = self.user_service.repo.get_by_id(user_id)
-        col_value = (getattr(user_row, "org_role", None) or "").strip().lower() if user_row else None
-        if col_value in _ROLE_PRIORITY:
-            return col_value
-        return None
+        return sorted(legacy | scoped)
 
     def _build_user_response(self, user) -> UserResponse:
         db = self.user_service.db
@@ -122,7 +120,10 @@ class UserController:
             data["division_label"] = None
 
         # Derive org_role from live role assignments (Bug #16).
-        data["org_role"] = self._derive_org_role(user.id)
+        # 2026-06-02: now returns the full list of builtin role names the
+        # user holds — auto-discovered from the DB, no hand-maintained
+        # priority tuple.
+        data["org_role"] = self._derive_org_roles(user.id)
 
         # Convenience concat — monolith parity. Joins first + last with a
         # space; falls back to ``login`` when both names are empty. Lets

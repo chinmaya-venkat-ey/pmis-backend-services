@@ -15,6 +15,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import List, Optional, Tuple
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.errors import (
@@ -25,7 +26,7 @@ from app.core.errors import (
     UserLoginAlreadyInUseError,
     UserNotFoundError,
 )
-from app.core.permissions import ADMIN_ROLE, ORG_TIER_ROLES, SUPER_ADMIN_ROLE
+from app.core.permissions import ADMIN_ROLE, SUPER_ADMIN_ROLE
 from app.core.security import hash_password
 from app.repositories.rbac_repository import RbacRepository
 from app.repositories.user_repository import UserRepository
@@ -339,8 +340,11 @@ class UserService:
 
         Behavior:
           * new_org_role normalized to lowercase string; null/empty → "clear"
-          * Non-empty value must be one of ORG_TIER_ROLES (the 6 builtins).
-            test_role and any other custom role → 422 ValidationError.
+          * Non-empty value must match a ``builtin=True`` row in
+            ``users.roles``. test_role and any other custom (builtin=False)
+            role → 422 ValidationError. 2026-06-02: this validation is now
+            DB-driven instead of hand-maintained, so new builtin roles
+            added via migration are automatically accepted.
           * Permission gate: reuses RoleAssignmentService._assert_caller_can_grant
             so the same caller-tier rules apply (only super_admin can grant
             super_admin / admin, etc.).
@@ -348,8 +352,8 @@ class UserService:
             and the new value is NOT super_admin, refuse to avoid locking the
             instance out of admin access.
           * Atomic delete-then-create within the surrounding update()
-            transaction: remove every globally-scoped org-tier row for the
-            target, then insert one fresh row for the new tier (if any).
+            transaction: remove every globally-scoped builtin-role row for
+            the target, then insert one fresh row for the new tier (if any).
         """
         from app.core.errors import ValidationError
         from app.repositories.user_role_assignment_repository import UserRoleAssignmentRepository
@@ -357,13 +361,21 @@ class UserService:
 
         normalized = (new_org_role or "").strip().lower() or None
 
-        if normalized is not None and normalized not in ORG_TIER_ROLES:
-            raise ValidationError(
-                f"org_role must be one of {list(ORG_TIER_ROLES)} (or null to clear). "
-                f"Got {new_org_role!r}.",
-                details={"field": "org_role", "value": new_org_role,
-                         "allowed": list(ORG_TIER_ROLES)},
-            )
+        if normalized is not None:
+            from app.models.role import Role
+            role_row = self.db.execute(
+                select(Role).where(Role.name == normalized).where(Role.builtin.is_(True))
+            ).scalar_one_or_none()
+            if role_row is None:
+                allowed = sorted(self.db.execute(
+                    select(Role.name).where(Role.builtin.is_(True))
+                ).scalars())
+                raise ValidationError(
+                    f"org_role must be a builtin role name (or null to clear). "
+                    f"Got {new_org_role!r}. Allowed: {allowed}.",
+                    details={"field": "org_role", "value": new_org_role,
+                             "allowed": allowed},
+                )
 
         # Last-super-admin lockout: target currently is super_admin (via any
         # path) and the new value isn't super_admin → refuse.
@@ -385,14 +397,16 @@ class UserService:
                 caller_is_admin=caller_is_admin,
             )
 
-        # Delete every globally-scoped org-tier assignment the target currently
-        # holds. Scoped assignments (org_id / project_id set) are NOT touched —
-        # those represent per-project membership and live independently.
+        # Delete every globally-scoped builtin-role assignment the target
+        # currently holds. Scoped assignments (org_id / project_id set) are
+        # NOT touched — those represent per-project membership and live
+        # independently. Non-builtin (custom) roles are also untouched so
+        # things like `test_role` aren't accidentally swept.
         ra_repo = UserRoleAssignmentRepository(self.db)
         existing_pairs = ra_repo.list_by_user(target.id)
         for assignment, role in existing_pairs:
             is_global = assignment.organization_id is None and assignment.project_id is None
-            if is_global and role.name in ORG_TIER_ROLES:
+            if is_global and getattr(role, "builtin", False):
                 ra_repo.delete(assignment)
 
         # Insert the new globally-scoped assignment for the requested tier
@@ -400,12 +414,13 @@ class UserService:
         if normalized is not None:
             new_role = self.rbac.get_role_by_name(normalized)
             if new_role is None:
-                # ORG_TIER_ROLES is the bootstrap-seeded set; if the row is
-                # missing the install is broken — treat as 500-class.
+                # The validation above already confirmed the role exists +
+                # is builtin via DB query. If we're here the row was
+                # deleted between the validation and this insert (race) —
+                # treat as 500-class.
                 raise ValidationError(
-                    f"Role {normalized!r} is in the allowlist but not present "
-                    f"in users.roles. Bootstrap migration may have been "
-                    f"skipped.",
+                    f"Role {normalized!r} disappeared between validation "
+                    f"and assignment. Retry.",
                 )
             ra_repo.create(
                 user_id=target.id,

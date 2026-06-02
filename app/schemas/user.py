@@ -38,7 +38,14 @@ class UserResponse(ResponseModel):
     division_label: Optional[str] = None
     division_other: Optional[str] = None
     phone_number: Optional[str] = None
-    org_role: Optional[str] = None
+    # 2026-06-02: changed from Optional[str] to List[str]. A user can hold
+    # multiple role assignments (e.g. admin globally + project_member on
+    # project X); we now return every builtin role they hold instead of
+    # picking one via a hand-maintained priority list. Auto-derived from
+    # users.user_roles + users.user_role_assignments by the controller;
+    # the users.users.org_role column itself stays as a legacy varchar
+    # hint and is no longer surfaced here.
+    org_role: List[str] = Field(default_factory=list)
     is_admin: bool = False
     is_super_admin: bool = False
     two_factor_enabled: bool = False

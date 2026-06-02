@@ -40,7 +40,12 @@ class BucketCounts(BaseModel):
 
     There is no ``active`` field at the project level. The Summary
     view's "Active Projects" KPI tile is computed by the FE as
-    ``total - completed`` (i.e. ``ontrack + delayed``)."""
+    ``total - completed`` (i.e. ``ontrack + delayed``).
+
+    ``pendingApprovalCount`` is a static placeholder until the approval
+    workflow integration lands — see
+    ``app/services/dashboard_service.py:_STATIC_PENDING_APPROVAL_COUNT``.
+    """
 
     model_config = ConfigDict(from_attributes=False)
 
@@ -48,6 +53,7 @@ class BucketCounts(BaseModel):
     ontrack: int = 0
     delayed: int = 0
     completed: int = 0
+    pendingApprovalCount: int = 0
 
 
 class DivisionCard(BaseModel):
@@ -166,7 +172,7 @@ class ProjectKpis(BaseModel):
     activitiesCompleted: int
     activitiesDelayed: int
     activitiesOntrack: int
-    pendingApprovals: int  # static 0 in v1
+    pendingApprovalCount: int  # static placeholder until approval-workflow integration
     delayedCount: int
 
 

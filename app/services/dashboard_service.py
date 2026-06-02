@@ -193,13 +193,27 @@ def _empty_project_counters() -> Dict[str, int]:
     }
 
 
+# Static placeholder for the dashboard "pending approvals" count.
+# Real wiring (e.g. activity-workflow transitions awaiting review) will
+# replace this when the approval module is fully integrated. Until then
+# every dashboard counts block surfaces the same static placeholder so
+# the FE can bind to the field without conditional logic.
+_STATIC_PENDING_APPROVAL_COUNT = 2
+
+
 def _build_bucket_counts(buckets: List[str]) -> Dict[str, int]:
-    """Fold a list of bucket strings into the ``BucketCounts`` shape."""
+    """Fold a list of bucket strings into the ``BucketCounts`` shape.
+
+    Always includes ``pendingApprovalCount`` (static placeholder, see
+    ``_STATIC_PENDING_APPROVAL_COUNT``) so every dashboard endpoint's
+    counts block carries the same key.
+    """
     out = {"total": 0, "ontrack": 0, "delayed": 0, "completed": 0}
     for b in buckets:
         out["total"] += 1
         if b in out:
             out[b] += 1
+    out["pendingApprovalCount"] = _STATIC_PENDING_APPROVAL_COUNT
     return out
 
 
@@ -726,10 +740,6 @@ class DashboardService:
     # Endpoint #3 — GET /project/dashboard/projects/{id}
     # =====================================================================
 
-    # Pending approvals KPI is intentionally static at zero — approval
-    # workflow is deferred to the next phase.
-    _STATIC_PENDING_APPROVALS = 0
-
     def get_project_detail(
         self,
         *,
@@ -775,7 +785,7 @@ class DashboardService:
             "activitiesCompleted": counters["activitiesCompleted"],
             "activitiesDelayed": counters["activitiesDelayed"],
             "activitiesOntrack": counters["activitiesOntrack"],
-            "pendingApprovals": self._STATIC_PENDING_APPROVALS,
+            "pendingApprovalCount": _STATIC_PENDING_APPROVAL_COUNT,
             "delayedCount": counters["delayedItemCount"],
         }
 
@@ -787,6 +797,7 @@ class DashboardService:
             "completed": (
                 counters["milestonesCompleted"] + counters["activitiesCompleted"]
             ),
+            "pendingApprovalCount": _STATIC_PENDING_APPROVAL_COUNT,
         }
 
         # ---- Delayed track rows ----------------------------------------
@@ -992,6 +1003,7 @@ class DashboardService:
             b = r["bucket"]
             if b in counts:
                 counts[b] += 1
+        counts["pendingApprovalCount"] = _STATIC_PENDING_APPROVAL_COUNT
 
         return {
             "asOf": today.isoformat(),

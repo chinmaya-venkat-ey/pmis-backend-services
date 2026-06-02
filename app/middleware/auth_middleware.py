@@ -1,11 +1,20 @@
-"""JWT auth middleware for pmis-project-management.
+"""JWT auth middleware for pmis-user-management.
 
-Decodes the Bearer token, checks `users.revoked_tokens` cross-schema, then
-hydrates request.state with user_id / permissions (flat + scoped) / is_admin.
+Decodes the Bearer token, checks `users.revoked_tokens` (this service OWNS
+that table — no cross-schema), then hydrates request.state with:
+  - user_id          : str (None for anonymous requests)
+  - user_login       : Optional[str]
+  - user_email       : Optional[str]
+  - token_jti        : Optional[str]
+  - user_permissions : Set[str]  (flat union of role + direct grants)
+  - scoped_permissions : Dict[(kind, id), Set[str]]  (Doc-41 scope tiers)
+  - is_admin         : bool
 
-Doc-41 scoped_permissions is essential here — project-svc's
-`require_project_permission` reads it to compare against the path's
-project_uuid.
+Anonymous-passthrough: requests with no/invalid/revoked token leave
+request.state anonymous and the route's require_* dep decides what to do.
+
+Public-path allow-list bypasses the JWT path entirely for: health endpoints,
+login, refresh, OTP routes, forgot/reset-password, introspect, /docs etc.
 """
 from __future__ import annotations
 
@@ -17,25 +26,32 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.core.security import decode_access_token, extract_bearer_token
 from app.db import SessionLocal
-from app.repositories.rbac_read_repository import RbacReadRepository
+from app.repositories.rbac_repository import RbacRepository
 from app.utilities.logger import get_logger
 
 
 logger = get_logger(__name__)
 
 
+# Endpoints that bypass the JWT path entirely.
 _PUBLIC_PREFIXES = (
     "/health",
     "/ready",
     "/docs",
     "/redoc",
     "/openapi.json",
-    # Doc-35 dev fallback for attachment downloads. URLs are
-    # UUID-guarded; the route is only mounted when
-    # ``file_server_local_fallback_enabled`` is true.
-    "/files",
 )
-_PUBLIC_EXACT = {"/"}
+_PUBLIC_EXACT = {
+    "/",
+    # Auth endpoints — anonymous by design
+    "/api/v3/users/login",
+    "/api/v3/users/refresh",
+    "/api/v3/users/introspect",
+    "/api/v3/users/login/send-otp",
+    "/api/v3/users/login/verify-otp",
+    "/api/v3/users/forgot-password",
+    "/api/v3/users/reset-password",
+}
 
 
 def _is_public_path(path: str) -> bool:
@@ -55,10 +71,11 @@ def _set_anonymous(request: Request) -> None:
     request.state.user_permissions = set()  # type: Set[str]
     request.state.scoped_permissions = {}
     request.state.is_admin = False
-    request.state.user_vendor_id = None  # hydrated below from users.users mirror
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
+    """Starlette middleware that hydrates request.state from the JWT."""
+
     async def dispatch(self, request: Request, call_next):
         _set_anonymous(request)
 
@@ -78,15 +95,19 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if not user_id:
             return await call_next(request)
 
+        # Doc-26 guard dropped per Q17 — pre-Doc-26 int-id tokens are
+        # already past their 7-day refresh window by the time this lands.
+
         db: Session = SessionLocal()
         try:
-            rbac = RbacReadRepository(db)
+            rbac = RbacRepository(db)
             if jti and rbac.is_revoked(jti):
+                # Revoked — stay anonymous.
                 return await call_next(request)
 
             perms: Set[str] = rbac.effective_permissions_for_user(user_id)
             scoped = rbac.effective_permissions_by_scope(user_id)
-            is_admin: bool = rbac.is_admin(user_id)
+            is_admin: bool = rbac.user_has_admin_role(user_id)
 
             request.state.user_id = user_id
             request.state.user_login = claims.get("sub")
@@ -95,14 +116,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
             request.state.user_permissions = perms
             request.state.scoped_permissions = scoped
             request.state.is_admin = is_admin
-
-            # Hydrate caller's vendor_id for row-level vendor scoping.
-            from app.models._cross_schema import User as MirrorUser
-            mirror_row = db.get(MirrorUser, user_id)
-            if mirror_row is not None:
-                request.state.user_vendor_id = mirror_row.vendor_id
         except Exception as exc:  # noqa: BLE001
             logger.warning("Auth hydration failed for user_id=%s: %s", user_id, exc)
+            # Anonymous defaults stay in place; route dep emits 401.
         finally:
             db.close()
 

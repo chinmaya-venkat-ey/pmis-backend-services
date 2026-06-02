@@ -1,158 +1,176 @@
-# pmis-project-management — Migration Log
+# pmis-user-management — Migration Log
 
-Fourth (and final) service ported in Phase 3 per Q19/Q29. Owns the `project` Postgres schema (16 tables). Source: `C:\Programming\PMIS\PMIS-OpenProject\app\` — the consolidated monolith — plus the per-table source models under `C:\Programming\PMIS\PMIS-OpenProject\app\infrastructure\db\models\`.
+Third service ported in Phase 3 per Q19/Q29. Owns the `users` Postgres schema. Source: `C:\Programming\PMIS\PMIS-user-management\` (the half-finished extract) plus the still-authoritative monolith pieces under `C:\Programming\PMIS\PMIS-OpenProject\app\`.
 
-**Doc decisions applied** (callouts):
-- **Q5 / Q6**: `meetings`, `work_packages`, `meeting_agenda_items`, `meeting_participants` dropped from scope. No tables, no routes.
-- **Doc-22**: legacy `depends` JSON column removed from milestones; edges live in `milestone_dependencies` (already in the monolith; preserved).
-- **Doc-24**: subtask nesting via `parent_subtask_id` is supported, with two partial-unique indexes anchoring positions per parent. Service-layer caps nesting at `settings.subtask_max_nesting_depth` (default 5).
-- **Doc-33**: `cloned_from_id` versioning columns gone from milestones / activities / tasks / subtasks. Not ported.
-- **Doc-35**: comments are "send events" — `body` is nullable; `attachments` is a JSONB list on the comment row; no separate attachments table.
-- **Doc-38**: activity / task / subtask `type` column kept for legacy reads only; new writes do not require it. `resource_mode` / `resource_count` similarly deprecated but preserved for back-compat.
-- **Doc-39**: `concerned_divisions` (JSONB list) added to activities; old single `concerned_division` column kept for legacy reads.
-- **Doc-41**: `users.user_role_assignments` (cross-schema) drives the scoped permission map. `require_project_permission(code)` reads `request.state.scoped_permissions[("project", project_uuid)]`; global-scope holders pass every check. AuthMiddleware hydrates the scoped map via `RbacReadRepository.effective_permissions_by_scope`.
-- **Doc-44**: caller-vs-target gates are deferred to follow-up (the first port wires the FSM but leaves vendor-vs-target comparisons for later).
-- **Doc-46**: `ProjectRepository.list_` narrows visibility for non-admins to projects they have an assignment on OR projects mapped to their vendor.
+**Q33 applied**: bootstrap super-admin password sourced from `SUPERADMIN_BOOTSTRAP_PASSWORD` env var. Migration 002 skips bootstrap-user creation if the var is unset; in production the var is removed after the first migration run.
+
+**Q14 applied**: `UNIVERSAL_OTP_ENABLED=true` is rejected at startup in production (see `app/main.py:lifespan`). Local dev can still enable it for FE testing.
+
+**Q13 applied**: OTP storage moved from notification-svc to user-svc. notification-svc DISPATCHES; user-svc GENERATES, STORES (hashed), VERIFIES. The `otp_codes` table lives in the `users` schema.
+
+**Q17 applied**: pre-Doc-26 int-id token compatibility branch dropped — those tokens are past their 7-day refresh window by deploy.
+
+**Doc-44** caller-vs-target gates are applied at the service layer in `UserService._assert_caller_can_modify`. The first port uses the coarse rule (self / admin / same-vendor). The fine-grained tier comparison is a follow-up.
+
+**Doc-46** vendor scoping is applied in `UserRepository.list_`: non-admin callers are filtered to their own `vendor_id` and admin-tier users (super_admin / admin roles via either legacy `user_roles` or scoped `user_role_assignments`) are excluded via `NOT EXISTS` subqueries.
+
+**Doc-41** scoped RBAC: `users.user_role_assignments` carries `(organization_id, project_id)` with a `CHECK NOT (org IS NOT NULL AND project IS NOT NULL)` constraint plus a uniqueness constraint on `(user_id, role_id, org, project)`. RbacRepository's `effective_permissions_by_scope` returns a `Dict[(kind, id), Set[str]]` consumed by `require_project_permission` / `require_org_permission`.
+
+**Doc-42b** grantable-roles matrix lives in `RoleGrantsService` as a static dict. The service surface returns the matrix; per-tier enforcement is in `RoleAssignmentService._assert_caller_can_grant` (super_admin can grant SUPER_ADMIN; admin can grant anything else; non-admin needs `rbac:assign` plus a vendor-scope match).
 
 ## Source
 
 | Topic | Source (path:line) |
 |---|---|
-| Project model | `C:\Programming\PMIS\PMIS-OpenProject\app\infrastructure\db\models\project.py:23` |
-| Project routes + status FSM | `…\app\api\v3\projects\routes.py` + `…\services\transitions.py` |
-| Milestone model + dep edge | `…\db\models\milestone.py:16`, `…\db\models\milestone_dependency.py` |
-| Activity model | `…\db\models\activity.py:16` |
-| Activity resource sidecar | `…\db\models\activity_resource.py:16` |
-| Task model | `…\db\models\task.py:16` |
-| Subtask model (Doc-24 nesting) | `…\db\models\subtask.py:30` |
-| Comment model (Doc-35 send-event) | `…\db\models\comment.py:40` |
-| Project-vendor M:N | `…\db\models\project_vendor.py` |
-| Status transitions FSM (catalog read) | `services/pmis-masters-management/app/models/project_status_transition.py` |
-| Audit log | New table (no monolith equivalent). Captures create/update/delete/restore/transition events. |
+| User model | `C:\Programming\PMIS\PMIS-user-management\app\db\models\user.py` |
+| Role model | `C:\Programming\PMIS\PMIS-user-management\app\db\models\role.py` |
+| Permission model | `C:\Programming\PMIS\PMIS-user-management\app\db\models\permission.py` |
+| user_role + role_permission + user_permission joins | `…\app\db\models\associations.py` |
+| user_role_assignments (Doc-41) | `…\app\db\models\role_assignment.py` |
+| OTP / password-reset / refresh-token models | `…\app\db\models\` |
+| `code_generators.generate_user_code` | `C:\Programming\PMIS\PMIS-user-management\app\shared\code_generators.py` |
+| OTP HMAC helpers (Q13 move) | `C:\Programming\PMIS\PMIS-notification-service\app\services\otp_service.py` |
+| AuthService + JWT issuance | `C:\Programming\PMIS\PMIS-user-management\app\services\auth_service.py` |
+| Refresh + grace-window rotation | `…\app\services\refresh_service.py` |
+| RBAC repository / hydration | `…\app\repositories\rbac_repository.py` |
+| Doc-41 require_project_permission / require_org_permission | `C:\Programming\PMIS\PMIS-OpenProject\app\api\v3\dependencies.py` |
+| Doc-44 caller-vs-target gates | `C:\Programming\PMIS\PMIS-OpenProject\app\api\v3\users\services.py` |
+| Doc-42b grant matrix | `C:\Programming\PMIS\PMIS-OpenProject\app\api\v3\role_grants\services.py` |
 
 ## Endpoint port table
 
-All business routes under `/project/*`. Health probes (`/health`, `/ready`) at app root.
+All routes mounted under `/user/*`. Health probes (`/health`, `/ready`) at app root (outside the prefix, per `app/routes/__init__.py`).
 
-### Projects
+### Auth (public allow-list)
 
-| METHOD | NEW PATH | RBAC |
-|---|---|---|
-| GET | `/project/projects/list` | authenticated (Doc-46 filtered) |
-| POST | `/project/projects/create` | `projects:create` |
-| GET | `/project/projects/{uuid}/details` | `projects:read` scoped |
-| PATCH | `/project/projects/{uuid}/update` | `projects:update` scoped |
-| DELETE | `/project/projects/{uuid}/delete` | `projects:delete_all` |
-| POST | `/project/projects/{uuid}/restore` | `projects:delete_all` |
-| POST | `/project/projects/{uuid}/status/transition` | `projects:update` scoped + FSM edge |
-| PUT | `/project/projects/{uuid}/vendors/replace` | `projects:update` scoped |
+| METHOD | NEW PATH | HANDLER | SOURCE | NOTES |
+|---|---|---|---|---|
+| POST | `/user/users/login` | `app/routes/auth_routes.py:login` | `PMIS-user-management/app/routes/auth_routes.py` | Returns either LoginResponse or `{requires_otp, ephemeral_token, channels_available}` |
+| POST | `/user/users/login/send-otp` | `auth_routes.py:send_otp` | `…/two_factor_routes.py` | Rate-limited via `otp_codes.last_sent_at` |
+| POST | `/user/users/login/verify-otp` | `auth_routes.py:verify_otp` | `…/two_factor_routes.py` | UNIVERSAL_OTP backdoor honored in dev only (Q14) |
+| POST | `/user/users/refresh` | `auth_routes.py:refresh` | `…/auth_routes.py:refresh` | Grace window via `previous_refresh_token_jti_valid_until` |
+| POST | `/user/users/logout` | `auth_routes.py:logout` | `…/auth_routes.py:logout` | Inserts jti into `revoked_tokens` |
+| POST | `/user/users/introspect` | `auth_routes.py:introspect` | RFC-7662 introspection (legacy `…/introspect.py`) | Anonymous endpoint; reveals nothing on invalid token |
+| POST | `/user/users/forgot-password` | `auth_routes.py:forgot_password` | `…/password_reset_routes.py:request_reset` | Anti-enum always 200 |
+| POST | `/user/users/reset-password` | `auth_routes.py:reset_password` | `…/password_reset_routes.py:perform_reset` | Single-use; consumed_at set on verify |
+| GET | `/user/users/me/get` | `auth_routes.py:get_me` | `…/users_routes.py:get_me` | Requires auth |
 
-### Milestones
-
-| METHOD | NEW PATH | RBAC |
-|---|---|---|
-| GET | `/project/projects/{uuid}/milestones/list` | `milestones:read` scoped |
-| POST | `/project/projects/{uuid}/milestones/create` | `milestones:create` scoped |
-| GET | `/project/milestones/{id}/details` | `milestones:read` |
-| PATCH | `/project/milestones/{id}/update` | `milestones:update` |
-| DELETE | `/project/milestones/{id}/delete` | `milestones:delete` |
-| POST | `/project/milestones/{id}/restore` | `milestones:restore` |
-| PUT | `/project/milestones/{id}/dependencies/replace` | `milestones:update` |
-| PUT | `/project/milestones/{id}/vendors/replace` | `milestones:update` |
-
-### Activities
+### Users
 
 | METHOD | NEW PATH | RBAC |
 |---|---|---|
-| GET | `/project/milestones/{id}/activities/list` | `activities:read` |
-| POST | `/project/activities/create` | `activities:create` |
-| GET | `/project/activities/{id}/details` | `activities:read` |
-| PATCH | `/project/activities/{id}/update` | `activities:update` |
-| DELETE | `/project/activities/{id}/delete` | `activities:delete` |
-| POST | `/project/activities/{id}/restore` | `activities:restore` |
-| PUT | `/project/activities/{id}/dependencies/replace` | `activities:update` |
+| POST | `/user/users/create` | `users:create` |
+| GET | `/user/users/list` | `users:read_all` |
+| GET | `/user/users/check-login` | authenticated |
+| GET | `/user/users/{user_id}/details` | `users:read` or self |
+| PATCH | `/user/users/{user_id}/update` | `users:update` + Doc-44 |
+| PATCH | `/user/users/{user_id}/password/update` | self or `users:update` |
+| DELETE | `/user/users/{user_id}/delete` | `users:delete_all` + Doc-44 + last-super-admin lockout |
+| POST | `/user/users/{user_id}/restore` | `users:delete_all` |
+| GET | `/user/users/me/permissions/list` | authenticated |
+| GET | `/user/users/{user_id}/permissions/list` | `permissions:read` |
+| POST | `/user/users/{user_id}/permissions/{code}/grant` | `permissions:manage` |
+| DELETE | `/user/users/{user_id}/permissions/{code}/revoke` | `permissions:manage` |
+| GET | `/user/users/{user_id}/projects/list` | self or `projects:read_all` |
 
-### Tasks
-
-| METHOD | NEW PATH | RBAC |
-|---|---|---|
-| GET | `/project/activities/{id}/tasks/list` | `tasks:read` |
-| POST | `/project/tasks/create` | `tasks:create` |
-| GET | `/project/tasks/{id}/details` | `tasks:read` |
-| PATCH | `/project/tasks/{id}/update` | `tasks:update` |
-| DELETE | `/project/tasks/{id}/delete` | `tasks:delete` |
-| POST | `/project/tasks/{id}/restore` | `tasks:restore` |
-| PUT | `/project/tasks/{id}/dependencies/replace` | `tasks:update` |
-
-### Subtasks
+### Roles
 
 | METHOD | NEW PATH | RBAC |
 |---|---|---|
-| GET | `/project/tasks/{id}/subtasks/list` | `subtasks:read` |
-| POST | `/project/subtasks/create` | `subtasks:create` |
-| GET | `/project/subtasks/{id}/details` | `subtasks:read` |
-| PATCH | `/project/subtasks/{id}/update` | `subtasks:update` |
-| DELETE | `/project/subtasks/{id}/delete` | `subtasks:delete` |
-| POST | `/project/subtasks/{id}/restore` | `subtasks:restore` |
-| PUT | `/project/subtasks/{id}/dependencies/replace` | `subtasks:update` |
+| GET | `/user/roles/list` | `roles:read` |
+| POST | `/user/roles/create` | `roles:create` |
+| GET | `/user/roles/{role_id}/details` | `roles:read` |
+| PATCH | `/user/roles/{role_id}/update` | `roles:update` |
+| DELETE | `/user/roles/{role_id}/delete` | `roles:delete` |
+| GET | `/user/roles/{role_id}/permissions/list` | `permissions:read` |
+| PUT | `/user/roles/{role_id}/permissions/replace` | `roles:update` |
+| POST | `/user/roles/{role_id}/permissions/{code}/grant` | `roles:update` |
+| DELETE | `/user/roles/{role_id}/permissions/{code}/revoke` | `roles:update` |
 
-### Comments (Doc-35 send-event)
+### Permissions
 
 | METHOD | NEW PATH | RBAC |
 |---|---|---|
-| GET | `/project/{kind}/{id}/comments/list` (×4 kinds) | `comments:read` |
-| POST | `/project/{kind}/{id}/comments/create` (×4 kinds) | `comments:create` |
-| DELETE | `/project/comments/{id}/delete` | `require_authenticated()` + author-or-admin check in controller |
+| GET | `/user/permissions/list` | `permissions:read` |
+| GET | `/user/permissions/by-module/list` | `permissions:read` |
+| GET | `/user/permissions/{code}/details` | `permissions:read` |
+| POST | `/user/permissions/create` | `permissions:manage` |
+| PATCH | `/user/permissions/{code}/update` | `permissions:manage` |
+| DELETE | `/user/permissions/{code}/delete` | `permissions:manage` |
 
-`{kind}` is `milestones` / `activities` / `tasks` / `subtasks`; the controller resolves the underlying `project_id` so the audit log can attribute correctly.
+### Role assignments (Doc-41 scoped grants)
 
-## Tables created (alembic `p1a000000001`)
+| METHOD | NEW PATH | RBAC |
+|---|---|---|
+| GET | `/user/users/{user_id}/role-assignments/list` | authenticated |
+| POST | `/user/users/{user_id}/role-assignments/create` | `rbac:assign` |
+| DELETE | `/user/users/{user_id}/role-assignments/{aid}/delete` | `rbac:assign` |
+| GET | `/user/projects/{project_uuid}/role-assignments/list` | `project_members:read` |
+| POST | `/user/projects/{project_uuid}/role-assignments/create` | `rbac:assign` |
+| DELETE | `/user/projects/{project_uuid}/role-assignments/{aid}/delete` | `rbac:assign` |
+| GET | `/user/vendors/{vendor_id}/projects/list` | `projects:read_all` |
+| GET | `/user/vendors/{vendor_id}/users/list` | `users:read_all` |
 
-16 tables under `project` schema. Key design notes:
+### Role grants (Doc-42b matrix)
 
-- `projects` — UUID PK; self-FK on `parent_id` via `use_alter`; soft-delete with deleted_at + deleted_by (logical FK to users.users.id).
-- `project_vendors`, `milestone_vendors` — M:N edges to `masters.vendors.id` (logical-only; no DB constraint).
-- `project_audit_logs` — append-only audit trail with JSONB `changes` column.
-- `milestones` / `activities` / `tasks` — partial unique indexes (`postgresql_where=deleted_at IS NULL`) enforce position uniqueness per parent for LIVE rows. Soft-deleted rows can share positions with live ones (history preserved).
-- `subtasks` — TWO partial unique indexes: one for top-level (`parent_subtask_id IS NULL`), one for nested (`parent_subtask_id IS NOT NULL`). Self-FK via `use_alter`.
-- `*_resources` — 1:1 sidecars with a partial unique index per parent_id ensuring exactly one live resource row per parent.
-- `*_dependencies` (4 tables) — directed edge tables. Composite PK on `(from, to)`. No DB-level cycle guard; service-layer walks the frontier.
-- `comments` — polymorphic via `(target_kind, target_id)`. No FK on `target_id` (target lives in different tables per kind). `attachments` is a JSONB list per Doc-35.
+| METHOD | NEW PATH | RBAC |
+|---|---|---|
+| GET | `/user/role-grants/{role_name}/matrix` | authenticated |
 
-## CHECK constraints
+## Tables created (alembic `u1a000000001`)
 
-- `ck_<activities|tasks|subtasks>_type`: `type IS NULL OR type IN ('standard', 'resource', 'transactional')` (Doc-38 legacy values).
-- `ck_<activities|tasks|subtasks>_resource_mode`: `IN ('count', 'details')` or NULL.
-- `ck_<activities|tasks|subtasks>_resource_count_positive`: `>= 1` or NULL.
+11 tables under `users` schema:
+1. `users` — UUID PK, soft-delete via deleted_at+deleted_by, refresh-token rotation columns (Doc-33+), 2FA toggle, logical FKs to `masters.vendors.id` (vendor_id) and `masters.divisions.code` (division).
+2. `roles` — INT PK, unique name, `builtin` flag (informational + lock on delete).
+3. `permissions` — `code` String(128) PK.
+4. `user_roles` (legacy global-scope) — kept for AuthMiddleware's admin-tier scan.
+5. `role_permissions` — composite PK.
+6. `user_permissions` — composite PK, direct (additive) grants.
+7. `user_role_assignments` (Doc-41) — INT PK, scope-exclusivity CHECK, unique (user, role, org, project).
+8. `revoked_tokens` — jti PK; **cross-read by all other services**.
+9. `password_reset_tokens` — single-use, HMAC-hashed.
+10. `otp_codes` — single-use, HMAC-hashed (Q13).
+11. `notification_log` — JSONB payload, status queued/sent/failed.
+
+## Seed data (alembic `u1a000000002`)
+
+- **All permission codes** from `app/core/permissions.py:ALL_PERMISSIONS` (USER + PROJECT + MASTERS domains, ~80 codes).
+- **6 built-in roles**: `super_admin`, `admin`, `org_admin`, `project_admin`, `project_member`, `division_member`.
+- **role_permissions grants** per tier (see migration source).
+- **bootstrap super_admin user** (skipped if `SUPERADMIN_BOOTSTRAP_PASSWORD` env var is unset).
+
+All inserts are `ON CONFLICT DO NOTHING` so the migration is idempotent.
 
 ## Behaviour preserved vs. monolith
 
-- UUID PKs on all primary entities (Doc-26).
-- Display labels (M{n}, A{m}.{a}, T{m}.{a}.{t}, S{m}.{a}.{t}.{s1}[.{sN}]) driven by partial-unique position indexes.
-- Doc-35 attachments-on-comment model (no separate attachments table).
-- Per-level independent priority + assigned_to (per Doc-41 follow-up).
-- Doc-38 type column kept nullable for legacy rows.
-- HAL Collection envelope shape consistent with masters-svc / user-svc.
-- Verb-suffix endpoint naming (POST `/create`, DELETE `/{id}/delete`, PUT `/replace`).
+- Vendor name kept on the wire as `vendor*` (NOT renamed to organizations; FE-only label change).
+- HAL envelopes used on response shapes (`_type`, `_embedded`, `_links`) for consistency with FE conventions.
+- Verb-suffix endpoint naming throughout (POST `/create`, DELETE `/{id}/delete`).
+- Anti-enum on `/forgot-password` — always 200.
+- 2FA-required login returns `requires_otp + ephemeral_token + channels_available` (status 200, special body).
+- Refresh-token grace window via `previous_refresh_token_jti_valid_until` (Doc-33+).
+- `is_builtin` informational only — never blocks delete on permissions/roles (per user direction; mirrors masters-svc convention).
 
 ## Behaviour diverged from monolith (deliberate)
 
-- All cross-schema FKs (vendor_id, type_of_resource_id, division, created_by, etc.) are LOGICAL only. No DB-level FK constraints across schemas; service layer enforces referential integrity.
-- `project_audit_logs` is new — the monolith had ad-hoc logging via `project_audit_log.py` but it wasn't wired into every service. Here every create/update/delete/restore/transition writes an audit row.
+- OTP storage moved from notification-svc in-memory dict → `users.otp_codes` (Q13).
+- Pre-Doc-26 int-id token branch dropped (Q17).
+- `UNIVERSAL_OTP_ENABLED=true` startup-errors in production (Q14).
+- `notification_log` (user-svc audit of dispatch requests) is new — the monolith had no audit trail of OTP / password-reset dispatches.
 
 ## Tests
 
 - `tests/integration/test_health.py` — `/health`, `/ready`, `/`.
-- `tests/integration/test_rbac_gates.py` — anonymous 401, reader 403 on create, admin pass.
-- `tests/unit/test_project_service_transitions.py` — admin bypass + non-admin FSM rejection + no-op self-transition.
-- `tests/unit/test_dependency_cycle_guards.py` — self + transitive cycles across milestones/activities/tasks/subtasks.
-- `tests/unit/test_subtask_nesting_depth.py` — Doc-24 nesting cap at boundary.
-- `tests/unit/test_comment_send_event.py` — Doc-35 body-or-attachments invariant + size + extension guards.
+- `tests/integration/test_rbac_gates.py` — public allow-list reach + 401/403 surfaces.
+- `tests/unit/test_user_service.py` — Doc-44 gate + last-super-admin lockout.
+- `tests/unit/test_role_service.py` — name conflict + builtin lock + SUPER_ADMIN-grant restriction.
+- `tests/unit/test_role_assignment_schema.py` — Doc-41 scope exclusivity validator.
+- `tests/unit/test_role_grants_service.py` — Doc-42b matrix tiers.
+- `tests/test_cross_schema_drift.py` — **Q24 CANONICAL** drift-detector. Imports each peer service's `_cross_schema.py` and asserts column-type parity for every users.* mirror.
 
 ## Follow-ups (deferred)
 
-- Doc-44 caller-vs-target gates (vendor-vs-target comparisons in the project service layer).
-- Multipart upload route for the file-server (current Comment routes accept a pre-uploaded `{url, filename, ...}` JSON envelope; the multipart->file-server hop lives in a Phase-4 follow-up).
-- Real-Postgres integration tests covering the partial-unique indexes + FSM table joins.
-- Dashboard / tree-view aggregation routes (left out of this port; will move to a separate read-model service).
-- `project_audit_logs` GC / archival cron.
+- Doc-44 fine-grained tier comparison (current `_assert_caller_can_modify` is the coarse self / admin / same-vendor rule).
+- HTTP notification client (`settings.notification_client = "http"`) — first port uses the `"mock"` driver. The HTTP driver is a one-screen aiohttp wrapper to add next.
+- Real-Postgres integration tests (per Q28: tests can take a local dump from prod but never modify the server).
+- Cron job to GC expired rows in `revoked_tokens`, `otp_codes`, `password_reset_tokens`.

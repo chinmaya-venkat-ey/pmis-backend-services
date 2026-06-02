@@ -1,4 +1,4 @@
-"""GET /health, /ready — mounted at app root (outside /project prefix)."""
+"""GET /health, /ready — mounted at app root (outside /user prefix)."""
 from __future__ import annotations
 
 from typing import Annotated
@@ -14,7 +14,12 @@ from app.db import get_db
 router = APIRouter(tags=["health"])
 
 
-@router.get("/health", status_code=status.HTTP_200_OK, summary="Liveness probe")
+@router.get(
+    "/health",
+    status_code=status.HTTP_200_OK,
+    summary="Liveness probe",
+    description="Process-alive check. No DB query.",
+)
 def health() -> dict:
     return {"status": "ok", "service": settings.service_name, "version": "0.1.0"}
 

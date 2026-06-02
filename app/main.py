@@ -1,15 +1,16 @@
-"""pmis-project-management — FastAPI application entry point.
+"""pmis-user-management — FastAPI application entry point.
 
 Mounts:
-  - Business routers under ``/project/*`` (projects, milestones, activities,
-    tasks, subtasks, comments).
+  - Business routers under ``/user/*`` (auth, users, roles, permissions,
+    role-assignments, role-grants).
   - Health probes (``/health``, ``/ready``) at the app root.
 
 Middleware order (outermost → innermost):
   1. CORSMiddleware  — dev only (Decision 8e)
   2. RequestContextMiddleware  — assigns request_id, logs in/out
-  3. AuthMiddleware  — decodes JWT, hydrates request.state including Doc-41
-                       scoped_permissions for require_project_permission
+  3. AuthMiddleware  — decodes JWT, hydrates request.state
+
+UNIVERSAL_OTP_ENABLED=true activates the break-glass OTP backdoor (000000).
 """
 from __future__ import annotations
 
@@ -24,8 +25,7 @@ from app.core.api_route import install_hal_route_class
 from app.middleware.auth_middleware import AuthMiddleware
 from app.middleware.error_handler import register_exception_handlers
 from app.middleware.request_context import RequestContextMiddleware
-from app.routes import attachment_routes, health_routes, project_router
-from app.utilities.file_client import get_file_client
+from app.routes import health_routes, user_router
 from app.utilities.logger import configure_logging, get_logger
 
 
@@ -35,37 +35,25 @@ logger = get_logger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    if settings.universal_otp_enabled:
+        logger.warning("UNIVERSAL_OTP_ENABLED=true — universal OTP backdoor is active")
     logger.info(
-        "Starting %s | env=%s",
-        settings.service_name, settings.env,
+        "Starting %s | env=%s | notification_client=%s",
+        settings.service_name, settings.env, settings.notification_client,
     )
-
-    # Fail-fast probe on attachment storage.. In dev the base
-    # path may simply not be configured yet — log a warning but don't
-    # block app boot, since /health and the non-attachment routes still
-    # work fine.
-    try:
-        get_file_client()._storage.ensure_ready()  # type: ignore[attr-defined]
-    except Exception as exc:  # noqa: BLE001 — startup must remain best-effort
-        logger.warning(
-            "Attachment storage probe failed at startup: %s. "
-            "Uploads will return 503 until the storage backend is reachable.",
-            exc,
-        )
-
     yield
     logger.info("Stopping %s", settings.service_name)
 
 
 def create_app() -> FastAPI:
     app = FastAPI(
-        title="pmis-project-management",
+        title="pmis-user-management",
         version="0.1.0",
         description=(
-            "Projects, milestones, activities, tasks, subtasks, comments. "
-            "Owns the `project` schema; reads cross-schema mirrors of "
-            "`users.*` (auth + RBAC) and `masters.*` (vendors, divisions, "
-            "priorities, statuses, transitions, resource types)."
+            "User, auth, RBAC, OTP, password-reset, role-assignments. "
+            "Owns the `users` schema; reads cross-schema mirrors of "
+            "`masters.vendors`, `masters.divisions`, `project.projects`, "
+            "`project.project_vendors`."
         ),
         root_path=settings.root_path,
         lifespan=lifespan,
@@ -73,8 +61,9 @@ def create_app() -> FastAPI:
 
     register_exception_handlers(app)
 
-    # Bottom-up registration: the last add_middleware is the OUTERMOST layer.
-    # On-the-wire order: CORS → RequestContext → Auth → route handler.
+    # Middleware are applied bottom-up: the last `add_middleware` call is the
+    # OUTERMOST layer. So the actual on-the-wire order ends up as:
+    #   CORS → RequestContext → Auth → route handler
     app.add_middleware(AuthMiddleware)
     app.add_middleware(RequestContextMiddleware)
     app.add_middleware(
@@ -86,12 +75,7 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(health_routes.router)
-    app.include_router(project_router)
-    # Dev-only fallback for serving attachment bytes when no external
-    # file server is configured. Mounted at the app root (not under
-    # /project) so the public URL matches the prefix shape used in prod.
-    if settings.file_server_local_fallback_enabled:
-        app.include_router(attachment_routes.files_router)
+    app.include_router(user_router)
 
     def _custom_openapi():
         if app.openapi_schema:

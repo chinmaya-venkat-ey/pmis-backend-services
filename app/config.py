@@ -1,4 +1,4 @@
-"""pmis-project-management — application configuration.
+"""pmis-user-management — application configuration.
 
 Reads environment variables via Pydantic v2 Settings. All settings are
 validated at startup. See ../../.env.example for the full matrix.
@@ -21,84 +21,46 @@ class Settings(BaseSettings):
     )
 
     # === Cross-service ===
-    env: str = Field(default="development")
+    env: str = Field(default="development", description="development|staging|production")
     log_level: str = Field(default="INFO")
-    log_format: str = Field(default="text")
-    root_path: str = Field(default="")
-    service_name: str = Field(default="pmis-project-management")
-    cors_origins: str = Field(default="http://localhost:3000")
+    log_format: str = Field(default="text", description="text|json")
+    root_path: str = Field(default="", description="Optional ROOT_PATH from nginx (per Decision 8a)")
+    service_name: str = Field(default="pmis-user-management")
+    cors_origins: str = Field(default="http://localhost:3000", description="comma-separated; used only when ENV=development")
 
     # === DB ===
     database_url: str = Field(default="postgresql+psycopg2://pmis_app:CHANGE-ME@localhost:5432/pmis")
     database_url_migrations: Optional[str] = Field(default=None)
 
-    # === JWT (verify only) ===
+    # === JWT ===
     secret_key: str = Field(default="replace-me-with-a-256-bit-secret")
     algorithm: str = Field(default="HS256")
+    access_token_expire_minutes: int = Field(default=120)
+    refresh_token_expire_days: int = Field(default=7)
+    refresh_token_grace_seconds: int = Field(default=120)
 
-    # === Attachments ===
-    attachments_storage_base_path: str = Field(default="/var/lib/pmis/attachments")
-    attachments_max_bytes: int = Field(default=26214400, description="25 MB per Q22")
-    attachments_allowed_extensions: str = Field(
-        default="pdf,docx,xlsx,txt,csv,jpg,jpeg,png,heic,mp4,webm,mov"
-    )
-    attachments_subdir_strategy: str = Field(default="year_month")
-    attachments_retention_days: int = Field(default=90)
-    attachments_on_unavailable: str = Field(default="fail")
-    attachments_nfs_server: Optional[str] = Field(default=None)
-    attachments_nfs_export: Optional[str] = Field(default=None)
+    # === Bootstrap (only consumed by alembic bootstrap data-migration) ===
+    bootstrap_superadmin_login: str = Field(default="superadmin")
+    bootstrap_superadmin_email: str = Field(default="superadmin@example.com")
+    superadmin_bootstrap_password: Optional[str] = Field(default=None, description="Q33: unset after first migration")
 
-    # === File server (external) ===
-    file_server_public_base_url: Optional[str] = Field(default=None)
-    file_server_local_fallback_enabled: bool = Field(default=True)
-    file_server_base_url: Optional[str] = Field(default=None)
-    file_server_auth_token: Optional[str] = Field(default=None)
+    # === 2FA / OTP ===
+    require_2fa: bool = Field(default=True)
+    otp_ttl_seconds: int = Field(default=300)
+    otp_resend_cooldown_seconds: int = Field(default=60)
+    otp_max_attempts: int = Field(default=5)
+    otp_code_length: int = Field(default=6)
+    otp_hash_pepper: str = Field(default="replace-me")
+    password_reset_ttl_seconds: int = Field(default=3600)
 
-    # === pmis-file-store (S3 microservice) ===
-    # When set, project-svc delegates all uploads/deletes to file-svc over HTTP
-    # instead of writing to the NFS mount. Set to the internal service URL,
-    # e.g. "http://pmis-file-store:8005".
-    file_store_service_url: Optional[str] = Field(default=None)
-    # Service-to-service JWT used by file_store requests.
-    # Must be a valid token accepted by file-svc's auth middleware
-    # (same SECRET_KEY). Generate via user-svc or share a long-lived admin token.
-    file_store_service_token: Optional[str] = Field(default=None)
-    # Default logical folder sent to file-svc when no entity-specific folder
-    # is provided. Callers can override per-upload.
-    file_store_default_folder: str = Field(default="project-attachments")
+    # Break-glass — Q14: startup error if true in production
+    universal_otp_enabled: bool = Field(default=False)
+    universal_otp_code: str = Field(default="000000")
 
-    # === Activity Workflow (external Java microservice) ===
-    # Base URL of the DIGIT-style workflow service that owns the activity
-    # approval state machine. PMIS proxies SUBMIT/APPROVE/REJECT/UPDATE
-    # to it and reads transition history for the Approval Inbox.
-    # Leave unset to operate in mock mode (synthetic responses).
-    workflow_service_url: Optional[str] = Field(default=None)
-    workflow_service_timeout_seconds: float = Field(default=10.0)
-    # Override mode: ``real`` | ``mock``. When unset, defaults to ``real``
-    # if ``workflow_service_url`` is configured, ``mock`` otherwise.
-    workflow_client: Optional[str] = Field(default=None)
-
-    # === Notification dispatch (PMIS-notification-service) ===
-    # Used by the approval-inbox transition proxy to email reviewers /
-    # the activity vendor when state changes. Leave the URL blank to
-    # operate in mock mode (dispatch is logged, not sent).
-    notification_service_url: Optional[str] = Field(default=None)
-    notification_service_timeout_seconds: float = Field(default=5.0)
-    notification_client: Optional[str] = Field(default=None)
-
-    # === User management (PMIS-user-management) ===
-    # Used by team-page save to bulk-replace project-scoped role
-    # assignments (orgUser section). The caller's Authorization header
-    # is forwarded so user-mgmt enforces ``project_members:update``
-    # against the actual caller (no service-account elevation).
-    # Leave the URL blank to operate in mock mode (orgUser diff is
-    # logged and skipped; local writes still proceed).
-    user_management_service_url: Optional[str] = Field(default=None)
-    user_management_service_timeout_seconds: float = Field(default=5.0)
-    user_management_client: Optional[str] = Field(default=None)
-
-    # === Frontend reference (HAL link builder) ===
-    frontend_base_url: Optional[str] = Field(default=None)
+    # === Outbound to notification-svc ===
+    notification_service_url: str = Field(default="http://pmis-notification-management:8002")
+    notification_service_timeout_seconds: float = Field(default=10.0)
+    notification_client: str = Field(default="mock", description="mock|http")
 
     # === Pagination ===
     default_page_size: int = Field(default=20)

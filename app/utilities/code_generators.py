@@ -1,10 +1,15 @@
-"""Human-readable code generators for project_code (and similar identifiers).
+"""Human-readable code generators for user_code (and similar identifiers).
 
-Format: `UIDAI-PR{YYMMDDHHMMSS-IST}` — used for projects.
-        `MS-{slug}-{YYMMDDHHMMSS-IST}` — milestones.
-        `AC-{slug}-{YYMMDDHHMMSS-IST}` — activities.
+Format: `US-{slug}-{YYMMDDHHMMSS-IST}`
+  - Slug: first 4 alphanumeric chars of the user's name (lowercased; falls
+    back to "user" if name is missing).
+  - Timestamp: IST (UTC+05:30) at creation time, fixed-width 12-digit.
 
-Ported from C:\\Programming\\PMIS\\PMIS-OpenProject\\app\\shared\\code_generators.py.
+Examples:
+  US-alic-260514101530   (Alice Lee, 2026-05-14 10:15:30 IST)
+  US-user-260514101533   (no name provided)
+
+Ported from C:\\Programming\\PMIS\\PMIS-user-management\\app\\shared\\code_generators.py.
 """
 from __future__ import annotations
 
@@ -18,26 +23,13 @@ _NON_ALNUM = re.compile(r"[^a-z0-9]")
 
 
 def _slug(name: str) -> str:
+    """Lowercase + strip non-alphanumerics + take first 4 chars."""
     cleaned = _NON_ALNUM.sub("", (name or "").lower())
-    return cleaned[:4] or "item"
+    return cleaned[:4] or "user"
 
 
-def _ts(now: datetime | None = None) -> str:
+def generate_user_code(name: str, now: datetime | None = None) -> str:
+    """Build a user_code string. `now` is overridable for deterministic tests."""
     moment = (now or datetime.now(IST)).astimezone(IST)
-    return moment.strftime("%y%m%d%H%M%S") + f"{moment.microsecond // 1000:03d}"
-
-
-def generate_project_code(now: datetime | None = None) -> str:
-    return f"UIDAI-PR{_ts(now)}"
-
-
-def generate_milestone_code(name: str, now: datetime | None = None) -> str:
-    return f"MS-{_slug(name)}-{_ts(now)}"
-
-
-def generate_activity_code(name: str, now: datetime | None = None) -> str:
-    return f"AC-{_slug(name)}-{_ts(now)}"
-
-
-def generate_vendor_code(name: str, now: datetime | None = None) -> str:
-    return f"VD-{_slug(name)}-{_ts(now)}"
+    timestamp = moment.strftime("%y%m%d%H%M%S") + f"{moment.microsecond // 1000:03d}"
+    return f"US-{_slug(name)}-{timestamp}"

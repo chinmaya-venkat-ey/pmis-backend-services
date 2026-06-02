@@ -1,6 +1,6 @@
 """Per-request context middleware.
 
-Duplicated from services/pmis-user-management/app/middleware/request_context.py.
+Duplicated from services/pmis-masters-management/app/middleware/request_context.py.
 """
 from __future__ import annotations
 
@@ -16,6 +16,8 @@ logger = get_logger("pmis.request")
 
 
 class RequestContextMiddleware(BaseHTTPMiddleware):
+    """Adds X-Request-ID header and logs request/response timing."""
+
     async def dispatch(self, request: Request, call_next):
         request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
         request.state.request_id = request_id

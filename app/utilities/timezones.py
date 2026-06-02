@@ -1,6 +1,7 @@
 """Timezone helpers — single source for IST conversion + ISO formatting.
 
-Duplicated from services/pmis-user-management/app/utilities/timezones.py.
+Duplicated from services/pmis-masters-management/app/utilities/timezones.py
+(promoted to canonical here in user-svc).
 """
 from __future__ import annotations
 

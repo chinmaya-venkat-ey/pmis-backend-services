@@ -102,7 +102,7 @@ All business routes under `/project/*`. Health probes (`/health`, `/ready`) at a
 |---|---|---|
 | GET | `/project/{kind}/{id}/comments/list` (×4 kinds) | `comments:read` |
 | POST | `/project/{kind}/{id}/comments/create` (×4 kinds) | `comments:create` |
-| DELETE | `/project/comments/{id}/delete` | `comments:delete` |
+| DELETE | `/project/comments/{id}/delete` | `require_authenticated()` + author-or-admin check in controller |
 
 `{kind}` is `milestones` / `activities` / `tasks` / `subtasks`; the controller resolves the underlying `project_id` so the audit log can attribute correctly.
 

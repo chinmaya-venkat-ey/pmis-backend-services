@@ -51,8 +51,8 @@ def require_permission(permission_code: Union[str, object]) -> Callable:
         uid = _user_id(request)
         if not uid:
             raise UnauthorizedError(AUTH_REQUIRED_MESSAGE, code="auth_required")
-        if _is_admin(request):
-            return uid
+        # A1 (2026-06-02 audit): admin/super_admin no longer short-circuit
+        # here. They must explicitly hold the code via r005's grant migration.
         if code not in _user_permissions(request):
             raise ForbiddenError(
                 f"Permission denied: {code} required",
@@ -73,8 +73,7 @@ def require_any_permission(*permission_codes: Union[str, object]) -> Callable:
         uid = _user_id(request)
         if not uid:
             raise UnauthorizedError(AUTH_REQUIRED_MESSAGE, code="auth_required")
-        if _is_admin(request):
-            return uid
+        # A1: no admin bypass.
         held = _user_permissions(request)
         if not any(c in held for c in codes):
             raise ForbiddenError(
@@ -202,11 +201,14 @@ def _resolve_org_id_from_path(request: Request) -> Optional[str]:
 def _has_scoped_permission(
     request: Request, code: str, scope_key: Tuple[str, Optional[str]],
 ) -> bool:
-    """Round-8: removed the flat-set fallback that let a perm scoped to
+    """A1 (2026-06-02 audit): admins no longer pass automatically. They must
+    explicitly hold the code at the requested scope OR at global scope, same
+    as any other caller. r005's grant migration ensures admin/super_admin
+    do hold every catalog code globally.
+
+    Round-8: removed the flat-set fallback that let a perm scoped to
     project P satisfy checks on project Q. A caller passes the gate iff
     they hold the code at the requested scope OR globally."""
-    if _is_admin(request):
-        return True
     scoped = _scoped_permissions(request)
     if code in scoped.get(("global", None), set()):
         return True
@@ -220,11 +222,9 @@ def require_project_permission(permission_code: Union[str, object]) -> Callable:
         uid = _user_id(request)
         if not uid:
             raise UnauthorizedError(AUTH_REQUIRED_MESSAGE, code="auth_required")
-        # Admin short-circuit: bypasses the project-id resolution (and
-        # its SQL ancestor walk) since admin / super_admin already pass
-        # every per-project check.
-        if _is_admin(request):
-            return uid
+        # A1 (2026-06-02 audit): no admin short-circuit. Project-id
+        # resolution always runs; admin/super_admin must explicitly hold
+        # the code at the resolved project scope or globally.
         project_id = _resolve_project_id_from_path(request)
         if project_id is None:
             raise ForbiddenError(
@@ -287,15 +287,17 @@ def assert_field_writes_allowed(
     perms from project P satisfy field-writes on project Q (because
     effective_permissions_for_user unions scoped codes into a flat set).
     Removed. A caller now passes the field gate iff they hold the code at
-    the requested scope OR at global scope. Admins still bypass.
+    the requested scope OR at global scope. A1 (2026-06-02 audit) removed
+    the blanket admin bypass; admins now pass only because r005 grants
+    them every catalog code explicitly.
 
     See user-svc canonical declaration for full docstring.
     """
     uid = _user_id(request)
     if not uid:
         raise UnauthorizedError(AUTH_REQUIRED_MESSAGE, code="auth_required")
-    if _is_admin(request):
-        return
+    # A1 (2026-06-02 audit): admins must hold each field code explicitly
+    # (granted by r005). No short-circuit here.
 
     target_scope = scope_key or ("global", None)
     held_scoped = _scoped_permissions(request).get(target_scope, set())
@@ -340,15 +342,16 @@ def assert_action_allowed(
     ``code`` at the row's parent-project scope (or globally). Mirror of
     ``assert_field_writes_allowed`` but for a single action code.
 
-    Anonymous -> 401. Admin/super_admin -> pass. Otherwise the caller must
-    hold ``code`` at ``scope_key`` OR at ``("global", None)``. Scoped codes
-    from OTHER scopes (the previous flat-set bleed) do NOT authorize.
+    Anonymous -> 401. Otherwise the caller must hold ``code`` at
+    ``scope_key`` OR at ``("global", None)``. Admins pass only via the
+    explicit r005 grant of every catalog code — A1 (2026-06-02) removed
+    the blanket bypass. Scoped codes from OTHER scopes (the previous
+    flat-set bleed) do NOT authorize.
     """
     uid = _user_id(request)
     if not uid:
         raise UnauthorizedError(AUTH_REQUIRED_MESSAGE, code="auth_required")
-    if _is_admin(request):
-        return
+    # A1 (2026-06-02 audit): no admin short-circuit; admins hold codes explicitly.
     target_scope = scope_key or ("global", None)
     scoped = _scoped_permissions(request)
     if code in scoped.get(target_scope, set()):

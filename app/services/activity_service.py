@@ -230,6 +230,10 @@ class ActivityService:
     ):
         row = self.get_by_id(activity_id)
         updates = payload.model_dump(exclude_unset=True)
+        # Compute `touched` from the ORIGINAL payload before any pops so
+        # the field walker can gate sub-resource codes (e.g. depends_on)
+        # whose values are processed separately below.
+        touched = set(updates.keys())
         depends_on = updates.pop("depends_on", None)
         # Doc-finance: handle category + ccn_value lifecycle separately.
         category_requested = updates.pop("category", None)
@@ -243,7 +247,6 @@ class ActivityService:
             updates["category"] = category_after
         if ccn_value_after is not None:
             updates["ccn_value"] = ccn_value_after
-        touched = set(updates.keys())
 
         # ----- catalog + transition validations on touched fields ------
         # Status is schema-level — no service check.

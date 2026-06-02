@@ -24,7 +24,6 @@ from app.core.permissions import (
     SUBTASKS_DELETE,
     SUBTASKS_READ,
     SUBTASKS_RESTORE,
-    SUBTASKS_UPDATE,
 )
 from app.core.rbac import (
     require_authenticated,
@@ -250,7 +249,9 @@ def get_subtask(
     "/{subtask_id}",
     response_model=SubtaskResponse,
     summary="Update a subtask (field-level RBAC + same-vendor assignment guard)",
-    dependencies=[Depends(require_project_permission(SUBTASKS_UPDATE))],
+    # Field-level RBAC runs in the service layer via assert_field_writes_allowed.
+    # No umbrella code at the route.
+    dependencies=[Depends(require_authenticated())],
 )
 def update_subtask(
     subtask_id: str,

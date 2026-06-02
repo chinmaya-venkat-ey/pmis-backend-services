@@ -20,52 +20,46 @@ from typing import Final
 PROJECTS_READ: Final[str] = "projects:read"
 PROJECTS_READ_ALL: Final[str] = "projects:read_all"
 PROJECTS_CREATE: Final[str] = "projects:create"
-PROJECTS_UPDATE: Final[str] = "projects:update"
 PROJECTS_DELETE_ALL: Final[str] = "projects:delete_all"
 
 # Project lifecycle transitions — explicit codes, one per verb.
-# Note: ``save`` uses ``projects:update`` (monolith parity); no dedicated
-# ``projects:save`` code exists.
 PROJECTS_PUBLISH: Final[str] = "projects:publish"
 PROJECTS_CLOSE: Final[str] = "projects:close"
 PROJECTS_REOPEN: Final[str] = "projects:reopen"
-PROJECTS_DRAFT: Final[str] = "projects:draft"
 
 MILESTONES_READ: Final[str] = "milestones:read"
 MILESTONES_CREATE: Final[str] = "milestones:create"
-MILESTONES_UPDATE: Final[str] = "milestones:update"
 MILESTONES_DELETE: Final[str] = "milestones:delete"
 MILESTONES_RESTORE: Final[str] = "milestones:restore"
 
 ACTIVITIES_READ: Final[str] = "activities:read"
 ACTIVITIES_CREATE: Final[str] = "activities:create"
-ACTIVITIES_UPDATE: Final[str] = "activities:update"
 ACTIVITIES_DELETE: Final[str] = "activities:delete"
 ACTIVITIES_RESTORE: Final[str] = "activities:restore"
 
 TASKS_READ: Final[str] = "tasks:read"
 TASKS_CREATE: Final[str] = "tasks:create"
-TASKS_UPDATE: Final[str] = "tasks:update"
 TASKS_DELETE: Final[str] = "tasks:delete"
 TASKS_RESTORE: Final[str] = "tasks:restore"
 
 SUBTASKS_READ: Final[str] = "subtasks:read"
 SUBTASKS_CREATE: Final[str] = "subtasks:create"
-SUBTASKS_UPDATE: Final[str] = "subtasks:update"
 SUBTASKS_DELETE: Final[str] = "subtasks:delete"
 SUBTASKS_RESTORE: Final[str] = "subtasks:restore"
 
 COMMENTS_READ: Final[str] = "comments:read"
 COMMENTS_CREATE: Final[str] = "comments:create"
-COMMENTS_DELETE: Final[str] = "comments:delete"
+# §3.1 (2026-06-02 audit) item 3 + B3: DELETE /comments/{id} is gated on
+# author-or-COMMENTS_MODERATE. Admins/super_admin hold this via r005.
+COMMENTS_MODERATE: Final[str] = "comments:moderate"
+# §3.1 (2026-06-02 audit) item 4: approval inbox detail/SUBMIT/transition
+# routes consult this code in lieu of the removed caller_is_admin bypass.
+APPROVALS_MODERATE: Final[str] = "approvals:moderate"
 
 ATTACHMENTS_CREATE: Final[str] = "attachments:create"
-ATTACHMENTS_DELETE: Final[str] = "attachments:delete"
 
 PROJECT_MEMBERS_READ: Final[str] = "project_members:read"
-PROJECT_MEMBERS_ADD: Final[str] = "project_members:add"
 PROJECT_MEMBERS_UPDATE: Final[str] = "project_members:update"
-PROJECT_MEMBERS_DELETE: Final[str] = "project_members:delete"
 
 
 # =========================================================================
@@ -90,6 +84,11 @@ PROJECTS_UPDATE_VENDORS: Final[str] = "projects:update:vendors"
 # dedicated PATCH /projects/{uuid}/finance route and to any finance-field
 # updates that arrive via the generic PATCH /projects/{uuid}/update path.
 PROJECTS_UPDATE_FINANCE: Final[str] = "projects:update:finance"
+# §3.8 (2026-06-02 audit): generic-PATCH gates for previously ungated
+# columns. Mirror of canonical; seeded + granted via r009.
+PROJECTS_UPDATE_ACTIVE: Final[str] = "projects:update:active"
+PROJECTS_UPDATE_PARENT_ID: Final[str] = "projects:update:parent_id"
+PROJECTS_UPDATE_STATUS: Final[str] = "projects:update:status"
 
 # --- milestones ---
 MILESTONES_UPDATE_NAME: Final[str] = "milestones:update:name"
@@ -118,6 +117,11 @@ ACTIVITIES_UPDATE_OWNER_DIVISION: Final[str] = "activities:update:owner_division
 ACTIVITIES_UPDATE_CONCERNED_DIVISIONS: Final[str] = "activities:update:concerned_divisions"
 ACTIVITIES_UPDATE_VENDOR_ID: Final[str] = "activities:update:vendor_id"
 ACTIVITIES_UPDATE_ACTIVITY_STARTED: Final[str] = "activities:update:activity_started"
+# §3.8 (2026-06-02 audit): mirror of canonical; seeded + granted via r009.
+ACTIVITIES_UPDATE_CATEGORY: Final[str] = "activities:update:category"
+ACTIVITIES_UPDATE_CCN_VALUE: Final[str] = "activities:update:ccn_value"
+ACTIVITIES_UPDATE_OWNER_DIVISION_OTHER: Final[str] = "activities:update:owner_division_other"
+ACTIVITIES_UPDATE_CONCERNED_DIVISION_OTHER: Final[str] = "activities:update:concerned_division_other"
 ACTIVITIES_UPDATE_RESOURCE: Final[str] = "activities:update:resource"
 ACTIVITIES_UPDATE_DEPENDENCIES: Final[str] = "activities:update:dependencies"
 
@@ -169,6 +173,14 @@ PROJECT_FIELD_CODES: Final[dict[str, str]] = {
     "total_project_value_excl_tax": PROJECTS_UPDATE_FINANCE,
     "tax_percent": PROJECTS_UPDATE_FINANCE,
     "ccn_cap_percent": PROJECTS_UPDATE_FINANCE,
+    # Sub-resource handled separately in service; still gated via field walker.
+    "vendor_ids": PROJECTS_UPDATE_VENDORS,
+    # §3.8 (2026-06-02 audit): generic-PATCH gates for lifecycle-adjacent
+    # columns. ``status`` here gates raw writes — formal lifecycle goes
+    # through PROJECTS_PUBLISH/CLOSE/REOPEN endpoints.
+    "active": PROJECTS_UPDATE_ACTIVE,
+    "parent_id": PROJECTS_UPDATE_PARENT_ID,
+    "status": PROJECTS_UPDATE_STATUS,
 }
 
 MILESTONE_FIELD_CODES: Final[dict[str, str]] = {
@@ -181,6 +193,8 @@ MILESTONE_FIELD_CODES: Final[dict[str, str]] = {
     "status": MILESTONES_UPDATE_STATUS,
     "priority": MILESTONES_UPDATE_PRIORITY,
     "position": MILESTONES_UPDATE_POSITION,
+    "depends_on": MILESTONES_UPDATE_DEPENDENCIES,
+    "vendor_ids": MILESTONES_UPDATE_VENDORS,
 }
 
 ACTIVITY_FIELD_CODES: Final[dict[str, str]] = {
@@ -197,7 +211,14 @@ ACTIVITY_FIELD_CODES: Final[dict[str, str]] = {
     "concerned_divisions": ACTIVITIES_UPDATE_CONCERNED_DIVISIONS,
     "vendor_id": ACTIVITIES_UPDATE_VENDOR_ID,
     "activity_started": ACTIVITIES_UPDATE_ACTIVITY_STARTED,
-    "resource": ACTIVITIES_UPDATE_RESOURCE,
+    # §3.8 (2026-06-02 audit): close schema-accepted-but-ungated gap.
+    "category": ACTIVITIES_UPDATE_CATEGORY,
+    "ccn_value": ACTIVITIES_UPDATE_CCN_VALUE,
+    "owner_division_other": ACTIVITIES_UPDATE_OWNER_DIVISION_OTHER,
+    "concerned_division_other": ACTIVITIES_UPDATE_CONCERNED_DIVISION_OTHER,
+    # §3.14 (2026-06-02 audit): "resource" key removed (UpdateRequest
+    # schema rejects the field). Constant kept but inert.
+    "depends_on": ACTIVITIES_UPDATE_DEPENDENCIES,
 }
 
 TASK_FIELD_CODES: Final[dict[str, str]] = {
@@ -211,7 +232,8 @@ TASK_FIELD_CODES: Final[dict[str, str]] = {
     "priority": TASKS_UPDATE_PRIORITY,
     "position": TASKS_UPDATE_POSITION,
     "assigned_to": TASKS_UPDATE_ASSIGNED_TO,
-    "resource": TASKS_UPDATE_RESOURCE,
+    # §3.14 (2026-06-02 audit): "resource" key removed (schema rejects it).
+    "depends_on": TASKS_UPDATE_DEPENDENCIES,
 }
 
 SUBTASK_FIELD_CODES: Final[dict[str, str]] = {
@@ -225,7 +247,8 @@ SUBTASK_FIELD_CODES: Final[dict[str, str]] = {
     "priority": SUBTASKS_UPDATE_PRIORITY,
     "position": SUBTASKS_UPDATE_POSITION,
     "assigned_to": SUBTASKS_UPDATE_ASSIGNED_TO,
-    "resource": SUBTASKS_UPDATE_RESOURCE,
+    # §3.14 (2026-06-02 audit): "resource" key removed (schema rejects it).
+    "depends_on": SUBTASKS_UPDATE_DEPENDENCIES,
 }
 
 

@@ -22,7 +22,6 @@ from app.core.permissions import (
     TASKS_DELETE,
     TASKS_READ,
     TASKS_RESTORE,
-    TASKS_UPDATE,
 )
 from app.core.rbac import (
     require_authenticated,
@@ -176,7 +175,9 @@ def get_task(
         "project, AND have a role-assignment on the project (explicit or "
         "via vendor projection). ``depends_on`` travels inline."
     ),
-    dependencies=[Depends(require_project_permission(TASKS_UPDATE))],
+    # Field-level RBAC runs in the service layer via assert_field_writes_allowed.
+    # No umbrella code at the route.
+    dependencies=[Depends(require_authenticated())],
 )
 def update_task(
     task_id: str,

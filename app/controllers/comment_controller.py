@@ -183,6 +183,7 @@ class CommentController:
     def delete(
         self, comment_id: str, *,
         caller_user_id: str, caller_is_admin: bool,
+        caller_permissions: Optional[set] = None,
     ) -> CommentDeleteSuccess:
         """Monolith parity: returns a ``Success`` envelope, NOT the full
         Comment row. The soft-delete state is captured in ``deleted_at``
@@ -200,6 +201,7 @@ class CommentController:
             comment_id,
             caller_user_id=caller_user_id,
             caller_is_admin=caller_is_admin,
+            caller_permissions=caller_permissions,
             project_id=project_id,
         )
         return CommentDeleteSuccess(

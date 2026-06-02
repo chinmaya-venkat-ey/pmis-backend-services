@@ -88,12 +88,14 @@ class ProjectService:
         include_deleted: bool = False,
         caller_user_id: Optional[str] = None,
         caller_is_admin: bool = False,
+        caller_can_see_all: bool = False,
     ) -> Tuple[List, int]:
         return self.repo.list_(
             offset=offset, page_size=page_size,
             status=status, active=active, public=public,
             include_deleted=include_deleted,
             caller_user_id=caller_user_id, caller_is_admin=caller_is_admin,
+            caller_can_see_all=caller_can_see_all,
         )
 
     # ---------------------------------------------------------------- write
@@ -174,6 +176,9 @@ class ProjectService:
     ):
         row = self.get_by_id(project_id)
         updates = payload.model_dump(exclude_unset=True)
+        # Compute `touched` from the ORIGINAL payload before any pops so
+        # the field walker can gate the sub-resource `vendor_ids` code.
+        touched = set(updates.keys())
         vendor_ids = updates.pop("vendor_ids", None)
         if not updates and vendor_ids is None:
             return row
@@ -228,15 +233,17 @@ class ProjectService:
                 self.db, vendor_ids,
             )
 
-        # Field-level RBAC for the column updates.
-        if request is not None and updates:
+        # Field-level RBAC for the column updates. `touched` was computed
+        # from the original payload before sub-resource pops, so sub-resource
+        # field codes (e.g. projects:update:vendors) are gated correctly.
+        if request is not None and touched:
             from app.core.permissions import PROJECT_FIELD_CODES
             from app.core.rbac import assert_field_writes_allowed
 
             assert_field_writes_allowed(
                 request,
                 field_codes=PROJECT_FIELD_CODES,
-                touched_fields=set(updates.keys()),
+                touched_fields=touched,
                 scope_key=("project", project_id),
             )
 

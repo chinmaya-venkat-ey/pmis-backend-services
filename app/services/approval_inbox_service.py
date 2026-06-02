@@ -23,8 +23,8 @@ Business rules:
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Iterable, List, Optional, Tuple
+from dataclasses import dataclass, field
+from typing import Iterable, List, Optional, Set, Tuple
 
 from fastapi import Request
 from sqlalchemy import select
@@ -37,6 +37,7 @@ from app.core.errors import (
     UnauthorizedError,
     ValidationError,
 )
+from app.core.permissions import APPROVALS_MODERATE
 from app.models._cross_schema import User, Vendor
 from app.models.activity import Activity
 from app.models.activity_workflow_tracker import ActivityWorkflowTracker
@@ -84,6 +85,12 @@ class CallerContext:
     division: Optional[str]
     role_codes: List[str]
     is_admin: bool
+    # §3.1 (2026-06-02 audit) item 4: caller's effective permission codes,
+    # used to replace `is_admin` short-circuits in _authorize_detail,
+    # _authorize_submit, _authorize_transition. Default empty set so older
+    # call sites (still constructing CallerContext positionally) keep
+    # working until updated.
+    permissions: Set[str] = field(default_factory=set)
 
 
 class ApprovalInboxService:
@@ -303,8 +310,10 @@ class ApprovalInboxService:
         # Caller division lives on the users mirror.
         division = self._caller_division(uid)
         roles = self._caller_role_codes(uid)
+        perms = getattr(request.state, "user_permissions", None) or set()
         return CallerContext(
-            user_id=uid, division=division, role_codes=roles, is_admin=is_admin,
+            user_id=uid, division=division, role_codes=roles,
+            is_admin=is_admin, permissions=set(perms),
         )
 
     def _caller_division(self, user_id: str) -> Optional[str]:
@@ -372,7 +381,8 @@ class ApprovalInboxService:
     def _authorize_detail(
         self, ctx: CallerContext, tracker: ActivityWorkflowTracker, role: str,
     ) -> None:
-        if ctx.is_admin:
+        # §3.1 item 4: replaced ctx.is_admin with APPROVALS_MODERATE check.
+        if APPROVALS_MODERATE in ctx.permissions:
             return
         if role in ("concerned_division", "activity_owner"):
             return
@@ -726,11 +736,12 @@ class ApprovalInboxService:
     def _authorize_submit(
         self, ctx: CallerContext, activity: Activity,
     ) -> None:
-        """SUBMIT requires the caller to be either an admin or the
-        activity vendor (organization). Project_admin role is also
+        """SUBMIT requires the caller to be either an approvals-moderator
+        or the activity vendor (organization). Project_admin role is also
         allowed since the Postman reject collection's UPDATE→SUBMIT
         sample uses PROJECT_ADMIN."""
-        if ctx.is_admin:
+        # §3.1 item 4: replaced ctx.is_admin with APPROVALS_MODERATE check.
+        if APPROVALS_MODERATE in ctx.permissions:
             return
         role_set = {r.lower() for r in (ctx.role_codes or [])}
         if {"project_admin", "super_admin", "admin"} & role_set:
@@ -752,7 +763,8 @@ class ApprovalInboxService:
         action: str,
     ) -> None:
         """Validate caller permission for APPROVE / REJECT / UPDATE."""
-        if ctx.is_admin:
+        # §3.1 item 4: replaced ctx.is_admin with APPROVALS_MODERATE check.
+        if APPROVALS_MODERATE in ctx.permissions:
             return
         state = (tracker.current_state or "").upper()
         my_div = (ctx.division or "").lower()

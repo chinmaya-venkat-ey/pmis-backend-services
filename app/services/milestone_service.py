@@ -231,6 +231,10 @@ class MilestoneService:
     ):
         row = self.get_by_id(milestone_id)
         updates = payload.model_dump(exclude_unset=True)
+        # Compute `touched` from the ORIGINAL payload before any pops so
+        # the field walker can gate sub-resource codes (depends_on,
+        # vendor_ids) whose values are processed separately below.
+        touched = set(updates.keys())
         depends_on = updates.pop("depends_on", None)
         vendor_ids = updates.pop("vendor_ids", None)
         # Doc-finance: category + ccn_value have their own lifecycle rules.
@@ -304,14 +308,16 @@ class MilestoneService:
             # downstream dependent's outlasting rule.
             self._assert_dep_dates_reverse(row, new_start, new_end)
 
-        if request is not None and updates:
+        # Field-level RBAC: use the `touched` set computed before pops so
+        # sub-resource codes (milestones:update:dependencies / vendors) gate.
+        if request is not None and touched:
             from app.core.permissions import MILESTONE_FIELD_CODES
             from app.core.rbac import assert_field_writes_allowed
 
             assert_field_writes_allowed(
                 request,
                 field_codes=MILESTONE_FIELD_CODES,
-                touched_fields=set(updates.keys()),
+                touched_fields=touched,
                 scope_key=("project", row.project_id),
             )
 

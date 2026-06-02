@@ -22,7 +22,6 @@ from app.core.permissions import (
     MILESTONES_DELETE,
     MILESTONES_READ,
     MILESTONES_RESTORE,
-    MILESTONES_UPDATE,
 )
 from app.core.rbac import (
     require_authenticated,
@@ -182,7 +181,9 @@ def get_milestone(
     "/{milestone_id}",
     response_model=MilestoneResponse,
     summary="Update a milestone (field-level RBAC; depends_on + vendor_ids inline)",
-    dependencies=[Depends(require_project_permission(MILESTONES_UPDATE))],
+    # Field-level RBAC runs in the service layer via assert_field_writes_allowed.
+    # No umbrella code at the route.
+    dependencies=[Depends(require_authenticated())],
 )
 def update_milestone(
     milestone_id: str,

@@ -10,6 +10,17 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from app.core import permissions as _permissions_mod
+
+# A1 (2026-06-02 audit): the route bypass for admins was removed, so the
+# default admin fixture must hold every code declared by this service's
+# mirror — matching the post-r005 runtime state. Gathered dynamically so
+# the fixture stays in sync as new codes are added to the mirror.
+_ALL_MIRROR_CODES = frozenset(
+    v for k, v in vars(_permissions_mod).items()
+    if not k.startswith("_") and isinstance(v, str) and ":" in v
+)
+
 
 class _TestAuthMiddleware(BaseHTTPMiddleware):
     """Hard-codes request.state to a logged-in admin by default.
@@ -28,8 +39,14 @@ class _TestAuthMiddleware(BaseHTTPMiddleware):
         request.state.user_login = "test-admin"
         request.state.user_email = "admin@example.com"
         request.state.token_jti = "test-jti"
-        request.state.user_permissions = getattr(app_state, "test_permissions", set())
-        request.state.scoped_permissions = getattr(app_state, "test_scoped_permissions", {})
+        perms = getattr(app_state, "test_permissions", None)
+        if perms is None:
+            perms = set(_ALL_MIRROR_CODES)
+        request.state.user_permissions = perms
+        scoped = getattr(app_state, "test_scoped_permissions", None)
+        if scoped is None:
+            scoped = {("global", None): set(_ALL_MIRROR_CODES)}
+        request.state.scoped_permissions = scoped
         request.state.is_admin = getattr(app_state, "test_is_admin", True)
         request.state.caller_role_name = getattr(app_state, "test_caller_role_name", None)
         request.state.request_id = "test-rid"

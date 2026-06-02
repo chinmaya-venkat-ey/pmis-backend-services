@@ -54,7 +54,14 @@ class ProjectRepository:
         include_deleted: bool = False,
         caller_user_id: Optional[str] = None,
         caller_is_admin: bool = False,
+        caller_can_see_all: bool = False,
     ) -> Tuple[List[Project], int]:
+        """§3.1 (2026-06-02 audit) item 7: ``caller_can_see_all`` replaces
+        the ``caller_is_admin`` short-circuit. The caller passes the
+        broad-view check if they hold ``projects:read_all`` (admin/super_admin
+        hold it via r005). Otherwise the standard "own-assignments +
+        vendor-projects" scoping applies. ``caller_is_admin`` is retained
+        for backwards compatibility with existing test fixtures."""
         stmt = select(Project)
         count_stmt = select(func.count()).select_from(Project)
         clauses = []
@@ -66,7 +73,8 @@ class ProjectRepository:
             clauses.append(Project.active.is_(active))
         if public is not None:
             clauses.append(Project.public.is_(public))
-        if caller_user_id and not caller_is_admin:
+        caller_passes_broad = caller_is_admin or caller_can_see_all
+        if caller_user_id and not caller_passes_broad:
             # Doc-46: non-admin sees projects they have an assignment on, OR
             # projects mapped to their vendor.
             caller_vendor_subq = (

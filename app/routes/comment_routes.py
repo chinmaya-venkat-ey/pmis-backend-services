@@ -173,13 +173,16 @@ for _path, _kind in _KIND_BY_PATH.items():
     dependencies=[Depends(require_authenticated())],
 )
 def delete_comment(
+    request: Request,
     comment_id: str,
     controller: Annotated[CommentController, Depends(get_comment_controller)],
     caller_user_id: Annotated[str, Depends(get_current_user_id)],
     caller_is_admin: Annotated[bool, Depends(get_caller_is_admin)],
 ) -> CommentDeleteSuccess:
+    caller_permissions = getattr(request.state, "user_permissions", None) or set()
     return controller.delete(
         comment_id,
         caller_user_id=caller_user_id,
         caller_is_admin=caller_is_admin,
+        caller_permissions=caller_permissions,
     )

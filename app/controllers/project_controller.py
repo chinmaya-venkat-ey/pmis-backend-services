@@ -154,12 +154,14 @@ class ProjectController:
         include_deleted: bool = False,
         caller_user_id: Optional[str] = None,
         caller_is_admin: bool = False,
+        caller_can_see_all: bool = False,
     ) -> Dict[str, Any]:
         rows, total = self.service.list_(
             offset=offset, page_size=page_size,
             status=status, active=active, public=public,
             include_deleted=include_deleted,
             caller_user_id=caller_user_id, caller_is_admin=caller_is_admin,
+            caller_can_see_all=caller_can_see_all,
         )
         return {
             "items": [self._to_response(r, with_attachments=False) for r in rows],

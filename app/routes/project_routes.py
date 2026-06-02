@@ -31,7 +31,7 @@ from app.core.permissions import (
     PROJECTS_DELETE_ALL,
     PROJECTS_PUBLISH,
     PROJECTS_READ,
-    PROJECTS_UPDATE,
+    PROJECTS_READ_ALL,
     PROJECT_MEMBERS_READ,
     COMMENTS_CREATE,
 )
@@ -223,6 +223,7 @@ def upsert_project(
     dependencies=[Depends(require_permission(PROJECTS_READ))],
 )
 def list_projects(
+    request: Request,
     controller: Annotated[ProjectController, Depends(get_project_controller)],
     caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
     caller_is_admin: Annotated[bool, Depends(get_caller_is_admin)],
@@ -232,11 +233,13 @@ def list_projects(
 ):
     # Monolith parity (Doc-38): query schema is offset / pageSize / active
     # / includeDeleted ONLY — ``public`` + ``status`` were dropped.
+    held = getattr(request.state, "user_permissions", None) or set()
     return controller.list_(
         offset=offset, page_size=page_size,
         status=None, active=active, public=None,
         include_deleted=False,
         caller_user_id=caller_user_id, caller_is_admin=caller_is_admin,
+        caller_can_see_all=(PROJECTS_READ_ALL in held),
     )
 
 
@@ -246,6 +249,7 @@ def list_projects(
     dependencies=[Depends(require_permission(PROJECTS_READ))],
 )
 def list_all_projects(
+    request: Request,
     controller: Annotated[ProjectController, Depends(get_project_controller)],
     caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
     caller_is_admin: Annotated[bool, Depends(get_caller_is_admin)],
@@ -253,11 +257,13 @@ def list_all_projects(
     page_size: int = Query(20, ge=1, le=100, alias="pageSize"),
     active: Optional[bool] = Query(None),
 ):
+    held = getattr(request.state, "user_permissions", None) or set()
     return controller.list_(
         offset=offset, page_size=page_size,
         status=None, active=active, public=None,
         include_deleted=True,
         caller_user_id=caller_user_id, caller_is_admin=caller_is_admin,
+        caller_can_see_all=(PROJECTS_READ_ALL in held),
     )
 
 
@@ -288,7 +294,10 @@ def get_project(
     "/{project_uuid}",
     response_model=ProjectResponse,
     summary="Update a project (field-level RBAC + optional vendor_ids replace)",
-    dependencies=[Depends(require_project_permission(PROJECTS_UPDATE))],
+    # Field-level RBAC runs in the service layer via assert_field_writes_allowed.
+    # No umbrella code at the route — caller must hold the per-field codes for
+    # whichever fields they touch.
+    dependencies=[Depends(require_authenticated())],
 )
 def update_project(
     project_uuid: str,
@@ -328,9 +337,9 @@ def delete_project(
         "Flips status from ``new`` to ``draft`` when the project carries "
         "at least one live milestone. Idempotent: a no-op once past ``new``."
     ),
-    # Monolith uses ``PROJECTS_UPDATE`` for save (see
-    # PMIS-OpenProject/app/api/v3/projects/routes.py:286). Match.
-    dependencies=[Depends(require_project_permission(PROJECTS_UPDATE))],
+    # Save is now authenticated-only at the route; no umbrella code. Any
+    # field-level checks happen inside the service via the field walker.
+    dependencies=[Depends(require_authenticated())],
 )
 def save_project(
     project_uuid: str,

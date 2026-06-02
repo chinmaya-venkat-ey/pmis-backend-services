@@ -22,7 +22,6 @@ from app.core.permissions import (
     ACTIVITIES_DELETE,
     ACTIVITIES_READ,
     ACTIVITIES_RESTORE,
-    ACTIVITIES_UPDATE,
 )
 from app.core.rbac import (
     require_authenticated,
@@ -177,7 +176,9 @@ def get_activity(
     "/{activity_id}",
     response_model=ActivityResponse,
     summary="Update an activity (field-level RBAC; depends_on inline)",
-    dependencies=[Depends(require_project_permission(ACTIVITIES_UPDATE))],
+    # Field-level RBAC runs in the service layer via assert_field_writes_allowed.
+    # No umbrella code at the route.
+    dependencies=[Depends(require_authenticated())],
 )
 def update_activity(
     activity_id: str,

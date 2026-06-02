@@ -179,15 +179,18 @@ for _path, _kind in _KIND_BY_PATH.items():
     dependencies=[Depends(require_authenticated())],
 )
 def delete_attachment(
+    request: Request,
     attachment_id: str,
     controller: Annotated[AttachmentController, Depends(get_attachment_controller)],
     caller_user_id: Annotated[str, Depends(get_current_user_id)],
     caller_is_admin: Annotated[bool, Depends(get_caller_is_admin)],
 ) -> CommentDeleteSuccess:
+    caller_permissions = getattr(request.state, "user_permissions", None) or set()
     return controller.delete(
         attachment_id,
         caller_user_id=caller_user_id,
         caller_is_admin=caller_is_admin,
+        caller_permissions=caller_permissions,
     )
 
 

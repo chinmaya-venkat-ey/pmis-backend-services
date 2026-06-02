@@ -58,6 +58,7 @@ class AttachmentController:
     def delete(
         self, attachment_id: str, *,
         caller_user_id: str, caller_is_admin: bool,
+        caller_permissions: Optional[set] = None,
     ) -> CommentDeleteSuccess:
         """DELETE /project/attachments/{id} is aliased to comment delete —
         the id refers to the body-NULL comment row.
@@ -70,11 +71,16 @@ class AttachmentController:
         ``"Comment <uuid> not found."`` — that monolith inconsistency
         falls out for free because both layers raise via the same
         ``CommentNotFoundError``.
+
+        §3.1 (2026-06-02 audit): ``caller_permissions`` must be threaded
+        through because DELETE /comments/{id} is now gated on
+        author-or-``comments:moderate`` instead of author-or-admin.
         """
         self._comments.delete(
             attachment_id,
             caller_user_id=caller_user_id,
             caller_is_admin=caller_is_admin,
+            caller_permissions=caller_permissions,
         )
         return CommentDeleteSuccess(
             message=f"Attachment {attachment_id} deleted.",

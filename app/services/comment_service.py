@@ -126,17 +126,30 @@ class CommentService:
         *,
         caller_user_id: str,
         caller_is_admin: bool,
+        caller_permissions: Optional[set] = None,
         project_id: Optional[str] = None,
     ):
-        """Author-or-admin soft-delete. Sets ``deleted_at`` + ``deleted_by``;
-        body and attachments are preserved (soft-delete is reversible).
+        """Author-or-moderator soft-delete. Sets ``deleted_at`` +
+        ``deleted_by``; body and attachments are preserved (soft-delete is
+        reversible).
 
-        Matches the monolith's ``DELETE /comments/{id}`` semantics.
+        §3.1 (2026-06-02 audit) item 3: replaced the ``caller_is_admin``
+        short-circuit with an explicit ``comments:moderate`` check. Admins
+        hold this code via r005, so the behavior is unchanged for them;
+        non-admin moderators (if any role is later granted the code) are
+        now also authorized.
         """
+        from app.core.permissions import COMMENTS_MODERATE
+
         row = self.get_by_id(comment_id)
-        if not caller_is_admin and row.author_user_id != caller_user_id:
+        held = caller_permissions or set()
+        if (
+            row.author_user_id != caller_user_id
+            and COMMENTS_MODERATE not in held
+        ):
             raise ForbiddenError(
-                "Only the author or an admin can delete a comment.",
+                "Only the author or a caller with comments:moderate can "
+                "delete a comment.",
                 code="comment_delete_forbidden",
             )
         self.repo.soft_delete(row, deleted_by=caller_user_id)

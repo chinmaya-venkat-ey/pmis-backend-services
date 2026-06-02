@@ -202,8 +202,10 @@ class SubtaskService:
         project = self.projects.get_by_id(row.project_id)
         assert_task_subtask_writable(project)
         updates = payload.model_dump(exclude_unset=True)
-        depends_on = updates.pop("depends_on", None)
+        # Compute `touched` from the ORIGINAL payload before any pops so
+        # the field walker can gate the sub-resource `depends_on` code.
         touched = set(updates.keys())
+        depends_on = updates.pop("depends_on", None)
 
         # Priority catalog + status-completion + parent-revert gates.
         if "priority" in updates:

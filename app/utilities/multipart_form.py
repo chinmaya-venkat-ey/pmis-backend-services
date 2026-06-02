@@ -212,6 +212,57 @@ def _allowed_extensions() -> set[str]:
     }
 
 
+def _assert_file_size_within_limit(upload: UploadFile, max_bytes: int) -> None:
+    upload.file.seek(0, 2)
+    size = upload.file.tell()
+    upload.file.seek(0)
+    if size > max_bytes:
+        raise AttachmentTooLargeError(
+            f"File {(upload.filename or 'unnamed')!r} is {size} bytes; "
+            f"maximum is {max_bytes}.",
+            details={
+                "file": upload.filename,
+                "size_bytes": size,
+                "max_bytes": max_bytes,
+            },
+        )
+
+
+def _assert_file_extension_allowed(upload: UploadFile, allowed: set) -> None:
+    ext = file_extension(upload.filename or "")
+    if not ext or ext not in allowed:
+        # Monolith parity: extension rendered with leading dot
+        # (``'.exe'`` not ``'exe'``), ``details`` carries only
+        # ``file`` + ``extension`` (no ``allowed`` list).
+        ext_display = f".{ext}" if ext else "''"
+        raise AttachmentDisallowedExtensionError(
+            f"File {(upload.filename or 'unnamed')!r} has disallowed "
+            f"extension {ext_display!r}. "
+            f"Allowed: {', '.join(sorted(allowed))}.",
+            details={
+                "file": upload.filename,
+                "extension": ext,
+            },
+        )
+
+
+def _validate_one_upload(
+    upload: UploadFile, max_bytes: int, allowed: set,
+) -> None:
+    """Per-file size + extension + content-magic check chain. Mirrors
+    the legacy in-line order: size first, then extension, then magic-
+    byte sniff. Extension + magic-byte checks are SKIPPED when the
+    allow-list is empty (legacy parity)."""
+    _assert_file_size_within_limit(upload, max_bytes)
+    if not allowed:
+        return
+    _assert_file_extension_allowed(upload, allowed)
+    # Magic-byte content sniff — rejects disguised binaries (.exe
+    # renamed to .pdf etc). Final line of defence after size +
+    # extension. Matches monolith parity.
+    detect_and_verify(upload.file, upload.filename or "unnamed")
+
+
 def pre_validate_files(files: List[UploadFile]) -> None:
     """Reject "bad file" cases BEFORE the parent row is inserted.
 
@@ -222,50 +273,19 @@ def pre_validate_files(files: List[UploadFile]) -> None:
     Checks (cheap → expensive):
       1. Per-file size against ``ATTACHMENTS_MAX_BYTES``.
       2. Extension against the allow-list.
+      3. Magic-byte content sniff.
 
     Raises ``AttachmentTooLargeError`` (HTTP 409) or
     ``AttachmentDisallowedExtensionError`` (HTTP 409) on the first failing
-    file.
+    file. Files are checked in caller order; the first failing file's
+    error wins.
     """
     if not files:
         return
     allowed = _allowed_extensions()
     max_bytes = settings.attachments_max_bytes
     for upload in files:
-        upload.file.seek(0, 2)
-        size = upload.file.tell()
-        upload.file.seek(0)
-        if size > max_bytes:
-            raise AttachmentTooLargeError(
-                f"File {(upload.filename or 'unnamed')!r} is {size} bytes; "
-                f"maximum is {max_bytes}.",
-                details={
-                    "file": upload.filename,
-                    "size_bytes": size,
-                    "max_bytes": max_bytes,
-                },
-            )
-        if not allowed:
-            continue
-        ext = file_extension(upload.filename or "")
-        if not ext or ext not in allowed:
-            # Monolith parity: extension rendered with leading dot
-            # (``'.exe'`` not ``'exe'``), ``details`` carries only
-            # ``file`` + ``extension`` (no ``allowed`` list).
-            ext_display = f".{ext}" if ext else "''"
-            raise AttachmentDisallowedExtensionError(
-                f"File {(upload.filename or 'unnamed')!r} has disallowed "
-                f"extension {ext_display!r}. "
-                f"Allowed: {', '.join(sorted(allowed))}.",
-                details={
-                    "file": upload.filename,
-                    "extension": ext,
-                },
-            )
-        # Magic-byte content sniff — rejects disguised binaries (.exe
-        # renamed to .pdf etc). Final line of defence after size +
-        # extension. Matches monolith parity.
-        detect_and_verify(upload.file, upload.filename or "unnamed")
+        _validate_one_upload(upload, max_bytes, allowed)
 
 
 def upload_files_via_client(files: List[UploadFile]) -> List[Dict[str, Any]]:

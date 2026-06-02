@@ -86,6 +86,52 @@ def validate_owner_pair(
         )
 
 
+def _assert_category_is_known(db: Session, n_category: str) -> None:
+    from app.utilities.catalogs import is_known_project_category
+    if not is_known_project_category(db, n_category):
+        raise ValidationError(
+            f"Invalid category '{n_category}'."
+        )
+
+
+def _assert_category_others_extras_present_and_valid(
+    n_other: Optional[str], n_reason: Optional[str],
+) -> None:
+    """When category == 'others', BOTH ``categoryOther`` and
+    ``categoryOtherReason`` are required + length-bounded."""
+    if not n_other:
+        raise ValidationError(
+            "categoryOther is required when category is 'others'."
+        )
+    if len(n_other) > 255:
+        raise ValidationError(
+            "categoryOther must be 1-255 characters."
+        )
+    if not n_reason:
+        raise ValidationError(
+            "categoryOtherReason is required when category is 'others'."
+        )
+    if len(n_reason) > 1000:
+        raise ValidationError(
+            "categoryOtherReason must be 1-1000 characters."
+        )
+
+
+def _reject_category_extras_when_not_others(
+    n_other: Optional[str], n_reason: Optional[str],
+) -> None:
+    """When category != 'others', neither ``categoryOther`` nor
+    ``categoryOtherReason`` may be supplied."""
+    if n_other:
+        raise ValidationError(
+            "categoryOther may only be provided when category is 'others'."
+        )
+    if n_reason:
+        raise ValidationError(
+            "categoryOtherReason may only be provided when category is 'others'."
+        )
+
+
 def validate_category_pair(
     db: Session,
     *,
@@ -100,12 +146,11 @@ def validate_category_pair(
     but the DB columns are still populated when a request carries them
     so legacy callers continue to work. The validation kicks in only
     when the caller actually supplies the fields.
-    """
-    from app.utilities.catalogs import (
-        PROJECT_CATEGORY_CHOICES,
-        is_known_project_category,
-    )
 
+    Check order preserved: (a) catalog lookup, then (b) per-branch
+    coupling rules. First violation wins, so user-facing messages are
+    byte-identical to the legacy in-line form.
+    """
     # Category codes are case-SENSITIVE in the monolith — MSAP/MSIP/BSP are
     # stored UPPERCASE; only 'others' is lowercase. Don't fold the case here
     # or the catalog lookup misses every legit code.
@@ -116,34 +161,12 @@ def validate_category_pair(
         if category_other_reason is not None else None
     )
 
-    if n_category:
-        if not is_known_project_category(db, n_category):
-            raise ValidationError(
-                f"Invalid category '{n_category}'."
-            )
-        if n_category == "others":
-            if not n_other:
-                raise ValidationError(
-                    "categoryOther is required when category is 'others'."
-                )
-            if len(n_other) > 255:
-                raise ValidationError(
-                    "categoryOther must be 1-255 characters."
-                )
-            if not n_reason:
-                raise ValidationError(
-                    "categoryOtherReason is required when category is 'others'."
-                )
-            if len(n_reason) > 1000:
-                raise ValidationError(
-                    "categoryOtherReason must be 1-1000 characters."
-                )
-        else:
-            if n_other:
-                raise ValidationError(
-                    "categoryOther may only be provided when category is 'others'."
-                )
-            if n_reason:
-                raise ValidationError(
-                    "categoryOtherReason may only be provided when category is 'others'."
-                )
+    if not n_category:
+        return
+
+    _assert_category_is_known(db, n_category)
+
+    if n_category == "others":
+        _assert_category_others_extras_present_and_valid(n_other, n_reason)
+    else:
+        _reject_category_extras_when_not_others(n_other, n_reason)

@@ -33,6 +33,79 @@ def _looks_like_vendor_code(token: str) -> bool:
     return token.strip().upper().startswith("VN-")
 
 
+def _dedup_trim_tokens(tokens: List[str]) -> List[str]:
+    """De-dup preserving order; trim whitespace; drop empties."""
+    seen: dict[str, None] = {}
+    cleaned: List[str] = []
+    for t in tokens:
+        if not t:
+            continue
+        s = str(t).strip()
+        if s and s not in seen:
+            seen[s] = None
+            cleaned.append(s)
+    return cleaned
+
+
+def _resolve_codes_to_uuids(
+    db: Session, code_tokens: List[str],
+) -> dict:
+    """Look up vendor_code → id for every VN-prefixed token. Raises
+    ``ValidationError`` if any code doesn't resolve."""
+    code_to_uuid: dict = {}
+    if code_tokens:
+        rows = db.execute(
+            select(_VendorMirror.vendor_code, _VendorMirror.id)
+            .where(_VendorMirror.vendor_code.in_(code_tokens))
+            .where(_VendorMirror.deleted_at.is_(None))
+        ).all()
+        code_to_uuid = dict(rows)
+
+    unresolved = [t for t in code_tokens if t not in code_to_uuid]
+    if unresolved:
+        raise ValidationError(
+            f"Unknown vendor(s): {', '.join(unresolved)}"
+        )
+    return code_to_uuid
+
+
+def _build_canonical(
+    cleaned: List[str], code_to_uuid: dict,
+) -> Tuple[List[str], dict]:
+    """Map each cleaned token to its canonical UUID, preserving caller
+    order. Returns ``(canonical_list, canonical_to_input)`` where the
+    second is used for friendlier error messages downstream."""
+    canonical: List[str] = []
+    canonical_to_input: dict = {}
+    for t in cleaned:
+        cid = code_to_uuid[t] if _looks_like_vendor_code(t) else t
+        canonical.append(cid)
+        canonical_to_input.setdefault(cid, t)
+    return canonical, canonical_to_input
+
+
+def _assert_canonical_uuids_live(
+    db: Session, canonical: List[str], canonical_to_input: dict,
+) -> None:
+    """Verify every canonical UUID exists as an active, non-soft-deleted
+    row. Raises ``ValidationError`` listing the original input tokens
+    that failed."""
+    rows = db.execute(
+        select(_VendorMirror.id)
+        .where(_VendorMirror.id.in_(canonical))
+        .where(_VendorMirror.active.is_(True))
+        .where(_VendorMirror.deleted_at.is_(None))
+    ).all()
+    live_ids = {r[0] for r in rows}
+    missing = [
+        canonical_to_input[cid] for cid in canonical if cid not in live_ids
+    ]
+    if missing:
+        raise ValidationError(
+            f"Unknown or inactive vendor(s): {', '.join(missing)}"
+        )
+
+
 def resolve_and_validate_vendor_ids(
     db: Session, tokens: List[str],
 ) -> List[str]:
@@ -47,66 +120,23 @@ def resolve_and_validate_vendor_ids(
     Caller still has to check vendor-in-project for activity / milestone
     vendor mappings — that's a separate guard (see
     ``vendor_in_project`` below).
+
+    Error message order preserved: code-resolution failure raises first,
+    then live/active check.
     """
     if not tokens:
         return []
 
-    # De-dup preserving order; trim.
-    seen: dict[str, None] = {}
-    cleaned: List[str] = []
-    for t in tokens:
-        if not t:
-            continue
-        s = str(t).strip()
-        if s and s not in seen:
-            seen[s] = None
-            cleaned.append(s)
+    cleaned = _dedup_trim_tokens(tokens)
     if not cleaned:
         return []
 
-    # ----- Phase 1: resolve codes to UUIDs --------------------------------
     code_tokens = [t for t in cleaned if _looks_like_vendor_code(t)]
+    code_to_uuid = _resolve_codes_to_uuids(db, code_tokens)
+    canonical, canonical_to_input = _build_canonical(cleaned, code_to_uuid)
 
-    code_to_uuid: dict[str, str] = {}
-    if code_tokens:
-        rows = db.execute(
-            select(_VendorMirror.vendor_code, _VendorMirror.id)
-            .where(_VendorMirror.vendor_code.in_(code_tokens))
-            .where(_VendorMirror.deleted_at.is_(None))
-        ).all()
-        code_to_uuid = dict(rows)
-
-    unresolved = [t for t in code_tokens if t not in code_to_uuid]
-    if unresolved:
-        raise ValidationError(
-            f"Unknown vendor(s): {', '.join(unresolved)}"
-        )
-
-    # Caller-order canonical-UUID list (uuid_tokens stay as-is here).
-    canonical: List[str] = []
-    canonical_to_input: dict[str, str] = {}
-    for t in cleaned:
-        cid = code_to_uuid[t] if _looks_like_vendor_code(t) else t
-        canonical.append(cid)
-        # Track the caller's original token for the error message.
-        canonical_to_input.setdefault(cid, t)
-
-    # ----- Phase 2: verify every canonical UUID is live + active ---------
     if canonical:
-        rows = db.execute(
-            select(_VendorMirror.id)
-            .where(_VendorMirror.id.in_(canonical))
-            .where(_VendorMirror.active.is_(True))
-            .where(_VendorMirror.deleted_at.is_(None))
-        ).all()
-        live_ids = {r[0] for r in rows}
-        missing = [
-            canonical_to_input[cid] for cid in canonical if cid not in live_ids
-        ]
-        if missing:
-            raise ValidationError(
-                f"Unknown or inactive vendor(s): {', '.join(missing)}"
-            )
+        _assert_canonical_uuids_live(db, canonical, canonical_to_input)
 
     return canonical
 

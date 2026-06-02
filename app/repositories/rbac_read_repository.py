@@ -74,26 +74,12 @@ class RbacReadRepository:
 
         return perms
 
-    def effective_permissions_by_scope(
-        self, user_id: str,
-    ) -> Dict[Tuple[str, Optional[str]], Set[str]]:
-        """Doc-41 scoped permission map.
-
-        Returns ``{(kind, scope_id): set(codes)}`` where ``kind`` is one of
-        ``'global' | 'org' | 'project'`` and ``scope_id`` is the vendor_id
-        or project_id (None for global).
-
-        Round-7 addition — VENDOR->PROJECT PROJECTION:
-          For every ("org", V) key, project those permissions onto
-          ("project", P) for every P in project.project_vendors mapped to V.
-          Source of truth is the role-assignment row's organization_id;
-          users.users.vendor_id is NOT consulted.
-        """
-        scoped: Dict[Tuple[str, Optional[str]], Set[str]] = {}
-        if not user_id:
-            return scoped
-
-        # Legacy global tier → ('global', None)
+    def _add_legacy_global_tier(
+        self,
+        user_id: str,
+        scoped: Dict[Tuple[str, Optional[str]], Set[str]],
+    ) -> None:
+        """Legacy global tier → ('global', None). UserRole + RolePermission."""
         legacy_codes: Set[str] = set()
         stmt_legacy = (
             select(RolePermission.permission_code)
@@ -105,7 +91,13 @@ class RbacReadRepository:
         if legacy_codes:
             scoped[("global", None)] = legacy_codes
 
-        # Doc-41 scoped tier
+    def _add_doc41_scoped_tier(
+        self,
+        user_id: str,
+        scoped: Dict[Tuple[str, Optional[str]], Set[str]],
+    ) -> Set[str]:
+        """Doc-41 scoped tier (project / org / global). Returns the set of
+        org_ids touched, used downstream by the vendor->project projection."""
         org_ids_seen: Set[str] = set()
         stmt_scoped = (
             select(
@@ -121,15 +113,21 @@ class RbacReadRepository:
         )
         for code, org_id, project_id in self.db.execute(stmt_scoped).all():
             if project_id is not None:
-                key = ("project", project_id)
+                key: Tuple[str, Optional[str]] = ("project", project_id)
             elif org_id is not None:
                 key = ("org", org_id)
                 org_ids_seen.add(org_id)
             else:
                 key = ("global", None)
             scoped.setdefault(key, set()).add(code)
+        return org_ids_seen
 
-        # Direct grants → treat as global
+    def _add_direct_grants(
+        self,
+        user_id: str,
+        scoped: Dict[Tuple[str, Optional[str]], Set[str]],
+    ) -> None:
+        """Direct user_permissions rows → treated as global tier."""
         direct_codes: Set[str] = set()
         stmt_direct = select(UserPermission.permission_code).where(
             UserPermission.user_id == user_id
@@ -139,20 +137,57 @@ class RbacReadRepository:
         if direct_codes:
             scoped.setdefault(("global", None), set()).update(direct_codes)
 
-        # Round-7: vendor->project projection.
-        if org_ids_seen:
-            # project-svc OWNS project_vendors — query its own table, not a mirror.
-            from app.models.project_vendor import ProjectVendor
+    def _project_vendor_perms_onto_projects(
+        self,
+        scoped: Dict[Tuple[str, Optional[str]], Set[str]],
+        org_ids_seen: Set[str],
+    ) -> None:
+        """Round-7 VENDOR->PROJECT projection: for every ('org', V) key,
+        replicate its permission set onto ('project', P) for every P in
+        ``project.project_vendors`` mapped to V. project-svc OWNS the
+        project_vendors table — query directly, not via a cross-schema
+        mirror."""
+        if not org_ids_seen:
+            return
+        from app.models.project_vendor import ProjectVendor
 
-            stmt = (
-                select(ProjectVendor.vendor_id, ProjectVendor.project_id)
-                .where(ProjectVendor.vendor_id.in_(org_ids_seen))
-            )
-            for vid, pid in self.db.execute(stmt).all():
-                org_perms = scoped.get(("org", vid), set())
-                if not org_perms:
-                    continue
-                scoped.setdefault(("project", pid), set()).update(org_perms)
+        stmt = (
+            select(ProjectVendor.vendor_id, ProjectVendor.project_id)
+            .where(ProjectVendor.vendor_id.in_(org_ids_seen))
+        )
+        for vid, pid in self.db.execute(stmt).all():
+            org_perms = scoped.get(("org", vid), set())
+            if not org_perms:
+                continue
+            scoped.setdefault(("project", pid), set()).update(org_perms)
+
+    def effective_permissions_by_scope(
+        self, user_id: str,
+    ) -> Dict[Tuple[str, Optional[str]], Set[str]]:
+        """Doc-41 scoped permission map.
+
+        Returns ``{(kind, scope_id): set(codes)}`` where ``kind`` is one of
+        ``'global' | 'org' | 'project'`` and ``scope_id`` is the vendor_id
+        or project_id (None for global).
+
+        Round-7 addition — VENDOR->PROJECT PROJECTION:
+          For every ("org", V) key, project those permissions onto
+          ("project", P) for every P in project.project_vendors mapped to V.
+          Source of truth is the role-assignment row's organization_id;
+          users.users.vendor_id is NOT consulted.
+
+        Tier-merge order preserved (legacy → scoped → direct → projection)
+        so the final map for any input is identical to the legacy in-line
+        form.
+        """
+        scoped: Dict[Tuple[str, Optional[str]], Set[str]] = {}
+        if not user_id:
+            return scoped
+
+        self._add_legacy_global_tier(user_id, scoped)
+        org_ids_seen = self._add_doc41_scoped_tier(user_id, scoped)
+        self._add_direct_grants(user_id, scoped)
+        self._project_vendor_perms_onto_projects(scoped, org_ids_seen)
 
         return scoped
 

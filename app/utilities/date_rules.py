@@ -64,6 +64,72 @@ def _fmt(d: Optional[datetime]) -> str:
     return d.strftime("%Y-%m-%d") if d else ""
 
 
+def _entity_check_start_against_parent_floor(
+    entity_start_n: Optional[datetime],
+    parent_start_n: Optional[datetime],
+    entity_cap: str,
+    parent_label: str,
+) -> None:
+    if (
+        parent_start_n is not None and entity_start_n is not None
+        and entity_start_n < parent_start_n
+    ):
+        raise ValidationError(
+            f"{entity_cap} start date cannot be before the {parent_label} "
+            f"start date ({_fmt(parent_start_n)})."
+        )
+
+
+def _entity_check_end_after_start(
+    entity_start_n: Optional[datetime],
+    entity_end_n: Optional[datetime],
+    entity_cap: str,
+) -> None:
+    if (
+        entity_start_n is not None and entity_end_n is not None
+        and entity_end_n < entity_start_n
+    ):
+        raise ValidationError(
+            f"{entity_cap} end date cannot be before its start date."
+        )
+
+
+def _entity_check_actual_start_against_project_floor(
+    actual_start_n: Optional[datetime],
+    project_start_n: Optional[datetime],
+    entity_cap: str,
+) -> None:
+    if (
+        actual_start_n is not None and project_start_n is not None
+        and actual_start_n < project_start_n
+    ):
+        raise ValidationError(
+            f"{entity_cap} actual start date cannot be before the project "
+            f"start date ({_fmt(project_start_n)})."
+        )
+
+
+def _entity_check_actual_end_ordering(
+    actual_end_n: Optional[datetime],
+    actual_start_n: Optional[datetime],
+    project_start_n: Optional[datetime],
+    entity_cap: str,
+) -> None:
+    if actual_end_n is None:
+        return
+    if actual_start_n is not None:
+        if actual_end_n < actual_start_n:
+            raise ValidationError(
+                f"{entity_cap} actual end date cannot be before the "
+                f"actual start date."
+            )
+    elif project_start_n is not None and actual_end_n < project_start_n:
+        raise ValidationError(
+            f"{entity_cap} actual end date cannot be before the "
+            f"project start date ({_fmt(project_start_n)})."
+        )
+
+
 def validate_entity_dates(
     *,
     entity_start: datetime,
@@ -86,6 +152,10 @@ def validate_entity_dates(
     is ``None`` (e.g. a fresh project with no dates set yet); the entity
     can still be created and the floor will be enforced once the parent
     gains a start date via PATCH.
+
+    Checks fire in the documented order — first violation wins, so the
+    user-facing message for any input is byte-identical to the legacy
+    in-line form.
     """
     entity_start_n = _normalize(entity_start)
     entity_end_n = _normalize(entity_end)
@@ -96,40 +166,85 @@ def validate_entity_dates(
 
     entity_cap = entity_label.capitalize()
 
-    if parent_start_n is not None and entity_start_n is not None:
-        if entity_start_n < parent_start_n:
-            raise ValidationError(
-                f"{entity_cap} start date cannot be before the {parent_label} "
-                f"start date ({_fmt(parent_start_n)})."
-            )
+    _entity_check_start_against_parent_floor(
+        entity_start_n, parent_start_n, entity_cap, parent_label,
+    )
+    _entity_check_end_after_start(
+        entity_start_n, entity_end_n, entity_cap,
+    )
+    _entity_check_actual_start_against_project_floor(
+        actual_start_n, project_start_n, entity_cap,
+    )
+    _entity_check_actual_end_ordering(
+        actual_end_n, actual_start_n, project_start_n, entity_cap,
+    )
+
+
+def _resource_check_onboard_floor(
+    onboard_n: Optional[datetime],
+    project_start_n: Optional[datetime],
+) -> None:
     if (
-        entity_start_n is not None and entity_end_n is not None
-        and entity_end_n < entity_start_n
+        onboard_n is not None and project_start_n is not None
+        and onboard_n < project_start_n
     ):
         raise ValidationError(
-            f"{entity_cap} end date cannot be before its start date."
+            f"Onboard date cannot be before the project start date "
+            f"({_fmt(project_start_n)})."
         )
+
+
+def _resource_check_actual_onboard_floor(
+    actual_onboard_n: Optional[datetime],
+    project_start_n: Optional[datetime],
+) -> None:
     if (
-        actual_start_n is not None and project_start_n is not None
-        and actual_start_n < project_start_n
+        actual_onboard_n is not None and project_start_n is not None
+        and actual_onboard_n < project_start_n
     ):
         raise ValidationError(
-            f"{entity_cap} actual start date cannot be before the project "
+            f"Actual onboard date cannot be before the project start date "
+            f"({_fmt(project_start_n)})."
+        )
+
+
+def _resource_check_offboard_ordering(
+    offboard_n: Optional[datetime],
+    onboard_n: Optional[datetime],
+    project_start_n: Optional[datetime],
+) -> None:
+    if offboard_n is None:
+        return
+    if onboard_n is not None:
+        if offboard_n < onboard_n:
+            raise ValidationError(
+                "Offboard date cannot be before the onboard date."
+            )
+    elif project_start_n is not None and offboard_n < project_start_n:
+        raise ValidationError(
+            f"Offboard date cannot be before the project start date "
+            f"({_fmt(project_start_n)})."
+        )
+
+
+def _resource_check_actual_offboard_ordering(
+    actual_offboard_n: Optional[datetime],
+    actual_onboard_n: Optional[datetime],
+    project_start_n: Optional[datetime],
+) -> None:
+    if actual_offboard_n is None:
+        return
+    if actual_onboard_n is not None:
+        if actual_offboard_n < actual_onboard_n:
+            raise ValidationError(
+                "Actual offboard date cannot be before the actual "
+                "onboard date."
+            )
+    elif project_start_n is not None and actual_offboard_n < project_start_n:
+        raise ValidationError(
+            f"Actual offboard date cannot be before the project "
             f"start date ({_fmt(project_start_n)})."
         )
-    if actual_end_n is not None:
-        if actual_start_n is not None:
-            if actual_end_n < actual_start_n:
-                raise ValidationError(
-                    f"{entity_cap} actual end date cannot be before the "
-                    f"actual start date."
-                )
-        elif project_start_n is not None:
-            if actual_end_n < project_start_n:
-                raise ValidationError(
-                    f"{entity_cap} actual end date cannot be before the "
-                    f"project start date ({_fmt(project_start_n)})."
-                )
 
 
 def validate_resource_dates(
@@ -141,51 +256,21 @@ def validate_resource_dates(
     project_start_date: datetime,
 ) -> None:
     """Floor + ordering rules for a resource sub-entity. All four input
-    dates are optional. Matches the monolith's resource-date rules."""
+    dates are optional. Matches the monolith's resource-date rules.
+
+    Checks fire in the documented order — first violation wins, so the
+    user-facing message for any input is byte-identical to the legacy
+    in-line form.
+    """
     onboard_n = _normalize(onboard)
     actual_onboard_n = _normalize(actual_onboard)
     offboard_n = _normalize(offboard)
     actual_offboard_n = _normalize(actual_offboard)
     project_start_n = _normalize(project_start_date)
 
-    if (
-        onboard_n is not None and project_start_n is not None
-        and onboard_n < project_start_n
-    ):
-        raise ValidationError(
-            f"Onboard date cannot be before the project start date "
-            f"({_fmt(project_start_n)})."
-        )
-    if (
-        actual_onboard_n is not None and project_start_n is not None
-        and actual_onboard_n < project_start_n
-    ):
-        raise ValidationError(
-            f"Actual onboard date cannot be before the project start date "
-            f"({_fmt(project_start_n)})."
-        )
-    if offboard_n is not None:
-        if onboard_n is not None:
-            if offboard_n < onboard_n:
-                raise ValidationError(
-                    "Offboard date cannot be before the onboard date."
-                )
-        elif project_start_n is not None:
-            if offboard_n < project_start_n:
-                raise ValidationError(
-                    f"Offboard date cannot be before the project start date "
-                    f"({_fmt(project_start_n)})."
-                )
-    if actual_offboard_n is not None:
-        if actual_onboard_n is not None:
-            if actual_offboard_n < actual_onboard_n:
-                raise ValidationError(
-                    "Actual offboard date cannot be before the actual "
-                    "onboard date."
-                )
-        elif project_start_n is not None:
-            if actual_offboard_n < project_start_n:
-                raise ValidationError(
-                    f"Actual offboard date cannot be before the project "
-                    f"start date ({_fmt(project_start_n)})."
-                )
+    _resource_check_onboard_floor(onboard_n, project_start_n)
+    _resource_check_actual_onboard_floor(actual_onboard_n, project_start_n)
+    _resource_check_offboard_ordering(offboard_n, onboard_n, project_start_n)
+    _resource_check_actual_offboard_ordering(
+        actual_offboard_n, actual_onboard_n, project_start_n,
+    )

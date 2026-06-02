@@ -944,6 +944,162 @@ class DashboardService:
 
     _VALID_ITEM_KINDS = {"milestone", "activity"}
 
+    def _assert_project_exists(self, project_id: str) -> None:
+        """Raise ``NotFoundError`` if the project is missing or soft-deleted."""
+        stmt = (
+            select(Project.id)
+            .where(Project.id == project_id)
+            .where(Project.deleted_at.is_(None))
+        )
+        if self.db.execute(stmt).scalar_one_or_none() is None:
+            raise NotFoundError("The project could not be found.")
+
+    def _sanitize_item_filters(
+        self, kind: Optional[str], bucket: Optional[str],
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """Drop unknown ``kind``/``bucket`` values to ``None`` (acts as
+        'no filter'). Matches original silent-fallback behavior."""
+        if kind is not None and kind not in self._VALID_ITEM_KINDS:
+            kind = None
+        if bucket is not None and bucket not in set(ITEM_BUCKETS):
+            bucket = None
+        return kind, bucket
+
+    @staticmethod
+    def _build_milestone_item_row(
+        *,
+        m: Tuple[Any, ...],
+        idx: int,
+        activities_by_milestone: Dict[str, List[Tuple[Any, ...]]],
+        bucket_value: str,
+        delay_value: int,
+    ) -> Dict[str, Any]:
+        (mid, mname, _pos, mstatus, mstart, mend, mas, mae) = m
+        children = activities_by_milestone.get(mid, [])
+        child_completed = sum(
+            1 for c in children if (c[4] or "") == "completed"
+        )
+        mp = _progress_pct(child_completed, len(children))
+        return {
+            "id": mid,
+            "kind": "milestone",
+            "wbs": f"M{idx}",
+            "name": mname,
+            "milestoneId": None,
+            "milestoneName": None,
+            "status": mstatus,
+            "bucket": bucket_value,
+            "plannedStart": iso_ist(mstart),
+            "plannedEnd": iso_ist(mend),
+            "actualStart": iso_ist(mas),
+            "actualEnd": iso_ist(mae),
+            "daysDelayed": delay_value,
+            "progressPct": mp,
+        }
+
+    def _build_milestone_item_rows(
+        self,
+        *,
+        milestone_rows: List[Tuple[Any, ...]],
+        activities_by_milestone: Dict[str, List[Tuple[Any, ...]]],
+        milestone_id: Optional[str],
+        bucket: Optional[str],
+        min_delay: Optional[int],
+        today: _date,
+    ) -> List[Dict[str, Any]]:
+        out: List[Dict[str, Any]] = []
+        for idx, m in enumerate(milestone_rows, start=1):
+            mid, _mname, _pos, mstatus, _mstart, mend, _mas, _mae = m
+            if milestone_id is not None and mid != milestone_id:
+                continue
+            b = _item_bucket(mstatus, mend, today)
+            d = _item_delay_days(mstatus, mend, today)
+            if bucket is not None and b != bucket:
+                continue
+            if min_delay is not None and d < min_delay:
+                continue
+            out.append(self._build_milestone_item_row(
+                m=m, idx=idx,
+                activities_by_milestone=activities_by_milestone,
+                bucket_value=b, delay_value=d,
+            ))
+        return out
+
+    @staticmethod
+    def _build_activity_item_row(
+        *,
+        a: Tuple[Any, ...],
+        wbs: str,
+        m_name_by_id: Dict[str, str],
+        bucket_value: str,
+        delay_value: int,
+    ) -> Dict[str, Any]:
+        (aid, amid, aname, _apos, astatus, astart, aend, aas, aae) = a
+        return {
+            "id": aid,
+            "kind": "activity",
+            "wbs": wbs,
+            "name": aname,
+            "milestoneId": amid,
+            "milestoneName": m_name_by_id.get(amid),
+            "status": astatus,
+            "bucket": bucket_value,
+            "plannedStart": iso_ist(astart),
+            "plannedEnd": iso_ist(aend),
+            "actualStart": iso_ist(aas),
+            "actualEnd": iso_ist(aae),
+            "daysDelayed": delay_value,
+            "progressPct": 100 if (astatus or "") == "completed" else 0,
+        }
+
+    def _build_activity_item_rows(
+        self,
+        *,
+        activity_rows: List[Tuple[Any, ...]],
+        m_index_by_id: Dict[str, int],
+        m_name_by_id: Dict[str, str],
+        bucket: Optional[str],
+        min_delay: Optional[int],
+        today: _date,
+    ) -> List[Dict[str, Any]]:
+        """WBS index is consumed for EVERY activity, even ones filtered
+        out — matches original behavior. So filtered-out items still
+        'use' their A{m}.{n} slot, and the next row sees the next
+        sequence number."""
+        out: List[Dict[str, Any]] = []
+        activity_index_per_milestone: Dict[str, int] = {}
+        for a in activity_rows:
+            (_aid, amid, _aname, _apos, astatus, _astart, aend, _aas, _aae) = a
+            activity_index_per_milestone[amid] = (
+                activity_index_per_milestone.get(amid, 0) + 1
+            )
+            ai = activity_index_per_milestone[amid]
+            mi = m_index_by_id.get(amid, 0)
+            b = _item_bucket(astatus, aend, today)
+            d = _item_delay_days(astatus, aend, today)
+            if bucket is not None and b != bucket:
+                continue
+            if min_delay is not None and d < min_delay:
+                continue
+            out.append(self._build_activity_item_row(
+                a=a, wbs=f"A{mi}.{ai}",
+                m_name_by_id=m_name_by_id,
+                bucket_value=b, delay_value=d,
+            ))
+        return out
+
+    @staticmethod
+    def _tally_item_bucket_counts(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+        counts: Dict[str, Any] = {
+            "total": len(rows), "ontrack": 0, "delayed": 0, "completed": 0,
+        }
+        for r in rows:
+            b = r["bucket"]
+            if b in counts:
+                counts[b] += 1
+        counts["pendingApprovalCount"] = _STATIC_PENDING_APPROVAL_COUNT
+        return counts
+
     def get_project_items(
         self,
         *,
@@ -954,25 +1110,10 @@ class DashboardService:
         min_delay: Optional[int] = None,
     ) -> Dict[str, Any]:
         """M/A drill-down rows under a project (with filters)."""
-        # Project existence check — single live row lookup.
-        exists_stmt = (
-            select(Project.id)
-            .where(Project.id == project_id)
-            .where(Project.deleted_at.is_(None))
-        )
-        if self.db.execute(exists_stmt).scalar_one_or_none() is None:
-            raise NotFoundError("The project could not be found.")
-
-        if kind is not None and kind not in self._VALID_ITEM_KINDS:
-            kind = None
-        if bucket is not None and bucket not in set(ITEM_BUCKETS):
-            bucket = None
-
+        self._assert_project_exists(project_id)
+        kind, bucket = self._sanitize_item_filters(kind, bucket)
         today = _ist_today()
 
-        rows: List[Dict[str, Any]] = []
-
-        # Pre-fetch milestones once — for both milestone rows + WBS index.
         milestone_rows = self._fetch_milestone_rows(project_id=project_id)
         m_index_by_id: Dict[str, int] = {}
         m_name_by_id: Dict[str, str] = {}
@@ -980,95 +1121,36 @@ class DashboardService:
             m_index_by_id[m[0]] = idx
             m_name_by_id[m[0]] = m[1]
 
-        # Activities are needed for milestone progress rollups even if
-        # the caller asked for milestones only.
         activity_rows = self._fetch_activity_rows(
             project_id=project_id, milestone_id=milestone_id,
         )
         activities_by_milestone: Dict[str, List[Tuple[Any, ...]]] = {}
-        activity_index_per_milestone: Dict[str, int] = {}
         for a in activity_rows:
-            amid = a[1]
-            activities_by_milestone.setdefault(amid, []).append(a)
+            activities_by_milestone.setdefault(a[1], []).append(a)
 
-        # ---- Milestones -------------------------------------------------
+        rows: List[Dict[str, Any]] = []
         if kind in (None, "milestone"):
-            for idx, m in enumerate(milestone_rows, start=1):
-                (mid, mname, _pos, mstatus, mstart, mend, mas, mae) = m
-                if milestone_id is not None and mid != milestone_id:
-                    continue
-                b = _item_bucket(mstatus, mend, today)
-                d = _item_delay_days(mstatus, mend, today)
-                if bucket is not None and b != bucket:
-                    continue
-                if min_delay is not None and d < min_delay:
-                    continue
-                # Milestone progress = % of its activities currently
-                # ``status=completed`` over its total live activities.
-                children = activities_by_milestone.get(mid, [])
-                child_completed = sum(
-                    1 for c in children if (c[4] or "") == "completed"
-                )
-                mp = _progress_pct(child_completed, len(children))
-                rows.append({
-                    "id": mid,
-                    "kind": "milestone",
-                    "wbs": f"M{idx}",
-                    "name": mname,
-                    "milestoneId": None,
-                    "milestoneName": None,
-                    "status": mstatus,
-                    "bucket": b,
-                    "plannedStart": iso_ist(mstart),
-                    "plannedEnd": iso_ist(mend),
-                    "actualStart": iso_ist(mas),
-                    "actualEnd": iso_ist(mae),
-                    "daysDelayed": d,
-                    "progressPct": mp,
-                })
-
-        # ---- Activities -------------------------------------------------
+            rows.extend(self._build_milestone_item_rows(
+                milestone_rows=milestone_rows,
+                activities_by_milestone=activities_by_milestone,
+                milestone_id=milestone_id,
+                bucket=bucket,
+                min_delay=min_delay,
+                today=today,
+            ))
         if kind in (None, "activity"):
-            for a in activity_rows:
-                (aid, amid, aname, _apos, astatus, astart, aend, aas, aae) = a
-                activity_index_per_milestone[amid] = (
-                    activity_index_per_milestone.get(amid, 0) + 1
-                )
-                ai = activity_index_per_milestone[amid]
-                mi = m_index_by_id.get(amid, 0)
-                b = _item_bucket(astatus, aend, today)
-                d = _item_delay_days(astatus, aend, today)
-                if bucket is not None and b != bucket:
-                    continue
-                if min_delay is not None and d < min_delay:
-                    continue
-                rows.append({
-                    "id": aid,
-                    "kind": "activity",
-                    "wbs": f"A{mi}.{ai}",
-                    "name": aname,
-                    "milestoneId": amid,
-                    "milestoneName": m_name_by_id.get(amid),
-                    "status": astatus,
-                    "bucket": b,
-                    "plannedStart": iso_ist(astart),
-                    "plannedEnd": iso_ist(aend),
-                    "actualStart": iso_ist(aas),
-                    "actualEnd": iso_ist(aae),
-                    "daysDelayed": d,
-                    "progressPct": 100 if (astatus or "") == "completed" else 0,
-                })
-
-        counts = {"total": len(rows), "ontrack": 0, "delayed": 0, "completed": 0}
-        for r in rows:
-            b = r["bucket"]
-            if b in counts:
-                counts[b] += 1
-        counts["pendingApprovalCount"] = _STATIC_PENDING_APPROVAL_COUNT
+            rows.extend(self._build_activity_item_rows(
+                activity_rows=activity_rows,
+                m_index_by_id=m_index_by_id,
+                m_name_by_id=m_name_by_id,
+                bucket=bucket,
+                min_delay=min_delay,
+                today=today,
+            ))
 
         return {
             "asOf": today.isoformat(),
-            "counts": counts,
+            "counts": self._tally_item_bucket_counts(rows),
             "rows": rows,
         }
 

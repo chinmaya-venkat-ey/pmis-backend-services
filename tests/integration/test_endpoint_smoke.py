@@ -218,8 +218,15 @@ class TestProjectEndpoints:
 # ----- Milestone ----------------------------------------------------------
 
 @pytest.fixture
-def milestone_ctrl_override(app):
+def milestone_ctrl_override(app, monkeypatch):
     from app.dependencies import get_milestone_controller
+
+    # Post-A1 audit: require_project_permission no longer admin-bypasses,
+    # so DELETE /milestones/{id} and POST /milestones/{id}/restore both
+    # run _ancestor_project_id which opens a real SessionLocal. Stub it
+    # to a fixed value so the scope-check completes in-process.
+    import app.core.rbac as rbac_mod
+    monkeypatch.setattr(rbac_mod, "_ancestor_project_id", lambda *a, **kw: "p1")
 
     fake = MagicMock()
     payload = _milestone()

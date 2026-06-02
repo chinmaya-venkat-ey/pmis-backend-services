@@ -125,16 +125,21 @@ def _build_calculation_steps(
     aid: str,
     predecessors: Dict[str, Set[str]],
     successors: Dict[str, Set[str]],
-    ES: Dict[str, int],
-    EF: Dict[str, int],
-    LS: Dict[str, int],
-    LF: Dict[str, int],
+    es: Dict[str, int],
+    ef: Dict[str, int],
+    ls: Dict[str, int],
+    lf: Dict[str, int],
     dur: int,
     project_end: int,
     slack: int,
     code_map: Dict[str, str],   # aid -> display_code
 ) -> CpaCalculationSteps:
-    """Build the step-by-step CPM calculation card for one activity."""
+    """Build the step-by-step CPM calculation card for one activity.
+
+    Parameter names are lowercased for PEP-8 compliance (Sonar S117); the
+    user-visible formula strings ("ES + Duration − 1", etc.) keep the
+    standard CPM uppercase notation in the API response.
+    """
     preds = sorted(predecessors.get(aid, set()))
     succs = sorted(successors.get(aid, set()))
 
@@ -143,23 +148,23 @@ def _build_calculation_steps(
         es_detail = CpaCalcDetail(
             formula="No predecessors → ES = 1",
             substituted="= 1",
-            result=ES[aid],
+            result=es[aid],
             note="First activity — can start on Day 1",
         )
     else:
         sym = ", ".join(f"EF[{code_map.get(p, p)}]" for p in preds)
-        vals = ", ".join(str(EF[p]) for p in preds)
+        vals = ", ".join(str(ef[p]) for p in preds)
         es_detail = CpaCalcDetail(
             formula=f"max({sym}) + 1",
             substituted=f"max({vals}) + 1",
-            result=ES[aid],
+            result=es[aid],
         )
 
     # Early Finish
     ef_detail = CpaCalcDetail(
         formula="ES + Duration − 1",
-        substituted=f"{ES[aid]} + {dur} − 1",
-        result=EF[aid],
+        substituted=f"{es[aid]} + {dur} − 1",
+        result=ef[aid],
     )
 
     # Late Finish
@@ -167,29 +172,29 @@ def _build_calculation_steps(
         lf_detail = CpaCalcDetail(
             formula="No successors → LF = Project End",
             substituted=f"= {project_end}",
-            result=LF[aid],
+            result=lf[aid],
             note="Last activity — must finish by Project End Day",
         )
     else:
         sym = ", ".join(f"LS[{code_map.get(s, s)}]" for s in succs)
-        vals = ", ".join(str(LS[s]) for s in succs)
+        vals = ", ".join(str(ls[s]) for s in succs)
         lf_detail = CpaCalcDetail(
             formula=f"min({sym}) − 1",
             substituted=f"min({vals}) − 1",
-            result=LF[aid],
+            result=lf[aid],
         )
 
     # Late Start
     ls_detail = CpaCalcDetail(
         formula="LF − Duration + 1",
-        substituted=f"{LF[aid]} − {dur} + 1",
-        result=LS[aid],
+        substituted=f"{lf[aid]} − {dur} + 1",
+        result=ls[aid],
     )
 
     # Slack
     slack_detail = CpaCalcDetail(
         formula="LS − ES",
-        substituted=f"{LS[aid]} − {ES[aid]}",
+        substituted=f"{ls[aid]} − {es[aid]}",
         result=slack,
     )
 
@@ -390,7 +395,7 @@ class CriticalPathService:
                 aid=aid,
                 predecessors=predecessors,
                 successors=successors,
-                ES=ES, EF=EF, LS=LS, LF=LF,
+                es=ES, ef=EF, ls=LS, lf=LF,
                 dur=dur,
                 project_end=project_end,
                 slack=slk,

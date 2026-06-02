@@ -2,9 +2,17 @@
 ``users.users.org_role`` column is set but who have no matching row in
 ``users.user_role_assignments`` at global scope.
 
-Revision ID: r011_backfill_org_role_assignments
+Revision ID: r011_org_role_backfill
 Revises: r010_add_director_division_roles
 Create Date: 2026-06-02
+
+NOTE: the revision id is intentionally kept short (≤32 chars). Alembic's
+default ``alembic_version_users.version_num`` column is VARCHAR(32). A
+previous attempt at this migration used the longer id
+``r011_backfill_org_role_assignments`` (34 chars) — the migration body
+ran fine on deploy, but the bookkeeping UPDATE to bump version_num
+failed with ``StringDataRightTruncation``, rolling back the whole
+transaction. Keep future revision ids ≤32 chars.
 
 Context (CEO-class bug):
 
@@ -51,7 +59,7 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = "r011_backfill_org_role_assignments"
+revision: str = "r011_org_role_backfill"
 down_revision: str = "r010_add_director_division_roles"
 branch_labels = None
 depends_on = None

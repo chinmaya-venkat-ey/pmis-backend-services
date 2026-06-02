@@ -63,7 +63,7 @@ class MilestoneController:
             .where(Milestone.project_id == project_id)
             .where(Milestone.deleted_at.is_(None))
         ).all()
-        by_id = {mid: pos for mid, pos in rows}
+        by_id = dict(rows)
         return [
             f"M{by_id[mid]}" for mid in milestone_ids if mid in by_id and by_id[mid]
         ]

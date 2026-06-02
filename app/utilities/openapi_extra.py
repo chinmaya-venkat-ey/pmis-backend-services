@@ -21,6 +21,9 @@ from typing import Any, Dict, Iterable, List, Optional
 from pydantic import BaseModel
 
 
+_MULTIPART_FORMDATA = "multipart/form-data"
+
+
 def _multipart_string_prop(description: str = "") -> Dict[str, Any]:
     return {"type": "string", "description": description}
 
@@ -86,7 +89,7 @@ def dual_mode_request_body(
                 "application/json": {
                     "schema": json_schema_cls.model_json_schema(by_alias=True),
                 },
-                "multipart/form-data": {
+                _MULTIPART_FORMDATA: {
                     "schema": {
                         "type": "object",
                         "required": list(multipart_required),
@@ -252,7 +255,7 @@ def multipart_files_only_request_body(
         "requestBody": {
             "required": True,
             "content": {
-                "multipart/form-data": {
+                _MULTIPART_FORMDATA: {
                     "schema": {
                         "type": "object",
                         "required": [field_name],
@@ -267,14 +270,14 @@ def multipart_files_only_request_body(
 
 
 def multipart_body_and_files_request_body(
-    *, description: str = "Comment body and/or files (one required).",
+    *, _description: str = "Comment body and/or files (one required).",
 ) -> Dict[str, Any]:
     """``POST /project/<kind>/{id}/comments`` — body + files multipart shape."""
     return {
         "requestBody": {
             "required": True,
             "content": {
-                "multipart/form-data": {
+                _MULTIPART_FORMDATA: {
                     "schema": {
                         "type": "object",
                         "properties": {

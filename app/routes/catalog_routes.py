@@ -41,7 +41,6 @@ router = APIRouter(tags=["catalog"])
 
 @router.get(
     "/divisions",
-    response_model=List[DivisionResponse],
     response_model_by_alias=True,
     summary="List divisions (catalog lookup)",
     dependencies=[Depends(require_authenticated())],
@@ -61,7 +60,6 @@ def list_divisions(
 
 @router.get(
     "/priorities",
-    response_model=List[PriorityResponse],
     summary="List priorities (catalog lookup)",
     dependencies=[Depends(require_authenticated())],
 )
@@ -87,7 +85,6 @@ def list_priorities(
 
 @router.get(
     "/resource_types",
-    response_model=List[ResourceTypeResponse],
     summary="List resource types (catalog lookup)",
     dependencies=[Depends(require_authenticated())],
 )
@@ -104,7 +101,6 @@ def list_resource_types(
 
 @router.post(
     "/resource_types/create",
-    response_model=ResourceTypeResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create a resource type",
     dependencies=[Depends(require_authenticated())],
@@ -133,7 +129,6 @@ def create_resource_type(
 
 @router.get(
     "/project_status_transitions",
-    response_model=List[ProjectStatusTransitionResponse],
     summary="List project status transitions (catalog lookup)",
     dependencies=[Depends(require_authenticated())],
 )

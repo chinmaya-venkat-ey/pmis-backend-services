@@ -66,7 +66,6 @@ def resolve_and_validate_vendor_ids(
 
     # ----- Phase 1: resolve codes to UUIDs --------------------------------
     code_tokens = [t for t in cleaned if _looks_like_vendor_code(t)]
-    uuid_tokens = [t for t in cleaned if not _looks_like_vendor_code(t)]
 
     code_to_uuid: dict[str, str] = {}
     if code_tokens:
@@ -75,7 +74,7 @@ def resolve_and_validate_vendor_ids(
             .where(_VendorMirror.vendor_code.in_(code_tokens))
             .where(_VendorMirror.deleted_at.is_(None))
         ).all()
-        code_to_uuid = {code: uid for code, uid in rows}
+        code_to_uuid = dict(rows)
 
     unresolved = [t for t in code_tokens if t not in code_to_uuid]
     if unresolved:

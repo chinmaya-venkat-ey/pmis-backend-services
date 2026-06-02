@@ -465,14 +465,14 @@ class CriticalPathService:
         # Project delay: how many days the last activity exceeds the planned span
         # Use planned span = max(EF) if all delays were 0
         plain_durations = {aid: max(1, _days_needed(act_by_id[aid])) for aid in activity_ids}
-        plain_EF: Dict[str, int] = {}
+        plain_ef: Dict[str, int] = {}
         for aid in topo_order:
             dur = plain_durations[aid]
             if not predecessors.get(aid):
-                plain_EF[aid] = dur
+                plain_ef[aid] = dur
             else:
-                plain_EF[aid] = max(plain_EF[pred] for pred in predecessors[aid]) + dur
-        planned_end = max(plain_EF.values()) if plain_EF else project_end
+                plain_ef[aid] = max(plain_ef[pred] for pred in predecessors[aid]) + dur
+        planned_end = max(plain_ef.values()) if plain_ef else project_end
         project_delay = max(0, project_end - planned_end)
 
         metadata = CpaMetadata(

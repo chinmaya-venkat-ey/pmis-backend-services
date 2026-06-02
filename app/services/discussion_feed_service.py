@@ -35,34 +35,26 @@ class DiscussionFeedService:
             raise ProjectNotFoundError(f"Project with ID {project_id} not found")
 
         db = self.db
-        milestone_id_to_name = {
-            mid: mname for (mid, mname) in db.execute(
-                select(Milestone.id, Milestone.name)
-                .where(Milestone.project_id == project_id)
-                .where(Milestone.deleted_at.is_(None))
-            ).all()
-        }
-        activity_id_to_name = {
-            aid: aname for (aid, aname) in db.execute(
-                select(Activity.id, Activity.name)
-                .where(Activity.project_id == project_id)
-                .where(Activity.deleted_at.is_(None))
-            ).all()
-        }
-        task_id_to_name = {
-            tid: tname for (tid, tname) in db.execute(
-                select(Task.id, Task.name)
-                .where(Task.project_id == project_id)
-                .where(Task.deleted_at.is_(None))
-            ).all()
-        }
-        subtask_id_to_name = {
-            sid: sname for (sid, sname) in db.execute(
-                select(Subtask.id, Subtask.name)
-                .where(Subtask.project_id == project_id)
-                .where(Subtask.deleted_at.is_(None))
-            ).all()
-        }
+        milestone_id_to_name = dict(db.execute(
+            select(Milestone.id, Milestone.name)
+            .where(Milestone.project_id == project_id)
+            .where(Milestone.deleted_at.is_(None))
+        ).all())
+        activity_id_to_name = dict(db.execute(
+            select(Activity.id, Activity.name)
+            .where(Activity.project_id == project_id)
+            .where(Activity.deleted_at.is_(None))
+        ).all())
+        task_id_to_name = dict(db.execute(
+            select(Task.id, Task.name)
+            .where(Task.project_id == project_id)
+            .where(Task.deleted_at.is_(None))
+        ).all())
+        subtask_id_to_name = dict(db.execute(
+            select(Subtask.id, Subtask.name)
+            .where(Subtask.project_id == project_id)
+            .where(Subtask.deleted_at.is_(None))
+        ).all())
 
         rows, total = self.comments.list_for_project_tree(
             project_id,

@@ -166,7 +166,6 @@ for _path, _kind in _KIND_BY_PATH.items():
 
 @router.delete(
     "/attachments/{attachment_id}",
-    response_model=CommentDeleteSuccess,
     summary="Soft-delete an attachment (uploader or admin)",
     description=(
         "Aliased to ``DELETE /project/comments/{id}``. The id resolves to "

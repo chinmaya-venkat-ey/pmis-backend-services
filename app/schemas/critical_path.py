@@ -34,7 +34,7 @@ class CpaDependencyRow(BaseModel):
     days_needed: int
     days_delayed: int
     effective_duration: int
-    status: Optional[str]
+    status: Optional[str] = None
     depends_on: List[CpaDependsOn]
 
 
@@ -102,7 +102,7 @@ class CpaActivitySchedule(BaseModel):
     milestone_id: str
     milestone_display_code: str
     milestone_name: str
-    status: Optional[str]
+    status: Optional[str] = None
     days_needed: int
     days_delayed: int
     effective_duration: int
@@ -131,7 +131,7 @@ class CpaFlowNode(BaseModel):
     late_finish: int
     slack: int
     on_critical_path: bool
-    status: Optional[str]
+    status: Optional[str] = None
     position: Dict[str, Any]
 
 

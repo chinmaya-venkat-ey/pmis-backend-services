@@ -17,6 +17,12 @@ from typing import Dict, List, Optional
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
+# ── Shared description strings (avoid duplication across Field() calls) ─────
+_DESC_USER_IDS = "User IDs"
+_DESC_USER_IDS_APPROVER = "User IDs (single approver; first wins)"
+_EX_ACTIVITY_NAME = "Requirements Gathering"
+
+
 # ── Sample user chips reused across schema examples ─────────────────────────
 _EX_USER1 = {"id": "usr-0001", "login": "rajesh.kumar",  "email": "rajesh.kumar@uidai.gov.in",  "first_name": "Rajesh", "last_name": "Kumar"}
 _EX_USER2 = {"id": "usr-0002", "login": "priya.sharma",  "email": "priya.sharma@uidai.gov.in",  "first_name": "Priya",  "last_name": "Sharma"}
@@ -79,8 +85,8 @@ class OwnershipWrite(BaseModel):
             }
         },
     )
-    project_owner: List[str] = Field(default_factory=list, description="User IDs")
-    approver: List[str] = Field(default_factory=list, description="User IDs (single approver; first wins)")
+    project_owner: List[str] = Field(default_factory=list, description=_DESC_USER_IDS)
+    approver: List[str] = Field(default_factory=list, description=_DESC_USER_IDS_APPROVER)
 
 
 # ── Per-activity assignments ─────────────────────────────────────────────────
@@ -132,9 +138,9 @@ class ActivityAssignmentsWrite(BaseModel):
             }
         },
     )
-    owner: List[str] = Field(default_factory=list, description="User IDs")
+    owner: List[str] = Field(default_factory=list, description=_DESC_USER_IDS)
     owner_approver: List[str] = Field(
-        default_factory=list, description="User IDs (single approver; first wins)"
+        default_factory=list, description=_DESC_USER_IDS_APPROVER
     )
     division_users: Dict[str, List[str]] = Field(
         default_factory=dict,
@@ -153,7 +159,7 @@ class TeamActivityRow(BaseModel):
         "example": {
             "id": "act-a101",
             "display_code": "A1.1",
-            "name": "Requirements Gathering",
+            "name": _EX_ACTIVITY_NAME,
             "milestone_id": "ms-m001",
             "milestone_name": "Planning",
             "milestone_display_code": "M1",
@@ -194,7 +200,7 @@ class TeamReadResponse(BaseModel):
             "activities": [
                 {
                     "id": "act-a101", "display_code": "A1.1",
-                    "name": "Requirements Gathering",
+                    "name": _EX_ACTIVITY_NAME,
                     "milestone_id": "ms-m001", "milestone_name": "Planning",
                     "milestone_display_code": "M1",
                     "concerned_divisions": ["IT_DIV", "LEGAL_DIV"],
@@ -325,7 +331,7 @@ class OrgUserRow(BaseModel):
         extra="ignore",
     )
     role_label: str
-    users: List[str] = Field(default_factory=list, description="User IDs")
+    users: List[str] = Field(default_factory=list, description=_DESC_USER_IDS)
 
 
 class ProjectOwnerRow(BaseModel):
@@ -337,7 +343,7 @@ class ProjectOwnerRow(BaseModel):
         extra="ignore",
     )
     role_label: str
-    users: List[str] = Field(default_factory=list, description="User IDs")
+    users: List[str] = Field(default_factory=list, description=_DESC_USER_IDS)
     single: bool = False
 
 
@@ -355,9 +361,9 @@ class TeamPageActivity(BaseModel):
     milestone_display_code: str = Field(description="Milestone display code, e.g. 'M1' (wire: milestoneDisplayCode)")
     milestone: str = Field(description="Milestone name (not ID)")
     concerned_divisions: List[str] = Field(default_factory=list)
-    owner: List[str] = Field(default_factory=list, description="User IDs")
+    owner: List[str] = Field(default_factory=list, description=_DESC_USER_IDS)
     owner_approver: List[str] = Field(
-        default_factory=list, description="User IDs (single approver; first wins)"
+        default_factory=list, description=_DESC_USER_IDS_APPROVER
     )
     division_users: Dict[str, List[str]] = Field(
         default_factory=dict,
@@ -398,7 +404,7 @@ class TeamPageResponse(BaseModel):
                 "activities": [
                     {
                         "id": "act-a101",
-                        "name": "Requirements Gathering",
+                        "name": _EX_ACTIVITY_NAME,
                         "milestone": "Planning",
                         "concernedDivisions": ["IT_DIV", "LEGAL_DIV"],
                         "owner": ["usr-0001"],

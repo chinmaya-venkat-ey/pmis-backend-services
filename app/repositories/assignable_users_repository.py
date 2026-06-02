@@ -72,7 +72,7 @@ class AssignableUsersRepository:
         ``lastName`` / ``email`` / ``orgRole`` ready for FE rendering.
         """
         # (a) Project-scoped holders.
-        project_users = list(self.db.execute(
+        project_users = self.db.execute(
             select(MirrorUser)
             .join(
                 UserRoleAssignment,
@@ -80,7 +80,7 @@ class AssignableUsersRepository:
             )
             .where(UserRoleAssignment.project_id == project_id)
             .where(MirrorUser.deleted_at.is_(None))
-        ).scalars())
+        ).scalars().all()
 
         # (b) Org-admin holders on the project's vendor(s).
         vendor_ids = list(self.db.execute(

@@ -160,7 +160,6 @@ for _path, _kind in _KIND_BY_PATH.items():
 
 @router.delete(
     "/comments/{comment_id}",
-    response_model=CommentDeleteSuccess,
     summary="Soft-delete a comment (author or admin)",
     description=(
         "Reversible soft-delete: sets ``deleted_at`` + ``deleted_by`` on "

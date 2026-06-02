@@ -59,13 +59,12 @@ def validate_owner_pair(
         )
 
     # 2. Owner — when supplied — must be a known division code.
-    if n_owner is not None:
-        if not is_known_owner_division(db, n_owner):
-            raise ValidationError(
-                f"Owner '{n_owner}' is not a known division. Pick one "
-                f"from GET /divisions or use 'others' with a custom "
-                f"ownerOther label."
-            )
+    if n_owner is not None and not is_known_owner_division(db, n_owner):
+        raise ValidationError(
+            f"Owner '{n_owner}' is not a known division. Pick one "
+            f"from GET /divisions or use 'others' with a custom "
+            f"ownerOther label."
+        )
 
     # 3 & 4. Rules around ``owner_other``.
     is_others = (n_owner == "others")

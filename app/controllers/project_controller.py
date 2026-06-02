@@ -117,7 +117,7 @@ class ProjectController:
             .where(_VendorMirror.id.in_(vendor_ids))
         ).all()
         # Preserve the order of vendor_ids so the response is deterministic.
-        by_id = {vid: vname for vid, vname in rows}
+        by_id = dict(rows)
         return [
             {"id": vid, "name": by_id.get(vid)}
             for vid in vendor_ids

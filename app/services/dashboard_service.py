@@ -265,6 +265,36 @@ class DashboardService:
         stmt = stmt.order_by(Project.name.asc())
         return list(self.db.execute(stmt).scalars().all())
 
+    def _tally_kind_rows(
+        self,
+        *,
+        out: Dict[str, Dict[str, int]],
+        rows: List[Tuple[str, Any, Any]],
+        today_ist: _date,
+        total_key: str,
+        completed_key: str,
+        delayed_key: str,
+        ontrack_key: str,
+    ) -> None:
+        """Fold one stream of ``(project_id, status, end_date)`` rows into
+        ``out`` using the supplied counter keys. Shared between the
+        milestones pass and the activities pass — same bucket dispatch,
+        same max-delay tracking, same ``delayedItemCount`` increment."""
+        for pid, status, end_dt in rows:
+            counters = out.setdefault(pid, _empty_project_counters())
+            bucket = _item_bucket(status, end_dt, today_ist)
+            counters[total_key] += 1
+            if bucket == BUCKET_COMPLETED:
+                counters[completed_key] += 1
+            elif bucket == BUCKET_DELAYED:
+                counters[delayed_key] += 1
+                counters["delayedItemCount"] += 1
+                d = _item_delay_days(status, end_dt, today_ist)
+                if d > counters["maxDelayDays"]:
+                    counters["maxDelayDays"] = d
+            else:
+                counters[ontrack_key] += 1
+
     def _fetch_per_project_counters(
         self, *, project_ids: List[str], today_ist: _date,
     ) -> Dict[str, Dict[str, int]]:
@@ -277,47 +307,35 @@ class DashboardService:
         if not project_ids:
             return out
 
-        # --- milestones --------------------------------------------------
         m_stmt = (
             select(Milestone.project_id, Milestone.status, Milestone.end_date)
             .where(Milestone.project_id.in_(project_ids))
             .where(Milestone.deleted_at.is_(None))
         )
-        for pid, status, end_dt in self.db.execute(m_stmt).all():
-            counters = out.setdefault(pid, _empty_project_counters())
-            bucket = _item_bucket(status, end_dt, today_ist)
-            counters["milestonesTotal"] += 1
-            if bucket == BUCKET_COMPLETED:
-                counters["milestonesCompleted"] += 1
-            elif bucket == BUCKET_DELAYED:
-                counters["milestonesDelayed"] += 1
-                counters["delayedItemCount"] += 1
-                d = _item_delay_days(status, end_dt, today_ist)
-                if d > counters["maxDelayDays"]:
-                    counters["maxDelayDays"] = d
-            else:
-                counters["milestonesOntrack"] += 1
+        self._tally_kind_rows(
+            out=out,
+            rows=self.db.execute(m_stmt).all(),
+            today_ist=today_ist,
+            total_key="milestonesTotal",
+            completed_key="milestonesCompleted",
+            delayed_key="milestonesDelayed",
+            ontrack_key="milestonesOntrack",
+        )
 
-        # --- activities --------------------------------------------------
         a_stmt = (
             select(Activity.project_id, Activity.status, Activity.end_date)
             .where(Activity.project_id.in_(project_ids))
             .where(Activity.deleted_at.is_(None))
         )
-        for pid, status, end_dt in self.db.execute(a_stmt).all():
-            counters = out.setdefault(pid, _empty_project_counters())
-            bucket = _item_bucket(status, end_dt, today_ist)
-            counters["activitiesTotal"] += 1
-            if bucket == BUCKET_COMPLETED:
-                counters["activitiesCompleted"] += 1
-            elif bucket == BUCKET_DELAYED:
-                counters["activitiesDelayed"] += 1
-                counters["delayedItemCount"] += 1
-                d = _item_delay_days(status, end_dt, today_ist)
-                if d > counters["maxDelayDays"]:
-                    counters["maxDelayDays"] = d
-            else:
-                counters["activitiesOntrack"] += 1
+        self._tally_kind_rows(
+            out=out,
+            rows=self.db.execute(a_stmt).all(),
+            today_ist=today_ist,
+            total_key="activitiesTotal",
+            completed_key="activitiesCompleted",
+            delayed_key="activitiesDelayed",
+            ontrack_key="activitiesOntrack",
+        )
 
         return out
 
@@ -521,6 +539,98 @@ class DashboardService:
     # Endpoint #1 — GET /project/dashboard/summary
     # =====================================================================
 
+    def _build_delayed_track(
+        self,
+        *,
+        projects: List[Project],
+        counters: Dict[str, Dict[str, int]],
+        vendors_by_pid: Dict[str, List[Tuple[str, str, bool]]],
+        delay_min_days: int,
+        top_delayed: int,
+    ) -> List[Dict[str, Any]]:
+        """One row per project whose worst item is delayed >= ``delay_min_days``.
+        Sorted desc by ``(delayedItemCount, maxDelayDays)``; truncated to
+        ``top_delayed`` (0 = no truncation)."""
+        rows: List[Dict[str, Any]] = []
+        div_labels = self._get_division_labels()
+        for p in projects:
+            c = counters[p.id]
+            if c["delayedItemCount"] <= 0 or c["maxDelayDays"] < delay_min_days:
+                continue
+            p_owner = p.owner or ""
+            rows.append({
+                "id": p.id,
+                "projectCode": p.project_code,
+                "name": p.name,
+                "organisations": _vendor_chips(vendors_by_pid.get(p.id, [])),
+                "division": p_owner,
+                "divisionLabel": div_labels.get(p_owner.lower(), p_owner),
+                "divisionOther": p.owner_other,
+                "delayedItemCount": c["delayedItemCount"],
+                "maxDelayDays": c["maxDelayDays"],
+            })
+        rows.sort(
+            key=lambda r: (r["delayedItemCount"], r["maxDelayDays"]),
+            reverse=True,
+        )
+        return rows[:top_delayed] if top_delayed else rows
+
+    def _build_organisation_cards(
+        self,
+        *,
+        projects: List[Project],
+        derived: Dict[str, Tuple[int, str]],
+        vendors_by_pid: Dict[str, List[Tuple[str, str, bool]]],
+        top_orgs: int,
+    ) -> List[Dict[str, Any]]:
+        """Aggregate each vendor's project buckets, sort by
+        ``(-projectCount, name)``, truncate to ``top_orgs``."""
+        vendor_to_buckets: Dict[str, List[str]] = defaultdict(list)
+        vendor_meta: Dict[str, Dict[str, Any]] = {}
+        for p in projects:
+            bucket = derived[p.id][1]
+            for vid, vname, vactive in vendors_by_pid.get(p.id, []):
+                vendor_to_buckets[vid].append(bucket)
+                if vid not in vendor_meta:
+                    vendor_meta[vid] = {
+                        "id": vid, "name": vname, "active": bool(vactive),
+                    }
+        cards: List[Dict[str, Any]] = []
+        for vid, buckets in vendor_to_buckets.items():
+            cards.append({
+                **vendor_meta[vid],
+                "projectCount": len(buckets),
+                "counts": _build_bucket_counts(buckets),
+            })
+        cards.sort(key=lambda c: (-c["projectCount"], c["name"]))
+        return cards[:top_orgs] if top_orgs else cards
+
+    def _build_division_cards(
+        self,
+        *,
+        projects: List[Project],
+        derived: Dict[str, Tuple[int, str]],
+        top_divisions: int,
+    ) -> List[Dict[str, Any]]:
+        """Group projects by owner code (lowercased; empty → ``unspecified``);
+        sort by ``(-projectCount, label)``, truncate to ``top_divisions``."""
+        div_to_buckets: Dict[str, List[str]] = defaultdict(list)
+        for p in projects:
+            code = (p.owner or "").lower() or "unspecified"
+            div_to_buckets[code].append(derived[p.id][1])
+        div_labels = self._get_division_labels()
+        cards: List[Dict[str, Any]] = []
+        for code, buckets in div_to_buckets.items():
+            cards.append({
+                "code": code,
+                "label": (div_labels.get(code, code) if code != "unspecified"
+                          else "Unspecified"),
+                "projectCount": len(buckets),
+                "counts": _build_bucket_counts(buckets),
+            })
+        cards.sort(key=lambda c: (-c["projectCount"], c["label"]))
+        return cards[:top_divisions] if top_divisions else cards
+
     def get_summary(
         self,
         *,
@@ -537,76 +647,27 @@ class DashboardService:
             self._fetch_projects_with_buckets(today_ist=today)
         )
 
-        # ---- KPI strip / pie counts -------------------------------------
         all_buckets = [derived[p.id][1] for p in projects]
         counts = _build_bucket_counts(all_buckets)
 
-        # ---- Delayed track (one row per project) ------------------------
-        delayed_rows: List[Dict[str, Any]] = []
-        for p in projects:
-            c = counters[p.id]
-            # Only include projects whose worst item is delayed >= floor.
-            # Counts every delayed item in that project, not just worst.
-            if c["delayedItemCount"] <= 0 or c["maxDelayDays"] < delay_min_days:
-                continue
-            p_owner = p.owner or ""
-            div_labels = self._get_division_labels()
-            delayed_rows.append({
-                "id": p.id,
-                "projectCode": p.project_code,
-                "name": p.name,
-                "organisations": _vendor_chips(vendors_by_pid.get(p.id, [])),
-                "division": p_owner,
-                "divisionLabel": div_labels.get(p_owner.lower(), p_owner),
-                "divisionOther": p.owner_other,
-                "delayedItemCount": c["delayedItemCount"],
-                "maxDelayDays": c["maxDelayDays"],
-            })
-        delayed_rows.sort(
-            key=lambda r: (r["delayedItemCount"], r["maxDelayDays"]),
-            reverse=True,
+        delayed_top = self._build_delayed_track(
+            projects=projects,
+            counters=counters,
+            vendors_by_pid=vendors_by_pid,
+            delay_min_days=delay_min_days,
+            top_delayed=top_delayed,
         )
-        delayed_top = delayed_rows[:top_delayed] if top_delayed else delayed_rows
-
-        # ---- Organisation cards (top-N by project count) ----------------
-        vendor_to_buckets: Dict[str, List[str]] = defaultdict(list)
-        vendor_meta: Dict[str, Dict[str, Any]] = {}
-        for p in projects:
-            bucket = derived[p.id][1]
-            for vid, vname, vactive in vendors_by_pid.get(p.id, []):
-                vendor_to_buckets[vid].append(bucket)
-                if vid not in vendor_meta:
-                    vendor_meta[vid] = {
-                        "id": vid, "name": vname, "active": bool(vactive),
-                    }
-        org_cards: List[Dict[str, Any]] = []
-        for vid, buckets in vendor_to_buckets.items():
-            meta = vendor_meta[vid]
-            org_cards.append({
-                **meta,
-                "projectCount": len(buckets),
-                "counts": _build_bucket_counts(buckets),
-            })
-        org_cards.sort(key=lambda c: (-c["projectCount"], c["name"]))
-        org_top = org_cards[:top_orgs] if top_orgs else org_cards
-
-        # ---- Division cards (top-N) -------------------------------------
-        div_to_buckets: Dict[str, List[str]] = defaultdict(list)
-        for p in projects:
-            code = (p.owner or "").lower() or "unspecified"
-            div_to_buckets[code].append(derived[p.id][1])
-        _div_labels = self._get_division_labels()
-        div_cards: List[Dict[str, Any]] = []
-        for code, buckets in div_to_buckets.items():
-            div_cards.append({
-                "code": code,
-                "label": (_div_labels.get(code, code) if code != "unspecified"
-                          else "Unspecified"),
-                "projectCount": len(buckets),
-                "counts": _build_bucket_counts(buckets),
-            })
-        div_cards.sort(key=lambda c: (-c["projectCount"], c["label"]))
-        div_top = div_cards[:top_divisions] if top_divisions else div_cards
+        org_top = self._build_organisation_cards(
+            projects=projects,
+            derived=derived,
+            vendors_by_pid=vendors_by_pid,
+            top_orgs=top_orgs,
+        )
+        div_top = self._build_division_cards(
+            projects=projects,
+            derived=derived,
+            top_divisions=top_divisions,
+        )
 
         return {
             "asOf": today.isoformat(),

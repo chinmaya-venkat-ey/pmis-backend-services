@@ -197,6 +197,79 @@ def _element_type_for_path(path: str) -> str:
     return "Resource"
 
 
+def _element_self_link(prefix: Optional[str], rid: Any, title: Any) -> Optional[dict]:
+    """Build ``{href, title?}`` for the element's self link, or None when
+    no prefix/id is available."""
+    if not (prefix and rid):
+        return None
+    self_link: dict[str, Any] = {"href": f"{prefix}/{rid}"}
+    if title:
+        self_link["title"] = title
+    return self_link
+
+
+def _element_direct_parent_link(
+    element_type: str, camel: dict, item: dict,
+) -> Optional[tuple[str, dict]]:
+    """Per-entity direct-parent backlink (monolith parity — Activity →
+    milestone, Task → activity, Subtask → task, Comment → target).
+    Returns ``(link_key, link_obj)`` or None."""
+    if element_type == "Activity":
+        mid = camel.get("milestoneId") or item.get("milestone_id")
+        if mid:
+            return ("milestone", {"href": f"/project/milestones/{mid}"})
+    elif element_type == "Task":
+        aid = camel.get("activityId") or item.get("activity_id")
+        if aid:
+            return ("activity", {"href": f"/project/activities/{aid}"})
+    elif element_type == "Subtask":
+        tid = camel.get("taskId") or item.get("task_id")
+        if tid:
+            return ("task", {"href": f"/project/tasks/{tid}"})
+    elif element_type == "Comment":
+        # Pluralisation quirk: ``target_kind + "s"`` matches monolith
+        # byte-for-byte even though it yields ``activitys`` (sic).
+        target_kind = camel.get("targetKind") or item.get("target_kind")
+        target_id = camel.get("targetId") or item.get("target_id")
+        if target_kind and target_id:
+            return (
+                "target",
+                {
+                    "href": f"/project/{target_kind}s/{target_id}",
+                    "title": target_kind,
+                },
+            )
+    return None
+
+
+def _element_project_link(
+    element_type: str, camel: dict, item: dict,
+) -> Optional[dict]:
+    """``_links.project`` backlink for Milestone / Activity / Task /
+    Subtask elements (monolith parity)."""
+    if element_type not in ("Milestone", "Activity", "Task", "Subtask"):
+        return None
+    project_id = camel.get("projectId") or item.get("project_id")
+    if not project_id:
+        return None
+    return {"href": f"/project/projects/{project_id}"}
+
+
+def _recurse_into_subtask_children(
+    element_type: str, camel: dict, prefix: Optional[str],
+) -> None:
+    """Subtask-only: each node in the recursive ``subtasks`` tree gets the
+    same ``_type`` + ``_links`` envelope as the top-level element. Mutates
+    ``camel`` in place."""
+    if element_type != "Subtask":
+        return
+    nested = camel.get("subtasks")
+    if isinstance(nested, list) and nested:
+        camel["subtasks"] = [
+            _wrap_element(child, element_type, prefix) for child in nested
+        ]
+
+
 def _wrap_element(
     item: dict, element_type: str, prefix: Optional[str],
 ) -> dict:
@@ -208,59 +281,28 @@ def _wrap_element(
 
     For Milestone / Activity / Task / Subtask elements, also adds a
     ``_links.project`` back-link to the parent project (monolith parity).
+
+    Link insertion order preserved (self → direct-parent → project), so
+    the rendered ``_links`` block on the wire is byte-identical to the
+    legacy in-line form.
     """
     camel = _camelize(item)
-    rid = camel.get("id")
-    title = camel.get("name")
     links: dict[str, dict] = {}
-    if prefix and rid:
-        self_link = {"href": f"{prefix}/{rid}"}
-        if title:
-            self_link["title"] = title
+
+    self_link = _element_self_link(prefix, camel.get("id"), camel.get("name"))
+    if self_link is not None:
         links["self"] = self_link
-    # Monolith parity: per-entity back-link to its direct parent in the
-    # M → A → T → S chain (NOT a uniform "milestone" link).
-    #   Activity → milestone, Task → activity, Subtask → task.
-    if element_type == "Activity":
-        milestone_id = camel.get("milestoneId") or item.get("milestone_id")
-        if milestone_id:
-            links["milestone"] = {"href": f"/project/milestones/{milestone_id}"}
-    elif element_type == "Task":
-        activity_id = camel.get("activityId") or item.get("activity_id")
-        if activity_id:
-            links["activity"] = {"href": f"/project/activities/{activity_id}"}
-    elif element_type == "Subtask":
-        task_id = camel.get("taskId") or item.get("task_id")
-        if task_id:
-            links["task"] = {"href": f"/project/tasks/{task_id}"}
-    elif element_type == "Comment":
-        # Monolith parity: comments add a ``_links.target`` pointing back
-        # at the entity they were posted on. NOTE the monolith quirk:
-        # the URL pluralisation is ``target_kind + "s"``, which yields
-        # ``activitys`` (sic) for activity targets — we mirror it
-        # byte-for-byte so the wire matches.
-        target_kind = camel.get("targetKind") or item.get("target_kind")
-        target_id = camel.get("targetId") or item.get("target_id")
-        if target_kind and target_id:
-            links["target"] = {
-                "href": f"/project/{target_kind}s/{target_id}",
-                "title": target_kind,
-            }
-    if element_type in ("Milestone", "Activity", "Task", "Subtask"):
-        project_id = camel.get("projectId") or item.get("project_id")
-        if project_id:
-            links["project"] = {"href": f"/project/projects/{project_id}"}
-    # Subtask-only: nested children inside the recursive ``subtasks`` tree
-    # need the same ``_type`` + ``_links`` envelope as the top-level
-    # element (monolith parity — every node in the tree is a full HAL
-    # resource). Reuse this wrapper on each child so the structure walks
-    # to any nesting depth.
-    if element_type == "Subtask":
-        nested = camel.get("subtasks")
-        if isinstance(nested, list) and nested:
-            camel["subtasks"] = [
-                _wrap_element(child, element_type, prefix) for child in nested
-            ]
+
+    parent = _element_direct_parent_link(element_type, camel, item)
+    if parent is not None:
+        links[parent[0]] = parent[1]
+
+    project_link = _element_project_link(element_type, camel, item)
+    if project_link is not None:
+        links["project"] = project_link
+
+    _recurse_into_subtask_children(element_type, camel, prefix)
+
     return {
         "_type": element_type,
         "_links": links,
@@ -295,6 +337,196 @@ def _wrap_inline_comment(camel: dict) -> dict:
     return out
 
 
+def _wrap_paged_dict(value: dict, request_path: Optional[str]) -> dict:
+    """Wrap a paged dict (``{items, total, offset, page_size}``) into a
+    HAL collection envelope. Comment collections suppress the top-level
+    ``_links`` block (monolith parity)."""
+    element_prefix = _collection_prefix_from_path(request_path or "")
+    element_type = _element_type_for_path(request_path or "")
+    # Collection self/next/last use the FULL request URL path
+    # (without query string) — preserves nested path like
+    # /project/projects/{pid}/milestones. Monolith parity:
+    # COMMENT collections do NOT carry a top-level ``_links`` block,
+    # so we suppress base_path for them (hal_collection skips link
+    # synthesis when base_path is None).
+    collection_base = (request_path or "").split("?", 1)[0] or None
+    if element_type == "Comment":
+        collection_base = None
+    items = value["items"] or []
+    wrapped_elements = [
+        _wrap_element(item, element_type, element_prefix) for item in items
+    ]
+    return hal_collection(
+        wrapped_elements,
+        total=int(value["total"]),
+        offset=int(value.get("offset", 1)),
+        page_size=int(value.get("page_size", len(items))),
+        base_path=collection_base,
+    )
+
+
+def _wrap_bare_list(value: list, request_path: Optional[str]) -> dict:
+    """Wrap a bare list (no pagination metadata) as a HAL collection. Each
+    dict element is wrapped via ``_wrap_element``; scalars are camelized
+    inline."""
+    element_prefix = _collection_prefix_from_path(request_path or "")
+    element_type = _element_type_for_path(request_path or "")
+    collection_base = (request_path or "").split("?", 1)[0] or None
+    wrapped_elements = [
+        _wrap_element(v, element_type, element_prefix) if isinstance(v, dict)
+        else _camelize(v)
+        for v in value
+    ]
+    return hal_collection(
+        wrapped_elements,
+        total=len(value),
+        offset=1,
+        page_size=len(value),
+        base_path=collection_base,
+    )
+
+
+def _resource_direct_parent(
+    hal_type: str, camel: dict, value: dict,
+) -> tuple[Optional[str], Optional[str]]:
+    """Resolve the (key, href) for the resource's direct-parent backlink
+    in the M → A → T → S chain. Returns (None, None) for hal types that
+    don't carry one (Milestone, Comment, Project, etc.)."""
+    if hal_type == "Activity":
+        mid = camel.get("milestoneId") or value.get("milestone_id")
+        if mid:
+            return ("milestone", f"/project/milestones/{mid}")
+    elif hal_type == "Task":
+        aid = camel.get("activityId") or value.get("activity_id")
+        if aid:
+            return ("activity", f"/project/activities/{aid}")
+    elif hal_type == "Subtask":
+        tid = camel.get("taskId") or value.get("task_id")
+        if tid:
+            return ("task", f"/project/tasks/{tid}")
+    return (None, None)
+
+
+def _build_comment_resource_links(camel: dict, value: dict) -> Optional[dict]:
+    """Comment resources override the self-link to always point at
+    ``/project/comments/{id}`` regardless of which collection URL produced
+    the response. Returns the extra_links dict (self + optional target)
+    or None when the comment has no id."""
+    rid = camel.get("id")
+    if not rid:
+        return None
+    ordered: dict[str, dict] = {
+        "self": {"href": f"/project/comments/{rid}"},
+    }
+    target_kind = camel.get("targetKind") or value.get("target_kind")
+    target_id = camel.get("targetId") or value.get("target_id")
+    if target_kind and target_id:
+        # Pluralisation quirk: ``target_kind + "s"`` matches monolith
+        # byte-for-byte even though it yields ``activitys`` (sic) for
+        # activities.
+        ordered["target"] = {
+            "href": f"/project/{target_kind}s/{target_id}",
+            "title": target_kind,
+        }
+    return ordered
+
+
+def _reorder_links_with_parent(
+    self_link: Optional[str],
+    extra_links: Optional[dict],
+    parent_key: str,
+    parent_href: str,
+) -> dict:
+    """Reorder extra_links so the rendered key order is self → direct-
+    parent → project (monolith parity — parent first, then project)."""
+    extra_links = extra_links or {}
+    ordered: dict[str, dict] = {}
+    if self_link:
+        ordered["self"] = {"href": self_link}
+    elif extra_links.get("self"):
+        ordered["self"] = extra_links["self"]
+    ordered[parent_key] = {"href": parent_href}
+    if "project" in extra_links:
+        ordered["project"] = extra_links["project"]
+    return ordered
+
+
+def _promote_inline_comment(hal_type: str, camel: dict) -> None:
+    """Inline ``comment`` on a M/A/T/S multipart-create response is itself
+    a full HAL Comment resource. Pydantic produces a flat camelized dict;
+    promote it in place."""
+    if hal_type not in ("Milestone", "Activity", "Task", "Subtask"):
+        return
+    inline_comment = camel.get("comment")
+    if isinstance(inline_comment, dict) and inline_comment.get("id"):
+        camel["comment"] = _wrap_inline_comment(inline_comment)
+
+
+def _wrap_dict_resource(
+    value: dict, hal_type: str, request_path: Optional[str],
+) -> dict:
+    """Wrap a single dict resource into the HAL envelope shape (``_type`` +
+    ``_links: {self, [direct-parent,] [project]}``). Handles envelope-
+    passthrough, ``_bare`` opt-out, Comment self-link override, and the
+    M → A → T → S parent/project backlink ordering."""
+    # If the handler already produced an envelope, surface as-is.
+    if _ENVELOPE_KEYS <= set(value.keys()):
+        return value
+    # Bare-data opt-out: certain monolith endpoints
+    # (``/role-assignments``, ``/assignable-users``) return the bare
+    # data dict directly under ``data`` with NO ``_type`` or
+    # ``_links`` envelope.
+    if value.pop("_bare", False):
+        return _camelize(value)
+
+    camel = _camelize(value)
+    self_link: Optional[str] = None
+    extra_links: Optional[dict] = None
+
+    if request_path:
+        rid = camel.get("id")
+        prefix = _collection_prefix_from_path(request_path)
+        if rid and prefix:
+            self_link = f"{prefix}/{rid}"
+            title = camel.get("name")
+            if title:
+                extra_links = {"self": {"href": self_link, "title": title}}
+                self_link = None  # consumed by extra_links override
+
+    # Monolith parity: M / A / T / S resources carry a ``_links.project``
+    # back-link (inserted AFTER the direct-parent link in the final order).
+    if hal_type in ("Milestone", "Activity", "Task", "Subtask"):
+        project_id = camel.get("projectId") or value.get("project_id")
+        if project_id:
+            extra_links = extra_links or {}
+            extra_links["project"] = {"href": f"/project/projects/{project_id}"}
+
+    # Direct-parent link, inserted BEFORE project in the rendered order.
+    parent_key, parent_href = _resource_direct_parent(hal_type, camel, value)
+
+    # Comment resources override the self-link path (always points at
+    # /project/comments/{id} regardless of producing route).
+    if hal_type == "Comment":
+        comment_links = _build_comment_resource_links(camel, value)
+        if comment_links is not None:
+            extra_links = comment_links
+            self_link = None
+
+    if parent_key:
+        extra_links = _reorder_links_with_parent(
+            self_link, extra_links, parent_key, parent_href,
+        )
+        # self_link consumed into extra_links via "self".
+        self_link = None
+
+    _promote_inline_comment(hal_type, camel)
+
+    return hal_resource(
+        hal_type, camel,
+        self_link=self_link, extra_links=extra_links,
+    )
+
+
 def _wrap(value: Any, hal_type: str, request_path: Optional[str] = None) -> Optional[dict]:
     """Convert a Pydantic-serialized body into the appropriate HAL inner
     shape. Returns the value to put under ``data``.
@@ -310,167 +542,21 @@ def _wrap(value: Any, hal_type: str, request_path: Optional[str] = None) -> Opti
     ``format_*_response`` HAL self-link shape. Collection responses get
     auto-generated ``self`` / ``next`` / ``last`` pagination links built
     from the request path + ``offset`` / ``pageSize``.
+
+    Branch dispatch: None → None; paged dict → collection; bare list →
+    collection; dict → resource (with envelope-passthrough + ``_bare``
+    opt-out + Comment self-link override + M/A/T/S parent/project
+    backlinks); anything else → scalar wrap. Branch order preserved so
+    response shape matches the legacy in-line form byte-for-byte.
     """
     if value is None:
         return None
-
     if _looks_like_paged_dict(value):
-        # Element prefix uses the LAST entity name in path so id-scoped
-        # element self-links resolve correctly even on nested list URLs
-        # (e.g. /project/projects/{pid}/milestones -> element prefix is
-        # /project/milestones, NOT /project/projects).
-        element_prefix = _collection_prefix_from_path(request_path or "")
-        element_type = _element_type_for_path(request_path or "")
-        # Collection self/next/last use the FULL request URL path
-        # (without query string) — preserves nested path like
-        # /project/projects/{pid}/milestones. Monolith parity:
-        # COMMENT collections do NOT carry a top-level ``_links`` block,
-        # so we suppress base_path for them (hal_collection skips link
-        # synthesis when base_path is None).
-        collection_base = (request_path or "").split("?", 1)[0] or None
-        if element_type == "Comment":
-            collection_base = None
-        items = value["items"] or []
-        wrapped_elements = [
-            _wrap_element(item, element_type, element_prefix) for item in items
-        ]
-        return hal_collection(
-            wrapped_elements,
-            total=int(value["total"]),
-            offset=int(value.get("offset", 1)),
-            page_size=int(value.get("page_size", len(items))),
-            base_path=collection_base,
-        )
-
+        return _wrap_paged_dict(value, request_path)
     if isinstance(value, list):
-        element_prefix = _collection_prefix_from_path(request_path or "")
-        element_type = _element_type_for_path(request_path or "")
-        collection_base = (request_path or "").split("?", 1)[0] or None
-        wrapped_elements = [
-            _wrap_element(v, element_type, element_prefix) if isinstance(v, dict)
-            else _camelize(v)
-            for v in value
-        ]
-        return hal_collection(
-            wrapped_elements,
-            total=len(value),
-            offset=1,
-            page_size=len(value),
-            base_path=collection_base,
-        )
-
+        return _wrap_bare_list(value, request_path)
     if isinstance(value, dict):
-        # If the handler already produced an envelope, surface as-is.
-        if _ENVELOPE_KEYS <= set(value.keys()):
-            return value
-        # Bare-data opt-out: certain monolith endpoints
-        # (``/role-assignments``, ``/assignable-users``) return the bare
-        # data dict directly under ``data`` with NO ``_type`` or
-        # ``_links`` envelope. Service layer signals this with
-        # ``_bare: True`` in the returned dict; we strip the marker and
-        # return just the camelized payload.
-        if value.pop("_bare", False):
-            return _camelize(value)
-        camel = _camelize(value)
-        self_link = None
-        extra_links = None
-        if request_path:
-            rid = camel.get("id")
-            prefix = _collection_prefix_from_path(request_path)
-            if rid and prefix:
-                self_link = f"{prefix}/{rid}"
-                title = camel.get("name")
-                if title:
-                    extra_links = {"self": {"href": self_link, "title": title}}
-                    self_link = None  # consumed by extra_links override
-        # Monolith parity: milestone / activity / task / subtask resources
-        # carry a ``_links.project`` back-link, and each non-milestone
-        # entity additionally carries a back-link to its DIRECT parent
-        # in the M → A → T → S chain (NOT a uniform "milestone" link):
-        #   Activity → milestone, Task → activity, Subtask → task.
-        if hal_type in ("Milestone", "Activity", "Task", "Subtask"):
-            project_id = camel.get("projectId") or value.get("project_id")
-            if project_id:
-                if extra_links is None:
-                    extra_links = {}
-                extra_links["project"] = {"href": f"/project/projects/{project_id}"}
-        # Direct-parent back-link, inserted BEFORE the project link in
-        # the rendered _links order (monolith parity — parent first,
-        # then project).
-        parent_key: Optional[str] = None
-        parent_href: Optional[str] = None
-        if hal_type == "Activity":
-            milestone_id = camel.get("milestoneId") or value.get("milestone_id")
-            if milestone_id:
-                parent_key, parent_href = (
-                    "milestone", f"/project/milestones/{milestone_id}",
-                )
-        elif hal_type == "Task":
-            activity_id = camel.get("activityId") or value.get("activity_id")
-            if activity_id:
-                parent_key, parent_href = (
-                    "activity", f"/project/activities/{activity_id}",
-                )
-        elif hal_type == "Subtask":
-            task_id = camel.get("taskId") or value.get("task_id")
-            if task_id:
-                parent_key, parent_href = (
-                    "task", f"/project/tasks/{task_id}",
-                )
-        elif hal_type == "Comment":
-            # Monolith parity: a Comment's ``_links.self.href`` ALWAYS
-            # points at ``/project/comments/{id}`` regardless of which
-            # collection URL produced the response. The path-derived
-            # prefix (e.g. ``/project/milestones`` for the M/A/T/S
-            # attachment upload route) would yield the wrong self link
-            # since the resource lives under ``/comments/{id}`` even
-            # when reached via ``/milestones/{id}/attachments``.
-            rid = camel.get("id")
-            target_kind = camel.get("targetKind") or value.get("target_kind")
-            target_id = camel.get("targetId") or value.get("target_id")
-            if rid:
-                if extra_links is None:
-                    extra_links = {}
-                ordered: dict[str, dict] = {
-                    "self": {"href": f"/project/comments/{rid}"},
-                }
-                if target_kind and target_id:
-                    # Pluralisation quirk: ``target_kind + "s"`` matches
-                    # monolith byte-for-byte even though it yields
-                    # ``activitys`` (sic) for activities.
-                    ordered["target"] = {
-                        "href": f"/project/{target_kind}s/{target_id}",
-                        "title": target_kind,
-                    }
-                extra_links = ordered
-                self_link = None
-        if parent_key:
-            if extra_links is None:
-                extra_links = {}
-            ordered: dict[str, dict] = {}
-            if self_link:
-                ordered["self"] = {"href": self_link}
-            elif extra_links.get("self"):
-                ordered["self"] = extra_links["self"]
-            ordered[parent_key] = {"href": parent_href}
-            if "project" in extra_links:
-                ordered["project"] = extra_links["project"]
-            extra_links = ordered
-            # self_link already consumed into extra_links via "self".
-            self_link = None
-        # Monolith parity: inline ``comment`` on a M/A/T/S multipart
-        # /create response is itself a full HAL Comment resource
-        # (``_type`` + ``_links: {self, target}``). Pydantic produces a
-        # flat camelized dict; promote it here.
-        if hal_type in ("Milestone", "Activity", "Task", "Subtask"):
-            inline_comment = camel.get("comment")
-            if isinstance(inline_comment, dict) and inline_comment.get("id"):
-                camel["comment"] = _wrap_inline_comment(inline_comment)
-        return hal_resource(
-            hal_type, camel,
-            self_link=self_link, extra_links=extra_links,
-        )
-
+        return _wrap_dict_resource(value, hal_type, request_path)
     # Scalar / unexpected — wrap minimally so the envelope stays valid.
     return {"_type": hal_type, "value": value}
 

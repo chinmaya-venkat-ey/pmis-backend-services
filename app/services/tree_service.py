@@ -185,30 +185,37 @@ class _LabelIndex:
         return out
 
 
-def _build_label_index(db: Session, project_id: str) -> _LabelIndex:
-    """Build a complete label index for one project (4 queries)."""
-    idx = _LabelIndex()
-
-    # ---- Milestones -----------------------------------------------------
-    m_stmt = (
+def _index_milestones(
+    db: Session, project_id: str, idx: "_LabelIndex",
+) -> Dict[str, int]:
+    """Label every live milestone ``M{n}`` and return ``{mid: rank}``."""
+    stmt = (
         select(Milestone.id, Milestone.position)
         .where(Milestone.project_id == project_id)
         .where(Milestone.deleted_at.is_(None))
         .order_by(asc(Milestone.position), asc(Milestone.id))
     )
     m_id_to_rank: Dict[str, int] = {}
-    for m_idx, (mid, _pos) in enumerate(db.execute(m_stmt).all(), start=1):
+    for m_idx, (mid, _pos) in enumerate(db.execute(stmt).all(), start=1):
         idx.milestone_id_to_label[mid] = f"M{m_idx}"
         m_id_to_rank[mid] = m_idx
+    return m_id_to_rank
 
-    # ---- Activities (project-scoped query, rank in Python) -------------
-    a_stmt = (
+
+def _index_activities(
+    db: Session,
+    project_id: str,
+    idx: "_LabelIndex",
+    m_id_to_rank: Dict[str, int],
+) -> Dict[str, Tuple[int, int]]:
+    """Label live activities ``A{m}.{n}`` and return ``{aid: (m, n)}``."""
+    stmt = (
         select(Activity.id, Activity.position, Activity.milestone_id)
         .where(Activity.project_id == project_id)
         .where(Activity.deleted_at.is_(None))
     )
     acts_by_milestone: Dict[str, List[Tuple[str, int]]] = defaultdict(list)
-    for aid, pos, mid in db.execute(a_stmt).all():
+    for aid, pos, mid in db.execute(stmt).all():
         acts_by_milestone[mid].append((aid, pos))
     a_id_to_rank: Dict[str, Tuple[int, int]] = {}
     for mid, pairs in acts_by_milestone.items():
@@ -219,15 +226,23 @@ def _build_label_index(db: Session, project_id: str) -> _LabelIndex:
         for a_idx, (aid, _pos) in enumerate(pairs, start=1):
             idx.activity_id_to_label[aid] = f"A{m_rank}.{a_idx}"
             a_id_to_rank[aid] = (m_rank, a_idx)
+    return a_id_to_rank
 
-    # ---- Tasks ----------------------------------------------------------
-    t_stmt = (
+
+def _index_tasks(
+    db: Session,
+    project_id: str,
+    idx: "_LabelIndex",
+    a_id_to_rank: Dict[str, Tuple[int, int]],
+) -> Dict[str, Tuple[int, int, int]]:
+    """Label live tasks ``T{m}.{a}.{n}`` and return ``{tid: (m, a, n)}``."""
+    stmt = (
         select(Task.id, Task.position, Task.activity_id)
         .where(Task.project_id == project_id)
         .where(Task.deleted_at.is_(None))
     )
     tasks_by_activity: Dict[str, List[Tuple[str, int]]] = defaultdict(list)
-    for tid, pos, aid in db.execute(t_stmt).all():
+    for tid, pos, aid in db.execute(stmt).all():
         tasks_by_activity[aid].append((tid, pos))
     t_id_to_rank: Dict[str, Tuple[int, int, int]] = {}
     for aid, pairs in tasks_by_activity.items():
@@ -239,9 +254,17 @@ def _build_label_index(db: Session, project_id: str) -> _LabelIndex:
         for t_idx, (tid, _pos) in enumerate(pairs, start=1):
             idx.task_id_to_label[tid] = f"T{m_rank}.{a_rank}.{t_idx}"
             t_id_to_rank[tid] = (m_rank, a_rank, t_idx)
+    return t_id_to_rank
 
-    # ---- Subtasks (Doc 24 variable-depth) -------------------------------
-    s_stmt = (
+
+def _index_subtasks(
+    db: Session,
+    project_id: str,
+    idx: "_LabelIndex",
+    t_id_to_rank: Dict[str, Tuple[int, int, int]],
+) -> None:
+    """Label variable-depth subtask trees ``S{m}.{a}.{t}.{...}`` (DFS)."""
+    stmt = (
         select(
             Subtask.id,
             Subtask.position,
@@ -253,7 +276,7 @@ def _build_label_index(db: Session, project_id: str) -> _LabelIndex:
     )
     top_by_task: Dict[str, List[Tuple[str, int]]] = defaultdict(list)
     children_by_parent: Dict[str, List[Tuple[str, int]]] = defaultdict(list)
-    for sid, pos, tid, pid in db.execute(s_stmt).all():
+    for sid, pos, tid, pid in db.execute(stmt).all():
         if pid is None:
             top_by_task[tid].append((sid, pos))
         else:
@@ -263,7 +286,6 @@ def _build_label_index(db: Session, project_id: str) -> _LabelIndex:
     for bucket in children_by_parent.values():
         bucket.sort(key=lambda x: (x[1], x[0]))
 
-    # DFS per top-level subtask, building the rank suffix as we descend.
     for tid, top_pairs in top_by_task.items():
         m_a_t = t_id_to_rank.get(tid)
         if m_a_t is None:
@@ -281,6 +303,14 @@ def _build_label_index(db: Session, project_id: str) -> _LabelIndex:
                 ):
                     stack.append((child_sid, f"{label}.{child_idx}"))
 
+
+def _build_label_index(db: Session, project_id: str) -> _LabelIndex:
+    """Build a complete label index for one project (4 queries)."""
+    idx = _LabelIndex()
+    m_id_to_rank = _index_milestones(db, project_id, idx)
+    a_id_to_rank = _index_activities(db, project_id, idx, m_id_to_rank)
+    t_id_to_rank = _index_tasks(db, project_id, idx, a_id_to_rank)
+    _index_subtasks(db, project_id, idx, t_id_to_rank)
     return idx
 
 

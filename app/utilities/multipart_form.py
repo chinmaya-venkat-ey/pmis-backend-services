@@ -64,6 +64,120 @@ class Multipart422(Exception):
 # ---------------------------------------------------------------------------
 # Form-field parser
 # ---------------------------------------------------------------------------
+def _process_required_string_key(
+    form, key: str, fields: Dict[str, Any],
+) -> None:
+    """required_string: passed through verbatim, including empty string so
+    Pydantic min_length=1 still fires."""
+    if key in form:
+        v = form[key]
+        if isinstance(v, str):
+            fields[key] = v
+
+
+def _process_string_key(
+    form, key: str, fields: Dict[str, Any],
+) -> None:
+    """string: pass through as strings, but SKIP empty strings (Swagger UI's
+    blank auto-fill must not trip min_length validators)."""
+    if key in form:
+        v = form[key]
+        if isinstance(v, str) and v != "":
+            fields[key] = v
+
+
+def _process_int_key(
+    form, key: str, fields: Dict[str, Any], bad: List[Dict[str, Any]],
+) -> None:
+    """int: coerce via int(...) — emit one error entry on failure."""
+    if key not in form or form[key] in ("", None):
+        return
+    raw = form[key]
+    try:
+        fields[key] = int(raw)
+    except (TypeError, ValueError):
+        bad.append({
+            "loc": ["body", key],
+            "msg": f"{key} must be an integer",
+            "type": "value_error",
+        })
+
+
+def _process_array_key(
+    form, key: str, fields: Dict[str, Any], bad: List[Dict[str, Any]],
+) -> None:
+    """array: JSON-decode; must produce a list. Plain strings (no leading
+    ``[``) are wrapped as a single-element list."""
+    if key not in form or form[key] in ("", None):
+        return
+    raw = form[key]
+    if not isinstance(raw, str):
+        bad.append({
+            "loc": ["body", key],
+            "msg": f"{key} must be a string",
+            "type": "type_error",
+        })
+        return
+    stripped = raw.strip()
+    if not stripped.startswith("["):
+        # Plain string (single value) — wrap as single-element list.
+        fields[key] = [raw]
+        return
+    try:
+        decoded = json.loads(stripped)
+    except json.JSONDecodeError:
+        bad.append({
+            "loc": ["body", key],
+            "msg": (
+                f"{key} must be a JSON-encoded array string "
+                f"(got {raw!r})"
+            ),
+            "type": "value_error",
+        })
+        return
+    if not isinstance(decoded, list):
+        bad.append({
+            "loc": ["body", key],
+            "msg": f"{key} must decode to a JSON array (got {raw!r})",
+            "type": "type_error",
+        })
+        return
+    fields[key] = decoded
+
+
+def _process_object_key(
+    form, key: str, fields: Dict[str, Any], bad: List[Dict[str, Any]],
+) -> None:
+    """object: JSON-decode; must produce a dict."""
+    if key not in form or form[key] in ("", None):
+        return
+    raw = form[key]
+    if not isinstance(raw, str):
+        bad.append({
+            "loc": ["body", key],
+            "msg": f"{key} must be a JSON-encoded object string",
+            "type": "type_error",
+        })
+        return
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        bad.append({
+            "loc": ["body", key],
+            "msg": f"{key} must be a JSON-encoded object string (got {raw!r})",
+            "type": "value_error",
+        })
+        return
+    if not isinstance(parsed, dict):
+        bad.append({
+            "loc": ["body", key],
+            "msg": f"{key} must decode to a JSON object",
+            "type": "type_error",
+        })
+        return
+    fields[key] = parsed
+
+
 def parse_form_fields(
     form,
     *,
@@ -87,99 +201,24 @@ def parse_form_fields(
 
     Raises ``Multipart422`` for parse-level failures; Pydantic catches
     the rest after this returns.
+
+    Key-type processing order preserved (required_string → string → int →
+    array → object) so the order of accumulated error entries in the
+    raised ``Multipart422`` is identical to the legacy in-line form.
     """
     fields: Dict[str, Any] = {}
     bad: List[Dict[str, Any]] = []
 
     for key in required_string_keys:
-        if key in form:
-            v = form[key]
-            if isinstance(v, str):
-                fields[key] = v
-
+        _process_required_string_key(form, key, fields)
     for key in string_keys:
-        if key in form:
-            v = form[key]
-            if isinstance(v, str):
-                if v == "":
-                    continue
-                fields[key] = v
-
+        _process_string_key(form, key, fields)
     for key in int_keys:
-        if key in form and form[key] not in ("", None):
-            raw = form[key]
-            try:
-                fields[key] = int(raw)
-            except (TypeError, ValueError):
-                bad.append({
-                    "loc": ["body", key],
-                    "msg": f"{key} must be an integer",
-                    "type": "value_error",
-                })
-
+        _process_int_key(form, key, fields, bad)
     for key in array_keys:
-        if key in form and form[key] not in ("", None):
-            raw = form[key]
-            if not isinstance(raw, str):
-                bad.append({
-                    "loc": ["body", key],
-                    "msg": f"{key} must be a string",
-                    "type": "type_error",
-                })
-                continue
-            stripped = raw.strip()
-            if not stripped.startswith("["):
-                # Plain string (single value) — wrap as single-element list.
-                fields[key] = [raw]
-                continue
-            try:
-                decoded = json.loads(stripped)
-            except json.JSONDecodeError:
-                bad.append({
-                    "loc": ["body", key],
-                    "msg": (
-                        f"{key} must be a JSON-encoded array string "
-                        f"(got {raw!r})"
-                    ),
-                    "type": "value_error",
-                })
-                continue
-            if not isinstance(decoded, list):
-                bad.append({
-                    "loc": ["body", key],
-                    "msg": f"{key} must decode to a JSON array (got {raw!r})",
-                    "type": "type_error",
-                })
-                continue
-            fields[key] = decoded
-
+        _process_array_key(form, key, fields, bad)
     for key in object_keys:
-        if key in form and form[key] not in ("", None):
-            raw = form[key]
-            if not isinstance(raw, str):
-                bad.append({
-                    "loc": ["body", key],
-                    "msg": f"{key} must be a JSON-encoded object string",
-                    "type": "type_error",
-                })
-                continue
-            try:
-                parsed = json.loads(raw)
-            except json.JSONDecodeError:
-                bad.append({
-                    "loc": ["body", key],
-                    "msg": f"{key} must be a JSON-encoded object string (got {raw!r})",
-                    "type": "value_error",
-                })
-                continue
-            if not isinstance(parsed, dict):
-                bad.append({
-                    "loc": ["body", key],
-                    "msg": f"{key} must decode to a JSON object",
-                    "type": "type_error",
-                })
-                continue
-            fields[key] = parsed
+        _process_object_key(form, key, fields, bad)
 
     if bad:
         raise Multipart422(bad)

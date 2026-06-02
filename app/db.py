@@ -1,13 +1,9 @@
-"""pmis-user-management — SQLAlchemy engine + session + Base.
+"""pmis-project-management — SQLAlchemy engine + session + Base.
 
 Per PLAN.md §2.5:
-  - Base.metadata = tables OWNED by this service (schema `users`).
-  - MirrorBase.metadata = READ-ONLY mirror declarations of foreign schemas.
-    Excluded from alembic autogenerate via include_object filter in env.py.
-
-WARNING: Models declared on Base are MIRRORED in other services' _cross_schema.py.
-See app/models/<model>.py for the per-table list of mirror locations.
-Q24 CI drift test catches divergence.
+  - Base.metadata = tables OWNED by this service (schema `project`).
+  - MirrorBase.metadata = READ-ONLY mirror declarations of foreign schemas
+    (users.*, masters.*). Excluded from alembic autogenerate.
 """
 from __future__ import annotations
 
@@ -68,23 +64,19 @@ SessionLocal = sessionmaker(
 
 
 class Base(DeclarativeBase):
-    """Metadata for tables owned by pmis-user-management (schema `users`).
-
-    Alembic autogenerate uses Base.metadata only.
-    """
+    """Metadata for tables owned by pmis-project-management (schema `project`)."""
     pass
 
 
 class MirrorBase(DeclarativeBase):
-    """READ-ONLY mirror declarations for tables owned by OTHER services.
+    """READ-ONLY mirror declarations for tables owned by user-svc, masters-svc.
 
-    NOT included in alembic autogenerate (see alembic/env.py:include_object).
+    NOT included in alembic autogenerate.
     """
     pass
 
 
 def get_db() -> Generator[Session, None, None]:
-    """FastAPI dependency for per-request DB session."""
     db = SessionLocal()
     try:
         yield db

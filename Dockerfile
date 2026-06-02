@@ -26,7 +26,7 @@ RUN groupadd --system app && useradd --system --gid app --home /app --no-create-
 
 USER appuser
 
-EXPOSE 8001
+EXPOSE 8003
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD curl -fsS http://localhost:8001/health || exit 1
+    CMD curl -fsS http://localhost:8003/health || exit 1
 CMD ["./entrypoint.sh"]

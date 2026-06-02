@@ -11,11 +11,13 @@ sqlalchemy==2.0.36
 alembic==1.18.1
 psycopg2-binary==2.9.10
 
-# Auth
+# Auth (verify only)
 python-jose[cryptography]==3.3.0
-argon2-cffi==23.1.0
 
-# HTTP client (outbound to notification-svc)
+# Attachments
+filetype==1.2.0
+
+# HTTP client (TestClient + any future outbound)
 httpx==0.28.1
 
 # Tests

@@ -1,4 +1,4 @@
-"""Integration tests for /health, /ready, / on user-svc."""
+"""Integration tests for /health, /ready, / on project-svc."""
 from __future__ import annotations
 
 from unittest.mock import MagicMock
@@ -9,16 +9,17 @@ def test_health_returns_ok(client):
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "ok"
-    assert body["service"] == "pmis-user-management"
+    assert body["service"] == "pmis-project-management"
 
 
 def test_root_returns_service_info(client):
     resp = client.get("/")
     assert resp.status_code == 200
-    body = resp.json()
-    # GET / goes through HAL envelope: {data, message, error, status}
-    assert body["data"]["service"] == "pmis-user-management"
-    assert "docs_url" in body["data"]
+    # ``/`` is HAL-wrapped; data carries the service-info dict with
+    # camelCased keys (snake_case -> camelCase happens in the HAL layer).
+    data = resp.json()["data"]
+    assert data["service"] == "pmis-project-management"
+    assert "docsUrl" in data
 
 
 def test_ready_503_when_db_unreachable(client, app, fake_db_session):

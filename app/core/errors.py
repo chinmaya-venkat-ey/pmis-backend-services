@@ -1,13 +1,10 @@
-"""Domain error hierarchy — CANONICAL declaration site.
+"""Domain error hierarchy for pmis-project-management.
 
-Services raise these; the @app.exception_handler in middleware/error_handler.py
-translates them to consistent JSON envelopes. No HTTPException in service code.
+Duplicates the user-svc canonical DomainError hierarchy and adds project-svc
+specific subclasses (project / milestone / activity / task / subtask / comment
+NotFound + a few status-transition errors).
 
-WARNING: This file is the canonical version. Other services duplicate it:
-  - services/pmis-masters-management/app/core/errors.py
-  - services/pmis-notification-management/app/core/errors.py
-  - services/pmis-project-management/app/core/errors.py
-Keep in sync by hand until tools/check_canonical_drift.py is wired.
+WARNING: Keep base classes in sync with services/pmis-user-management/app/core/errors.py.
 """
 from __future__ import annotations
 
@@ -15,10 +12,9 @@ from typing import Optional
 
 
 class DomainError(Exception):
-    """Base for all expected errors."""
-
     status_code: int = 500
-    default_code: str = "INTERNAL_ERROR"
+    # Monolith parity: errorIdentifier is lowercase snake_case on the wire.
+    default_code: str = "internal_error"
 
     def __init__(
         self,
@@ -35,94 +31,118 @@ class DomainError(Exception):
 
 class NotFoundError(DomainError):
     status_code = 404
-    default_code = "NOT_FOUND"
+    default_code = "not_found"
 
 
 class ConflictError(DomainError):
     status_code = 409
-    default_code = "CONFLICT"
+    default_code = "conflict"
 
 
 class ForbiddenError(DomainError):
     status_code = 403
-    default_code = "FORBIDDEN"
+    default_code = "forbidden"
 
 
 class UnauthorizedError(DomainError):
     status_code = 401
-    default_code = "UNAUTHORIZED"
+    default_code = "unauthorized"
 
 
 class ValidationError(DomainError):
     status_code = 422
-    default_code = "VALIDATION_ERROR"
+    default_code = "validation_error"
 
 
-# user-svc-specific subclasses
-class UserNotFoundError(NotFoundError):
-    default_code = "USER_NOT_FOUND"
+# ---------------------------------------------------------------------------
+# project-svc specific
+# ---------------------------------------------------------------------------
+
+class ProjectNotFoundError(NotFoundError):
+    # Monolith parity: every NotFound* error uses the generic ``not_found``
+    # identifier on the wire (matches monolith ``app/core/errors.py``).
+    # The specific entity (project / milestone / …) is conveyed via the
+    # ``message`` text only.
+    default_code = "not_found"
 
 
-class UserLoginAlreadyInUseError(ConflictError):
-    default_code = "USER_LOGIN_IN_USE"
+class ProjectCodeConflictError(ConflictError):
+    default_code = "project_code_conflict"
 
 
-class UserEmailAlreadyInUseError(ConflictError):
-    default_code = "USER_EMAIL_IN_USE"
+class MilestoneNotFoundError(NotFoundError):
+    default_code = "not_found"
 
 
-class InvalidCredentialsError(UnauthorizedError):
-    default_code = "INVALID_CREDENTIALS"
+class ActivityNotFoundError(NotFoundError):
+    default_code = "not_found"
 
 
-class TwoFactorRequiredError(UnauthorizedError):
-    """Not an error per se — signals to the controller that 2FA is needed."""
-
-    default_code = "TWO_FACTOR_REQUIRED"
-    status_code = 200  # caller responds with a special body, not an error
-
-    def __init__(self, message: str = "", *, ephemeral_token: str, channels_available: list[str], **kw):
-        super().__init__(message, **kw)
-        self.details = {
-            **(kw.get("details") or {}),
-            "ephemeral_token": ephemeral_token,
-            "channels_available": channels_available,
-        }
+class TaskNotFoundError(NotFoundError):
+    default_code = "not_found"
 
 
-class OtpInvalidError(UnauthorizedError):
-    default_code = "OTP_INVALID"
+class SubtaskNotFoundError(NotFoundError):
+    default_code = "not_found"
 
 
-class OtpExpiredError(UnauthorizedError):
-    default_code = "OTP_EXPIRED"
+class CommentNotFoundError(NotFoundError):
+    default_code = "not_found"
 
 
-class OtpAttemptsExceededError(UnauthorizedError):
-    default_code = "OTP_ATTEMPTS_EXCEEDED"
+class InvalidStatusTransitionError(ConflictError):
+    """Project status transition not allowed by the masters.project_status_transitions
+    catalog."""
+
+    default_code = "invalid_status_transition"
 
 
-class RefreshTokenInvalidError(UnauthorizedError):
-    default_code = "REFRESH_TOKEN_INVALID"
+class AttachmentTooLargeError(ValidationError):
+    """Monolith parity: surfaces as 422 with the generic
+    ``validation_error`` identifier — NOT 409 / a specific code."""
 
 
-class PasswordResetTokenInvalidError(UnauthorizedError):
-    default_code = "PASSWORD_RESET_TOKEN_INVALID"
+class AttachmentDisallowedExtensionError(ValidationError):
+    """Monolith parity: surfaces as 422 with the generic
+    ``validation_error`` identifier — NOT 409 / a specific code."""
 
 
-class LastSuperAdminLockoutError(ConflictError):
-    """Can't delete / demote the only remaining super_admin."""
+class StorageUnavailableError(DomainError):
+    """Raised when the attachment storage backend (NFS mount / file server)
+    is unreachable or refuses writes. Maps to HTTP 503."""
 
-    default_code = "LAST_SUPER_ADMIN_LOCKOUT"
+    status_code = 503
+    default_code = "storage_unavailable"
+
+
+class UserMgmtUnavailableError(DomainError):
+    """Raised when PMIS-user-management is unreachable, times out, or
+    returns a non-2xx response on a cross-service write. Maps to HTTP 502
+    (Bad Gateway) — project-mgmt is the gateway, user-mgmt is upstream.
+
+    ``details`` carries:
+      - ``upstream_status``: HTTP status from user-mgmt (or None on
+        connection/timeout failure)
+      - ``upstream_body``: the response body (truncated) when present
+      - ``stage``: free-form label of which call failed
+        (e.g. ``replace_role_assignments``)
+    """
+
+    status_code = 502
+    default_code = "user_mgmt_unavailable"
+
+
+class CommentBodyOrAttachmentRequiredError(ValidationError):
+    """Doc-35 send-event invariant: comment must carry body OR attachments."""
+
+    default_code = "comment_body_or_attachment_required"
+
+
+class DependencyCycleError(ConflictError):
+    """milestone/activity/task/subtask dependency would introduce a cycle."""
+
+    default_code = "dependency_cycle"
 
 
 class CallerCannotModifyTargetError(ForbiddenError):
-    """Doc-44 caller-vs-target gate. e.g. org_admin trying to edit admin."""
-
-    default_code = "CALLER_CANNOT_MODIFY_TARGET"
-
-
-class CallerCannotGrantRoleError(ForbiddenError):
-    """Caller's role doesn't authorize granting this role to that scope."""
-
-    default_code = "CALLER_CANNOT_GRANT_ROLE"
+    default_code = "caller_cannot_modify_target"

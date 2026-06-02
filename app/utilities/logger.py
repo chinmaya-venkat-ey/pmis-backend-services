@@ -1,8 +1,7 @@
-"""Logging config — CANONICAL declaration site.
+"""Logging config for pmis-project-management.
 
-Honors LOG_LEVEL and LOG_FORMAT=text|json from app.config.settings.
-
-WARNING: Duplicated across services. Keep in sync.
+Duplicated from services/pmis-user-management/app/utilities/logger.py.
+Keep in sync.
 """
 from __future__ import annotations
 
@@ -20,7 +19,7 @@ class JsonFormatter(logging.Formatter):
             "level": record.levelname,
             "logger": record.name,
             "message": record.getMessage(),
-            "service": getattr(settings, "service_name", "pmis-user-management"),
+            "service": getattr(settings, "service_name", "pmis-project-management"),
         }
         for key in ("request_id", "user_id", "endpoint"):
             if key in record.__dict__:

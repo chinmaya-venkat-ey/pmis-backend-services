@@ -87,7 +87,10 @@ def upgrade() -> None:
             (from_status, to_status, permission_code, active, description)
         VALUES
             (NULL,         'new',         NULL,                 true, 'Initial status accepted on a fresh create'),
-            ('new',        'draft',       'projects:draft',     true, 'First save — wizard step 1 complete'),
+            -- §3.12 (2026-06-02 audit): permission_code dropped from this
+            -- edge after `projects:draft` was deleted from the canonical
+            -- catalog; the column is stored but not consulted for authz.
+            ('new',        'draft',       NULL,                 true, 'First save — wizard step 1 complete'),
             ('draft',      'published',   'projects:publish',   true, 'Project goes live'),
             ('draft',      'cancelled',   'projects:close',     true, 'Abandon a draft before publishing'),
             ('published',  'in_progress', 'projects:publish',   true, 'Active work has begun'),

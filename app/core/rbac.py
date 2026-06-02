@@ -55,16 +55,14 @@ def require_authenticated() -> Callable:
 def require_permission(permission_code: str) -> Callable:
     """Dependency factory: 401 if anonymous, 403 if user lacks `permission_code`.
 
-    Admin users (request.state.is_admin) pass every check — this matches
-    the monolith pattern where `admin` role holds every permission code.
+    A1 (2026-06-02 audit): admin users no longer short-circuit. They must
+    explicitly hold the code via r005's grant migration.
     """
 
     def _checker(request: Request) -> str:
         user_id = _user_id_from_state(request)
         if not user_id:
             raise UnauthorizedError(AUTH_REQUIRED_MESSAGE, code="AUTH_REQUIRED")
-        if _is_admin_from_state(request):
-            return user_id
         if permission_code not in _user_permissions_from_state(request):
             raise ForbiddenError(
                 f"Permission denied: {permission_code} required",
@@ -77,7 +75,10 @@ def require_permission(permission_code: str) -> Callable:
 
 
 def require_any_permission(*permission_codes: str) -> Callable:
-    """Dependency factory: caller needs at least ONE of the codes."""
+    """Dependency factory: caller needs at least ONE of the codes.
+
+    A1 (2026-06-02 audit): no admin bypass.
+    """
 
     if not permission_codes:
         raise ValueError("require_any_permission needs at least one code")
@@ -86,8 +87,6 @@ def require_any_permission(*permission_codes: str) -> Callable:
         user_id = _user_id_from_state(request)
         if not user_id:
             raise UnauthorizedError(AUTH_REQUIRED_MESSAGE, code="AUTH_REQUIRED")
-        if _is_admin_from_state(request):
-            return user_id
         held = _user_permissions_from_state(request)
         if not any(code in held for code in permission_codes):
             raise ForbiddenError(

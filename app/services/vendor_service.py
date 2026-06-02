@@ -42,8 +42,17 @@ class VendorService:
         active_only: bool = False,
         caller_vendor_id: Optional[str] = None,
         is_admin: bool = False,
+        caller_can_see_all: bool = False,
     ) -> List[Vendor]:
-        vendor_id_filter = None if is_admin else caller_vendor_id
+        """§3.1 (2026-06-02 audit) item 7: ``caller_can_see_all`` replaces
+        the ``is_admin`` short-circuit (caller passes if they hold
+        ``vendors:read`` — admin/super_admin hold it via r005). ``is_admin``
+        kept for backwards compatibility with route call sites that pre-
+        date the change."""
+        if is_admin or caller_can_see_all:
+            vendor_id_filter = None
+        else:
+            vendor_id_filter = caller_vendor_id
         return self.repo.list_(
             active_only=active_only,
             vendor_id_filter=vendor_id_filter,

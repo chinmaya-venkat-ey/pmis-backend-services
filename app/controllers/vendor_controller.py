@@ -39,11 +39,13 @@ class VendorController:
         active_only: bool = False,
         caller_vendor_id: Optional[str] = None,
         is_admin: bool = False,
+        caller_can_see_all: bool = False,
     ) -> Dict[str, Any]:
         vendors = self.service.list_(
             active_only=active_only,
             caller_vendor_id=caller_vendor_id,
             is_admin=is_admin,
+            caller_can_see_all=caller_can_see_all,
         )
         vendor_ids = [v.id for v in vendors]
         projects_by_vendor = self.service.list_projects_for_vendors(vendor_ids)

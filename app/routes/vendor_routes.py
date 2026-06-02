@@ -45,10 +45,15 @@ def list_vendors(
         description="When true, return only active vendors. Default false shows all (active + inactive).",
     ),
 ) -> Dict[str, Any]:
+    held = getattr(request.state, "user_permissions", None) or set()
     return controller.list_(
         active_only=active_only,
         caller_vendor_id=getattr(request.state, "user_vendor_id", None),
         is_admin=getattr(request.state, "is_admin", False),
+        # §3.1 (2026-06-02 audit) item 7: broad view requires vendors:manage
+        # (admin/super_admin hold it via r005). Non-manage callers see only
+        # their own vendor via caller_vendor_id.
+        caller_can_see_all=(VENDORS_MANAGE in held),
     )
 
 

@@ -14,7 +14,7 @@ from app.core.permissions import (
     ROLES_UPDATE,
 )
 from app.core.rbac import require_permission
-from app.dependencies import get_role_controller
+from app.dependencies import get_current_user_id, get_role_controller
 from app.schemas.role import (
     RoleCreateRequest,
     RolePermissionsReplaceRequest,
@@ -55,8 +55,9 @@ def list_roles(
 def create_role(
     payload: RoleCreateRequest,
     controller: Annotated[RoleController, Depends(get_role_controller)],
+    caller_user_id: Annotated[str, Depends(get_current_user_id)],
 ):
-    return controller.create(payload)
+    return controller.create(payload, caller_user_id=caller_user_id)
 
 
 @router.get(
@@ -83,8 +84,9 @@ def update_role(
     role_id: int,
     payload: RoleUpdateRequest,
     controller: Annotated[RoleController, Depends(get_role_controller)],
+    caller_user_id: Annotated[str, Depends(get_current_user_id)],
 ):
-    return controller.update(role_id, payload)
+    return controller.update(role_id, payload, caller_user_id=caller_user_id)
 
 
 @router.delete(
@@ -132,8 +134,11 @@ def replace_role_permissions(
     role_id: int,
     payload: RolePermissionsReplaceRequest,
     controller: Annotated[RoleController, Depends(get_role_controller)],
+    caller_user_id: Annotated[str, Depends(get_current_user_id)],
 ):
-    return controller.replace_role_permissions(role_id, payload)
+    return controller.replace_role_permissions(
+        role_id, payload, caller_user_id=caller_user_id,
+    )
 
 
 @router.post(
@@ -146,8 +151,9 @@ def grant_role_permission(
     role_id: int,
     code: str,
     controller: Annotated[RoleController, Depends(get_role_controller)],
+    caller_user_id: Annotated[str, Depends(get_current_user_id)],
 ):
-    return controller.grant_permission(role_id, code)
+    return controller.grant_permission(role_id, code, caller_user_id=caller_user_id)
 
 
 @router.delete(

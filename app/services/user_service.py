@@ -19,12 +19,13 @@ from sqlalchemy.orm import Session
 
 from app.core.errors import (
     CallerCannotModifyTargetError,
+    ForbiddenError,
     LastSuperAdminLockoutError,
     UserEmailAlreadyInUseError,
     UserLoginAlreadyInUseError,
     UserNotFoundError,
 )
-from app.core.permissions import ORG_TIER_ROLES, SUPER_ADMIN_ROLE
+from app.core.permissions import ADMIN_ROLE, ORG_TIER_ROLES, SUPER_ADMIN_ROLE
 from app.core.security import hash_password
 from app.repositories.rbac_repository import RbacRepository
 from app.repositories.user_repository import UserRepository
@@ -62,10 +63,18 @@ class UserService:
         include_deleted: bool = False,
         caller_vendor_id: Optional[str] = None,
         caller_is_admin: bool = False,
+        caller_can_see_all: bool = False,
     ):
-        """Returns (rows, total). Non-admin callers are vendor-scoped + admin-tier-excluded."""
-        vendor_filter = None if caller_is_admin else caller_vendor_id
-        exclude_admin_tier = not caller_is_admin
+        """Returns (rows, total).
+
+        §3.1 (2026-06-02 audit) item 7: the broad-view bypass now keys on
+        ``caller_can_see_all`` (caller holds ``users:read_all`` — admin
+        and super_admin hold it via r005), not on ``caller_is_admin``.
+        Non-broad callers are vendor-scoped + admin-tier-excluded.
+        """
+        broad = caller_is_admin or caller_can_see_all
+        vendor_filter = None if broad else caller_vendor_id
+        exclude_admin_tier = not broad
         return self.repo.list_(
             offset=offset,
             page_size=page_size,
@@ -112,6 +121,23 @@ class UserService:
                 details={"email": str(payload.email)},
             )
 
+        # §3.4.1 (2026-06-02 audit): the Rule-4 guard that exists on update()
+        # also applies on create(). Refuse to mint a user whose org_role
+        # column is admin/super_admin unless the caller is super_admin.
+        # Closes the takeover path where an admin POSTs a new user with
+        # org_role="super_admin" and instantly mints a peer-or-superior.
+        if payload.org_role in (ADMIN_ROLE, SUPER_ADMIN_ROLE):
+            if not (
+                created_by_user_id is not None
+                and self._caller_is_super_admin(created_by_user_id)
+            ):
+                raise ForbiddenError(
+                    f"Only super_admin may create a user with "
+                    f"org_role={payload.org_role!r}.",
+                    code="RESERVED_ORG_ROLE_DENIED",
+                    details={"org_role": payload.org_role},
+                )
+
         # Round-8 C2: validate each project_assignment against the matrix
         # BEFORE creating the user. We resolve every role_id to its name,
         # then call the same guard `_assert_caller_can_grant` that the
@@ -134,6 +160,25 @@ class UserService:
                     caller_user_id=created_by_user_id,
                     caller_is_admin=caller_is_admin,
                 )
+
+        # §3.4.1 (2026-06-02 audit): the VM-style branch below
+        # (project_ids + org_role) used to bypass _assert_caller_can_grant
+        # entirely — an admin could POST {project_ids=[...], org_role=
+        # "super_admin"} and self-assign every project. Validate up-front.
+        if payload.project_ids and payload.org_role and created_by_user_id is not None:
+            from app.services.role_assignment_service import RoleAssignmentService
+
+            vm_guard = RoleAssignmentService(self.db)
+            vm_role = self.rbac.get_role_by_name(payload.org_role)
+            if vm_role is not None:
+                for pid in payload.project_ids:
+                    vm_guard._assert_caller_can_grant(
+                        role_name=vm_role.name,
+                        organization_id=None,
+                        project_id=pid,
+                        caller_user_id=created_by_user_id,
+                        caller_is_admin=caller_is_admin,
+                    )
 
         first_name = payload.first_name
         last_name = payload.last_name
@@ -191,19 +236,26 @@ class UserService:
         caller_user_id: str,
         caller_is_admin: bool,
     ):
-        """Doc-44 Flow 1 (round-7): self-only OR admin/super_admin.
+        """Doc-44 Flow 1: self-edit OR caller holding the per-field code.
 
         Field-level enforcement: for non-self callers, every touched field
         must have a corresponding `users:update:<field>` permission held by
-        the caller. (Admins bypass field-level checks at the helper.)
+        the caller. Admins/super_admin pass because r005 grants them every
+        field code — A1 (2026-06-02 audit) removed the implicit bypass.
 
         org_admin/project_admin can NOT edit other users' rows (round-7
         decision Q1) — they manage role-assignments, not user-row fields.
         """
         target = self.get_by_id(user_id)
-        self._assert_caller_can_modify_user(caller_user_id, target, caller_is_admin)
+        self._assert_caller_can_modify_user(
+            caller_user_id, target, caller_is_admin, request=request,
+        )
 
         updates = payload.model_dump(exclude_unset=True)
+        # §3.7 (2026-06-02 audit): compute `touched` BEFORE the pops below
+        # so future field_codes additions (e.g. full_name, project_ids,
+        # admin) won't silently bypass the walker if a code is later mapped.
+        touched = set(updates.keys())
         # Split full_name → first_name / last_name when present
         if "full_name" in updates and updates["full_name"]:
             parts = updates.pop("full_name").split(None, 1)
@@ -219,8 +271,8 @@ class UserService:
         if not updates:
             return target
 
-        # Field-level gate. Self-edit and admin bypass the gate (admin via
-        # the helper's _is_admin shortcut; self via this branch).
+        # Field-level gate. Self-edit bypasses; otherwise the caller must
+        # hold the corresponding ``users:update:<field>`` code.
         if request is not None and caller_user_id != target.id:
             from app.core.permissions import USER_FIELD_CODES
             from app.core.rbac import assert_field_writes_allowed
@@ -228,7 +280,7 @@ class UserService:
             assert_field_writes_allowed(
                 request,
                 field_codes=USER_FIELD_CODES,
-                touched_fields=set(updates.keys()),
+                touched_fields=touched,
             )
 
         if "email" in updates and updates["email"] is not None:
@@ -240,6 +292,21 @@ class UserService:
                     details={"email": email},
                 )
             updates["email"] = email
+
+        # A3 (2026-06-02 audit): refuse to flip a user's org_role to
+        # admin or super_admin unless the caller is super_admin. This
+        # closes the takeover path where an admin could PATCH another
+        # user's row to elevate them.
+        if "org_role" in updates:
+            requested_org_role = updates.get("org_role")
+            if requested_org_role in (ADMIN_ROLE, SUPER_ADMIN_ROLE):
+                if not self._caller_is_super_admin(caller_user_id):
+                    raise ForbiddenError(
+                        f"Only super_admin may set a user's org_role to "
+                        f"{requested_org_role!r}.",
+                        code="RESERVED_ORG_ROLE_DENIED",
+                        details={"org_role": requested_org_role},
+                    )
 
         # Doc-45 round-9b extension: when the PATCH supplies org_role, also
         # sync the GLOBAL org-tier role-assignment so the user actually gets
@@ -413,27 +480,33 @@ class UserService:
     # ------------------------------------------------------------------ Doc-44 gates (round-7)
 
     def _assert_caller_can_modify_user(
-        self, caller_user_id: str, target, caller_is_admin: bool,
+        self, caller_user_id: str, target, caller_is_admin: bool, request=None,
     ):
         """Flow 1 gate: PATCH /user/users/{id}/update.
 
+        §3.1 (2026-06-02 audit) item 1: replaced ``caller_is_admin`` short-
+        circuit with an explicit capability check. Caller passes if they
+        hold ANY ``users:update:*`` field code globally — the field walker
+        then determines which specific fields they can write. Admins still
+        pass because r005 grants every field code to admin/super_admin.
+
         Allowed:
           - Self-edit (caller is the target).
-          - admin / super_admin (any target).
+          - Anyone holding at least one ``users:update:*`` code globally.
 
-        Disallowed:
-          - Anyone else, including same-vendor non-admins. org_admin and
-            project_admin manage role-assignments, not user-row fields
-            (round-7 Q1).
-
-        Field-level enforcement runs AFTER this gate in `update()`.
+        Field-level enforcement runs AFTER this gate in ``update()``.
         """
         if caller_user_id == target.id:
             return
-        if caller_is_admin:
-            return
+        if request is not None:
+            from app.core.permissions import USER_FIELD_CODES
+
+            held = getattr(request.state, "user_permissions", None) or set()
+            if any(c in held for c in USER_FIELD_CODES.values()):
+                return
         raise CallerCannotModifyTargetError(
-            "Only the account owner or an admin can modify this user's profile",
+            "Only the account owner or a caller holding users:update:* can "
+            "modify this user's profile",
             details={"target_user_id": target.id},
         )
 
@@ -442,30 +515,67 @@ class UserService:
     ):
         """Flow 3 gate: DELETE /user/users/{id}/delete (and /restore).
 
-        Allowed:
-          - admin / super_admin (any target).
-          - org_admin holding `users:delete_vendor` scoped to a vendor that
-            equals target.vendor_id.
+        §3.1 (2026-06-02 audit) item 2: replaced the ``caller_is_admin``
+        short-circuit with explicit code checks. Caller passes if they hold
+        ``users:delete_all`` globally, OR ``users:delete_vendor`` at
+        ("org", target.vendor_id). Admin holds users:delete_all via r005.
 
-        Implementation: ask the scoped_permissions map whether the caller
-        holds USERS_DELETE_VENDOR at ("org", target.vendor_id). If yes, allow.
-        Otherwise require caller_is_admin.
+        Allowed:
+          - Anyone holding USERS_DELETE_ALL globally.
+          - Anyone holding USERS_DELETE_VENDOR scoped to target.vendor_id.
 
         Self-delete is NOT allowed (admins delete users, not themselves; the
         last-super-admin lockout already guards the dangerous case).
         """
-        if caller_is_admin:
-            return
-        if request is not None and target.vendor_id:
-            from app.core.permissions import USERS_DELETE_VENDOR
+        from app.core.permissions import USERS_DELETE_ALL, USERS_DELETE_VENDOR
 
+        if request is not None:
             scoped = getattr(request.state, "scoped_permissions", None) or {}
-            if USERS_DELETE_VENDOR in scoped.get(("org", target.vendor_id), set()):
+            held_flat = getattr(request.state, "user_permissions", None) or set()
+            if USERS_DELETE_ALL in held_flat:
+                return
+            if target.vendor_id and USERS_DELETE_VENDOR in scoped.get(
+                ("org", target.vendor_id), set()
+            ):
                 return
         raise CallerCannotModifyTargetError(
             "You don't have authority to delete this user",
             details={"target_user_id": target.id},
         )
+
+    def _caller_is_super_admin(self, caller_user_id: Optional[str]) -> bool:
+        """True if `caller_user_id` holds the super_admin role via legacy
+        user_roles OR a global user_role_assignment. Used by A3 takeover
+        guards (2026-06-02 audit).
+        """
+        if not caller_user_id:
+            return False
+        from sqlalchemy import select
+        from app.models.user_role import UserRole
+        from app.models.user_role_assignment import UserRoleAssignment
+
+        super_role = self.rbac.get_role_by_name(SUPER_ADMIN_ROLE)
+        if super_role is None:
+            return False
+
+        legacy = self.db.execute(
+            select(UserRole.user_id)
+            .where(UserRole.role_id == super_role.id)
+            .where(UserRole.user_id == caller_user_id)
+            .limit(1)
+        ).first()
+        if legacy is not None:
+            return True
+
+        scoped = self.db.execute(
+            select(UserRoleAssignment.user_id)
+            .where(UserRoleAssignment.role_id == super_role.id)
+            .where(UserRoleAssignment.user_id == caller_user_id)
+            .where(UserRoleAssignment.organization_id.is_(None))
+            .where(UserRoleAssignment.project_id.is_(None))
+            .limit(1)
+        ).first()
+        return scoped is not None
 
     def _is_only_super_admin(self, user_id: str) -> bool:
         """True if this user holds super_admin AND no other user does."""

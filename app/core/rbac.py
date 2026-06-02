@@ -13,6 +13,23 @@ Two layers:
 Anonymous requests have empty permission sets and `user_id=None` → every
 gate emits 401.
 
+Intentional layering pattern (do NOT consolidate into route-only gates):
+  - Most routes declare their permission at the route layer via
+    `Depends(require_permission(CODE))` — visible in the OpenAPI spec.
+  - For PATCH endpoints with field-level RBAC (project / milestone / activity
+    / task / subtask / user updates), the route layer only enforces
+    `require_authenticated()`; the per-field permission check lives in the
+    service layer via `assert_field_writes_allowed(..., field_codes=...,
+    touched_fields=set(payload.model_dump(exclude_unset=True)))`. This split
+    is intentional: the touched-field set isn't visible at the route layer
+    without re-parsing the body, so pushing field-level checks up to the
+    route would either duplicate parsing or force pre-parsed dependencies
+    that obscure controller/service responsibilities. Keep field-walker
+    checks in the service.
+  - The same intentional split applies to `assert_action_allowed` calls
+    inside `comment_routes.py` / `attachment_routes.py` — where the scope
+    id is only known after a row lookup.
+
 WARNING: Duplicated across services per PLAN.md §6.1. Keep in sync.
 """
 from __future__ import annotations
@@ -78,8 +95,8 @@ def require_permission(permission_code: Union[str, object]) -> Callable:
         uid = _user_id(request)
         if not uid:
             raise UnauthorizedError(AUTH_REQUIRED_MESSAGE, code="AUTH_REQUIRED")
-        if _is_admin(request):
-            return uid
+        # A1 (2026-06-02 audit): admin/super_admin no longer short-circuit
+        # here. They must explicitly hold the code via r005's grant migration.
         if code not in _user_permissions(request):
             raise ForbiddenError(
                 f"Permission denied: {code} required",
@@ -101,8 +118,7 @@ def require_any_permission(*permission_codes: Union[str, object]) -> Callable:
         uid = _user_id(request)
         if not uid:
             raise UnauthorizedError(AUTH_REQUIRED_MESSAGE, code="AUTH_REQUIRED")
-        if _is_admin(request):
-            return uid
+        # A1: no admin bypass — caller must hold one of the codes explicitly.
         held = _user_permissions(request)
         if not any(c in held for c in codes):
             raise ForbiddenError(
@@ -161,7 +177,10 @@ def _has_scoped_permission(
 ) -> bool:
     """True iff caller holds `code` at `scope_key` OR globally.
 
-    Admins pass automatically.
+    A1 (2026-06-02 audit): admins no longer pass automatically. They must
+    explicitly hold the code at the requested scope OR at global scope, same
+    as any other caller. r005's grant migration ensures admin/super_admin
+    do hold every catalog code globally.
 
     Round-8 scope-bleed fix: the previous flat-`user_permissions` fallback
     let a code scoped to project P satisfy checks on project Q (because
@@ -169,8 +188,6 @@ def _has_scoped_permission(
     Removed. A caller now passes the gate iff they hold the code at the
     requested scope OR at global scope.
     """
-    if _is_admin(request):
-        return True
     scoped = _scoped_permissions(request)
     if code in scoped.get(("global", None), set()):
         return True
@@ -254,9 +271,10 @@ def assert_field_writes_allowed(
 
     Behaviour:
       - Anonymous → UnauthorizedError (consistent with require_* deps).
-      - Admin/super_admin → pass (no field-level checks).
-      - Otherwise: for each touched field, look up its code in `field_codes`
-                   and verify the caller holds it (scoped OR globally).
+      - For each touched field, look up its code in `field_codes` and
+        verify the caller holds it (scoped OR globally). Admins now pass
+        only because r005 grants them every field code explicitly — A1
+        (2026-06-02) removed the blanket admin bypass.
       - On any miss → 403 with details={"missing": [<code>, ...], "fields": [<field>, ...]}.
       - Fields not present in `field_codes` are ignored (callers should pass
         only persistent-write fields). The service layer is responsible for
@@ -265,8 +283,8 @@ def assert_field_writes_allowed(
     uid = _user_id(request)
     if not uid:
         raise UnauthorizedError(AUTH_REQUIRED_MESSAGE, code="AUTH_REQUIRED")
-    if _is_admin(request):
-        return
+    # A1 (2026-06-02 audit): admins must hold each field code explicitly
+    # (granted by r005). No short-circuit here.
 
     # Round-8 scope-bleed fix: removed the flat-`user_permissions` fallback
     # that previously let a code scoped to project P authorize edits on
@@ -318,8 +336,8 @@ def assert_action_allowed(
     uid = _user_id(request)
     if not uid:
         raise UnauthorizedError(AUTH_REQUIRED_MESSAGE, code="AUTH_REQUIRED")
-    if _is_admin(request):
-        return
+    # A1 (2026-06-02 audit): admins no longer short-circuit; they must hold
+    # the code explicitly (granted by r005).
     target_scope = scope_key or ("global", None)
     scoped = _scoped_permissions(request)
     if code in scoped.get(target_scope, set()):

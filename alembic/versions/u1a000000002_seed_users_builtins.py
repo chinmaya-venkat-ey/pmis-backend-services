@@ -51,7 +51,6 @@ from app.core.permissions import (
     ALL_PROJECT_DOMAIN_PERMISSIONS,
     ALL_USER_FIELD_WRITES,
     ATTACHMENTS_CREATE,
-    ATTACHMENTS_DOWNLOAD,
     COMMENTS_CREATE,
     COMMENTS_READ,
     DIVISION_MEMBER_ROLE,
@@ -148,7 +147,7 @@ _DIVISION_MEMBER_PERMS: tuple[str, ...] = (
     USERS_READ,
     PROJECTS_READ,
     MILESTONES_READ, TASKS_READ, SUBTASKS_READ,
-    COMMENTS_READ, ATTACHMENTS_DOWNLOAD,
+    COMMENTS_READ,
     *ALL_MASTERS_READ_PERMISSIONS,
 )
 
@@ -279,14 +278,68 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Scope-correct undo of u1a000000002 upgrade (A9 fix, 2026-06-02).
+
+    Previously this function did unscoped `DELETE FROM users.user_roles`
+    and `DELETE FROM users.role_permissions` — which would wipe rows
+    created by later migrations or by runtime grants.
+
+    Updated to only delete what u1a's upgrade actually created:
+      - user_roles row binding the bootstrap superadmin to super_admin
+      - the bootstrap superadmin user row
+      - role_permissions rows for the 6 built-in roles only
+      - the 6 built-in role rows
+      - permission rows whose code is in ALL_PERMISSIONS at downgrade time
+    """
     bind = op.get_bind()
-    bind.execute(sa.text("DELETE FROM users.user_roles"))
-    bind.execute(sa.text("DELETE FROM users.users WHERE login IN ('superadmin')"))
-    bind.execute(sa.text("DELETE FROM users.role_permissions"))
+
+    builtin_role_names = list(_grants_by_role.keys())
+
+    # Resolve the 6 built-in role IDs.
+    role_rows = bind.execute(
+        sa.text("SELECT id FROM users.roles WHERE name = ANY(:names)"),
+        {"names": builtin_role_names},
+    ).fetchall()
+    builtin_role_ids = [r[0] for r in role_rows]
+
+    # Find the bootstrap superadmin user this migration inserted (if any).
+    superadmin_login = os.environ.get("BOOTSTRAP_SUPERADMIN_LOGIN", "superadmin")
+    superadmin_user_row = bind.execute(
+        sa.text("SELECT id FROM users.users WHERE login = :login"),
+        {"login": superadmin_login},
+    ).first()
+    superadmin_user_id = superadmin_user_row[0] if superadmin_user_row else None
+
+    # 1. Delete the user_roles row binding the bootstrap superadmin.
+    if superadmin_user_id is not None and builtin_role_ids:
+        bind.execute(
+            sa.text(
+                "DELETE FROM users.user_roles "
+                "WHERE user_id = :uid AND role_id = ANY(:rids)"
+            ),
+            {"uid": superadmin_user_id, "rids": builtin_role_ids},
+        )
+
+    # 2. Delete the bootstrap superadmin user row.
+    bind.execute(
+        sa.text("DELETE FROM users.users WHERE login = :login"),
+        {"login": superadmin_login},
+    )
+
+    # 3. Delete role_permissions for the 6 built-in roles only.
+    if builtin_role_ids:
+        bind.execute(
+            sa.text("DELETE FROM users.role_permissions WHERE role_id = ANY(:rids)"),
+            {"rids": builtin_role_ids},
+        )
+
+    # 4. Delete the 6 built-in role rows.
     bind.execute(
         sa.text("DELETE FROM users.roles WHERE name = ANY(:names)"),
-        {"names": list(_grants_by_role.keys())},
+        {"names": builtin_role_names},
     )
+
+    # 5. Delete permission rows for canonical codes only.
     bind.execute(
         sa.text("DELETE FROM users.permissions WHERE code = ANY(:codes)"),
         {"codes": list(ALL_PERMISSIONS)},

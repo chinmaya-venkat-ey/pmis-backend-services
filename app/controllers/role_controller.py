@@ -1,7 +1,7 @@
 """RoleController — HTTP adapter for /user/roles/* routes."""
 from __future__ import annotations
 
-from typing import List
+from typing import List, Optional
 
 from app.schemas.role import (
     RoleCreateRequest,
@@ -23,11 +23,26 @@ class RoleController:
     def get_details(self, role_id: int) -> RoleResponse:
         return RoleResponse.model_validate(self.service.get_by_id(role_id))
 
-    def create(self, payload: RoleCreateRequest) -> RoleResponse:
-        return RoleResponse.model_validate(self.service.create(payload))
+    def create(
+        self,
+        payload: RoleCreateRequest,
+        *,
+        caller_user_id: Optional[str] = None,
+    ) -> RoleResponse:
+        return RoleResponse.model_validate(
+            self.service.create(payload, caller_user_id=caller_user_id)
+        )
 
-    def update(self, role_id: int, payload: RoleUpdateRequest) -> RoleResponse:
-        return RoleResponse.model_validate(self.service.update(role_id, payload))
+    def update(
+        self,
+        role_id: int,
+        payload: RoleUpdateRequest,
+        *,
+        caller_user_id: Optional[str] = None,
+    ) -> RoleResponse:
+        return RoleResponse.model_validate(
+            self.service.update(role_id, payload, caller_user_id=caller_user_id)
+        )
 
     def delete(self, role_id: int) -> RoleResponse:
         return RoleResponse.model_validate(self.service.delete(role_id))
@@ -40,14 +55,30 @@ class RoleController:
             role_id=role.id, role_name=role.name, permissions=perms,
         )
 
-    def replace_role_permissions(self, role_id: int, payload: RolePermissionsReplaceRequest) -> RolePermissionsResponse:
-        role, perms = self.service.replace_role_permissions(role_id, payload)
+    def replace_role_permissions(
+        self,
+        role_id: int,
+        payload: RolePermissionsReplaceRequest,
+        *,
+        caller_user_id: Optional[str] = None,
+    ) -> RolePermissionsResponse:
+        role, perms = self.service.replace_role_permissions(
+            role_id, payload, caller_user_id=caller_user_id,
+        )
         return RolePermissionsResponse(
             role_id=role.id, role_name=role.name, permissions=perms,
         )
 
-    def grant_permission(self, role_id: int, code: str) -> RolePermissionsResponse:
-        role, perms = self.service.grant_permission_to_role(role_id, code)
+    def grant_permission(
+        self,
+        role_id: int,
+        code: str,
+        *,
+        caller_user_id: Optional[str] = None,
+    ) -> RolePermissionsResponse:
+        role, perms = self.service.grant_permission_to_role(
+            role_id, code, caller_user_id=caller_user_id,
+        )
         return RolePermissionsResponse(
             role_id=role.id, role_name=role.name, permissions=perms,
         )

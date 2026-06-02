@@ -57,6 +57,21 @@ class PermissionService:
             description=payload.description,
             is_builtin=False,
         )
+        # A1 (2026-06-02 audit, part 3): auto-grant every new permission code
+        # to admin and super_admin. After the `_is_admin` short-circuit removal
+        # in Phase 4, these tiers must explicitly hold every code or they will
+        # be 403'd on any new gate. Reserved codes (A7) are excluded so they
+        # can never be granted via the runtime API.
+        from app.core.permissions import (
+            ADMIN_ROLE,
+            RESERVED_DIRECT_GRANT_CODES,
+            SUPER_ADMIN_ROLE,
+        )
+        if payload.code not in RESERVED_DIRECT_GRANT_CODES:
+            for role_name in (SUPER_ADMIN_ROLE, ADMIN_ROLE):
+                role = self.repo.get_role_by_name(role_name)
+                if role is not None:
+                    self.repo.grant_permissions_to_role(role.id, [payload.code])
         self.db.commit()
         return row
 

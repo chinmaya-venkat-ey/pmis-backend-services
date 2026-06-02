@@ -136,11 +136,12 @@ class UserController:
 
     # ------------------------------------------------------------------ list / get
 
-    def list_(self, *, offset, page_size, status, include_deleted, caller_vendor_id, caller_is_admin):
+    def list_(self, *, offset, page_size, status, include_deleted, caller_vendor_id, caller_is_admin, caller_can_see_all=False):
         rows, total = self.user_service.list_(
             offset=offset, page_size=page_size,
             status=status, include_deleted=include_deleted,
             caller_vendor_id=caller_vendor_id, caller_is_admin=caller_is_admin,
+            caller_can_see_all=caller_can_see_all,
         )
         return {
             "items": [self._build_user_response(r) for r in rows],

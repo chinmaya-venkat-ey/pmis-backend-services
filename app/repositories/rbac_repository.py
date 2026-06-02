@@ -236,12 +236,26 @@ class RbacRepository:
     # ------------------------------------------------------------------ effective permission queries
 
     def effective_permissions_for_user(self, user_id: str) -> Set[str]:
-        """Flat union of role-derived + direct-grant codes."""
+        """Flat union of GLOBAL role-derived + direct-grant codes.
+
+        §3.3 (2026-06-02 audit): the flat ``user_permissions`` set is what
+        ``require_permission`` reads. To keep project-scoped grants from
+        bleeding into global ``require_permission`` checks, only codes from
+        GLOBAL-scope grants enter this set.
+
+        Exception: admin and super_admin are tier roles; their permissions
+        are universal by design. An admin/super_admin assignment at ANY
+        scope contributes its codes to the flat set. (Runtime APIs reject
+        scoped admin/super_admin assignments, but legacy data could exist.)
+        Scoped grants from OTHER (non-admin-tier) roles are accessible only
+        via ``effective_permissions_by_scope`` / scoped checks.
+        """
         if not user_id:
             return set()
         perms: Set[str] = set()
 
-        # Legacy global tier (users.user_roles → role_permissions)
+        # Legacy global tier (users.user_roles → role_permissions). The
+        # user_roles table is global-by-design — every grant here is global.
         stmt = (
             select(RolePermission.permission_code)
             .join(UserRole, UserRole.role_id == RolePermission.role_id)
@@ -250,19 +264,32 @@ class RbacRepository:
         for (code,) in self.db.execute(stmt).all():
             perms.add(code)
 
-        # Doc-41 scoped tier (users.user_role_assignments → role_permissions)
+        # Doc-41 scoped tier (users.user_role_assignments → role_permissions).
+        # Include codes from GLOBAL-scope assignments (org_id IS NULL AND
+        # project_id IS NULL) OR from any-scope admin/super_admin assignment
+        # (admin tier is universal — see §3.3 docstring above).
         stmt = (
             select(RolePermission.permission_code)
             .join(
                 UserRoleAssignment,
                 UserRoleAssignment.role_id == RolePermission.role_id,
             )
+            .join(Role, Role.id == UserRoleAssignment.role_id)
             .where(UserRoleAssignment.user_id == user_id)
+            .where(
+                or_(
+                    and_(
+                        UserRoleAssignment.organization_id.is_(None),
+                        UserRoleAssignment.project_id.is_(None),
+                    ),
+                    Role.name.in_(_ADMIN_ROLE_NAMES),
+                )
+            )
         )
         for (code,) in self.db.execute(stmt).all():
             perms.add(code)
 
-        # Direct user grants
+        # Direct user grants (always global — user_permissions has no scope).
         for code in self.list_user_permissions(user_id):
             perms.add(code)
 
@@ -310,23 +337,32 @@ class RbacRepository:
         if global_perms:
             out[("global", None)] = global_perms
 
-        # Scoped tier — group by (org_id, project_id) per assignment row
+        # Scoped tier — group by (org_id, project_id) per assignment row.
+        # §3.3 (2026-06-02 audit): admin/super_admin tier roles are
+        # universal — their codes always land in ("global", None), even if
+        # the assignment row carries a scope. (Runtime APIs reject scoped
+        # admin/super_admin assignments, but legacy data could exist.)
         org_ids_seen: Set[str] = set()
         stmt = (
             select(
                 UserRoleAssignment.organization_id,
                 UserRoleAssignment.project_id,
+                Role.name,
                 RolePermission.permission_code,
             )
             .join(
                 RolePermission,
                 RolePermission.role_id == UserRoleAssignment.role_id,
             )
+            .join(Role, Role.id == UserRoleAssignment.role_id)
             .where(UserRoleAssignment.user_id == user_id)
         )
-        for org_id, project_id, code in self.db.execute(stmt).all():
-            if org_id is None and project_id is None:
+        for org_id, project_id, role_name, code in self.db.execute(stmt).all():
+            if role_name in _ADMIN_ROLE_NAMES:
+                # Universal-tier role — always global, regardless of row scope.
                 key: Tuple[str, Optional[str]] = ("global", None)
+            elif org_id is None and project_id is None:
+                key = ("global", None)
             elif org_id is not None:
                 key = ("org", org_id)
                 org_ids_seen.add(org_id)
@@ -410,44 +446,7 @@ class RbacRepository:
             return False
         return self.db.get(RevokedToken, jti) is not None
 
-    # ------------------------------------------------------------------ legacy user_roles
-
-    def list_user_legacy_roles(self, user_id: str) -> List[Role]:
-        stmt = (
-            select(Role)
-            .join(UserRole, UserRole.role_id == Role.id)
-            .where(UserRole.user_id == user_id)
-        )
-        return list(self.db.execute(stmt).scalars())
-
-    def assign_user_legacy_role(
-        self, user_id: str, role_id: int, *, caller_user_id: Optional[str] = None
-    ) -> Optional[Role]:
-        role = self.db.get(Role, role_id)
-        if not role:
-            return None
-        existing = self.db.execute(
-            select(UserRole).where(
-                UserRole.user_id == user_id, UserRole.role_id == role_id
-            )
-        ).scalar_one_or_none()
-        if not existing:
-            self.db.add(
-                UserRole(
-                    user_id=user_id,
-                    role_id=role_id,
-                    created_by=caller_user_id,
-                    created_at=_utcnow(),
-                )
-            )
-            self.db.commit()
-        return role
-
-    def unassign_user_legacy_role(self, user_id: str, role_id: int) -> Optional[Role]:
-        role = self.db.get(Role, role_id)
-        stmt = delete(UserRole).where(
-            UserRole.user_id == user_id, UserRole.role_id == role_id
-        )
-        self.db.execute(stmt)
-        self.db.commit()
-        return role
+    # §3.4.2 (2026-06-02 audit): list/assign/unassign_user_legacy_role
+    # removed. They bypassed _assert_caller_can_grant. user_roles is now
+    # write-only by migration (bootstrap superadmin seed); the runtime
+    # surface lives on user_role_assignments via RoleAssignmentService.

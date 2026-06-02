@@ -48,11 +48,20 @@ def test_doc44_gate_self_edit_allowed():
 
 
 def test_doc44_gate_admin_allowed():
+    """A caller holding at least one users:update:* code can modify any user.
+
+    §3.1 (2026-06-02 audit) item 1: the gate now consults the caller's
+    permissions on ``request.state`` instead of ``caller_is_admin``.
+    """
     from app.services.user_service import UserService
 
     svc = UserService(MagicMock())
     target = _make_user(user_id="u-2", vendor_id="vend-A")
-    svc._assert_caller_can_modify_user("u-9", target, caller_is_admin=True)
+    fake_request = MagicMock()
+    fake_request.state.user_permissions = {"users:update:email"}
+    svc._assert_caller_can_modify_user(
+        "u-9", target, caller_is_admin=True, request=fake_request,
+    )
 
 
 def test_doc44_gate_cross_vendor_blocked():
@@ -85,13 +94,19 @@ def test_doc44_gate_same_vendor_blocked():
 
 
 def test_delete_blocks_last_super_admin():
-    """If the target is the only super_admin remaining, delete must raise."""
+    """If the target is the only super_admin remaining, delete must raise.
+
+    §3.1 (2026-06-02 audit) item 2: ``delete()`` consults
+    ``_assert_caller_can_delete_user``, which now requires
+    ``users:delete_all`` or vendor-scoped ``users:delete_vendor``. We
+    mock the gate to focus on the lockout invariant.
+    """
     from app.services.user_service import UserService
 
     svc = UserService(MagicMock())
     target = _make_user(user_id="u-super")
     svc.repo.get_by_id = MagicMock(return_value=target)
-    svc._assert_caller_can_modify_user = MagicMock()  # bypass Doc-44
+    svc._assert_caller_can_delete_user = MagicMock()  # bypass authz gate
     svc._is_only_super_admin = MagicMock(return_value=True)
 
     with pytest.raises(LastSuperAdminLockoutError):
@@ -104,7 +119,7 @@ def test_delete_proceeds_when_other_super_admins_exist():
     svc = UserService(MagicMock())
     target = _make_user(user_id="u-super")
     svc.repo.get_by_id = MagicMock(return_value=target)
-    svc._assert_caller_can_modify_user = MagicMock()
+    svc._assert_caller_can_delete_user = MagicMock()
     svc._is_only_super_admin = MagicMock(return_value=False)
     svc.repo.soft_delete = MagicMock()
     svc.repo.rotate_refresh_token = MagicMock()

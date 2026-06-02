@@ -153,6 +153,13 @@ class RoleAssignmentService:
             return RoleAssignmentBatchResponse(items=results, total=len(results))
         return results[0]
 
+    # §3.4.3 (2026-06-02 audit): team-management endpoint may only assign
+    # the two project-scoped tiers. Stops the §3.3+§3.4.3 combo where admin
+    # could PUT assignments={"super_admin": [admin_id]} on any project and
+    # inherit global super_admin powers via the universal-tier projection.
+    # New roles (e.g. "project_observer") must be added here explicitly.
+    _BULK_REPLACE_ALLOWED_ROLES = frozenset({PROJECT_ADMIN_ROLE, PROJECT_MEMBER_ROLE})
+
     def bulk_replace_for_project(
         self,
         project_id: str,
@@ -168,13 +175,29 @@ class RoleAssignmentService:
         linkage checks here — those are for RBAC delegation (granting
         arbitrary roles), not for the team-management use case.
 
-        For each role_name in `assignments`:
+        §3.4.3: role_name is whitelisted to {project_admin, project_member};
+        every other role (including admin/super_admin/custom-with-admin-codes)
+        is refused here. RBAC delegation paths must go through
+        ``create()`` / ``_assert_caller_can_grant``.
+
+        For each whitelisted role_name in `assignments`:
           1. Look up the role; raise 404 if unknown.
           2. Delete all existing rows for (project_id, role).
           3. Insert one row per user_id (skips unknown users silently).
         Roles not listed are left unchanged.
         Commits once at the end.
         """
+        bad_roles = sorted(set(assignments.keys()) - self._BULK_REPLACE_ALLOWED_ROLES)
+        if bad_roles:
+            raise CallerCannotGrantRoleError(
+                f"Role(s) {bad_roles!r} cannot be assigned via the team-"
+                f"management endpoint. Allowed: "
+                f"{sorted(self._BULK_REPLACE_ALLOWED_ROLES)!r}.",
+                details={
+                    "rejected_roles": bad_roles,
+                    "allowed_roles": sorted(self._BULK_REPLACE_ALLOWED_ROLES),
+                },
+            )
         for role_name, user_ids in assignments.items():
             role = self.rbac.get_role_by_name(role_name)
             if role is None:

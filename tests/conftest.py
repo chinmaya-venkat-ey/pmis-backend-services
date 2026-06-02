@@ -14,6 +14,13 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from app.core.permissions import ALL_PERMISSIONS
+
+# A1 (2026-06-02 audit): after the `_is_admin` route bypass was removed,
+# admins now pass gates only if they explicitly hold the code (granted by
+# r005). The default test admin fixture must mirror that runtime state.
+_ALL_PERMISSIONS_SET = frozenset(ALL_PERMISSIONS)
+
 
 class _TestAuthMiddleware(BaseHTTPMiddleware):
     """Test-only middleware that hard-codes request.state to a logged-in admin.
@@ -29,12 +36,14 @@ class _TestAuthMiddleware(BaseHTTPMiddleware):
         request.state.user_login = "test-admin"
         request.state.user_email = "admin@example.com"
         request.state.token_jti = "test-jti"
-        request.state.user_permissions = getattr(
-            app_state, "test_permissions", set()
-        )
-        request.state.scoped_permissions = getattr(
-            app_state, "test_scoped_permissions", {}
-        )
+        perms = getattr(app_state, "test_permissions", None)
+        if perms is None:
+            perms = set(_ALL_PERMISSIONS_SET)
+        request.state.user_permissions = perms
+        scoped = getattr(app_state, "test_scoped_permissions", None)
+        if scoped is None:
+            scoped = {("global", None): set(_ALL_PERMISSIONS_SET)}
+        request.state.scoped_permissions = scoped
         request.state.is_admin = getattr(app_state, "test_is_admin", True)
         request.state.request_id = "test-rid"
         return await call_next(request)

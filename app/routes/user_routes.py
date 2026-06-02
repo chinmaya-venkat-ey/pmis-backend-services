@@ -3,12 +3,11 @@ from __future__ import annotations
 
 from typing import Annotated, List
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Query, Request, status
 
 from app.controllers.user_controller import UserController
 from app.core.permissions import (
     PERMISSIONS_MANAGE,
-    RBAC_ASSIGN,
     USERS_CREATE,
     USERS_DELETE_ALL,
     USERS_DELETE_VENDOR,
@@ -19,12 +18,9 @@ from app.core.rbac import require_any_permission, require_authenticated, require
 from app.dependencies import (
     get_caller_is_admin,
     get_current_user_id,
-    get_rbac_repo,
     get_user_controller,
 )
-from app.repositories.rbac_repository import RbacRepository
 from app.schemas.permission import EffectivePermissionsResponse
-from app.schemas.role import RoleResponse
 from app.schemas.summaries import UserProjectsResponse
 from app.schemas.user import (
     UserCheckLoginResponse,
@@ -59,11 +55,15 @@ def list_users(
     request: Request = None,
 ):
     caller_vendor_id = getattr(request.state, "vendor_id", None) if request else None
+    held = getattr(request.state, "user_permissions", None) if request else None
     return controller.list_(
         offset=offset, page_size=page_size,
         status=status, include_deleted=include_deleted,
         caller_vendor_id=caller_vendor_id,
         caller_is_admin=caller_is_admin,
+        # §3.1 (2026-06-02 audit) item 7: broad view requires users:read_all
+        # (admin/super_admin hold it via r005). Otherwise vendor-scoped.
+        caller_can_see_all=(USERS_READ_ALL in (held or set())),
     )
 
 
@@ -261,62 +261,15 @@ def revoke_user_permission(
 
 
 # ---------------------------------------------------------------------------
-# User → legacy roles (DEPRECATED — prefer /role-assignments)
-# ---------------------------------------------------------------------------
-
-@router.get(
-    "/{user_id}/roles",
-    response_model=List[RoleResponse],
-    summary="List a user's roles (DEPRECATED — use GET /users/{id}/role-assignments for the scoped view; this endpoint returns only legacy global roles from user_roles)",
-    dependencies=[Depends(require_any_permission(USERS_READ, USERS_READ_ALL))],
-)
-def list_user_legacy_roles(
-    user_id: str,
-    rbac: Annotated[RbacRepository, Depends(get_rbac_repo)],
-):
-    roles = rbac.list_user_legacy_roles(user_id)
-    return [RoleResponse.model_validate(r) for r in roles]
-
-
-@router.post(
-    "/{user_id}/roles/{role_id}",
-    response_model=RoleResponse,
-    summary="Assign a role to a user (DEPRECATED — use POST /users/{id}/role-assignments for scoped assignments)",
-    dependencies=[Depends(require_permission(RBAC_ASSIGN))],
-    responses={404: {"description": "Role not found"}},
-)
-def assign_user_legacy_role(
-    user_id: str,
-    role_id: int,
-    rbac: Annotated[RbacRepository, Depends(get_rbac_repo)],
-    caller_user_id: Annotated[str, Depends(get_current_user_id)],
-):
-    role = rbac.assign_user_legacy_role(user_id, role_id, caller_user_id=caller_user_id)
-    if not role:
-        raise HTTPException(status_code=404, detail="Role not found")
-    return RoleResponse.model_validate(role)
-
-
-@router.delete(
-    "/{user_id}/roles/{role_id}",
-    response_model=RoleResponse,
-    summary="Unassign a role from a user (DEPRECATED — use DELETE /users/{id}/role-assignments/{aid}; lockout-protected for 'admin')",
-    dependencies=[Depends(require_permission(RBAC_ASSIGN))],
-    responses={404: {"description": "Role not found"}},
-)
-def unassign_user_legacy_role(
-    user_id: str,
-    role_id: int,
-    rbac: Annotated[RbacRepository, Depends(get_rbac_repo)],
-):
-    role = rbac.unassign_user_legacy_role(user_id, role_id)
-    if not role:
-        raise HTTPException(status_code=404, detail="Role not found")
-    return RoleResponse.model_validate(role)
-
-
-# ---------------------------------------------------------------------------
 # User → projects (read-only cross-schema listing)
+# ---------------------------------------------------------------------------
+#
+# §3.4.2 (2026-06-02 audit): the three legacy ``/{user_id}/roles[/{role_id}]``
+# endpoints (list_user_legacy_roles, assign_user_legacy_role,
+# unassign_user_legacy_role) were removed. They bypassed
+# _assert_caller_can_grant and let any caller holding rbac:assign mint a
+# super_admin assignment directly into users.user_roles. Use the scoped
+# /users/{id}/role-assignments endpoints instead.
 # ---------------------------------------------------------------------------
 
 @router.get(

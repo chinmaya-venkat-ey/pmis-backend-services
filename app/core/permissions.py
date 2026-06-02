@@ -79,11 +79,12 @@ RBAC_ASSIGN: Final[str] = "rbac:assign"
 
 # =========================================================================
 # PROJECT MEMBERS — superseded by user_role_assignments, kept for legacy
+# Note: :add and :delete codes were removed (2026-06-02 audit cleanup) —
+# the actual role-assignment endpoints gate on rbac:assign instead, and
+# bulk-replace gates on :update. No endpoint ever consulted :add or :delete.
 # =========================================================================
 PROJECT_MEMBERS_READ: Final[str] = "project_members:read"
-PROJECT_MEMBERS_ADD: Final[str] = "project_members:add"
 PROJECT_MEMBERS_UPDATE: Final[str] = "project_members:update"
-PROJECT_MEMBERS_DELETE: Final[str] = "project_members:delete"
 
 
 # =========================================================================
@@ -97,10 +98,12 @@ PROJECTS_DELETE_ALL: Final[str] = "projects:delete_all"  # admin/super_admin onl
 # FSM transition gates (the masters.project_status_transitions table now
 # stores these codes instead of role names — round-7 "switch FSM to
 # permission codes" decision).
+# Note: PROJECTS_DRAFT removed (2026-06-02 audit cleanup) — no route
+# enforced it, the stored FSM permission_code column is not read by any
+# gate today, so the constant served no purpose.
 PROJECTS_PUBLISH: Final[str] = "projects:publish"
 PROJECTS_CLOSE: Final[str] = "projects:close"
 PROJECTS_REOPEN: Final[str] = "projects:reopen"
-PROJECTS_DRAFT: Final[str] = "projects:draft"   # back to draft from new
 
 # PROJECTS — field-level writes (PATCH /project/projects/{uuid}/update)
 PROJECTS_UPDATE_NAME: Final[str] = "projects:update:name"
@@ -120,6 +123,12 @@ PROJECTS_UPDATE_VENDORS: Final[str] = "projects:update:vendors"
 # alembic r004; granted to super_admin / admin / org_admin /
 # project_admin (admin tiers + the project admin).
 PROJECTS_UPDATE_FINANCE: Final[str] = "projects:update:finance"
+# §3.8 (2026-06-02 audit): the generic PATCH endpoint previously let
+# callers write these columns without holding a code (Pydantic accepted,
+# walker missed). Seeded + granted to admin/super_admin via r009.
+PROJECTS_UPDATE_ACTIVE: Final[str] = "projects:update:active"
+PROJECTS_UPDATE_PARENT_ID: Final[str] = "projects:update:parent_id"
+PROJECTS_UPDATE_STATUS: Final[str] = "projects:update:status"
 
 
 # =========================================================================
@@ -165,6 +174,12 @@ ACTIVITIES_UPDATE_OWNER_DIVISION: Final[str] = "activities:update:owner_division
 ACTIVITIES_UPDATE_CONCERNED_DIVISIONS: Final[str] = "activities:update:concerned_divisions"
 ACTIVITIES_UPDATE_VENDOR_ID: Final[str] = "activities:update:vendor_id"
 ACTIVITIES_UPDATE_ACTIVITY_STARTED: Final[str] = "activities:update:activity_started"
+# §3.8 (2026-06-02 audit): activity columns accepted by the schema but
+# previously ungated. Seeded + granted to admin/super_admin via r009.
+ACTIVITIES_UPDATE_CATEGORY: Final[str] = "activities:update:category"
+ACTIVITIES_UPDATE_CCN_VALUE: Final[str] = "activities:update:ccn_value"
+ACTIVITIES_UPDATE_OWNER_DIVISION_OTHER: Final[str] = "activities:update:owner_division_other"
+ACTIVITIES_UPDATE_CONCERNED_DIVISION_OTHER: Final[str] = "activities:update:concerned_division_other"
 # Sidecar / sub-resource
 ACTIVITIES_UPDATE_RESOURCE: Final[str] = "activities:update:resource"
 ACTIVITIES_UPDATE_DEPENDENCIES: Final[str] = "activities:update:dependencies"
@@ -217,14 +232,23 @@ SUBTASKS_UPDATE_DEPENDENCIES: Final[str] = "subtasks:update:dependencies"
 # =========================================================================
 # COMMENTS — action codes (no field-level updates; comments are immutable
 # except via moderation tombstone delete)
+# Note: ATTACHMENTS_DOWNLOAD + ATTACHMENTS_DELETE removed (2026-06-02
+# audit cleanup) — download proxies to fileservice's files:read; delete
+# is gated by an "uploader or admin" in-controller check. Neither was
+# enforced.
+# Note: COMMENTS_MODERATE retained pending team decision (B3 in
+# permissions_decisions.md) on the comments authorization model.
 # =========================================================================
 COMMENTS_READ: Final[str] = "comments:read"
 COMMENTS_CREATE: Final[str] = "comments:create"
 COMMENTS_MODERATE: Final[str] = "comments:moderate"   # admin/super_admin only (Q8)
 
 ATTACHMENTS_CREATE: Final[str] = "attachments:create"
-ATTACHMENTS_DOWNLOAD: Final[str] = "attachments:download"
-ATTACHMENTS_DELETE: Final[str] = "attachments:delete"
+
+# §3.1 (2026-06-02 audit) item 4: replaces the ``ctx.is_admin`` short-
+# circuit in approval_inbox_service for detail, SUBMIT, and APPROVE/REJECT
+# transitions. Grant to admin/super_admin via the r008 migration.
+APPROVALS_MODERATE: Final[str] = "approvals:moderate"
 
 
 # =========================================================================
@@ -290,6 +314,16 @@ PROJECT_FIELD_CODES: Final[dict[str, str]] = {
     "total_project_value_excl_tax": PROJECTS_UPDATE_FINANCE,
     "tax_percent": PROJECTS_UPDATE_FINANCE,
     "ccn_cap_percent": PROJECTS_UPDATE_FINANCE,
+    # Sub-resource fields handled separately in the service layer but still
+    # gated via the field walker — must be present in the PATCH body's
+    # touched-set computation BEFORE the service pops them.
+    "vendor_ids": PROJECTS_UPDATE_VENDORS,
+    # §3.8 (2026-06-02 audit): generic-PATCH gates for the lifecycle-
+    # adjacent columns. ``status`` here gates raw writes — the formal
+    # lifecycle transitions still go through PROJECTS_PUBLISH/CLOSE/REOPEN.
+    "active": PROJECTS_UPDATE_ACTIVE,
+    "parent_id": PROJECTS_UPDATE_PARENT_ID,
+    "status": PROJECTS_UPDATE_STATUS,
 }
 
 MILESTONE_FIELD_CODES: Final[dict[str, str]] = {
@@ -302,6 +336,8 @@ MILESTONE_FIELD_CODES: Final[dict[str, str]] = {
     "status": MILESTONES_UPDATE_STATUS,
     "priority": MILESTONES_UPDATE_PRIORITY,
     "position": MILESTONES_UPDATE_POSITION,
+    "depends_on": MILESTONES_UPDATE_DEPENDENCIES,
+    "vendor_ids": MILESTONES_UPDATE_VENDORS,
 }
 
 ACTIVITY_FIELD_CODES: Final[dict[str, str]] = {
@@ -318,7 +354,15 @@ ACTIVITY_FIELD_CODES: Final[dict[str, str]] = {
     "concerned_divisions": ACTIVITIES_UPDATE_CONCERNED_DIVISIONS,
     "vendor_id": ACTIVITIES_UPDATE_VENDOR_ID,
     "activity_started": ACTIVITIES_UPDATE_ACTIVITY_STARTED,
-    "resource": ACTIVITIES_UPDATE_RESOURCE,
+    # §3.8 (2026-06-02 audit): close the schema-accepted-but-ungated gap.
+    "category": ACTIVITIES_UPDATE_CATEGORY,
+    "ccn_value": ACTIVITIES_UPDATE_CCN_VALUE,
+    "owner_division_other": ACTIVITIES_UPDATE_OWNER_DIVISION_OTHER,
+    "concerned_division_other": ACTIVITIES_UPDATE_CONCERNED_DIVISION_OTHER,
+    # §3.14 (2026-06-02 audit): "resource" key removed — ActivityUpdateRequest
+    # rejects the field. Constant ACTIVITIES_UPDATE_RESOURCE retained but
+    # inert (catalog row kept; no enforcement site).
+    "depends_on": ACTIVITIES_UPDATE_DEPENDENCIES,
 }
 
 TASK_FIELD_CODES: Final[dict[str, str]] = {
@@ -332,7 +376,9 @@ TASK_FIELD_CODES: Final[dict[str, str]] = {
     "priority": TASKS_UPDATE_PRIORITY,
     "position": TASKS_UPDATE_POSITION,
     "assigned_to": TASKS_UPDATE_ASSIGNED_TO,
-    "resource": TASKS_UPDATE_RESOURCE,
+    # §3.14 (2026-06-02 audit): "resource" key removed (TaskUpdateRequest
+    # rejects the field). TASKS_UPDATE_RESOURCE constant kept but inert.
+    "depends_on": TASKS_UPDATE_DEPENDENCIES,
 }
 
 SUBTASK_FIELD_CODES: Final[dict[str, str]] = {
@@ -346,7 +392,9 @@ SUBTASK_FIELD_CODES: Final[dict[str, str]] = {
     "priority": SUBTASKS_UPDATE_PRIORITY,
     "position": SUBTASKS_UPDATE_POSITION,
     "assigned_to": SUBTASKS_UPDATE_ASSIGNED_TO,
-    "resource": SUBTASKS_UPDATE_RESOURCE,
+    # §3.14 (2026-06-02 audit): "resource" key removed (SubtaskUpdateRequest
+    # rejects the field). SUBTASKS_UPDATE_RESOURCE constant kept but inert.
+    "depends_on": SUBTASKS_UPDATE_DEPENDENCIES,
 }
 
 
@@ -358,10 +406,10 @@ SUBTASK_FIELD_CODES: Final[dict[str, str]] = {
 
 ALL_USER_FIELD_WRITES: Final[tuple[str, ...]] = tuple(USER_FIELD_CODES.values())
 
-ALL_PROJECT_FIELD_WRITES: Final[tuple[str, ...]] = (
+ALL_PROJECT_FIELD_WRITES: Final[tuple[str, ...]] = tuple(dict.fromkeys((
     *PROJECT_FIELD_CODES.values(),
     PROJECTS_UPDATE_VENDORS,
-)
+)))
 
 ALL_MILESTONE_FIELD_WRITES: Final[tuple[str, ...]] = (
     *MILESTONE_FIELD_CODES.values(),
@@ -391,7 +439,7 @@ PROJECT_MEMBER_WRITES: Final[tuple[str, ...]] = (
     TASKS_UPDATE_STATUS, TASKS_UPDATE_PRIORITY, TASKS_UPDATE_ASSIGNED_TO,
     SUBTASKS_UPDATE_STATUS, SUBTASKS_UPDATE_PRIORITY, SUBTASKS_UPDATE_ASSIGNED_TO,
     COMMENTS_CREATE, COMMENTS_READ,
-    ATTACHMENTS_CREATE, ATTACHMENTS_DOWNLOAD,
+    ATTACHMENTS_CREATE,
 )
 
 # Codes for a division_member (read-only observer tier).
@@ -404,15 +452,15 @@ DIVISION_MEMBER_WRITES: Final[tuple[str, ...]] = ()
 
 ALL_PROJECT_ACTION_CODES: Final[tuple[str, ...]] = (
     PROJECTS_READ, PROJECTS_READ_ALL, PROJECTS_CREATE, PROJECTS_DELETE_ALL,
-    PROJECTS_PUBLISH, PROJECTS_CLOSE, PROJECTS_REOPEN, PROJECTS_DRAFT,
+    PROJECTS_PUBLISH, PROJECTS_CLOSE, PROJECTS_REOPEN,
     MILESTONES_READ, MILESTONES_CREATE, MILESTONES_DELETE, MILESTONES_RESTORE,
     ACTIVITIES_READ, ACTIVITIES_CREATE, ACTIVITIES_DELETE, ACTIVITIES_RESTORE,
     TASKS_READ, TASKS_CREATE, TASKS_DELETE, TASKS_RESTORE,
     SUBTASKS_READ, SUBTASKS_CREATE, SUBTASKS_DELETE, SUBTASKS_RESTORE,
     COMMENTS_READ, COMMENTS_CREATE, COMMENTS_MODERATE,
-    ATTACHMENTS_CREATE, ATTACHMENTS_DOWNLOAD, ATTACHMENTS_DELETE,
-    PROJECT_MEMBERS_READ, PROJECT_MEMBERS_ADD,
-    PROJECT_MEMBERS_UPDATE, PROJECT_MEMBERS_DELETE,
+    ATTACHMENTS_CREATE,
+    APPROVALS_MODERATE,
+    PROJECT_MEMBERS_READ, PROJECT_MEMBERS_UPDATE,
 )
 
 ALL_PROJECT_DOMAIN_PERMISSIONS: Final[tuple[str, ...]] = (

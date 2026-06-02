@@ -139,11 +139,13 @@ def test_admin_can_list_users(client, app, fake_db_session):
     try:
         resp = client.get("/api/v3/users")
         assert resp.status_code == 200
-        # Route returns the dict bare (response_model=dict skips HAL wrap).
+        # The response middleware HAL-wraps every payload — the dict the
+        # controller returns is reshaped into ``{data: Collection, ...}``.
         body = resp.json()
         assert isinstance(body, dict)
-        assert body["items"] == []
-        assert body["total"] == 0
+        collection = body["data"]
+        assert collection["total"] == 0
+        assert collection["_embedded"]["elements"] == []
     finally:
         app.dependency_overrides.pop(get_user_controller, None)
         app.dependency_overrides.pop(get_db, None)

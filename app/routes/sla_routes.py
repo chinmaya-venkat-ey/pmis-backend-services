@@ -25,13 +25,21 @@ from app.schemas.sla import SlaOnboardRequest, SlaUpdateRequest
 class SlaSeedRequest(BaseModel):
     """Body for ``POST /sla-masters/seed-defaults``.
 
-    Both fields are optional. An empty body seeds every contract type the
-    server knows about.
+    The body is optional. Three equivalent ways to seed everything:
+
+      * Omit the body / send ``{}``
+      * Send ``{"contract_types": ["all"]}`` (or ``["ALL"]`` / ``["*"]``)
+      * Send ``{"contract_types": ["BSP","MSAP","MSIP","PMU"]}``
+
+    To seed a subset, list just those codes.
     """
     contract_types: Optional[List[str]] = Field(
         default=None,
-        description="Optional whitelist of contract codes (BSP, MSAP, MSIP, PMU). "
-                    "Omit to seed all.",
+        description="Contract codes to seed. Allowed values: BSP, MSAP, MSIP, PMU, "
+                    "or the special token 'all' (case-insensitive, also '*') which "
+                    "expands to every supported contract. Omit or send an empty list "
+                    "for the same effect as 'all'.",
+        examples=[["all"], ["BSP", "MSAP"]],
     )
 
 router = APIRouter(tags=["SLA Masters"])

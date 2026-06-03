@@ -214,10 +214,16 @@ class SlaService:
         from app.schemas.sla import SlaOnboardRequest
 
         # Pick the seed list. Unknown contract codes are tolerated — they just
-        # contribute zero rows.
+        # contribute zero rows. "ALL" / "*" tokens (case-insensitive) expand to
+        # every contract type the server knows about, equivalent to omitting
+        # the filter — provided so callers can be explicit instead of relying
+        # on the "empty list = all" default that's easy to misread.
         if contract_types:
-            wanted = {c.upper() for c in contract_types}
-            payloads = [p for ct, lst in SEEDS_BY_CONTRACT.items() if ct in wanted for p in lst]
+            wanted = {c.strip().upper() for c in contract_types if c and c.strip()}
+            if "ALL" in wanted or "*" in wanted or not wanted:
+                payloads = list(ALL_SEED_SLAS)
+            else:
+                payloads = [p for ct, lst in SEEDS_BY_CONTRACT.items() if ct in wanted for p in lst]
         else:
             payloads = list(ALL_SEED_SLAS)
 

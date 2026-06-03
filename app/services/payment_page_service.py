@@ -126,15 +126,16 @@ class PaymentPageService:
 
         row = self.phase_qrg.get_for_phase(project_id, phase)
         if row is None:
-            self.phase_qrg.create(
+            row = self.phase_qrg.create(
                 project_id=project_id, phase=phase, qrg_applied=applied,
                 created_by=caller_user_id, updated_by=caller_user_id,
             )
         else:
             self.phase_qrg.update(row, qrg_applied=applied, updated_by=caller_user_id)
 
+        # target_id is VARCHAR(36): use the row's UUID (not a composite string).
         self.audit.write(
-            project_id=project_id, target_kind="phase_qrg", target_id=f"{project_id}:{phase}",
+            project_id=project_id, target_kind="phase_qrg", target_id=row.id,
             action="update", actor_user_id=caller_user_id,
             changes={"phase": phase, "qrg_applied": applied},
         )

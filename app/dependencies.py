@@ -10,7 +10,9 @@ from sqlalchemy.orm import Session
 
 from app.controllers.activity_status_controller import ActivityStatusController
 from app.controllers.activity_type_controller import ActivityTypeController
+from app.controllers.cost_type_controller import CostTypeController
 from app.controllers.division_controller import DivisionController
+from app.controllers.frequency_controller import FrequencyController
 from app.controllers.milestone_status_controller import MilestoneStatusController
 from app.controllers.notification_template_controller import (
     NotificationTemplateController,
@@ -25,7 +27,9 @@ from app.controllers.vendor_controller import VendorController
 from app.db import get_db
 from app.services.activity_status_service import ActivityStatusService
 from app.services.activity_type_service import ActivityTypeService
+from app.services.cost_type_service import CostTypeService
 from app.services.division_service import DivisionService
+from app.services.frequency_service import FrequencyService
 from app.services.milestone_status_service import MilestoneStatusService
 from app.services.notification_template_service import NotificationTemplateService
 from app.services.priority_service import PriorityService
@@ -53,6 +57,14 @@ def get_resource_type_controller(
 
 def get_priority_controller(db: Session = Depends(get_db)) -> PriorityController:
     return PriorityController(PriorityService(db))
+
+
+def get_cost_type_controller(db: Session = Depends(get_db)) -> CostTypeController:
+    return CostTypeController(CostTypeService(db))
+
+
+def get_frequency_controller(db: Session = Depends(get_db)) -> FrequencyController:
+    return FrequencyController(FrequencyService(db))
 
 
 def get_project_category_controller(

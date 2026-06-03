@@ -22,7 +22,9 @@ from fastapi import APIRouter
 
 from app.routes.activity_status_routes import router as activity_status_router
 from app.routes.activity_type_routes import router as activity_type_router
+from app.routes.cost_type_routes import router as cost_type_router
 from app.routes.division_routes import router as division_router
+from app.routes.frequency_routes import router as frequency_router
 from app.routes.milestone_status_routes import router as milestone_status_router
 from app.routes.notification_template_routes import (
     router as notification_template_router,
@@ -41,6 +43,8 @@ api_router.include_router(division_router)
 api_router.include_router(vendor_router)
 api_router.include_router(resource_type_router)
 api_router.include_router(priority_router)
+api_router.include_router(cost_type_router)
+api_router.include_router(frequency_router)
 api_router.include_router(project_category_router)
 api_router.include_router(activity_type_router)
 api_router.include_router(activity_status_router)

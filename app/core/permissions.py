@@ -114,6 +114,20 @@ NOTIFICATION_TEMPLATES_MANAGE: Final[str] = "notification_templates:manage"
 
 
 # =========================================================================
+# Catalog: cost_types  (Project-Finance payment screen — Cost Type dropdown)
+# =========================================================================
+COST_TYPES_READ: Final[str] = "cost_types:read"
+COST_TYPES_MANAGE: Final[str] = "cost_types:manage"
+
+
+# =========================================================================
+# Catalog: frequencies  (Project-Finance payment screen — Frequency dropdown)
+# =========================================================================
+FREQUENCIES_READ: Final[str] = "frequencies:read"
+FREQUENCIES_MANAGE: Final[str] = "frequencies:manage"
+
+
+# =========================================================================
 # Aggregate lists — used by the bootstrap migration and CI drift tests.
 # =========================================================================
 ALL_MASTERS_READ_PERMISSIONS: Final[tuple[str, ...]] = (
@@ -127,6 +141,8 @@ ALL_MASTERS_READ_PERMISSIONS: Final[tuple[str, ...]] = (
     MILESTONE_STATUSES_READ,
     PROJECT_STATUS_TRANSITIONS_READ,
     NOTIFICATION_TEMPLATES_READ,
+    COST_TYPES_READ,
+    FREQUENCIES_READ,
 )
 
 ALL_MASTERS_MANAGE_PERMISSIONS: Final[tuple[str, ...]] = (
@@ -140,5 +156,7 @@ ALL_MASTERS_MANAGE_PERMISSIONS: Final[tuple[str, ...]] = (
     MILESTONE_STATUSES_MANAGE,
     PROJECT_STATUS_TRANSITIONS_MANAGE,
     NOTIFICATION_TEMPLATES_MANAGE,
+    COST_TYPES_MANAGE,
+    FREQUENCIES_MANAGE,
 )
 

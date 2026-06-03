@@ -161,6 +161,8 @@ _ELEMENT_TYPE_BY_COLLECTION = {
     "subtasks": "Subtask",
     "comments": "Comment",
     "audit-logs": "AuditLog",
+    "cost-items": "CostItem",
+    "payment-terms": "PaymentTerm",
 }
 
 

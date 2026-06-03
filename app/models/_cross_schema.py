@@ -21,6 +21,8 @@ Tables OWNED BY OTHER SERVICES that project-svc reads:
     - masters.milestone_statuses
     - masters.activity_types
     - masters.project_status_transitions
+    - masters.cost_types          (Project-Finance payment screen)
+    - masters.frequencies         (Project-Finance payment screen)
 
 All on `MirrorBase` — excluded from alembic autogenerate.
 
@@ -243,3 +245,36 @@ class ProjectStatusTransition(MirrorBase):
     to_status: Mapped[str] = mapped_column(String(50))
     permission_code: Mapped[Optional[str]] = mapped_column(String(128))
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class CostType(MirrorBase):
+    """Project-Finance "Cost Type" dropdown source. Canonical:
+    masters-svc app/models/cost_type.py. Codes: 'fixed', 'one_time'."""
+
+    __tablename__ = "cost_types"
+    __table_args__ = {"schema": "masters"}
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    code: Mapped[str] = mapped_column(String(32))
+    name: Mapped[str] = mapped_column(String(64))
+    description: Mapped[Optional[str]] = mapped_column(String(500))
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_builtin: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class Frequency(MirrorBase):
+    """Project-Finance "Frequency" dropdown source. Canonical:
+    masters-svc app/models/frequency.py. Codes: 'one_time', 'daily',
+    'monthly', 'quarterly', 'half_yearly', 'yearly'."""
+
+    __tablename__ = "frequencies"
+    __table_args__ = {"schema": "masters"}
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    code: Mapped[str] = mapped_column(String(32))
+    name: Mapped[str] = mapped_column(String(64))
+    description: Mapped[Optional[str]] = mapped_column(String(500))
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_builtin: Mapped[bool] = mapped_column(Boolean, default=False)

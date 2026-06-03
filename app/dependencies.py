@@ -14,7 +14,10 @@ from app.controllers.critical_path_controller import CriticalPathController
 from app.controllers.dashboard_controller import DashboardController
 from app.controllers.finance_controller import FinanceController
 from app.controllers.milestone_controller import MilestoneController
+from app.controllers.payment_page_controller import PaymentPageController
 from app.controllers.project_controller import ProjectController
+from app.controllers.project_cost_item_controller import ProjectCostItemController
+from app.controllers.project_payment_term_controller import ProjectPaymentTermController
 from app.controllers.subtask_controller import SubtaskController
 from app.controllers.task_controller import TaskController
 from app.controllers.team_controller import TeamController
@@ -95,3 +98,21 @@ def get_approval_inbox_controller(
 
 def get_finance_controller(db: Session = Depends(get_db)) -> FinanceController:
     return FinanceController(db)
+
+
+def get_project_cost_item_controller(
+    db: Session = Depends(get_db),
+) -> ProjectCostItemController:
+    return ProjectCostItemController(db)
+
+
+def get_project_payment_term_controller(
+    db: Session = Depends(get_db),
+) -> ProjectPaymentTermController:
+    return ProjectPaymentTermController(db)
+
+
+def get_payment_page_controller(
+    db: Session = Depends(get_db),
+) -> PaymentPageController:
+    return PaymentPageController(db)

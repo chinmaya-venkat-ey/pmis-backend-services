@@ -19,6 +19,7 @@ from app.routes import (
     finance_routes,
     health_routes,
     milestone_routes,
+    payment_routes,
     project_routes,
     subtask_routes,
     task_routes,
@@ -70,6 +71,14 @@ project_router.include_router(approval_inbox_routes.router)
 
 # Project finance — GET/PATCH /api/v3/projects/{uuid}/finance.
 project_router.include_router(finance_routes.router)
+
+# Payment module — Project-Finance screen (cost items, payment terms, QRG,
+# CCN cap, aggregated page). Project-scoped create/list + id-scoped CRUD.
+project_router.include_router(payment_routes.cost_item_project_scoped_router)
+project_router.include_router(payment_routes.cost_item_router)
+project_router.include_router(payment_routes.payment_term_project_scoped_router)
+project_router.include_router(payment_routes.payment_term_router)
+project_router.include_router(payment_routes.payment_page_router)
 
 
 __all__ = ["project_router", "health_routes", "attachment_routes"]

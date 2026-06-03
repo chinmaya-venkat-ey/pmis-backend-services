@@ -24,7 +24,7 @@ from app.core.permissions import (
     COMMENTS_CREATE,
     COMMENTS_READ,
 )
-from app.core.rbac import assert_action_allowed, require_authenticated
+from app.core.rbac import assert_action_allowed, require_authenticated, require_permission
 from app.dependencies import (
     get_caller_is_admin,
     get_comment_controller,
@@ -154,6 +154,32 @@ for _path, _kind in _KIND_BY_PATH.items():
         dependencies=[Depends(require_authenticated())],
         summary=f"List comments on a {_kind} (newest first)",
     )
+
+
+# --------------------------------------------------------- GET by id
+
+@router.get(
+    "/comments/{comment_id}",
+    response_model=CommentResponse,
+    summary="Fetch a single comment or attachment by its id",
+    description=(
+        "Resolve one comment/attachment row by its OWN id — independent "
+        "of the M/A/T/S target it hangs on. The existing list endpoints "
+        "find rows by ``(target_kind, target_id)``; this one finds a row "
+        "directly by ``comment_id``. Works for both text comments and "
+        "attachment-only (``body IS NULL``) document rows — when the row "
+        "is a document the file metadata rides under ``attachments[]`` "
+        "(``url`` / ``filename`` / ``mimeType`` / ``sizeBytes`` / "
+        "``uploadedAt``). Returns 404 (``not_found``) for a missing or "
+        "soft-deleted id (monolith parity)."
+    ),
+    dependencies=[Depends(require_permission(COMMENTS_READ))],
+)
+def get_comment(
+    comment_id: str,
+    controller: Annotated[CommentController, Depends(get_comment_controller)],
+) -> CommentResponse:
+    return controller.get(comment_id)
 
 
 # --------------------------------------------------------- DELETE by id

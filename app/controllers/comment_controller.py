@@ -131,6 +131,19 @@ class CommentController:
             "total": total, "offset": offset, "page_size": page_size,
         }
 
+    # ---------------------------------------------------------- get by id
+
+    def get(self, comment_id: str) -> CommentResponse:
+        """Resolve one comment/attachment row by its OWN id (not by
+        target). Serves both regular comments and attachment-only
+        (``body IS NULL``) document rows — the resolved envelope carries
+        the file metadata under ``attachments[]``. The service 404s on a
+        missing or soft-deleted id (``"Comment <uuid> not found."``),
+        matching the monolith.
+        """
+        row = self.service.get_by_id(comment_id)
+        return self._to_response(row)
+
     # ------------------------------------------------------------- create
 
     def create_json(

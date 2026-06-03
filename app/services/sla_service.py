@@ -189,6 +189,64 @@ class SlaService:
             updated_at=defn.updated_at,
         )
 
+    # ---------------------------------------------------------------- seed defaults
+
+    def seed_default_slas(
+        self,
+        contract_types: Optional[List[str]] = None,
+        created_by: Optional[str] = None,
+    ) -> dict:
+        """Idempotent fan-out onboarding of RFP-default SLAs.
+
+        Reads payloads from ``app.seed_data.sla_master_seeds`` and pushes each
+        through ``create_from_form``. SLAs that already exist (matched by
+        ``sla_ref`` or by ``(contract_type, title)``) are skipped — neither
+        a re-run nor a partial seed should produce duplicate rows or errors.
+
+        Args:
+            contract_types: filter to only these codes (BSP / MSAP / MSIP / PMU).
+                None = seed everything in the bundle.
+
+        Returns:
+            {"seeded": N, "skipped_existing": M, "failed": [{sla_ref, error}, ...]}
+        """
+        from app.seed_data import ALL_SEED_SLAS, SEEDS_BY_CONTRACT
+        from app.schemas.sla import SlaOnboardRequest
+
+        # Pick the seed list. Unknown contract codes are tolerated — they just
+        # contribute zero rows.
+        if contract_types:
+            wanted = {c.upper() for c in contract_types}
+            payloads = [p for ct, lst in SEEDS_BY_CONTRACT.items() if ct in wanted for p in lst]
+        else:
+            payloads = list(ALL_SEED_SLAS)
+
+        seeded = 0
+        skipped = 0
+        failed: List[dict] = []
+        for raw in payloads:
+            try:
+                req = SlaOnboardRequest(**raw)
+            except Exception as exc:  # pragma: no cover — defensive
+                failed.append({"sla_ref": raw.get("sla_ref"), "error": f"schema: {exc}"})
+                continue
+            try:
+                self.create_from_form(req, created_by=created_by)
+                seeded += 1
+            except ConflictError:
+                # Already onboarded — fine. The whole point of a seeder is to
+                # be safe to run twice.
+                skipped += 1
+            except Exception as exc:
+                failed.append({"sla_ref": raw.get("sla_ref"), "error": str(exc)})
+
+        return {
+            "seeded": seeded,
+            "skipped_existing": skipped,
+            "failed": failed,
+            "total_candidates": len(payloads),
+        }
+
     # ---------------------------------------------------------------- create
 
     def create_from_form(

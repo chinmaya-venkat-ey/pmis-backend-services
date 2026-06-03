@@ -53,3 +53,10 @@ class SlaController:
 
     def delete(self, sla_id: str) -> SlaDefinitionResponse:
         return self.service.soft_delete(sla_id)
+
+    def seed_defaults(
+        self,
+        contract_types: Optional[List[str]] = None,
+        created_by: Optional[str] = None,
+    ) -> dict:
+        return self.service.seed_default_slas(contract_types, created_by=created_by)

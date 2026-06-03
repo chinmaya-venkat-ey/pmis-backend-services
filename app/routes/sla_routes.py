@@ -2,6 +2,7 @@
 
 Endpoints:
   POST   /api/v3/sla-masters                        onboard a new SLA master
+  POST   /api/v3/sla-masters/seed-defaults          idempotent bulk seed (RFP defaults)
   GET    /api/v3/sla-masters                        list SLA masters (filterable)
   GET    /api/v3/sla-masters/{id}                   get full SLA detail
   GET    /api/v3/sla-masters/{id}/dsl               get auto-generated YAML DSL
@@ -10,14 +11,28 @@ Endpoints:
 """
 from __future__ import annotations
 
-from typing import Optional
+from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Body, Depends, Query
+from pydantic import BaseModel, Field
 
 from app.controllers.sla_controller import SlaController
 from app.core.response import api_response, hal_collection, hal_resource
 from app.dependencies import get_sla_controller
 from app.schemas.sla import SlaOnboardRequest, SlaUpdateRequest
+
+
+class SlaSeedRequest(BaseModel):
+    """Body for ``POST /sla-masters/seed-defaults``.
+
+    Both fields are optional. An empty body seeds every contract type the
+    server knows about.
+    """
+    contract_types: Optional[List[str]] = Field(
+        default=None,
+        description="Optional whitelist of contract codes (BSP, MSAP, MSIP, PMU). "
+                    "Omit to seed all.",
+    )
 
 router = APIRouter(tags=["SLA Masters"])
 
@@ -180,4 +195,41 @@ def delete_sla(
         ),
         message=f"SLA '{result.sla_ref}' deleted",
         status=200,
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /sla-masters/seed-defaults
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/sla-masters/seed-defaults",
+    status_code=201,
+    summary="Seed RFP-default SLAs for one or more contract types (idempotent)",
+)
+def seed_sla_defaults(
+    payload: SlaSeedRequest = Body(default_factory=SlaSeedRequest),
+    ctrl: SlaController = Depends(get_sla_controller),
+):
+    """Bulk-onboard the SLAs bundled in ``app/seed_data/sla_master_seeds.py``.
+
+    Safe to call repeatedly: SLAs that already exist are counted under
+    ``skipped_existing`` and not re-created. Use this once per environment to
+    populate a fresh contract DB with the 36 RFP-default SLAs across BSP,
+    MSAP, MSIP and PMU.
+    """
+    summary = ctrl.seed_defaults(payload.contract_types)
+    msg = (
+        f"Seeded {summary['seeded']} new, skipped {summary['skipped_existing']} existing"
+        + (f", failed {len(summary['failed'])}" if summary["failed"] else "")
+        + f" (of {summary['total_candidates']} candidates)"
+    )
+    return api_response(
+        data=hal_resource(
+            "SlaSeedSummary",
+            summary,
+            self_link=f"{_BASE}/seed-defaults",
+        ),
+        message=msg,
+        status=201,
     )

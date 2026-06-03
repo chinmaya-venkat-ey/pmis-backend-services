@@ -78,7 +78,10 @@ class ProjectManagementClient:
         if cached is not None:
             return cached
 
-        url = f"{self._base_url}/project/activities/{activity_id}"
+        # The pmis-project-management service mounts its routers under /api/v3.
+        # When fronted by the VM's nginx the path is /projects/api/v3/activities/{id};
+        # base_url already includes the /projects prefix.
+        url = f"{self._base_url}/api/v3/activities/{activity_id}"
         headers: Dict[str, str] = {"Accept": "application/json"}
         if bearer_token:
             headers["Authorization"] = f"Bearer {bearer_token}"

@@ -274,6 +274,10 @@ PROJECT_STATUS_TRANSITIONS_READ: Final[str] = "project_status_transitions:read"
 PROJECT_STATUS_TRANSITIONS_MANAGE: Final[str] = "project_status_transitions:manage"
 NOTIFICATION_TEMPLATES_READ: Final[str] = "notification_templates:read"
 NOTIFICATION_TEMPLATES_MANAGE: Final[str] = "notification_templates:manage"
+COST_TYPES_READ: Final[str] = "cost_types:read"
+COST_TYPES_MANAGE: Final[str] = "cost_types:manage"
+FREQUENCIES_READ: Final[str] = "frequencies:read"
+FREQUENCIES_MANAGE: Final[str] = "frequencies:manage"
 
 
 # =========================================================================
@@ -486,6 +490,7 @@ ALL_MASTERS_READ_PERMISSIONS: Final[tuple[str, ...]] = (
     PROJECT_CATEGORIES_READ, ACTIVITY_TYPES_READ, ACTIVITY_STATUSES_READ,
     MILESTONE_STATUSES_READ, PROJECT_STATUS_TRANSITIONS_READ,
     NOTIFICATION_TEMPLATES_READ,
+    COST_TYPES_READ, FREQUENCIES_READ,
 )
 
 ALL_MASTERS_MANAGE_PERMISSIONS: Final[tuple[str, ...]] = (
@@ -493,6 +498,7 @@ ALL_MASTERS_MANAGE_PERMISSIONS: Final[tuple[str, ...]] = (
     PROJECT_CATEGORIES_MANAGE, ACTIVITY_TYPES_MANAGE, ACTIVITY_STATUSES_MANAGE,
     MILESTONE_STATUSES_MANAGE, PROJECT_STATUS_TRANSITIONS_MANAGE,
     NOTIFICATION_TEMPLATES_MANAGE,
+    COST_TYPES_MANAGE, FREQUENCIES_MANAGE,
 )
 
 

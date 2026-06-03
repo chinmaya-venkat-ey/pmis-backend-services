@@ -50,12 +50,17 @@ _REQUEST_CONFIG = ConfigDict(
 # ===================================================================== cost items
 
 class CostItemCreateRequest(BaseModel):
-    """POST /projects/{uuid}/cost-items."""
+    """POST /projects/{uuid}/cost-items.
+
+    ``costTypeCode`` is REQUIRED (fixed / one_time). ``phase`` must be >= 0
+    and is required for ``fixed`` rows (enforced in the service); it is
+    forced null for ``one_time``.
+    """
 
     model_config = _REQUEST_CONFIG
 
-    cost_type_code: Annotated[Optional[str], Field(default=None, max_length=32)]
-    phase: Optional[int] = None
+    cost_type_code: Annotated[str, Field(min_length=1, max_length=32)]
+    phase: Annotated[Optional[int], Field(default=None, ge=0)] = None
     cost: Annotated[Optional[Decimal], Field(default=None, ge=0)] = None
     tax_percent: Annotated[Optional[Decimal], Field(default=None, ge=0, le=100)] = None
     milestone_ids: List[str] = Field(default_factory=list)
@@ -63,12 +68,13 @@ class CostItemCreateRequest(BaseModel):
 
 
 class CostItemUpdateRequest(BaseModel):
-    """PATCH /cost-items/{id} — partial."""
+    """PATCH /cost-items/{id} — partial. ``costTypeCode`` cannot be unset to
+    null; ``phase`` must be >= 0."""
 
     model_config = _REQUEST_CONFIG
 
-    cost_type_code: Annotated[Optional[str], Field(default=None, max_length=32)]
-    phase: Optional[int] = None
+    cost_type_code: Annotated[Optional[str], Field(default=None, min_length=1, max_length=32)]
+    phase: Annotated[Optional[int], Field(default=None, ge=0)] = None
     cost: Annotated[Optional[Decimal], Field(default=None, ge=0)] = None
     tax_percent: Annotated[Optional[Decimal], Field(default=None, ge=0, le=100)] = None
     milestone_ids: Optional[List[str]] = None
@@ -94,28 +100,20 @@ class CostItemResponse(ResponseModel):
 
 # ================================================================== payment terms
 
-class PaymentTermCreateRequest(BaseModel):
-    """POST /projects/{uuid}/payment-terms."""
-
-    model_config = _REQUEST_CONFIG
-
-    phase: Optional[int] = None
-    milestone_id: Annotated[Optional[str], Field(default=None, max_length=36)]
-    frequency_code: Annotated[Optional[str], Field(default=None, max_length=32)]
-    percent_of_payment: Annotated[Optional[Decimal], Field(default=None, ge=0, le=100)] = None
-    position: Optional[int] = None
-
-
 class PaymentTermUpdateRequest(BaseModel):
-    """PATCH /payment-terms/{id} — partial."""
+    """PATCH /payment-terms/{id} — partial.
+
+    Payment-term ROWS are auto-managed from the Project-Cost milestone
+    bundles (one row per milestone per phase). The user only fills in the
+    schedule on each row: ``frequencyCode`` + ``percentOfPayment``. ``phase``
+    and ``milestoneId`` are derived from the cost rows and are NOT editable
+    here.
+    """
 
     model_config = _REQUEST_CONFIG
 
-    phase: Optional[int] = None
-    milestone_id: Annotated[Optional[str], Field(default=None, max_length=36)]
     frequency_code: Annotated[Optional[str], Field(default=None, max_length=32)]
     percent_of_payment: Annotated[Optional[Decimal], Field(default=None, ge=0, le=100)] = None
-    position: Optional[int] = None
 
 
 class PaymentTermResponse(ResponseModel):

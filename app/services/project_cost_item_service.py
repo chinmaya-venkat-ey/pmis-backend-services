@@ -3,11 +3,19 @@
 Owns create / update / delete / restore of cost rows plus the milestone
 bundle binding. Enforces:
   - publish-lock (admin bypass) via app.utilities.payment_lock
-  - cost_type_code resolves to an active master (cross-schema mirror)
-  - one-time rows carry no phase / no milestones, and only one live one-time
-    row per project
-  - bound milestones belong to the project (live) and a milestone stays in a
-    single phase across the project
+  - cost_type_code is REQUIRED and resolves to an active master
+  - ``fixed`` rows require a phase (>= 0); ``one_time`` rows carry no phase /
+    no milestones, and only one live one-time row per project
+  - bound milestones belong to the project (live) and a milestone belongs to
+    exactly ONE live cost row (hence one phase)
+
+Auto-sync (the cost ↔ payment-term link): after EVERY cost write the
+payment-term rows are reconciled to exactly match the milestones bound to
+the live FIXED cost rows — one payment-term row per milestone per phase.
+Adding a milestone to a cost row materialises its payment-term row (restoring
+a previously-removed one to preserve the entered frequency/percent); removing
+it soft-deletes the row. The user only fills frequency + percent on those rows.
+
 Transactions commit once at the end. Derived ``total`` is computed in the
 controller (payment_calc); the service returns the ORM row.
 """
@@ -23,11 +31,13 @@ from app.models.milestone import Milestone
 from app.models.project_cost_item import ProjectCostItem
 from app.repositories.project_audit_log_repository import ProjectAuditLogRepository
 from app.repositories.project_cost_item_repository import ProjectCostItemRepository
+from app.repositories.project_payment_term_repository import ProjectPaymentTermRepository
 from app.repositories.project_repository import ProjectRepository
 from app.schemas.payment import CostItemCreateRequest, CostItemUpdateRequest
 from app.utilities.payment_lock import assert_payment_writable
 from app.utilities.payment_masters import validate_cost_type_code
 
+FIXED = "fixed"
 ONE_TIME = "one_time"
 
 
@@ -35,6 +45,7 @@ class ProjectCostItemService:
     def __init__(self, db: Session):
         self.db = db
         self.repo = ProjectCostItemRepository(db)
+        self.payment_terms = ProjectPaymentTermRepository(db)
         self.projects = ProjectRepository(db)
         self.audit = ProjectAuditLogRepository(db)
 
@@ -62,6 +73,8 @@ class ProjectCostItemService:
         assert_payment_writable(project, caller_is_admin=caller_is_admin)
 
         cost_type = validate_cost_type_code(self.db, payload.cost_type_code)
+        if cost_type is None:
+            raise ValidationError("Cost type is required.")
         phase = payload.phase
         milestone_ids = list(payload.milestone_ids or [])
 
@@ -69,10 +82,13 @@ class ProjectCostItemService:
         if cost_type == ONE_TIME:
             phase = None
             milestone_ids = []
+        elif cost_type == FIXED:
+            if phase is None:
+                raise ValidationError("Phase is required for a fixed cost row.")
 
         if milestone_ids:
             self._validate_milestones(project_id, milestone_ids)
-            self._assert_one_phase_per_milestone(project_id, milestone_ids, phase, exclude_id=None)
+            self._assert_milestones_free(project_id, milestone_ids, exclude_id=None)
 
         position = (
             payload.position if payload.position is not None and payload.position > 0
@@ -93,7 +109,7 @@ class ProjectCostItemService:
             self.db.flush()
         except Exception as exc:  # pragma: no cover - surfaced as friendly 409
             self.db.rollback()
-            raise self._one_time_conflict_or_raise(exc, project_id)
+            raise self._conflict_or_raise(exc, project_id)
 
         if milestone_ids:
             self.repo.replace_milestones(row.id, milestone_ids)
@@ -103,6 +119,7 @@ class ProjectCostItemService:
             action="create", actor_user_id=caller_user_id,
             changes={"cost_type_code": cost_type, "phase": phase},
         )
+        self._reconcile_payment_terms(project_id, caller_user_id)
         self.db.commit()
         row._milestone_ids = milestone_ids
         return row
@@ -120,6 +137,8 @@ class ProjectCostItemService:
 
         if "cost_type_code" in updates:
             updates["cost_type_code"] = validate_cost_type_code(self.db, updates["cost_type_code"])
+            if updates["cost_type_code"] is None:
+                raise ValidationError("Cost type cannot be empty.")
 
         # Resolve the effective cost type + phase after this patch.
         effective_type = updates.get("cost_type_code", row.cost_type_code)
@@ -128,12 +147,13 @@ class ProjectCostItemService:
             updates["phase"] = None
             effective_phase = None
             milestone_ids = []  # one-time clears its bundle
+        elif effective_type == FIXED:
+            if effective_phase is None:
+                raise ValidationError("Phase is required for a fixed cost row.")
 
         if milestone_ids is not None and milestone_ids:
             self._validate_milestones(row.project_id, milestone_ids)
-            self._assert_one_phase_per_milestone(
-                row.project_id, milestone_ids, effective_phase, exclude_id=row.id,
-            )
+            self._assert_milestones_free(row.project_id, milestone_ids, exclude_id=row.id)
 
         if updates:
             before = {k: getattr(row, k) for k in updates}
@@ -142,7 +162,7 @@ class ProjectCostItemService:
                 self.db.flush()
             except Exception as exc:  # pragma: no cover
                 self.db.rollback()
-                raise self._one_time_conflict_or_raise(exc, row.project_id)
+                raise self._conflict_or_raise(exc, row.project_id)
             self.audit.write(
                 project_id=row.project_id, target_kind="cost_item", target_id=row.id,
                 action="update", actor_user_id=caller_user_id,
@@ -152,6 +172,7 @@ class ProjectCostItemService:
         if milestone_ids is not None:
             self.repo.replace_milestones(row.id, milestone_ids)
 
+        self._reconcile_payment_terms(row.project_id, caller_user_id)
         self.db.commit()
         row._milestone_ids = self.repo.list_milestone_ids(row.id)
         return row
@@ -165,6 +186,7 @@ class ProjectCostItemService:
             project_id=row.project_id, target_kind="cost_item", target_id=row.id,
             action="delete", actor_user_id=caller_user_id,
         )
+        self._reconcile_payment_terms(row.project_id, caller_user_id)
         self.db.commit()
         return row
 
@@ -174,14 +196,66 @@ class ProjectCostItemService:
             raise ValidationError("The cost item could not be found.")
         project = self._require_project(row.project_id)
         assert_payment_writable(project, caller_is_admin=caller_is_admin)
-        self.repo.restore(row)
+        try:
+            self.repo.restore(row)
+            self.db.flush()
+        except Exception as exc:  # pragma: no cover
+            self.db.rollback()
+            raise self._conflict_or_raise(exc, row.project_id)
         self.audit.write(
             project_id=row.project_id, target_kind="cost_item", target_id=row.id,
             action="restore", actor_user_id=caller_user_id,
         )
+        self._reconcile_payment_terms(row.project_id, caller_user_id)
         self.db.commit()
         row._milestone_ids = self.repo.list_milestone_ids(row.id)
         return row
+
+    # --------------------------------------------------- payment-term sync
+
+    def _reconcile_payment_terms(self, project_id: str, caller_user_id: Optional[str]) -> None:
+        """Make the live payment-term rows exactly match the milestones bound
+        to the live FIXED cost rows — one row per milestone, phase taken from
+        the cost binding. Preserves user-entered frequency/percent across
+        add → remove → re-add (restores the soft-deleted row)."""
+        ms_to_phase = self.repo.milestone_phase_map(project_id)
+        eligible = set(ms_to_phase.keys())
+
+        live_terms = self.payment_terms.list_all_live(project_id)
+        live_ms = {t.milestone_id for t in live_terms}
+
+        # Remove terms whose milestone is no longer on a cost row;
+        # move terms whose milestone changed phase.
+        for term in live_terms:
+            if term.milestone_id not in eligible:
+                self.payment_terms.soft_delete(term)
+            elif term.phase != ms_to_phase[term.milestone_id]:
+                self.payment_terms.update(
+                    term, phase=ms_to_phase[term.milestone_id], updated_by=caller_user_id,
+                )
+
+        # Add a row for each newly-eligible milestone (restore if one was
+        # previously removed, else create a blank row).
+        for milestone_id, phase in ms_to_phase.items():
+            if milestone_id in live_ms:
+                continue
+            dead = self.payment_terms.get_soft_deleted_by_milestone(project_id, milestone_id)
+            if dead is not None:
+                # Bring it back live in a single flush with a FRESH position
+                # (its old slot may be taken) and the current phase, preserving
+                # the user-entered frequency/percent.
+                self.payment_terms.update(
+                    dead, deleted_at=None, phase=phase,
+                    position=self.payment_terms.next_position_for_project(project_id),
+                    updated_by=caller_user_id,
+                )
+            else:
+                self.payment_terms.create(
+                    project_id=project_id, phase=phase, milestone_id=milestone_id,
+                    frequency_code=None, percent_of_payment=None,
+                    position=self.payment_terms.next_position_for_project(project_id),
+                    created_by=caller_user_id, updated_by=caller_user_id,
+                )
 
     # --------------------------------------------------------------- helpers
 
@@ -204,23 +278,23 @@ class ProjectCostItemService:
                 f"Unknown milestone(s) for this project: {', '.join(missing)}"
             )
 
-    def _assert_one_phase_per_milestone(
-        self, project_id: str, milestone_ids: List[str], phase: Optional[int], *, exclude_id: Optional[str],
+    def _assert_milestones_free(
+        self, project_id: str, milestone_ids: List[str], *, exclude_id: Optional[str],
     ) -> None:
-        if phase is None:
-            return
+        """A milestone may belong to only ONE live cost row (hence one phase).
+        Reject any milestone already bound to a different cost row."""
         conflicts = self.repo.phases_binding_milestones(
             project_id, milestone_ids, exclude_cost_item_id=exclude_id,
         )
-        offending = [mid for mid, other_phase in conflicts if other_phase is not None and other_phase != phase]
+        offending = sorted({mid for mid, _ in conflicts})
         if offending:
             raise ValidationError(
-                "Milestone(s) already bound to a different phase: "
-                f"{', '.join(sorted(set(offending)))}. A milestone belongs to one phase only."
+                "Milestone(s) already used in another cost row: "
+                f"{', '.join(offending)}. A milestone can belong to one cost row only."
             )
 
     @staticmethod
-    def _one_time_conflict_or_raise(exc: Exception, project_id: str) -> Exception:
+    def _conflict_or_raise(exc: Exception, project_id: str) -> Exception:
         text = str(getattr(exc, "orig", exc)).lower()
         if "one_time_per_project" in text:
             return ConflictError(

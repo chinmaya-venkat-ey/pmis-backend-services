@@ -367,6 +367,19 @@ class MilestoneService:
 
     def delete(self, milestone_id: str, *, caller_user_id: Optional[str]):
         row = self.get_by_id(milestone_id)
+        # Finance-page guard: a milestone bound to a live project-cost row
+        # cannot be deleted — it would orphan the cost bundle + its
+        # auto-managed payment term. Caller must remove it from finance first.
+        from app.repositories.project_cost_item_repository import (
+            ProjectCostItemRepository,
+        )
+        if ProjectCostItemRepository(self.db).is_milestone_bound(row.id):
+            raise ConflictError(
+                "This milestone is used on the project finance page. Remove it "
+                "from the finance page (cost rows) first, then delete the milestone.",
+                code="conflict",
+                details={"milestone_id": row.id, "project_id": row.project_id},
+            )
         self.repo.soft_delete(row)
         self.audit.write(
             project_id=row.project_id,

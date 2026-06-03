@@ -1,6 +1,10 @@
 """ProjectPaymentTermController — shapes Project-Term responses. The derived
 ``value`` needs the row's phase fixed total, so the controller loads the
-project's live cost rows and applies payment_calc."""
+project's live cost rows and applies payment_calc.
+
+Payment-term rows are auto-managed (created/removed by ProjectCostItemService
+from the cost milestone bundles), so this controller exposes GET + list +
+PATCH only — no manual create / delete / restore."""
 from __future__ import annotations
 
 from sqlalchemy.orm import Session
@@ -27,24 +31,9 @@ class ProjectPaymentTermController:
     def get(self, term_id: str) -> PaymentTermResponse:
         return self._to_response(self.service.get_by_id(term_id))
 
-    def create(self, project_id, payload, *, caller_user_id, caller_is_admin=False) -> PaymentTermResponse:
-        row = self.service.create(
-            project_id, payload, caller_user_id=caller_user_id, caller_is_admin=caller_is_admin,
-        )
-        return self._to_response(row)
-
     def update(self, term_id, payload, *, caller_user_id, caller_is_admin=False) -> PaymentTermResponse:
         row = self.service.update(
             term_id, payload, caller_user_id=caller_user_id, caller_is_admin=caller_is_admin,
-        )
-        return self._to_response(row)
-
-    def delete(self, term_id, *, caller_user_id, caller_is_admin=False) -> None:
-        self.service.delete(term_id, caller_user_id=caller_user_id, caller_is_admin=caller_is_admin)
-
-    def restore(self, term_id, *, caller_user_id, caller_is_admin=False) -> PaymentTermResponse:
-        row = self.service.restore(
-            term_id, caller_user_id=caller_user_id, caller_is_admin=caller_is_admin,
         )
         return self._to_response(row)
 

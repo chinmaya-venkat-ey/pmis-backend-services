@@ -4,6 +4,7 @@ Soft-delete via ``deleted_at`` (default filter excludes deleted).
 """
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import List, Optional, Tuple
 
 from sqlalchemy import and_, func, select
@@ -78,3 +79,33 @@ class ProjectPaymentTermRepository:
         row.deleted_at = None
         self.db.flush()
         return row
+
+    def get_soft_deleted_by_milestone(
+        self, project_id: str, milestone_id: str,
+    ) -> Optional[ProjectPaymentTerm]:
+        """Most-recent soft-deleted payment term for a milestone — restored
+        (preserving its frequency/percent) when the milestone is re-added to
+        a cost row."""
+        return self.db.execute(
+            select(ProjectPaymentTerm)
+            .where(ProjectPaymentTerm.project_id == project_id)
+            .where(ProjectPaymentTerm.milestone_id == milestone_id)
+            .where(ProjectPaymentTerm.deleted_at.is_not(None))
+            .order_by(ProjectPaymentTerm.deleted_at.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+
+    def sum_percent_for_phase(
+        self, project_id: str, phase: int, *, exclude_id: Optional[str] = None,
+    ) -> Decimal:
+        """Σ ``percent_of_payment`` across LIVE payment terms in a phase
+        (optionally excluding one row) — for the 100%-per-phase cap."""
+        stmt = (
+            select(func.coalesce(func.sum(ProjectPaymentTerm.percent_of_payment), 0))
+            .where(ProjectPaymentTerm.project_id == project_id)
+            .where(ProjectPaymentTerm.phase == phase)
+            .where(ProjectPaymentTerm.deleted_at.is_(None))
+        )
+        if exclude_id is not None:
+            stmt = stmt.where(ProjectPaymentTerm.id != exclude_id)
+        return Decimal(self.db.execute(stmt).scalar_one())

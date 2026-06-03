@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Path, Query, status
 
 from app.controllers.payment_page_controller import PaymentPageController
 from app.controllers.project_cost_item_controller import ProjectCostItemController
@@ -40,7 +40,6 @@ from app.schemas.payment import (
     CostItemResponse,
     CostItemUpdateRequest,
     PaymentPageResponse,
-    PaymentTermCreateRequest,
     PaymentTermResponse,
     PaymentTermUpdateRequest,
     QrgResponse,
@@ -154,31 +153,14 @@ def restore_cost_item(
 
 
 # ========================================================= payment terms (scoped)
+# Rows are auto-managed from the cost milestone bundles → list + get + patch
+# only (no manual create / delete / restore).
 payment_term_project_scoped_router = APIRouter(prefix="/projects", tags=["payment-terms"])
-
-
-@payment_term_project_scoped_router.post(
-    "/{project_uuid}/payment-terms",
-    response_model=PaymentTermResponse,
-    status_code=status.HTTP_201_CREATED,
-    summary="Create a payment term",
-    dependencies=[Depends(require_project_permission(PROJECTS_UPDATE_FINANCE))],
-)
-def create_payment_term(
-    project_uuid: str,
-    payload: PaymentTermCreateRequest,
-    controller: Annotated[ProjectPaymentTermController, Depends(get_project_payment_term_controller)],
-    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
-    caller_is_admin: Annotated[bool, Depends(get_caller_is_admin)],
-):
-    return controller.create(
-        project_uuid, payload, caller_user_id=caller_user_id, caller_is_admin=caller_is_admin,
-    )
 
 
 @payment_term_project_scoped_router.get(
     "/{project_uuid}/payment-terms",
-    summary="List a project's payment terms",
+    summary="List a project's payment terms (auto-managed from cost rows)",
     dependencies=[Depends(require_project_permission(PROJECTS_READ))],
 )
 def list_payment_terms(
@@ -213,7 +195,7 @@ def get_payment_term(
 @payment_term_router.patch(
     "/{term_id}",
     response_model=PaymentTermResponse,
-    summary="Update a payment term",
+    summary="Set a payment term's schedule (frequency + % of payment)",
     dependencies=[Depends(require_permission(PROJECTS_UPDATE_FINANCE))],
 )
 def update_payment_term(
@@ -226,36 +208,6 @@ def update_payment_term(
     return controller.update(
         term_id, payload, caller_user_id=caller_user_id, caller_is_admin=caller_is_admin,
     )
-
-
-@payment_term_router.delete(
-    "/{term_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-    summary="Soft-delete a payment term",
-    dependencies=[Depends(require_permission(PROJECTS_UPDATE_FINANCE))],
-)
-def delete_payment_term(
-    term_id: str,
-    controller: Annotated[ProjectPaymentTermController, Depends(get_project_payment_term_controller)],
-    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
-    caller_is_admin: Annotated[bool, Depends(get_caller_is_admin)],
-):
-    controller.delete(term_id, caller_user_id=caller_user_id, caller_is_admin=caller_is_admin)
-
-
-@payment_term_router.post(
-    "/{term_id}/restore",
-    response_model=PaymentTermResponse,
-    summary="Restore a soft-deleted payment term",
-    dependencies=[Depends(require_permission(PROJECTS_UPDATE_FINANCE))],
-)
-def restore_payment_term(
-    term_id: str,
-    controller: Annotated[ProjectPaymentTermController, Depends(get_project_payment_term_controller)],
-    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
-    caller_is_admin: Annotated[bool, Depends(get_caller_is_admin)],
-):
-    return controller.restore(term_id, caller_user_id=caller_user_id, caller_is_admin=caller_is_admin)
 
 
 # ============================================================ aggregated page + ccn
@@ -302,11 +254,11 @@ def update_ccn_cap(
 )
 def set_phase_qrg(
     project_uuid: str,
-    phase: int,
     payload: QrgUpdateRequest,
     controller: Annotated[PaymentPageController, Depends(get_payment_page_controller)],
     caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
     caller_is_admin: Annotated[bool, Depends(get_caller_is_admin)],
+    phase: int = Path(ge=0),
 ):
     return controller.set_qrg(
         project_uuid, phase, payload.qrg_applied,

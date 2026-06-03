@@ -130,3 +130,30 @@ class ProjectCostItemRepository:
         for cid, mid in rows:
             out.setdefault(cid, []).append(mid)
         return out
+
+    def milestone_phase_map(self, project_id: str) -> dict:
+        """Return ``{milestone_id: phase}`` for every milestone bound to a
+        LIVE FIXED cost row (with a phase) in this project. A milestone is in
+        exactly one phase (enforced), so the map is well-defined. This drives
+        the payment-term auto-sync (rows exist only for these milestones)."""
+        rows = self.db.execute(
+            select(CostItemMilestone.milestone_id, ProjectCostItem.phase)
+            .join(ProjectCostItem, ProjectCostItem.id == CostItemMilestone.cost_item_id)
+            .where(ProjectCostItem.project_id == project_id)
+            .where(ProjectCostItem.deleted_at.is_(None))
+            .where(ProjectCostItem.cost_type_code == "fixed")
+            .where(ProjectCostItem.phase.is_not(None))
+        ).all()
+        return {mid: phase for mid, phase in rows}
+
+    def is_milestone_bound(self, milestone_id: str) -> bool:
+        """True if the milestone is bound to ANY live cost row (i.e. it's on
+        the finance page). Used to block milestone deletion."""
+        found = self.db.execute(
+            select(CostItemMilestone.milestone_id)
+            .join(ProjectCostItem, ProjectCostItem.id == CostItemMilestone.cost_item_id)
+            .where(CostItemMilestone.milestone_id == milestone_id)
+            .where(ProjectCostItem.deleted_at.is_(None))
+            .limit(1)
+        ).first()
+        return found is not None

@@ -73,13 +73,13 @@ def _make_upload_endpoint(target_kind: str):
     # under the form key ``file`` (singular). Project-attachment POST
     # is the plural ``files`` form — that route lives in
     # ``project_routes`` and is unaffected.
-    async def handler(
+    async def handler(  # NOSONAR(S7503): FastAPI handler — async preserves event-loop scheduling semantics
         target_id: str,
         request: Request,
         controller: Annotated[AttachmentController, Depends(get_attachment_controller)],
         caller_user_id: Annotated[str, Depends(get_current_user_id)],
         file: Annotated[UploadFile, File(description="A file to attach.")],
-    ):
+    ) -> CommentResponse:
         # Round-8: resolve parent project_id and scope-check ATTACHMENTS_CREATE.
         project_id = _project_id_for_target(target_kind, target_id)
         assert_action_allowed(
@@ -138,8 +138,8 @@ for _path, _kind in _KIND_BY_PATH.items():
         ),
         status_code=status.HTTP_201_CREATED,
         # Monolith parity: M/A/T/S upload returns a Comment HAL envelope,
-        # so the wrap layer derives ``_type: "Comment"`` from this model.
-        response_model=CommentResponse,
+        # so the wrap layer derives ``_type: "Comment"`` from the handler's
+        # ``-> CommentResponse`` return annotation.
         # Swagger UI 5.x renders a proper file picker only when the
         # request body is declared with ``format: binary`` explicitly.
         openapi_extra=multipart_files_only_request_body(

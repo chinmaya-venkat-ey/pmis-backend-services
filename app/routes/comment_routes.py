@@ -68,7 +68,7 @@ def _make_create_endpoint(target_kind: str):
     gate which leaked scoped grants across projects.
     """
 
-    async def handler(
+    async def handler(  # NOSONAR(S7503): FastAPI handler — async preserves event-loop scheduling semantics
         target_id: str,
         request: Request,
         controller: Annotated[CommentController, Depends(get_comment_controller)],

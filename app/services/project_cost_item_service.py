@@ -63,6 +63,24 @@ class ProjectCostItemService:
             project_id, offset=offset, page_size=page_size, include_deleted=include_deleted,
         )
 
+    def available_milestones(self, project_id: str, *, exclude_cost_item_id: Optional[str] = None):
+        """Live project milestones NOT yet bound to another live cost row —
+        the set the FE should offer in the cost-row milestone picker. When
+        editing a cost row, pass its id as ``exclude_cost_item_id`` so the
+        row's own milestones remain selectable. Returns (id, position, name)
+        tuples ordered by position."""
+        self._require_project(project_id)
+        bound = self.repo.bound_milestone_ids(
+            project_id, exclude_cost_item_id=exclude_cost_item_id,
+        )
+        rows = self.db.execute(
+            select(Milestone.id, Milestone.position, Milestone.name)
+            .where(Milestone.project_id == project_id)
+            .where(Milestone.deleted_at.is_(None))
+            .order_by(Milestone.position.asc())
+        ).all()
+        return [(mid, pos, name) for mid, pos, name in rows if mid not in bound]
+
     # ----------------------------------------------------------------- write
 
     def create(

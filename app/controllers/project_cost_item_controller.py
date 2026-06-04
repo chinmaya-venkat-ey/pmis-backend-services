@@ -54,3 +54,18 @@ class ProjectCostItemController:
             "items": [self._to_response(r) for r in rows],
             "total": total, "offset": offset, "page_size": page_size,
         }
+
+    def available_milestones(self, project_id, *, exclude_cost_item_id=None):
+        rows = self.service.available_milestones(
+            project_id, exclude_cost_item_id=exclude_cost_item_id,
+        )
+        return {
+            "milestones": [
+                {
+                    "id": mid,
+                    "display_code": f"M{pos}" if pos else None,
+                    "name": name,
+                }
+                for mid, pos, name in rows
+            ],
+        }

@@ -71,6 +71,27 @@ def create_cost_item(
 
 
 @cost_item_project_scoped_router.get(
+    "/{project_uuid}/cost-items/available-milestones",
+    summary="Milestones still available to add to a cost row (excludes ones already bound)",
+    description=(
+        "Returns the project's live milestones that are NOT yet bound to any "
+        "other live cost row — i.e. the set the milestone picker should offer "
+        "when adding a cost row. When editing an existing cost row, pass "
+        "``excludeCostItemId`` so that row's own milestones stay selectable."
+    ),
+    dependencies=[Depends(require_project_permission(PROJECTS_READ))],
+)
+def available_cost_milestones(
+    project_uuid: str,
+    controller: Annotated[ProjectCostItemController, Depends(get_project_cost_item_controller)],
+    exclude_cost_item_id: Annotated[Optional[str], Query(alias="excludeCostItemId")] = None,
+):
+    return controller.available_milestones(
+        project_uuid, exclude_cost_item_id=exclude_cost_item_id,
+    )
+
+
+@cost_item_project_scoped_router.get(
     "/{project_uuid}/cost-items",
     summary="List a project's cost items",
     dependencies=[Depends(require_project_permission(PROJECTS_READ))],

@@ -157,3 +157,19 @@ class ProjectCostItemRepository:
             .limit(1)
         ).first()
         return found is not None
+
+    def bound_milestone_ids(
+        self, project_id: str, *, exclude_cost_item_id: Optional[str] = None,
+    ) -> set:
+        """Every milestone id already bound to a LIVE cost row in this project.
+        Optionally exclude one cost row (the one being edited) so its own
+        milestones stay selectable. Drives the "available milestones" picker."""
+        stmt = (
+            select(CostItemMilestone.milestone_id)
+            .join(ProjectCostItem, ProjectCostItem.id == CostItemMilestone.cost_item_id)
+            .where(ProjectCostItem.project_id == project_id)
+            .where(ProjectCostItem.deleted_at.is_(None))
+        )
+        if exclude_cost_item_id is not None:
+            stmt = stmt.where(ProjectCostItem.id != exclude_cost_item_id)
+        return set(self.db.execute(stmt).scalars())

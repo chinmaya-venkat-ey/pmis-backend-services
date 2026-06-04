@@ -13,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.errors import ProjectNotFoundError
-from app.models._cross_schema import Division, User
+from app.models._cross_schema import Division, User, Vendor
 from app.repositories.project_audit_log_repository import ProjectAuditLogRepository
 from app.repositories.project_repository import ProjectRepository
 
@@ -87,6 +87,78 @@ class AuditLogService:
         ).all()
         return {uid: (login, code) for uid, login, code in rows}
 
+    def _resolve_dep_codes(self, target_kind: str, project_id: str, uuids) -> List[str]:
+        """Resolve a list of dependency-target UUIDs to their WBS display
+        codes (M1 / A1.2 / T1.2.3 / S1.2.3.4…) for the given entity kind.
+        Reuses the same resolvers the entity controllers use. Unresolved
+        ids (e.g. a since-deleted target) are dropped — best-effort."""
+        ids = [u for u in (uuids or []) if u]
+        if not ids:
+            return []
+        if target_kind == "milestone":
+            from app.controllers.milestone_controller import MilestoneController
+            return MilestoneController(self.db)._resolve_milestone_display_codes(project_id, ids)
+        if target_kind == "activity":
+            from app.controllers.activity_controller import ActivityController
+            return ActivityController(self.db)._resolve_activity_display_codes(project_id, ids)
+        if target_kind == "task":
+            from app.controllers.task_controller import TaskController
+            return TaskController(self.db)._resolve_task_display_codes(project_id, ids)
+        if target_kind == "subtask":
+            from app.services.subtask_service import SubtaskService
+            code_by_id = SubtaskService(self.db)._batch_resolve_display_codes(ids)
+            return [code_by_id[u] for u in ids if u in code_by_id]
+        return list(ids)
+
+    def _enrich_dependency_display(self, entry: Dict[str, Any], row) -> None:
+        """Make dependency changes render as WBS codes instead of opaque
+        UUIDs. The FE diffs ``before``/``after`` (and the HAL layer camelCases
+        the inner keys to ``dependsOn``, so the FE's snake-keyed override never
+        fires) — so we replace the UUID list IN PLACE with display codes, and
+        also surface ``dependsOnDisplay`` / ``dependsOnDisplayBefore`` at the
+        top level for the FE's explicit path. ``changes`` is left raw (UUIDs)
+        for fidelity."""
+        before = entry.get("before") or {}
+        after = entry.get("after") or {}
+        if "depends_on" not in before and "depends_on" not in after:
+            return
+        kind = row.target_kind
+        pid = row.project_id
+        before_codes = self._resolve_dep_codes(kind, pid, before.get("depends_on"))
+        after_codes = self._resolve_dep_codes(kind, pid, after.get("depends_on"))
+        if "depends_on" in before:
+            before["depends_on"] = before_codes
+        if "depends_on" in after:
+            after["depends_on"] = after_codes
+        entry["depends_on_display"] = after_codes
+        entry["depends_on_display_before"] = before_codes
+
+    def _resolve_vendor_names(self, vendor_ids) -> List[str]:
+        """Resolve vendor/organization UUIDs to their names via the
+        masters.vendors mirror. Unknown ids fall back to the raw value."""
+        ids = [v for v in (vendor_ids or []) if v]
+        if not ids:
+            return []
+        rows = self.db.execute(
+            select(Vendor.id, Vendor.name).where(Vendor.id.in_(ids))
+        ).all()
+        name_by_id = {vid: name for vid, name in rows}
+        return [name_by_id.get(v, v) for v in ids]
+
+    def _enrich_vendor_display(self, entry: Dict[str, Any], row) -> None:
+        """Make organization (vendor) changes render as NAMES instead of
+        UUIDs. Handles both wire shapes:
+          * ``vendor_ids`` (list)  — project / milestone org membership
+          * ``vendor_id``  (single)— activity organization
+        Substituted in place in ``before``/``after`` (the FE renders those);
+        ``changes`` stays raw for fidelity."""
+        for side in (entry.get("before") or {}, entry.get("after") or {}):
+            if isinstance(side.get("vendor_ids"), list):
+                side["vendor_ids"] = self._resolve_vendor_names(side["vendor_ids"])
+            if side.get("vendor_id"):
+                names = self._resolve_vendor_names([side["vendor_id"]])
+                side["vendor_id"] = names[0] if names else side["vendor_id"]
+
     def _resolve_owner_label(self, owner_code: str) -> str:
         """Look up the division label for a project owner code. Falls back
         to the raw code when the label cannot be resolved (null/"others"/
@@ -112,7 +184,12 @@ class AuditLogService:
         actor_ids = list({r.actor_user_id for r in rows if r.actor_user_id})
         actor_map = self._load_actor_map(actor_ids)
 
-        elements = [_serialize_entry(r, actor_map) for r in rows]
+        elements = []
+        for r in rows:
+            entry = _serialize_entry(r, actor_map)
+            self._enrich_dependency_display(entry, r)
+            self._enrich_vendor_display(entry, r)
+            elements.append(entry)
 
         # Monolith parity: top-level Collection envelope with self-link,
         # count, and ``_embedded.elements`` (the wrap layer skips its

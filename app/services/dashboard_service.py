@@ -684,6 +684,53 @@ class DashboardService:
 
     _VALID_BUCKETS_FOR_LIST = set(PROJECT_BUCKETS) | {"total", "active"}
 
+    @staticmethod
+    def _bucket_filter_passes(bucket: str, bucket_filter: Optional[str]) -> bool:
+        """``total``/``None`` always pass; ``active`` = not completed;
+        any other value must match the row's bucket exactly."""
+        if not bucket_filter or bucket_filter == "total":
+            return True
+        if bucket_filter == "active":
+            return bucket != BUCKET_COMPLETED
+        return bucket == bucket_filter
+
+    @staticmethod
+    def _q_filter_passes(
+        project: Project,
+        vendors: List[Tuple[str, str, bool]],
+        q: Optional[str],
+    ) -> bool:
+        """Free-text match over id/projectCode/name/owner/ownerOther + vendor names."""
+        if not q:
+            return True
+        needle = q.lower()
+        haystack = [
+            project.id,
+            project.project_code or "",
+            project.name or "",
+            project.owner or "",
+            project.owner_other or "",
+        ]
+        haystack.extend([v[1] for v in vendors])
+        return any(needle in (p or "").lower() for p in haystack)
+
+    @staticmethod
+    def _vendor_filter_passes(
+        vendors: List[Tuple[str, str, bool]],
+        vendor_id: Optional[str],
+    ) -> bool:
+        if not vendor_id:
+            return True
+        return any(v[0] == vendor_id for v in vendors)
+
+    @staticmethod
+    def _division_filter_passes(
+        project: Project, division: Optional[str],
+    ) -> bool:
+        if not division:
+            return True
+        return (project.owner or "").lower() == division.lower()
+
     def _matches_project_filters(
         self,
         *,
@@ -695,38 +742,12 @@ class DashboardService:
         vendor_id: Optional[str],
         division: Optional[str],
     ) -> bool:
-        # Bucket: ``total`` and ``None`` both pass; ``active`` means
-        # not-completed; otherwise an exact bucket match.
-        if bucket_filter and bucket_filter != "total":
-            if bucket_filter == "active":
-                if bucket == BUCKET_COMPLETED:
-                    return False
-            elif bucket != bucket_filter:
-                return False
-
-        # Free-text search across id/projectCode/name/division/vendor names.
-        if q:
-            needle = q.lower()
-            haystack = [
-                project.id,
-                project.project_code or "",
-                project.name or "",
-                project.owner or "",
-                project.owner_other or "",
-            ]
-            haystack.extend([v[1] for v in vendors])
-            if not any(needle in (p or "").lower() for p in haystack):
-                return False
-
-        if vendor_id and not any(v[0] == vendor_id for v in vendors):
-            return False
-
-        if division:
-            target = division.lower()
-            if (project.owner or "").lower() != target:
-                return False
-
-        return True
+        return (
+            self._bucket_filter_passes(bucket, bucket_filter)
+            and self._q_filter_passes(project, vendors, q)
+            and self._vendor_filter_passes(vendors, vendor_id)
+            and self._division_filter_passes(project, division)
+        )
 
     def list_projects(
         self,

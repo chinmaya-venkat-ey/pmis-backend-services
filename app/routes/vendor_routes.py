@@ -18,7 +18,7 @@ from __future__ import annotations
 import uuid
 from collections import defaultdict
 from datetime import datetime, timezone
-from typing import Annotated, Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select
@@ -176,6 +176,43 @@ def _apply_project_ids(db: Session, vendor_id: str, project_ids: List[str]) -> N
         db.add(ProjectVendor(project_id=pid, vendor_id=vendor_id, created_at=now))
 
 
+def _normalize_assignment_entry(entry: Dict[str, Any]) -> Tuple[Any, str, List[str]]:
+    """Extract ``(project_id, role_name, desired_user_ids)`` from a raw
+    assignment entry, accepting both snake_case and camelCase keys."""
+    pid = entry.get("project_id") or entry.get("projectId")
+    raw_role = entry.get("role", "")
+    role_name = _LABEL_TO_NAME.get(str(raw_role).strip().lower(), raw_role)
+    desired = list(entry.get("user_ids") or entry.get("userIds") or [])
+    return pid, role_name, desired
+
+
+def _sync_role_assignments(
+    db: Session,
+    *,
+    project_id: str,
+    role_id: int,
+    desired_user_ids: List[str],
+) -> None:
+    """Reconcile ``user_role_assignments`` for one (project, role) so the
+    set of holders matches ``desired_user_ids`` — additive + subtractive."""
+    current = {
+        r.user_id: r for r in db.execute(
+            select(UserRoleAssignment)
+            .where(UserRoleAssignment.project_id == project_id)
+            .where(UserRoleAssignment.role_id == role_id)
+        ).scalars().all()
+    }
+    desired_set = set(desired_user_ids)
+    for uid in desired_user_ids:
+        if uid not in current:
+            db.add(UserRoleAssignment(
+                user_id=uid, role_id=role_id, project_id=project_id,
+            ))
+    for uid, ra in current.items():
+        if uid not in desired_set:
+            db.delete(ra)
+
+
 def _apply_user_assignments(
     db: Session,
     vendor_id: str,
@@ -190,32 +227,20 @@ def _apply_user_assignments(
         ).all()
     }
     for entry in assignments:
-        pid = entry.get("project_id") or entry.get("projectId")
-        raw_role = entry.get("role", "")
-        role_name = _LABEL_TO_NAME.get(str(raw_role).strip().lower(), raw_role)
-        desired_user_ids = list(entry.get("user_ids") or entry.get("userIds") or [])
-
+        pid, role_name, desired_user_ids = _normalize_assignment_entry(entry)
         if pid not in project_ids or role_name not in _PROJECT_TIER_ROLES:
             continue
-
-        role_row = db.execute(select(Role).where(Role.name == role_name)).scalars().first()
+        role_row = db.execute(
+            select(Role).where(Role.name == role_name)
+        ).scalars().first()
         if role_row is None:
             continue
-
-        current = {
-            r.user_id: r for r in db.execute(
-                select(UserRoleAssignment)
-                .where(UserRoleAssignment.project_id == pid)
-                .where(UserRoleAssignment.role_id == role_row.id)
-            ).scalars().all()
-        }
-        desired_set = set(desired_user_ids)
-        for uid in desired_user_ids:
-            if uid not in current:
-                db.add(UserRoleAssignment(user_id=uid, role_id=role_row.id, project_id=pid))
-        for uid, ra in current.items():
-            if uid not in desired_set:
-                db.delete(ra)
+        _sync_role_assignments(
+            db,
+            project_id=pid,
+            role_id=role_row.id,
+            desired_user_ids=desired_user_ids,
+        )
     db.flush()
 
 

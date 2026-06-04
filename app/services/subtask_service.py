@@ -412,22 +412,9 @@ class SubtaskService:
             },
         )
 
-    def _batch_resolve_display_codes(self, subtask_ids: List[str]) -> dict:
-        """Return ``{subtask_id: 'S<m>.<a>.<t>.<chain>'}`` for the given
-        subtask UUIDs. Walks parent_subtask_id chain per row to build the
-        nesting suffix (5+ segments for nested subtasks)."""
-        if not subtask_ids:
-            return {}
-        from app.models.activity import Activity
-        from app.models.milestone import Milestone
+    def _fetch_subtask_rows(self, subtask_ids: List[str]):
         from app.models.subtask import Subtask
-        from app.models.task import Task
-
-        # Pull every (id, position, parent_subtask_id, task_id) — both for
-        # the requested IDs and any ancestor we may walk up to. Simplest:
-        # one query per project's whole subtask set is overkill, so just
-        # query rows by id and walk up lazily.
-        rows = {
+        return {
             sid: (pos, parent_id, task_id)
             for sid, pos, parent_id, task_id in self.db.execute(
                 select(
@@ -437,66 +424,91 @@ class SubtaskService:
                 .where(Subtask.id.in_(subtask_ids))
             ).all()
         }
+
+    def _walk_ancestors_into_rows(self, rows: dict) -> None:
+        """Discover every ancestor id reachable from ``rows`` via the
+        parent_subtask_id chain and fold them into ``rows`` in place."""
+        from app.models.subtask import Subtask
         ancestor_ids: set[str] = set()
         for sid, (_, parent_id, _) in rows.items():
             cur = parent_id
             while cur:
                 ancestor_ids.add(cur)
-                # Pre-fetch ancestor positions in a moment.
                 cur_row = self.db.execute(
                     select(Subtask.parent_subtask_id)
                     .where(Subtask.id == cur)
                 ).first()
                 cur = cur_row[0] if cur_row else None
-        if ancestor_ids:
-            ancestor_rows = self.db.execute(
-                select(Subtask.id, Subtask.position, Subtask.parent_subtask_id)
-                .where(Subtask.id.in_(ancestor_ids))
-            ).all()
-            for aid, pos, parent_id in ancestor_rows:
-                if aid not in rows:
-                    rows[aid] = (pos, parent_id, None)
+        if not ancestor_ids:
+            return
+        ancestor_rows = self.db.execute(
+            select(Subtask.id, Subtask.position, Subtask.parent_subtask_id)
+            .where(Subtask.id.in_(ancestor_ids))
+        ).all()
+        for aid, pos, parent_id in ancestor_rows:
+            if aid not in rows:
+                rows[aid] = (pos, parent_id, None)
 
-        # Per-task M.A.T chain.
+    def _fetch_mat_chains(self, task_ids: set) -> dict:
+        from app.models.activity import Activity
+        from app.models.milestone import Milestone
+        from app.models.task import Task
+        if not task_ids:
+            return {}
+        chain_rows = self.db.execute(
+            select(
+                Task.id, Milestone.position,
+                Activity.position, Task.position,
+            )
+            .join(Activity, Activity.id == Task.activity_id)
+            .join(Milestone, Milestone.id == Activity.milestone_id)
+            .where(Task.id.in_(task_ids))
+        ).all()
+        return {tid: (m, a, t) for tid, m, a, t in chain_rows}
+
+    @staticmethod
+    def _build_one_display_code(
+        sid: str, rows: dict, chains: dict,
+    ) -> Optional[str]:
+        r = rows.get(sid)
+        if not r:
+            return None
+        pos, parent_id, task_id = r
+        chain = chains.get(task_id)
+        if not chain or not all(chain) or not pos:
+            return None
+        m_pos, a_pos, t_pos = chain
+        positions = [pos]
+        cur = parent_id
+        seen: set[str] = set()
+        while cur and cur not in seen:
+            seen.add(cur)
+            anc = rows.get(cur)
+            if not anc:
+                break
+            anc_pos, anc_parent, _ = anc
+            if not anc_pos:
+                break
+            positions.insert(0, anc_pos)
+            cur = anc_parent
+        parts = [f"S{m_pos}", str(a_pos), str(t_pos)] + [str(p) for p in positions]
+        return ".".join(parts)
+
+    def _batch_resolve_display_codes(self, subtask_ids: List[str]) -> dict:
+        """Return ``{subtask_id: 'S<m>.<a>.<t>.<chain>'}`` for the given
+        subtask UUIDs. Walks parent_subtask_id chain per row to build the
+        nesting suffix (5+ segments for nested subtasks)."""
+        if not subtask_ids:
+            return {}
+        rows = self._fetch_subtask_rows(subtask_ids)
+        self._walk_ancestors_into_rows(rows)
         task_ids = {tid for _, _, tid in rows.values() if tid}
-        chains = {}
-        if task_ids:
-            chain_rows = self.db.execute(
-                select(
-                    Task.id, Milestone.position,
-                    Activity.position, Task.position,
-                )
-                .join(Activity, Activity.id == Task.activity_id)
-                .join(Milestone, Milestone.id == Activity.milestone_id)
-                .where(Task.id.in_(task_ids))
-            ).all()
-            chains = {tid: (m, a, t) for tid, m, a, t in chain_rows}
-
-        out = {}
+        chains = self._fetch_mat_chains(task_ids)
+        out: dict = {}
         for sid in subtask_ids:
-            r = rows.get(sid)
-            if not r:
-                continue
-            pos, parent_id, task_id = r
-            chain = chains.get(task_id)
-            if not chain or not all(chain) or not pos:
-                continue
-            m_pos, a_pos, t_pos = chain
-            positions = [pos]
-            cur = parent_id
-            seen: set[str] = set()
-            while cur and cur not in seen:
-                seen.add(cur)
-                anc = rows.get(cur)
-                if not anc:
-                    break
-                anc_pos, anc_parent, _ = anc
-                if not anc_pos:
-                    break
-                positions.insert(0, anc_pos)
-                cur = anc_parent
-            parts = [f"S{m_pos}", str(a_pos), str(t_pos)] + [str(p) for p in positions]
-            out[sid] = ".".join(parts)
+            code = self._build_one_display_code(sid, rows, chains)
+            if code is not None:
+                out[sid] = code
         return out
 
     # ------------------------------------------ display-code resolver -----

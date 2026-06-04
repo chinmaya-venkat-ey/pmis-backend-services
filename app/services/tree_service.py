@@ -366,6 +366,106 @@ class TreeService:
     def __init__(self, db: Session):
         self.db = db
 
+    def _load_project_for_tree(
+        self, project_id: str, *, include_deleted: bool,
+    ) -> Any:
+        """Fetch the project row and apply visibility rules. Raises
+        ``NotFoundError`` if the project is missing or (when
+        ``include_deleted`` is False) soft-deleted."""
+        project = self.db.execute(
+            select(Project).where(Project.id == project_id)
+        ).scalar_one_or_none()
+        if project is None:
+            raise NotFoundError("The project could not be found.")
+        if not include_deleted and project.deleted_at is not None:
+            # Monolith parity: soft-deleted branch uses the VERBOSE form
+            # (distinct from the missing-row form just above). Quoting
+            # the UUID explicitly tells the FE "this row exists in the
+            # DB but is gone" — useful for restore flows.
+            raise NotFoundError(
+                f"Project with ID {project_id} has been deleted",
+            )
+        return project
+
+    def _fetch_tree_entities(
+        self, project_id: str, *, include_deleted: bool,
+    ) -> Tuple[List[Any], List[Any], List[Any], List[Any], List[Any], List[Any], List[Any]]:
+        """One pass over M/A/A-resources/T/T-resources/S/S-resources for
+        a project. All queries filter by the denormalized ``project_id``
+        and honor the ``include_deleted`` toggle."""
+        db = self.db
+
+        def _scoped(stmt, model):
+            stmt = stmt.where(model.project_id == project_id)
+            if not include_deleted:
+                stmt = stmt.where(model.deleted_at.is_(None))
+            return stmt
+
+        milestones = list(db.execute(
+            _scoped(select(Milestone), Milestone)
+            .order_by(Milestone.position.asc(), Milestone.id.asc())
+        ).scalars().all())
+        activities = list(db.execute(
+            _scoped(select(Activity), Activity)
+            .order_by(Activity.position.asc(), Activity.id.asc())
+        ).scalars().all())
+        act_resources = list(db.execute(
+            _scoped(select(ActivityResource), ActivityResource)
+        ).scalars().all())
+        tasks = list(db.execute(
+            _scoped(select(Task), Task)
+            .order_by(Task.position.asc(), Task.id.asc())
+        ).scalars().all())
+        task_resources = list(db.execute(
+            _scoped(select(TaskResource), TaskResource)
+        ).scalars().all())
+        subtasks = list(db.execute(
+            _scoped(select(Subtask), Subtask)
+            .order_by(Subtask.position.asc(), Subtask.id.asc())
+        ).scalars().all())
+        sub_resources = list(db.execute(
+            _scoped(select(SubtaskResource), SubtaskResource)
+        ).scalars().all())
+        return (
+            milestones, activities, act_resources,
+            tasks, task_resources,
+            subtasks, sub_resources,
+        )
+
+    def _build_vendor_name_map(self, activities: List[Any]) -> Dict[str, str]:
+        """``vendor_id → name`` for every vendor referenced by an
+        activity in the tree (one query)."""
+        vendor_ids: set = {a.vendor_id for a in activities if a.vendor_id}
+        if not vendor_ids:
+            return {}
+        out: Dict[str, str] = {}
+        for vid, vname in self.db.execute(
+            select(Vendor.id, Vendor.name).where(Vendor.id.in_(vendor_ids))
+        ).all():
+            out[vid] = vname
+        return out
+
+    def _bulk_load_dep_edges(
+        self,
+        *,
+        dep_model: Any,
+        from_col: Any,
+        to_col: Any,
+        live_src_ids: set,
+        live_tgt_ids: set,
+    ) -> Dict[str, List[str]]:
+        """Load every dependency edge whose ``from`` is in
+        ``live_src_ids`` and ``to`` is in ``live_tgt_ids``. Returns
+        ``{from_id: [to_id, ...]}``."""
+        out: Dict[str, List[str]] = defaultdict(list)
+        if not live_src_ids:
+            return out
+        stmt = select(from_col, to_col).where(from_col.in_(live_src_ids))
+        for src, tgt in self.db.execute(stmt).all():
+            if tgt in live_tgt_ids:
+                out[src].append(tgt)
+        return out
+
     def get_project_tree(
         self,
         project_id: str,
@@ -374,85 +474,28 @@ class TreeService:
     ) -> Dict[str, Any]:
         db = self.db
 
-        project = db.execute(
-            select(Project).where(Project.id == project_id)
-        ).scalar_one_or_none()
-        if project is None:
-            raise NotFoundError("The project could not be found.")
-        if not include_deleted and project.deleted_at is not None:
-            # Monolith parity: soft-deleted branch uses the VERBOSE form
-            # (distinct from the missing-row form just above). Quoting the
-            # UUID explicitly tells the FE "this row exists in the DB but
-            # is gone" — useful for restore flows.
-            raise NotFoundError(
-                f"Project with ID {project_id} has been deleted",
-            )
+        project = self._load_project_for_tree(
+            project_id, include_deleted=include_deleted,
+        )
 
         # Single "today" reference for the entire tree — sampled once so
         # every node gets a consistent verdict even on a slow request
         # that straddles IST midnight.
         today_ist: _date_type = datetime.now(IST).date()
 
-        # All queries filter by the denormalized project_id (one index
-        # per table). The local helper applies the soft-delete filter
-        # unless the caller asked to include deleted rows.
-        def _scoped(stmt, model):
-            stmt = stmt.where(model.project_id == project_id)
-            if not include_deleted:
-                stmt = stmt.where(model.deleted_at.is_(None))
-            return stmt
-
-        milestones = list(
-            db.execute(
-                _scoped(select(Milestone), Milestone)
-                .order_by(Milestone.position.asc(), Milestone.id.asc())
-            ).scalars().all()
-        )
-        activities = list(
-            db.execute(
-                _scoped(select(Activity), Activity)
-                .order_by(Activity.position.asc(), Activity.id.asc())
-            ).scalars().all()
-        )
-        act_resources = list(
-            db.execute(_scoped(select(ActivityResource), ActivityResource))
-            .scalars().all()
+        (
+            milestones, activities, act_resources,
+            tasks, task_resources,
+            subtasks, sub_resources,
+        ) = self._fetch_tree_entities(
+            project_id, include_deleted=include_deleted,
         )
 
         # One-shot vendor lookup so each activity node emits ``vendorName``
         # alongside ``vendorId`` — the FE consumes the tree for dependency
         # graphs and was forced to do a per-vendorId round-trip before
         # this lookup landed in the monolith.
-        vendor_ids: set = {a.vendor_id for a in activities if a.vendor_id}
-        vendor_name_by_id: Dict[str, str] = {}
-        if vendor_ids:
-            v_stmt = (
-                select(Vendor.id, Vendor.name)
-                .where(Vendor.id.in_(vendor_ids))
-            )
-            for vid, vname in db.execute(v_stmt).all():
-                vendor_name_by_id[vid] = vname
-
-        tasks = list(
-            db.execute(
-                _scoped(select(Task), Task)
-                .order_by(Task.position.asc(), Task.id.asc())
-            ).scalars().all()
-        )
-        task_resources = list(
-            db.execute(_scoped(select(TaskResource), TaskResource))
-            .scalars().all()
-        )
-        subtasks = list(
-            db.execute(
-                _scoped(select(Subtask), Subtask)
-                .order_by(Subtask.position.asc(), Subtask.id.asc())
-            ).scalars().all()
-        )
-        sub_resources = list(
-            db.execute(_scoped(select(SubtaskResource), SubtaskResource))
-            .scalars().all()
-        )
+        vendor_name_by_id = self._build_vendor_name_map(activities)
 
         # Bulk-resolve assignee display names across all tasks + subtasks
         # in a single users-table read.
@@ -464,55 +507,38 @@ class TreeService:
             db, assignee_uids,
         )
 
-        # Bulk-load dependency edges (4 queries — one per association
-        # table). Store as ``{source_id: [target_id, ...]}`` so each
-        # node render is O(1). Project-svc dependency tables don't carry
-        # project_id or deleted_at, so we narrow by joining against the
-        # live M/A/T/S id sets we already loaded.
+        # Bulk-load dependency edges — 4 queries, one per association
+        # table. Each table is scoped to live M/A/T/S id sets so deleted
+        # endpoints get pruned.
         live_m_ids = {m.id for m in milestones}
         live_a_ids = {a.id for a in activities}
         live_t_ids = {t.id for t in tasks}
         live_s_ids = {s.id for s in subtasks}
 
-        milestone_deps_by_source: Dict[str, List[str]] = defaultdict(list)
-        if live_m_ids:
-            md_stmt = select(
-                MilestoneDependency.from_milestone_id,
-                MilestoneDependency.to_milestone_id,
-            ).where(MilestoneDependency.from_milestone_id.in_(live_m_ids))
-            for src, tgt in db.execute(md_stmt).all():
-                if tgt in live_m_ids:
-                    milestone_deps_by_source[src].append(tgt)
-
-        act_deps_by_source: Dict[str, List[str]] = defaultdict(list)
-        if live_a_ids:
-            ad_stmt = select(
-                ActivityDependency.from_activity_id,
-                ActivityDependency.to_activity_id,
-            ).where(ActivityDependency.from_activity_id.in_(live_a_ids))
-            for src, tgt in db.execute(ad_stmt).all():
-                if tgt in live_a_ids:
-                    act_deps_by_source[src].append(tgt)
-
-        task_deps_by_source: Dict[str, List[str]] = defaultdict(list)
-        if live_t_ids:
-            td_stmt = select(
-                TaskDependency.from_task_id,
-                TaskDependency.to_task_id,
-            ).where(TaskDependency.from_task_id.in_(live_t_ids))
-            for src, tgt in db.execute(td_stmt).all():
-                if tgt in live_t_ids:
-                    task_deps_by_source[src].append(tgt)
-
-        subtask_deps_by_source: Dict[str, List[str]] = defaultdict(list)
-        if live_s_ids:
-            sd_stmt = select(
-                SubtaskDependency.from_subtask_id,
-                SubtaskDependency.to_subtask_id,
-            ).where(SubtaskDependency.from_subtask_id.in_(live_s_ids))
-            for src, tgt in db.execute(sd_stmt).all():
-                if tgt in live_s_ids:
-                    subtask_deps_by_source[src].append(tgt)
+        milestone_deps_by_source = self._bulk_load_dep_edges(
+            dep_model=MilestoneDependency,
+            from_col=MilestoneDependency.from_milestone_id,
+            to_col=MilestoneDependency.to_milestone_id,
+            live_src_ids=live_m_ids, live_tgt_ids=live_m_ids,
+        )
+        act_deps_by_source = self._bulk_load_dep_edges(
+            dep_model=ActivityDependency,
+            from_col=ActivityDependency.from_activity_id,
+            to_col=ActivityDependency.to_activity_id,
+            live_src_ids=live_a_ids, live_tgt_ids=live_a_ids,
+        )
+        task_deps_by_source = self._bulk_load_dep_edges(
+            dep_model=TaskDependency,
+            from_col=TaskDependency.from_task_id,
+            to_col=TaskDependency.to_task_id,
+            live_src_ids=live_t_ids, live_tgt_ids=live_t_ids,
+        )
+        subtask_deps_by_source = self._bulk_load_dep_edges(
+            dep_model=SubtaskDependency,
+            from_col=SubtaskDependency.from_subtask_id,
+            to_col=SubtaskDependency.to_subtask_id,
+            live_src_ids=live_s_ids, live_tgt_ids=live_s_ids,
+        )
 
         # Build the label index ONCE per tree request — populates
         # displayCode + dependsOnDisplay on every node.

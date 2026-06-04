@@ -43,6 +43,26 @@ class ProjectRepository:
             select(Project).where(Project.project_code == project_code)
         ).scalar_one_or_none()
 
+    def name_in_use(self, name: str, *, exclude_id: Optional[str] = None) -> bool:
+        """Bug #141: True if ANOTHER live project already uses ``name``.
+
+        Soft-deleted rows do not block the name (matches the partial unique
+        index ``uq_projects_name_live`` added in p1a000000009). Whitespace
+        is preserved as-stored; callers should pass the trimmed value the
+        schema produces.
+        """
+        if not name:
+            return False
+        stmt = (
+            select(Project.id)
+            .where(Project.name == name)
+            .where(Project.deleted_at.is_(None))
+            .limit(1)
+        )
+        if exclude_id is not None:
+            stmt = stmt.where(Project.id != exclude_id)
+        return self.db.execute(stmt).scalar_one_or_none() is not None
+
     def list_(
         self,
         *,

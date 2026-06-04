@@ -122,13 +122,16 @@ class ActivityService:
                 vendor_id=payload.vendor_id,
             )
         # Date rules — parent floor is the owning milestone (monolith parity).
+        # Per bug #206: activities are exempt from the project-start floor on
+        # actual_start_date — users may "start" an activity before the project
+        # start date. The parent-milestone floor on planned start_date stays.
         validate_entity_dates(
             entity_start=payload.start_date,
             entity_end=payload.end_date,
             actual_start=payload.actual_start_date,
             actual_end=payload.actual_end_date,
             parent_start_date=milestone.start_date,
-            project_start_date=project.start_date if project else None,
+            project_start_date=None,
             entity_label="activity",
             parent_label="milestone",
         )
@@ -308,13 +311,15 @@ class ActivityService:
             new_end = updates.get("end_date", row.end_date)
             new_actual_start = updates.get("actual_start_date", row.actual_start_date)
             new_actual_end = updates.get("actual_end_date", row.actual_end_date)
+            # Bug #206: activities are exempt from the project-start floor on
+            # actual_start_date (see create-path comment above).
             validate_entity_dates(
                 entity_start=new_start,
                 entity_end=new_end,
                 actual_start=new_actual_start,
                 actual_end=new_actual_end,
                 parent_start_date=milestone.start_date if milestone else None,
-                project_start_date=project.start_date if project else None,
+                project_start_date=None,
                 entity_label="activity",
                 parent_label="milestone",
             )

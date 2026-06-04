@@ -119,6 +119,10 @@ class ProjectService:
             owner_other=payload.owner_other,
             require_owner=True,
         )
+        # Bug #141: project names must be unique among LIVE rows. Pre-check
+        # surfaces a friendly 409; uq_projects_name_live is the race-safe
+        # safety net.
+        self._assert_name_unique(payload.name, exclude_id=None)
         # Doc-38: category / categoryOther / categoryOtherReason were
         # removed from the request wire in the monolith. The schema still
         # accepts them for legacy callers, but the controller / service
@@ -207,6 +211,10 @@ class ProjectService:
         # ----- validations on touched fields (monolith parity) ----------
         if "status" in updates:
             self._validate_status(updates["status"])
+        if "name" in updates and updates["name"] != row.name:
+            # Bug #141: live names are unique. Skip the check when the
+            # incoming name equals the stored one (no-op edits).
+            self._assert_name_unique(updates["name"], exclude_id=row.id)
         if "owner" in updates or "owner_other" in updates:
             effective_owner = updates.get("owner", row.owner)
             effective_other = updates.get("owner_other", row.owner_other)
@@ -312,6 +320,13 @@ class ProjectService:
         # zombie row in place" semantics — to bring it back to live the
         # caller must use the dedicated /restore endpoint.
         existing = self.repo.get_by_id(project_id, include_deleted=True)
+        # Bug #141: enforce live-name uniqueness on both INSERT and UPDATE
+        # branches. exclude_id keeps an in-place rename of the same row
+        # from colliding with itself.
+        self._assert_name_unique(
+            payload.name,
+            exclude_id=existing.id if existing is not None else None,
+        )
         if existing is None:
             project_code = generate_project_code()
             if self.repo.get_by_code(project_code) is not None:
@@ -727,6 +742,22 @@ class ProjectService:
                 "violations": violations[:10],
             },
         )
+
+    def _assert_name_unique(
+        self, name: Optional[str], *, exclude_id: Optional[str],
+    ) -> None:
+        """Bug #141: reject any project whose name collides with a live
+        sibling. Soft-deleted rows don't block the name (matches the
+        partial unique index uq_projects_name_live)."""
+        if not name:
+            return
+        if self.repo.name_in_use(name, exclude_id=exclude_id):
+            raise ConflictError(
+                f"A project named {name!r} already exists. Project names "
+                "must be unique.",
+                code="project_name_conflict",
+                details={"name": name},
+            )
 
     def _validate_status(self, status: Optional[str]) -> None:
         """Reject statuses outside the catalog / fallback set.

@@ -13,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.errors import ProjectNotFoundError
-from app.models._cross_schema import User
+from app.models._cross_schema import Division, User
 from app.repositories.project_audit_log_repository import ProjectAuditLogRepository
 from app.repositories.project_repository import ProjectRepository
 
@@ -87,6 +87,18 @@ class AuditLogService:
         ).all()
         return {uid: (login, code) for uid, login, code in rows}
 
+    def _resolve_owner_label(self, owner_code: str) -> str:
+        """Look up the division label for a project owner code. Falls back
+        to the raw code when the label cannot be resolved (null/"others"/
+        unknown code) — Bug #149: audit-log Owner column must display the
+        Division Label, not the Division Code."""
+        if not owner_code or owner_code.lower() == "others":
+            return owner_code
+        label = self.db.execute(
+            select(Division.label).where(Division.code == owner_code)
+        ).scalar_one_or_none()
+        return label or owner_code
+
     def list_for_project(
         self, project_id: str, *, offset: int = 1, page_size: int = 50,
     ) -> Dict[str, Any]:
@@ -121,7 +133,9 @@ class AuditLogService:
                 "project_code": project.project_code,
                 "project_name": project.name,
                 "project_status": project.status,
-                "owner": project.owner,
+                # Bug #149: display the Division Label, not the Division Code.
+                "owner": self._resolve_owner_label(project.owner),
+                "owner_code": project.owner,
             },
             "total": total,
             "count": len(elements),

@@ -40,6 +40,15 @@ class Project(Base):
     __table_args__ = (
         Index("ix_projects_project_code", "project_code", unique=True),
         Index("ix_projects_name", "name"),
+        # Bug #141: project names must be unique among LIVE rows.
+        # Soft-deleted rows free their name. Materialized by
+        # alembic p1a000000009.
+        Index(
+            "uq_projects_name_live",
+            "name",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL"),
+        ),
         Index("ix_projects_active", "active"),
         Index("ix_projects_public", "public"),
         Index("ix_projects_parent_id", "parent_id"),

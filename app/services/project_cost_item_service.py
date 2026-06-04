@@ -266,11 +266,16 @@ class ProjectCostItemService:
         return project
 
     def _validate_milestones(self, project_id: str, milestone_ids: List[str]) -> None:
+        # Meeting milestones (is_meeting=True) are hidden from milestone-
+        # level surfaces and must not be bindable to cost rows — they hold
+        # meeting activities, not deliverable scope. Reject any caller that
+        # tries to bind a cost item to one.
         live = set(self.db.execute(
             select(Milestone.id)
             .where(Milestone.id.in_(milestone_ids))
             .where(Milestone.project_id == project_id)
             .where(Milestone.deleted_at.is_(None))
+            .where(Milestone.is_meeting.is_(False))
         ).scalars())
         missing = [m for m in milestone_ids if m not in live]
         if missing:

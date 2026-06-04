@@ -188,11 +188,17 @@ class _LabelIndex:
 def _index_milestones(
     db: Session, project_id: str, idx: "_LabelIndex",
 ) -> Dict[str, int]:
-    """Label every live milestone ``M{n}`` and return ``{mid: rank}``."""
+    """Label every live milestone ``M{n}`` and return ``{mid: rank}``.
+
+    Meeting milestones (is_meeting=True) are excluded from the M{n}
+    label series — they're hidden from the project tree and shouldn't
+    consume a display position.
+    """
     stmt = (
         select(Milestone.id, Milestone.position)
         .where(Milestone.project_id == project_id)
         .where(Milestone.deleted_at.is_(None))
+        .where(Milestone.is_meeting.is_(False))
         .order_by(asc(Milestone.position), asc(Milestone.id))
     )
     m_id_to_rank: Dict[str, int] = {}
@@ -392,7 +398,13 @@ class TreeService:
     ) -> Tuple[List[Any], List[Any], List[Any], List[Any], List[Any], List[Any], List[Any]]:
         """One pass over M/A/A-resources/T/T-resources/S/S-resources for
         a project. All queries filter by the denormalized ``project_id``
-        and honor the ``include_deleted`` toggle."""
+        and honor the ``include_deleted`` toggle.
+
+        Meeting milestones (``is_meeting=True``) are hidden from the
+        project tree — the FE never renders them. Skip even when
+        ``include_deleted=True`` since there's no UX value in surfacing
+        a soft-deleted meeting row.
+        """
         db = self.db
 
         def _scoped(stmt, model):
@@ -403,6 +415,7 @@ class TreeService:
 
         milestones = list(db.execute(
             _scoped(select(Milestone), Milestone)
+            .where(Milestone.is_meeting.is_(False))
             .order_by(Milestone.position.asc(), Milestone.id.asc())
         ).scalars().all())
         activities = list(db.execute(

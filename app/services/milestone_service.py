@@ -230,6 +230,10 @@ class MilestoneService:
         request=None,
     ):
         row = self.get_by_id(milestone_id)
+        # 2026-06-03 — meeting milestones are auto-managed by the publish
+        # flow. Direct mutation is rejected so the FE doesn't accidentally
+        # rename them or fiddle with their dates.
+        self._assert_not_meeting_milestone(row, action="updated")
         updates = payload.model_dump(exclude_unset=True)
         # Compute `touched` from the ORIGINAL payload before any pops so
         # the field walker can gate sub-resource codes (depends_on,
@@ -367,6 +371,10 @@ class MilestoneService:
 
     def delete(self, milestone_id: str, *, caller_user_id: Optional[str]):
         row = self.get_by_id(milestone_id)
+        # 2026-06-03 — the meeting milestone is auto-managed; refuse to
+        # soft-delete it (would leave existing meeting activities
+        # orphaned).
+        self._assert_not_meeting_milestone(row, action="deleted")
         # Finance-page guard: a milestone bound to a live project-cost row
         # cannot be deleted — it would orphan the cost bundle + its
         # auto-managed payment term. Caller must remove it from finance first.
@@ -393,6 +401,9 @@ class MilestoneService:
         row = self.repo.get_by_id(milestone_id, include_deleted=True)
         if row is None:
             raise MilestoneNotFoundError("The milestone could not be found.")
+        # Restoring a deleted meeting milestone is also auto-managed —
+        # if a project needs one, the publish/JIT path will create it.
+        self._assert_not_meeting_milestone(row, action="restored")
         self.repo.restore(row)
         self.audit.write(
             project_id=row.project_id,
@@ -401,6 +412,19 @@ class MilestoneService:
         )
         self.db.commit()
         return row
+
+    @staticmethod
+    def _assert_not_meeting_milestone(row, *, action: str) -> None:
+        """Refuse direct mutation of a meeting milestone. The publish flow
+        and the project-detail JIT path own its lifecycle; user-driven
+        PATCH / DELETE / restore would bypass that ownership."""
+        if getattr(row, "is_meeting", False):
+            raise ConflictError(
+                f"Meeting milestones cannot be {action}. They are "
+                f"managed automatically by the publish flow.",
+                code="meeting_milestone_immutable",
+                details={"milestone_id": row.id},
+            )
 
     # ----------------------------------------------------- dependency guard
 
@@ -459,11 +483,16 @@ class MilestoneService:
             return
         from sqlalchemy import select
         from app.models.milestone import Milestone
+        # Meeting milestones can't participate in milestone dependencies
+        # (they aren't part of the deliverable scope, so chaining onto them
+        # would be nonsensical). Treat as "missing" so the caller gets a
+        # clear error rather than silently accepting the link.
         rows = self.db.execute(
             select(Milestone.id)
             .where(Milestone.id.in_(depends_on_ids))
             .where(Milestone.project_id == project_id)
             .where(Milestone.deleted_at.is_(None))
+            .where(Milestone.is_meeting.is_(False))
         ).all()
         found = {r[0] for r in rows}
         missing = [d for d in depends_on_ids if d not in found]
@@ -619,11 +648,15 @@ class MilestoneService:
 
         resolved = list(uuid_ids)
         if positions:
+            # Meeting milestones don't get a M{n} display position
+            # (filtered from the tree-service label index), so position-
+            # based resolution must skip them too.
             rows = self.db.execute(
                 select(Milestone.id)
                 .where(Milestone.project_id == project_id)
                 .where(Milestone.position.in_(positions))
                 .where(Milestone.deleted_at.is_(None))
+                .where(Milestone.is_meeting.is_(False))
             ).all()
             resolved.extend(r[0] for r in rows)
         return resolved
@@ -738,10 +771,18 @@ class MilestoneService:
             return
         if project.status != "published":
             return
+        # Auto-close fires only when EVERY deliverable milestone is in a
+        # terminal state. Meeting milestones are auto-created with
+        # ``status="not_completed"`` and stay that way for the life of the
+        # project — if we didn't filter them out here, no published project
+        # could ever satisfy the all-terminal check and auto-close would
+        # silently never fire. Filter ``is_meeting=False`` keeps the check
+        # restricted to real deliverable milestones.
         rows = list(self.db.execute(
             select(Milestone.status)
             .where(Milestone.project_id == project_id)
             .where(Milestone.deleted_at.is_(None))
+            .where(Milestone.is_meeting.is_(False))
         ).all())
         if not rows or not all(is_terminal_status(s) for (s,) in rows):
             return

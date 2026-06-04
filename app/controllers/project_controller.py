@@ -38,6 +38,8 @@ class ProjectController:
 
     def _to_response(
         self, row, *, with_attachments: bool = False,
+        ensure_meeting_milestone: bool = False,
+        caller_user_id: Optional[str] = None,
     ) -> ProjectResponse:
         """Build the wire response for a single project.
 
@@ -46,6 +48,13 @@ class ProjectController:
         save / publish / close / list) leave the field as None — the
         HAL wrap layer drops the key entirely when None so the wire
         body matches monolith exactly.
+
+        2026-06-03 — ``meeting_milestone_id`` is populated for every
+        response. When ``ensure_meeting_milestone=True`` AND the project
+        is published, the JIT path lazily creates the hidden meeting
+        milestone if it's missing (covers projects published before the
+        feature shipped). When False, the field is read-only — the
+        controller doesn't write through the response shaper.
         """
         resp = ProjectResponse.model_validate(row)
         # ``isPublic`` mirrors ``public`` on the wire.
@@ -64,9 +73,40 @@ class ProjectController:
             getattr(row, "total_project_value_excl_tax", 0),
             getattr(row, "tax_percent", 0),
         )
+        # 2026-06-03 — meeting milestone id (hidden container for meeting
+        # activities). Always read first; lazily create on the
+        # project-detail path only.
+        resp.meeting_milestone_id = self._resolve_meeting_milestone_id(
+            row, ensure=ensure_meeting_milestone, caller_user_id=caller_user_id,
+        )
         if with_attachments:
             resp.attachments = self._hydrate_attachments(row.id)
         return resp
+
+    def _resolve_meeting_milestone_id(
+        self, project, *, ensure: bool, caller_user_id: Optional[str],
+    ) -> Optional[str]:
+        """Return the id of the project's meeting milestone if one exists.
+
+        When ``ensure=True`` AND the project is published, lazily create
+        one if absent (covers projects published before the meeting-
+        milestone feature shipped). Reads come for free either way.
+        """
+        existing = self.service.milestones.get_meeting_milestone_id(project.id)
+        if existing is not None:
+            return existing
+        if not ensure:
+            return None
+        if (getattr(project, "status", None) or "").lower() != "published":
+            return None
+        # JIT create. The service helper does its own existence check, so
+        # this is safe even under concurrent detail fetches.
+        new_id = self.service._ensure_meeting_milestone(
+            project, caller_user_id=caller_user_id,
+        )
+        if new_id is not None:
+            self.db.commit()
+        return new_id
 
     def _resolve_owner_label(self, owner_code: Optional[str]) -> Optional[str]:
         """Look up the division label for the project owner via the
@@ -127,6 +167,7 @@ class ProjectController:
 
     def get(
         self, project_id: str, *, caller_is_admin: bool = True,
+        caller_user_id: Optional[str] = None,
     ) -> ProjectResponse:
         """Single-project read.
 
@@ -135,6 +176,12 @@ class ProjectController:
         silent-hide so FE can't distinguish "doesn't exist" from
         "not yet published"). See monolith
         PMIS-OpenProject/app/api/v3/projects/controller.py:304-319.
+
+        2026-06-03 — this is the JIT entry point for the meeting
+        milestone. If the project is published and has no meeting
+        milestone yet, one is created lazily as part of the response
+        shape so the returned ``meeting_milestone_id`` is always non-null
+        for published projects with dates set.
         """
         row = self.service.get_by_id(project_id)
         if not caller_is_admin and (row.status or "") in ("new", "draft"):
@@ -143,7 +190,12 @@ class ProjectController:
                 f"Project with ID {project_id} not found"
             )
         # Only GET single hydrates attachments; matches monolith parity.
-        return self._to_response(row, with_attachments=True)
+        return self._to_response(
+            row,
+            with_attachments=True,
+            ensure_meeting_milestone=True,
+            caller_user_id=caller_user_id,
+        )
 
     def list_(
         self, *,

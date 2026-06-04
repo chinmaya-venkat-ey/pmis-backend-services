@@ -307,10 +307,15 @@ class DashboardService:
         if not project_ids:
             return out
 
+        # --- milestones --------------------------------------------------
+        # Meeting milestones (is_meeting=True) are excluded from dashboard
+        # aggregation — they're auto-managed containers for meeting
+        # activities and shouldn't affect project progress / KPI counts.
         m_stmt = (
             select(Milestone.project_id, Milestone.status, Milestone.end_date)
             .where(Milestone.project_id.in_(project_ids))
             .where(Milestone.deleted_at.is_(None))
+            .where(Milestone.is_meeting.is_(False))
         )
         self._tally_kind_rows(
             out=out,
@@ -322,10 +327,16 @@ class DashboardService:
             ontrack_key="milestonesOntrack",
         )
 
+        # --- activities --------------------------------------------------
+        # JOIN to milestones to skip activities under meeting milestones —
+        # they aren't part of the project's normal deliverable scope, so
+        # they shouldn't drive progress / delayed-count / KPI tiles.
         a_stmt = (
             select(Activity.project_id, Activity.status, Activity.end_date)
+            .join(Milestone, Milestone.id == Activity.milestone_id)
             .where(Activity.project_id.in_(project_ids))
             .where(Activity.deleted_at.is_(None))
+            .where(Milestone.is_meeting.is_(False))
         )
         self._tally_kind_rows(
             out=out,
@@ -376,6 +387,9 @@ class DashboardService:
             )
             .where(Milestone.project_id == project_id)
             .where(Milestone.deleted_at.is_(None))
+            # Meeting milestones (is_meeting=True) are hidden from the
+            # project-detail KPI rows / pie-chart counts.
+            .where(Milestone.is_meeting.is_(False))
             .order_by(Milestone.position.asc())
         )
         return [tuple(r) for r in self.db.execute(stmt).all()]
@@ -386,7 +400,12 @@ class DashboardService:
         """Live activities for a project (optionally narrowed to one
         milestone). Returns tuples ``(id, milestone_id, name, position,
         status, start_date, end_date, actual_start_date,
-        actual_end_date)``."""
+        actual_end_date)``.
+
+        Excludes activities whose parent milestone is_meeting=True UNLESS
+        the caller explicitly addresses the meeting milestone by id (rare;
+        used only when the FE wants to display the meeting roster).
+        """
         stmt = (
             select(
                 Activity.id,
@@ -399,11 +418,17 @@ class DashboardService:
                 Activity.actual_start_date,
                 Activity.actual_end_date,
             )
+            .join(Milestone, Milestone.id == Activity.milestone_id)
             .where(Activity.project_id == project_id)
             .where(Activity.deleted_at.is_(None))
         )
         if milestone_id is not None:
+            # Caller explicitly wants this milestone's activities — even
+            # if it's the meeting milestone.
             stmt = stmt.where(Activity.milestone_id == milestone_id)
+        else:
+            # Default project-wide listing skips meeting activities.
+            stmt = stmt.where(Milestone.is_meeting.is_(False))
         stmt = stmt.order_by(
             Activity.milestone_id.asc(), Activity.position.asc(),
         )

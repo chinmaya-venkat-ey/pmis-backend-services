@@ -600,12 +600,17 @@ class ActivityService:
 
         resolved = list(uuid_ids)
         for ms_pos, act_pos in lookups:
+            # Skip meeting milestones — they don't get an M{n} display code
+            # in the tree, so display-code refs must never resolve to a
+            # meeting activity. A direct UUID for a meeting activity still
+            # resolves above via ``uuid_ids``.
             row = self.db.execute(
                 select(Activity.id)
                 .join(Milestone, Milestone.id == Activity.milestone_id)
                 .where(Milestone.project_id == project_id)
                 .where(Milestone.position == ms_pos)
                 .where(Milestone.deleted_at.is_(None))
+                .where(Milestone.is_meeting.is_(False))
                 .where(Activity.position == act_pos)
                 .where(Activity.deleted_at.is_(None))
             ).scalar_one_or_none()

@@ -231,6 +231,8 @@ class TeamService:
     # ── activities with milestone context ────────────────────────────────────
 
     def _read_team_activities(self, project_id: str) -> List[TeamActivityRow]:
+        # Skip activities under the meeting milestone — the team-management
+        # page is for project deliverables, not the hidden meeting roster.
         rows = self.db.execute(
             select(
                 Activity,
@@ -241,6 +243,7 @@ class TeamService:
             .where(Activity.project_id == project_id)
             .where(Activity.deleted_at.is_(None))
             .where(Milestone.deleted_at.is_(None))
+            .where(Milestone.is_meeting.is_(False))
             .order_by(Milestone.position, Activity.position)
         ).all()
 

@@ -286,8 +286,13 @@ def get_project(
     project_uuid: str,
     controller: Annotated[ProjectController, Depends(get_project_controller)],
     caller_is_admin: Annotated[bool, Depends(get_caller_is_admin)],
+    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
 ):
-    return controller.get(project_uuid, caller_is_admin=caller_is_admin)
+    return controller.get(
+        project_uuid,
+        caller_is_admin=caller_is_admin,
+        caller_user_id=caller_user_id,
+    )
 
 
 @router.patch(

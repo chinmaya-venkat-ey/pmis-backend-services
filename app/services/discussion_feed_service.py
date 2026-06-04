@@ -35,15 +35,22 @@ class DiscussionFeedService:
             raise ProjectNotFoundError(f"Project with ID {project_id} not found")
 
         db = self.db
+        # Skip the meeting milestone — its comments / discussions aren't
+        # part of the project's normal discussion feed.
         milestone_id_to_name = dict(db.execute(
             select(Milestone.id, Milestone.name)
             .where(Milestone.project_id == project_id)
             .where(Milestone.deleted_at.is_(None))
+            .where(Milestone.is_meeting.is_(False))
         ).all())
+        # Skip activities under the meeting milestone too (their comments
+        # belong to the meeting roster, not the project discussion feed).
         activity_id_to_name = dict(db.execute(
             select(Activity.id, Activity.name)
+            .join(Milestone, Milestone.id == Activity.milestone_id)
             .where(Activity.project_id == project_id)
             .where(Activity.deleted_at.is_(None))
+            .where(Milestone.is_meeting.is_(False))
         ).all())
         task_id_to_name = dict(db.execute(
             select(Task.id, Task.name)

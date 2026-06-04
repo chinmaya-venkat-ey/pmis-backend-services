@@ -14,6 +14,7 @@ from typing import Optional
 from uuid import uuid4
 
 from sqlalchemy import (
+    Boolean,
     DateTime,
     ForeignKey,
     Index,
@@ -81,6 +82,20 @@ class Milestone(Base):
     ccn_value: Mapped[Decimal] = mapped_column(
         Numeric(18, 2), nullable=False,
         server_default=text("0"), default=Decimal("0"),
+    )
+
+    # 2026-06-03: meeting-milestone flag. When TRUE, this milestone is
+    # auto-managed by the publish flow and acts as a container for
+    # meeting-type activities. It is filtered out of every milestone-
+    # level surface (list endpoints, dashboards, critical path, discussion
+    # feed) and is not directly editable or deletable via API. The single
+    # project_response field ``meetingMilestoneId`` exposes its id so the
+    # FE can create activities under it. A partial unique index
+    # (see migration p1a000000007_is_meeting) enforces at most one live
+    # meeting milestone per project.
+    is_meeting: Mapped[bool] = mapped_column(
+        Boolean, nullable=False,
+        server_default=text("false"), default=False,
     )
 
     created_at: Mapped[datetime] = mapped_column(

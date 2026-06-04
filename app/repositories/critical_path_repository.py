@@ -21,6 +21,8 @@ class CriticalPathRepository:
         self.db = db
 
     def get_project_activities(self, project_id: str) -> List[Dict[str, Any]]:
+        # Skip activities whose parent milestone is_meeting=True — meeting
+        # activities aren't part of the project's critical-path scope.
         rows = self.db.execute(
             select(
                 Activity.id,
@@ -32,16 +34,20 @@ class CriticalPathRepository:
                 Activity.end_date,
                 Activity.actual_start_date,
                 Activity.actual_end_date,
-            ).where(
+            )
+            .join(Milestone, Milestone.id == Activity.milestone_id)
+            .where(
                 and_(
                     Activity.project_id == project_id,
                     Activity.deleted_at.is_(None),
+                    Milestone.is_meeting.is_(False),
                 )
             ).order_by(Activity.milestone_id, Activity.position)
         ).mappings().all()
         return [dict(r) for r in rows]
 
     def get_project_milestones(self, project_id: str) -> Dict[str, Dict[str, Any]]:
+        # Exclude the meeting milestone — CPM doesn't model meetings.
         rows = self.db.execute(
             select(
                 Milestone.id,
@@ -51,6 +57,7 @@ class CriticalPathRepository:
                 and_(
                     Milestone.project_id == project_id,
                     Milestone.deleted_at.is_(None),
+                    Milestone.is_meeting.is_(False),
                 )
             ).order_by(Milestone.position)
         ).mappings().all()

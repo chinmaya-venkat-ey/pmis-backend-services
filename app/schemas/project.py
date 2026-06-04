@@ -110,6 +110,16 @@ class ProjectResponse(ResponseModel):
     deleted_at: Optional[datetime] = None
     deleted_by: Optional[str] = None
 
+    # 2026-06-03 — id of the hidden meeting milestone for this project.
+    # Populated on every project response for published projects (created
+    # on publish, or just-in-time on detail fetch for projects that
+    # predate the feature). Null for pre-publish projects. FE creates
+    # meeting-type activities by POSTing to
+    # ``/milestones/{meetingMilestoneId}/activities/create``. The
+    # milestone itself is filtered out of every milestone-level surface
+    # (list, dashboards, CPM, discussion feed).
+    meeting_milestone_id: Optional[str] = None
+
     # Monolith parity: ``attachments`` is included ONLY on the GET
     # single-project response. Create / update / upsert / save / publish
     # / close responses + every list element OMIT this field entirely.

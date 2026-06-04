@@ -63,6 +63,11 @@ class ProjectService:
         self.db = db
         self.repo = ProjectRepository(db)
         self.audit = ProjectAuditLogRepository(db)
+        # MilestoneRepository is used by :meth:`_ensure_meeting_milestone`
+        # (2026-06-03 meeting-milestone feature). Importing here lets the
+        # publish flow auto-create the hidden meeting container.
+        from app.repositories.milestone_repository import MilestoneRepository
+        self.milestones = MilestoneRepository(db)
 
     # ---------------------------------------------------------------- read
 
@@ -488,8 +493,68 @@ class ProjectService:
             action="publish", actor_user_id=caller_user_id,
             changes={"from": before, "to": "published"},
         )
+        # 2026-06-03: auto-create the hidden meeting milestone if absent.
+        # See :meth:`_ensure_meeting_milestone` for the full lifecycle
+        # description. Idempotent — a no-op when one already exists.
+        self._ensure_meeting_milestone(row, caller_user_id=caller_user_id)
         self.db.commit()
         return row
+
+    def _ensure_meeting_milestone(
+        self, project, *, caller_user_id: Optional[str],
+    ) -> Optional[str]:
+        """Create the hidden meeting milestone for a project if it doesn't
+        already exist. Returns the (possibly existing) meeting milestone's
+        id, or None if the project has no dates set (date-rules require
+        start/end on every milestone; we silently skip rather than fail).
+
+        Called from:
+          * :meth:`publish` — eagerly creates one as part of the publish
+            transaction so a freshly-published project gets its container
+            in the same commit.
+          * Project-detail controller (JIT path) — fills the gap for
+            projects published BEFORE this feature shipped.
+
+        Idempotent: a partial unique index
+        (``uq_milestones_one_meeting_per_project``) plus this look-before-
+        leap check guarantee at most one live meeting milestone per
+        project even under concurrent requests.
+
+        The created milestone:
+          * ``name = "Meetings"`` — placeholder, filtered out of UI anyway.
+          * ``is_meeting = True``.
+          * ``start_date`` / ``end_date`` = the project's own window so
+            meeting activities can be scheduled anywhere inside it.
+          * ``position`` = ``next_position_for_project`` so the unique
+            (project_id, position) index doesn't conflict.
+          * Status / category default to ``not_completed`` / ``original``.
+        """
+        existing = self.milestones.get_meeting_milestone_id(project.id)
+        if existing is not None:
+            return existing
+        # Date-rules require start_date + end_date on every milestone row.
+        # If the project doesn't have dates yet (rare — publishable projects
+        # normally do), skip rather than fail and let the JIT-create retry
+        # on a later detail fetch when dates exist.
+        if not project.start_date or not project.end_date:
+            return None
+        position = self.milestones.next_position_for_project(project.id)
+        new_row = self.milestones.create(
+            project_id=project.id,
+            name="Meetings",
+            description=None,
+            start_date=project.start_date,
+            end_date=project.end_date,
+            position=position,
+            status="not_completed",
+            priority=None,
+            category="original",
+            ccn_value=0,
+            is_meeting=True,
+            created_by=caller_user_id,
+            updated_by=caller_user_id,
+        )
+        return new_row.id
 
     def close(
         self,
@@ -710,11 +775,19 @@ class ProjectService:
         """Doc-27 publishability gate — every live milestone must have
         ≥1 live activity. Errors match monolith
         (``publish.py:97-121``) byte-for-byte.
+
+        Meeting milestones (``is_meeting=True``) are excluded — they're
+        auto-created post-publish anyway, and would always be empty at
+        the moment the gate fires. The auto-create in :meth:`publish`
+        runs AFTER this gate, so in normal flow they wouldn't even exist
+        here, but the filter is defensive in case a meeting milestone
+        was ever inserted manually or via a future code path.
         """
         live_milestones = self.db.execute(
             select(Milestone.id, Milestone.name)
             .where(Milestone.project_id == project_id)
             .where(Milestone.deleted_at.is_(None))
+            .where(Milestone.is_meeting.is_(False))
         ).all()
         if not live_milestones:
             # Monolith pattern: top-level identifier is ``invalid_publish``;

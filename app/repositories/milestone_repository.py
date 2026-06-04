@@ -52,10 +52,19 @@ class MilestoneRepository:
     def list_for_project(
         self, project_id: str, *,
         offset: int = 1, page_size: int = 50, include_deleted: bool = False,
+        include_meetings: bool = False,
     ) -> Tuple[List[Milestone], int]:
+        """List milestones under a project. By default, meeting milestones
+        (``is_meeting = True``) are filtered out — they're auto-managed
+        containers for meeting-type activities and shouldn't appear in
+        normal milestone-level surfaces. Set ``include_meetings=True``
+        to include them (used by the project-detail controller when it
+        needs to resolve ``meeting_milestone_id``)."""
         clauses = [Milestone.project_id == project_id]
         if not include_deleted:
             clauses.append(Milestone.deleted_at.is_(None))
+        if not include_meetings:
+            clauses.append(Milestone.is_meeting.is_(False))
         stmt = select(Milestone).where(and_(*clauses)).order_by(Milestone.position.asc())
         count_stmt = select(func.count()).select_from(Milestone).where(and_(*clauses))
         total = self.db.execute(count_stmt).scalar_one()
@@ -63,6 +72,18 @@ class MilestoneRepository:
             stmt.offset(max(0, offset - 1) * page_size).limit(page_size)
         ).scalars().all()
         return list(rows), total
+
+    def get_meeting_milestone_id(self, project_id: str) -> Optional[str]:
+        """Return the id of the live meeting milestone for a project,
+        or None if it doesn't exist yet. There is at most one (enforced
+        by the partial unique index ``uq_milestones_one_meeting_per_project``)."""
+        return self.db.execute(
+            select(Milestone.id)
+            .where(Milestone.project_id == project_id)
+            .where(Milestone.is_meeting.is_(True))
+            .where(Milestone.deleted_at.is_(None))
+            .limit(1)
+        ).scalar_one_or_none()
 
     def next_position_for_project(self, project_id: str) -> int:
         row = self.db.execute(

@@ -9,6 +9,10 @@ that table — no cross-schema), then hydrates request.state with:
   - user_permissions : Set[str]  (flat union of role + direct grants)
   - scoped_permissions : Dict[(kind, id), Set[str]]  (Doc-41 scope tiers)
   - is_admin         : bool
+  - vendor_id        : Optional[str]  (caller's owning vendor/organization;
+                       NULL for users with no vendor affiliation. Bug #174:
+                       must be hydrated so non-admin user-list callers are
+                       scoped to their own vendor.)
 
 Anonymous-passthrough: requests with no/invalid/revoked token leave
 request.state anonymous and the route's require_* dep decides what to do.
@@ -71,6 +75,7 @@ def _set_anonymous(request: Request) -> None:
     request.state.user_permissions = set()  # type: Set[str]
     request.state.scoped_permissions = {}
     request.state.is_admin = False
+    request.state.vendor_id = None
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -108,6 +113,12 @@ class AuthMiddleware(BaseHTTPMiddleware):
             perms: Set[str] = rbac.effective_permissions_for_user(user_id)
             scoped = rbac.effective_permissions_by_scope(user_id)
             is_admin: bool = rbac.user_has_admin_role(user_id)
+            # Bug #174: hydrate vendor_id so the user-list endpoint can
+            # scope non-admin callers to their own vendor/organization.
+            # One pure-PK lookup; cheap.
+            from app.models.user import User as _UserModel
+            user_row = db.get(_UserModel, user_id)
+            vendor_id = getattr(user_row, "vendor_id", None) if user_row else None
 
             request.state.user_id = user_id
             request.state.user_login = claims.get("sub")
@@ -116,6 +127,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
             request.state.user_permissions = perms
             request.state.scoped_permissions = scoped
             request.state.is_admin = is_admin
+            request.state.vendor_id = vendor_id
         except Exception as exc:  # noqa: BLE001
             logger.warning("Auth hydration failed for user_id=%s: %s", user_id, exc)
             # Anonymous defaults stay in place; route dep emits 401.

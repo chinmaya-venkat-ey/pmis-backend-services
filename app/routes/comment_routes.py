@@ -73,8 +73,8 @@ def _make_create_endpoint(target_kind: str):
         request: Request,
         controller: Annotated[CommentController, Depends(get_comment_controller)],
         caller_user_id: Annotated[str, Depends(get_current_user_id)],
-        body: str = Form(""),
-        files: Optional[List[UploadFile]] = File(None),
+        body: Annotated[str, Form()] = "",
+        files: Annotated[Optional[List[UploadFile]], File()] = None,
     ) -> CommentResponse:
         project_id = _project_id_for_target(target_kind, target_id)
         assert_action_allowed(
@@ -105,8 +105,8 @@ def _make_list_endpoint(target_kind: str):
         target_id: str,
         request: Request,
         controller: Annotated[CommentController, Depends(get_comment_controller)],
-        offset: int = Query(1, ge=1),
-        page_size: int = Query(20, ge=1, le=100, alias="pageSize"),
+        offset: Annotated[int, Query(ge=1)] = 1,
+        page_size: Annotated[int, Query(ge=1, le=100, alias="pageSize")] = 20,
     ):
         project_id = _project_id_for_target(target_kind, target_id)
         assert_action_allowed(
@@ -160,7 +160,6 @@ for _path, _kind in _KIND_BY_PATH.items():
 
 @router.get(
     "/comments/{comment_id}",
-    response_model=CommentResponse,
     summary="Fetch a single comment or attachment by its id",
     description=(
         "Resolve one comment/attachment row by its OWN id — independent "

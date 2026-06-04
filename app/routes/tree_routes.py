@@ -33,6 +33,6 @@ router = APIRouter(prefix="/projects", tags=["tree"])
 def get_project_tree(
     project_uuid: str,
     controller: Annotated[TreeController, Depends(get_tree_controller)],
-    include_deleted: bool = Query(False, alias="includeDeleted"),
+    include_deleted: Annotated[bool, Query(alias="includeDeleted")] = False,
 ) -> Dict[str, Any]:
     return controller.get_tree(project_uuid, include_deleted=include_deleted)

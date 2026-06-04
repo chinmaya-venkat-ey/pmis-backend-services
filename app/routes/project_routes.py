@@ -227,9 +227,9 @@ def list_projects(
     controller: Annotated[ProjectController, Depends(get_project_controller)],
     caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
     caller_is_admin: Annotated[bool, Depends(get_caller_is_admin)],
-    offset: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100, alias="pageSize"),
-    active: Optional[bool] = Query(None),
+    offset: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100, alias="pageSize")] = 20,
+    active: Annotated[Optional[bool], Query()] = None,
 ):
     # Monolith parity (Doc-38): query schema is offset / pageSize / active
     # / includeDeleted ONLY — ``public`` + ``status`` were dropped.
@@ -253,9 +253,9 @@ def list_all_projects(
     controller: Annotated[ProjectController, Depends(get_project_controller)],
     caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
     caller_is_admin: Annotated[bool, Depends(get_caller_is_admin)],
-    offset: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100, alias="pageSize"),
-    active: Optional[bool] = Query(None),
+    offset: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100, alias="pageSize")] = 20,
+    active: Annotated[Optional[bool], Query()] = None,
 ):
     held = getattr(request.state, "user_permissions", None) or set()
     return controller.list_(
@@ -373,7 +373,7 @@ def close_project(
     project_uuid: str,
     controller: Annotated[ProjectController, Depends(get_project_controller)],
     caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
-    payload: Optional[ProjectCloseRequest] = Body(default=None),
+    payload: Annotated[Optional[ProjectCloseRequest], Body()] = None,
 ):
     return controller.close(project_uuid, payload, caller_user_id=caller_user_id)
 
@@ -455,11 +455,11 @@ def list_project_assignable_users(
 def list_project_audit_logs(
     project_uuid: str,
     controller: Annotated[ProjectController, Depends(get_project_controller)],
-    offset: int = Query(1, ge=1, description="Page number (1-indexed)."),
-    page_size: int = Query(
-        50, ge=1, le=200, alias="pageSize",
+    offset: Annotated[int, Query(ge=1, description="Page number (1-indexed).")] = 1,
+    page_size: Annotated[int, Query(
+        ge=1, le=200, alias="pageSize",
         description="Items per page (max 200).",
-    ),
+    )] = 50,
 ):
     return controller.audit_logs(
         project_uuid, offset=offset, page_size=page_size,
@@ -482,11 +482,11 @@ def list_project_audit_logs(
 def list_project_discussion_feed(
     project_uuid: str,
     controller: Annotated[ProjectController, Depends(get_project_controller)],
-    offset: int = Query(1, ge=1, description="Page number (1-indexed)."),
-    page_size: int = Query(
-        50, ge=1, le=200, alias="pageSize",
+    offset: Annotated[int, Query(ge=1, description="Page number (1-indexed).")] = 1,
+    page_size: Annotated[int, Query(
+        ge=1, le=200, alias="pageSize",
         description="Items per page (max 200).",
-    ),
+    )] = 50,
 ):
     return controller.discussion_feed(
         project_uuid, offset=offset, page_size=page_size,
@@ -532,7 +532,7 @@ async def upload_project_attachments(
     project_uuid: str,
     controller: Annotated[ProjectController, Depends(get_project_controller)],
     caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
-    files: List[UploadFile] = File(...),
+    files: Annotated[List[UploadFile], File()],
 ):
     return controller.attachments.upload(
         "project", project_uuid, files,

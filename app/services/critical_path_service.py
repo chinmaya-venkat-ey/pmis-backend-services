@@ -252,18 +252,18 @@ def _forward_pass(
     predecessors: Dict[str, Set[str]],
     get_duration,
 ) -> Tuple[Dict[str, int], Dict[str, int], int]:
-    ES: Dict[str, int] = {}
-    EF: Dict[str, int] = {}
+    es: Dict[str, int] = {}
+    ef: Dict[str, int] = {}
     for aid in topo_order:
         dn, dd = get_duration(aid)
         dur = _effective_duration(dn, dd)
         if not predecessors.get(aid):
-            ES[aid] = 1
+            es[aid] = 1
         else:
-            ES[aid] = max(EF[pred] for pred in predecessors[aid]) + 1
-        EF[aid] = ES[aid] + dur - 1
-    project_end = max(EF.values()) if EF else 1
-    return ES, EF, project_end
+            es[aid] = max(ef[pred] for pred in predecessors[aid]) + 1
+        ef[aid] = es[aid] + dur - 1
+    project_end = max(ef.values()) if ef else 1
+    return es, ef, project_end
 
 
 def _backward_pass(
@@ -272,17 +272,17 @@ def _backward_pass(
     project_end: int,
     get_duration,
 ) -> Tuple[Dict[str, int], Dict[str, int]]:
-    LF: Dict[str, int] = {}
-    LS: Dict[str, int] = {}
+    lf: Dict[str, int] = {}
+    ls: Dict[str, int] = {}
     for aid in reversed(topo_order):
         dn, dd = get_duration(aid)
         dur = _effective_duration(dn, dd)
         if not successors.get(aid):
-            LF[aid] = project_end
+            lf[aid] = project_end
         else:
-            LF[aid] = min(LS[succ] for succ in successors[aid]) - 1
-        LS[aid] = LF[aid] - dur + 1
-    return LS, LF
+            lf[aid] = min(ls[succ] for succ in successors[aid]) - 1
+        ls[aid] = lf[aid] - dur + 1
+    return ls, lf
 
 
 def _build_code_map(
@@ -327,10 +327,10 @@ def _build_schedule_row(
     milestones: Dict[str, Dict[str, Any]],
     predecessors: Dict[str, Set[str]],
     successors: Dict[str, Set[str]],
-    ES: Dict[str, int],
-    EF: Dict[str, int],
-    LS: Dict[str, int],
-    LF: Dict[str, int],
+    es: Dict[str, int],
+    ef: Dict[str, int],
+    ls: Dict[str, int],
+    lf: Dict[str, int],
     slack_map: Dict[str, int],
     critical_ids: Set[str],
     code_map: Dict[str, str],
@@ -358,7 +358,7 @@ def _build_schedule_row(
         aid=aid,
         predecessors=predecessors,
         successors=successors,
-        es=ES, ef=EF, ls=LS, lf=LF,
+        es=es, ef=ef, ls=ls, lf=lf,
         dur=dur,
         project_end=project_end,
         slack=slk,
@@ -377,10 +377,10 @@ def _build_schedule_row(
         days_delayed=dd,
         effective_duration=dur,
         depends_on=depends_on,
-        early_start=ES.get(aid, 1),
-        early_finish=EF.get(aid, 1),
-        late_start=LS.get(aid, 1),
-        late_finish=LF.get(aid, 1),
+        early_start=es.get(aid, 1),
+        early_finish=ef.get(aid, 1),
+        late_start=ls.get(aid, 1),
+        late_finish=lf.get(aid, 1),
         slack=slk,
         on_critical_path=aid in critical_ids,
         calculation_steps=calc_steps,
@@ -394,10 +394,10 @@ def _build_activity_schedule(
     milestones: Dict[str, Dict[str, Any]],
     predecessors: Dict[str, Set[str]],
     successors: Dict[str, Set[str]],
-    ES: Dict[str, int],
-    EF: Dict[str, int],
-    LS: Dict[str, int],
-    LF: Dict[str, int],
+    es: Dict[str, int],
+    ef: Dict[str, int],
+    ls: Dict[str, int],
+    lf: Dict[str, int],
     slack_map: Dict[str, int],
     critical_ids: Set[str],
     code_map: Dict[str, str],
@@ -411,7 +411,7 @@ def _build_activity_schedule(
             milestones=milestones,
             predecessors=predecessors,
             successors=successors,
-            ES=ES, EF=EF, LS=LS, LF=LF,
+            es=es, ef=ef, ls=ls, lf=lf,
             slack_map=slack_map,
             critical_ids=critical_ids,
             code_map=code_map,
@@ -426,10 +426,10 @@ def _build_flow_nodes(
     *,
     activities: List[Dict[str, Any]],
     milestones: Dict[str, Dict[str, Any]],
-    ES: Dict[str, int],
-    EF: Dict[str, int],
-    LS: Dict[str, int],
-    LF: Dict[str, int],
+    es: Dict[str, int],
+    ef: Dict[str, int],
+    ls: Dict[str, int],
+    lf: Dict[str, int],
     slack_map: Dict[str, int],
     critical_ids: Set[str],
     get_duration,
@@ -443,7 +443,7 @@ def _build_flow_nodes(
         aid = act["id"]
         ms = milestones.get(act["milestone_id"], {})
         ms_pos = ms.get("position", 0)
-        col = ES.get(aid, 1)
+        col = es.get(aid, 1)
         row = ms_order.get(act["milestone_id"], 0)
         dn, dd = get_duration(aid)
         nodes.append(CpaFlowNode(
@@ -455,10 +455,10 @@ def _build_flow_nodes(
             days_needed=dn,
             days_delayed=dd,
             effective_duration=_effective_duration(dn, dd),
-            early_start=ES.get(aid, 1),
-            early_finish=EF.get(aid, 1),
-            late_start=LS.get(aid, 1),
-            late_finish=LF.get(aid, 1),
+            early_start=es.get(aid, 1),
+            early_finish=ef.get(aid, 1),
+            late_start=ls.get(aid, 1),
+            late_finish=lf.get(aid, 1),
             slack=slack_map.get(aid, 0),
             on_critical_path=aid in critical_ids,
             status=act.get("status"),
@@ -594,10 +594,10 @@ class CriticalPathService:
         activity_ids = list(act_by_id.keys())
         topo_order, has_cycle = _topological_sort(activity_ids, predecessors, successors)
 
-        ES, EF, project_end = _forward_pass(topo_order, predecessors, get_duration)
-        LS, LF = _backward_pass(topo_order, successors, project_end, get_duration)
+        es, ef, project_end = _forward_pass(topo_order, predecessors, get_duration)
+        ls, lf = _backward_pass(topo_order, successors, project_end, get_duration)
 
-        slack_map: Dict[str, int] = {aid: LS[aid] - ES[aid] for aid in activity_ids}
+        slack_map: Dict[str, int] = {aid: ls[aid] - es[aid] for aid in activity_ids}
         critical_ids: Set[str] = {aid for aid, s in slack_map.items() if s == 0}
 
         code_map = _build_code_map(activities, milestones)
@@ -612,7 +612,7 @@ class CriticalPathService:
             milestones=milestones,
             predecessors=predecessors,
             successors=successors,
-            ES=ES, EF=EF, LS=LS, LF=LF,
+            es=es, ef=ef, ls=ls, lf=lf,
             slack_map=slack_map,
             critical_ids=critical_ids,
             code_map=code_map,
@@ -623,7 +623,7 @@ class CriticalPathService:
         nodes = _build_flow_nodes(
             activities=activities,
             milestones=milestones,
-            ES=ES, EF=EF, LS=LS, LF=LF,
+            es=es, ef=ef, ls=ls, lf=lf,
             slack_map=slack_map,
             critical_ids=critical_ids,
             get_duration=get_duration,

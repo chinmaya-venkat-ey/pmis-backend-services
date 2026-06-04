@@ -42,7 +42,7 @@ router = APIRouter(
 )
 def get_dashboard_summary(
     controller: Annotated[DashboardController, Depends(get_dashboard_controller)],
-    delay_min_days: int = Query(5, ge=1, le=365, alias="delayMinDays"),
+    delay_min_days: Annotated[int, Query(ge=1, le=365, alias="delayMinDays")] = 5,
 ) -> Dict[str, Any]:
     return controller.summary(delay_min_days=delay_min_days)
 
@@ -61,12 +61,12 @@ def get_dashboard_summary(
 )
 def list_dashboard_projects_route(
     controller: Annotated[DashboardController, Depends(get_dashboard_controller)],
-    bucket: Optional[str] = Query(None),
-    q: Optional[str] = Query(None),
-    vendor_id: Optional[str] = Query(None, alias="vendorId"),
-    division: Optional[str] = Query(None),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(200, ge=1, le=500, alias="pageSize"),
+    bucket: Annotated[Optional[str], Query()] = None,
+    q: Annotated[Optional[str], Query()] = None,
+    vendor_id: Annotated[Optional[str], Query(alias="vendorId")] = None,
+    division: Annotated[Optional[str], Query()] = None,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=500, alias="pageSize")] = 200,
 ) -> Dict[str, Any]:
     return controller.projects(
         bucket=bucket,
@@ -92,7 +92,7 @@ def list_dashboard_projects_route(
 def get_dashboard_project_detail(
     project_uuid: str,
     controller: Annotated[DashboardController, Depends(get_dashboard_controller)],
-    delay_min_days: int = Query(5, ge=1, le=365, alias="delayMinDays"),
+    delay_min_days: Annotated[int, Query(ge=1, le=365, alias="delayMinDays")] = 5,
 ) -> Dict[str, Any]:
     return controller.project_detail(
         project_id=project_uuid, delay_min_days=delay_min_days,
@@ -112,10 +112,10 @@ def get_dashboard_project_detail(
 def get_dashboard_project_items(
     project_uuid: str,
     controller: Annotated[DashboardController, Depends(get_dashboard_controller)],
-    kind: Optional[str] = Query(None),
-    bucket: Optional[str] = Query(None),
-    milestone_id: Optional[str] = Query(None, alias="milestoneId"),
-    min_delay: Optional[int] = Query(None, ge=0, alias="minDelay"),
+    kind: Annotated[Optional[str], Query()] = None,
+    bucket: Annotated[Optional[str], Query()] = None,
+    milestone_id: Annotated[Optional[str], Query(alias="milestoneId")] = None,
+    min_delay: Annotated[Optional[int], Query(ge=0, alias="minDelay")] = None,
 ) -> Dict[str, Any]:
     return controller.project_items(
         project_id=project_uuid,

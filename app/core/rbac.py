@@ -39,7 +39,7 @@ def require_authenticated() -> Callable:
         uid = _user_id(request)
         if not uid:
             raise UnauthorizedError(AUTH_REQUIRED_MESSAGE, code="auth_required")
-        return uid
+        return uid  # NOSONAR(S3516): FastAPI DI — uid is consumed by downstream handlers
 
     return _checker
 
@@ -59,7 +59,7 @@ def require_permission(permission_code: Union[str, object]) -> Callable:
                 code="permission_denied",
                 details={"required": code},
             )
-        return uid
+        return uid  # NOSONAR(S3516): FastAPI DI — uid is consumed by downstream handlers
 
     return _checker
 
@@ -81,7 +81,7 @@ def require_any_permission(*permission_codes: Union[str, object]) -> Callable:
                 code="permission_denied",
                 details={"required_any": list(codes)},
             )
-        return uid
+        return uid  # NOSONAR(S3516): FastAPI DI — uid is consumed by downstream handlers
 
     return _checker
 
@@ -93,7 +93,7 @@ def require_admin() -> Callable:
             raise UnauthorizedError(AUTH_REQUIRED_MESSAGE, code="auth_required")
         if not _is_admin(request):
             raise ForbiddenError("Admin role required", code="admin_required")
-        return uid
+        return uid  # NOSONAR(S3516): FastAPI DI — uid is consumed by downstream handlers
 
     return _checker
 
@@ -238,7 +238,7 @@ def require_project_permission(permission_code: Union[str, object]) -> Callable:
                 code="permission_denied",
                 details={"required": code, "scope": "project", "scope_id": project_id},
             )
-        return uid
+        return uid  # NOSONAR(S3516): FastAPI DI — uid is consumed by downstream handlers
 
     return _checker
 
@@ -263,7 +263,7 @@ def require_org_permission(permission_code: Union[str, object]) -> Callable:
                 code="permission_denied",
                 details={"required": code, "scope": "org", "scope_id": org_id},
             )
-        return uid
+        return uid  # NOSONAR(S3516): FastAPI DI — uid is consumed by downstream handlers
 
     return _checker
 

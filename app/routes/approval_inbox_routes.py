@@ -64,18 +64,15 @@ def list_inbox(
     controller: Annotated[
         ApprovalInboxController, Depends(get_approval_inbox_controller),
     ],
-    role: Optional[str] = Query(
-        default=None,
+    role: Annotated[Optional[str], Query(
         description="concerned_division | activity_owner | admin",
-    ),
-    status: Optional[str] = Query(
-        default=None,
+    )] = None,
+    status: Annotated[Optional[str], Query(
         description="pending | approved | rejected | all (default: pending)",
-    ),
-    search: Optional[str] = Query(
-        default=None,
+    )] = None,
+    search: Annotated[Optional[str], Query(
         description="Free-text search across activity / project / organization",
-    ),
+    )] = None,
 ):
     return controller.list_inbox(
         request, role=role, status=status, search=search,

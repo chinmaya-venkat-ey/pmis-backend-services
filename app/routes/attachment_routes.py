@@ -78,7 +78,7 @@ def _make_upload_endpoint(target_kind: str):
         request: Request,
         controller: Annotated[AttachmentController, Depends(get_attachment_controller)],
         caller_user_id: Annotated[str, Depends(get_current_user_id)],
-        file: UploadFile = File(..., description="A file to attach."),
+        file: Annotated[UploadFile, File(description="A file to attach.")],
     ):
         # Round-8: resolve parent project_id and scope-check ATTACHMENTS_CREATE.
         project_id = _project_id_for_target(target_kind, target_id)
@@ -101,8 +101,8 @@ def _make_list_endpoint(target_kind: str):
         target_id: str,
         request: Request,
         controller: Annotated[AttachmentController, Depends(get_attachment_controller)],
-        offset: int = Query(1, ge=1),
-        page_size: int = Query(20, ge=1, le=100, alias="pageSize"),
+        offset: Annotated[int, Query(ge=1)] = 1,
+        page_size: Annotated[int, Query(ge=1, le=100, alias="pageSize")] = 20,
     ):
         # Round-8: scope-check COMMENTS_READ at the parent project.
         project_id = _project_id_for_target(target_kind, target_id)

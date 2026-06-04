@@ -78,9 +78,9 @@ def create_cost_item(
 def list_cost_items(
     project_uuid: str,
     controller: Annotated[ProjectCostItemController, Depends(get_project_cost_item_controller)],
-    offset: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=100, alias="pageSize"),
-    include_deleted: bool = Query(False, alias="includeDeleted"),
+    offset: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100, alias="pageSize")] = 50,
+    include_deleted: Annotated[bool, Query(alias="includeDeleted")] = False,
 ):
     return controller.list_for_project(
         project_uuid, offset=offset, page_size=page_size, include_deleted=include_deleted,
@@ -166,9 +166,9 @@ payment_term_project_scoped_router = APIRouter(prefix="/projects", tags=["paymen
 def list_payment_terms(
     project_uuid: str,
     controller: Annotated[ProjectPaymentTermController, Depends(get_project_payment_term_controller)],
-    offset: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=100, alias="pageSize"),
-    include_deleted: bool = Query(False, alias="includeDeleted"),
+    offset: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100, alias="pageSize")] = 50,
+    include_deleted: Annotated[bool, Query(alias="includeDeleted")] = False,
 ):
     return controller.list_for_project(
         project_uuid, offset=offset, page_size=page_size, include_deleted=include_deleted,
@@ -258,7 +258,7 @@ def set_phase_qrg(
     controller: Annotated[PaymentPageController, Depends(get_payment_page_controller)],
     caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
     caller_is_admin: Annotated[bool, Depends(get_caller_is_admin)],
-    phase: int = Path(ge=0),
+    phase: Annotated[int, Path(ge=0)],
 ):
     return controller.set_qrg(
         project_uuid, phase, payload.qrg_applied,

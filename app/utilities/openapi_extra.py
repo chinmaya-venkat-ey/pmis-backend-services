@@ -270,7 +270,7 @@ def multipart_files_only_request_body(
 
 
 def multipart_body_and_files_request_body(
-    *, _description: str = "Comment body and/or files (one required).",
+    *, _description: str = "Comment body and/or files (one required).",  # NOSONAR(S1172): underscore prefix marks intentionally-unused param
 ) -> Dict[str, Any]:
     """``POST /project/<kind>/{id}/comments`` — body + files multipart shape."""
     return {

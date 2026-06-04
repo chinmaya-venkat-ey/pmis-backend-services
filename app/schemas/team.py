@@ -23,9 +23,13 @@ _DESC_USER_IDS_APPROVER = "User IDs (single approver; first wins)"
 _EX_ACTIVITY_NAME = "Requirements Gathering"
 
 
+# ── Sample user IDs reused across schema examples ──────────────────────────
+_EX_ID_1 = "usr-0001"
+_EX_ID_2 = "usr-0002"
+
 # ── Sample user chips reused across schema examples ─────────────────────────
-_EX_USER1 = {"id": "usr-0001", "login": "rajesh.kumar",  "email": "rajesh.kumar@uidai.gov.in",  "first_name": "Rajesh", "last_name": "Kumar"}
-_EX_USER2 = {"id": "usr-0002", "login": "priya.sharma",  "email": "priya.sharma@uidai.gov.in",  "first_name": "Priya",  "last_name": "Sharma"}
+_EX_USER1 = {"id": _EX_ID_1, "login": "rajesh.kumar",  "email": "rajesh.kumar@uidai.gov.in",  "first_name": "Rajesh", "last_name": "Kumar"}
+_EX_USER2 = {"id": _EX_ID_2, "login": "priya.sharma",  "email": "priya.sharma@uidai.gov.in",  "first_name": "Priya",  "last_name": "Sharma"}
 _EX_USER3 = {"id": "usr-0003", "login": "amit.singh",    "email": "amit.singh@uidai.gov.in",    "first_name": "Amit",   "last_name": "Singh"}
 _EX_USER4 = {"id": "usr-0004", "login": "deepa.nair",    "email": "deepa.nair@uidai.gov.in",    "first_name": "Deepa",  "last_name": "Nair"}
 _EX_USER5 = {"id": "usr-0005", "login": "suresh.patel",  "email": "suresh.patel@uidai.gov.in",  "first_name": "Suresh", "last_name": "Patel"}
@@ -80,8 +84,8 @@ class OwnershipWrite(BaseModel):
         extra="ignore",
         json_schema_extra={
             "example": {
-                "project_owner": ["usr-0001"],
-                "approver": ["usr-0002"],
+                "project_owner": [_EX_ID_1],
+                "approver": [_EX_ID_2],
             }
         },
     )
@@ -128,12 +132,12 @@ class ActivityAssignmentsWrite(BaseModel):
                 "owner":         ["usr-0003"],
                 "owner_approver":["usr-0004"],
                 "division_users": {
-                    "IT_DIV":    ["usr-0001", "usr-0002"],
+                    "IT_DIV":    [_EX_ID_1, _EX_ID_2],
                     "LEGAL_DIV": ["usr-0005"],
                 },
                 "division_approvers": {
                     "IT_DIV":    ["usr-0004"],
-                    "LEGAL_DIV": ["usr-0002"],
+                    "LEGAL_DIV": [_EX_ID_2],
                 },
             }
         },
@@ -254,27 +258,27 @@ class TeamWriteRequest(BaseModel):
         json_schema_extra={
             "example": {
                 "ownership": {
-                    "project_owner": ["usr-0001"],
-                    "approver":      ["usr-0002"],
+                    "project_owner": [_EX_ID_1],
+                    "approver":      [_EX_ID_2],
                 },
                 "activity_assignments": {
                     "act-a101": {
                         "owner":          ["usr-0003"],
                         "owner_approver": ["usr-0004"],
                         "division_users": {
-                            "IT_DIV":    ["usr-0001", "usr-0002"],
+                            "IT_DIV":    [_EX_ID_1, _EX_ID_2],
                             "LEGAL_DIV": ["usr-0005"],
                         },
                         "division_approvers": {
                             "IT_DIV":    ["usr-0004"],
-                            "LEGAL_DIV": ["usr-0002"],
+                            "LEGAL_DIV": [_EX_ID_2],
                         },
                     },
                     "act-a102": {
                         "owner":          ["usr-0003"],
                         "owner_approver": ["usr-0004"],
-                        "division_users":     {"IT_DIV": ["usr-0002"]},
-                        "division_approvers": {"IT_DIV": ["usr-0001"]},
+                        "division_users":     {"IT_DIV": [_EX_ID_2]},
+                        "division_approvers": {"IT_DIV": [_EX_ID_1]},
                     },
                 },
             }
@@ -390,16 +394,16 @@ class TeamPageResponse(BaseModel):
                 "projectId": "proj-1111-2222-3333-4444",
                 "projectName": "Aadhaar Service Onboarding",
                 "userDirectory": [
-                    {"id": "usr-0001", "name": "Rajesh Kumar (rajesh.kumar)"},
-                    {"id": "usr-0002", "name": "Priya Sharma (priya.sharma)"},
+                    {"id": _EX_ID_1, "name": "Rajesh Kumar (rajesh.kumar)"},
+                    {"id": _EX_ID_2, "name": "Priya Sharma (priya.sharma)"},
                 ],
                 "orgUser": [
-                    {"roleLabel": "project_admin",  "users": ["usr-0001"]},
-                    {"roleLabel": "project_member", "users": ["usr-0002"]},
+                    {"roleLabel": "project_admin",  "users": [_EX_ID_1]},
+                    {"roleLabel": "project_member", "users": [_EX_ID_2]},
                 ],
                 "projectOwner": [
-                    {"roleLabel": "Approver",      "users": ["usr-0002"], "single": True},
-                    {"roleLabel": "Project Owner", "users": ["usr-0001"]},
+                    {"roleLabel": "Approver",      "users": [_EX_ID_2], "single": True},
+                    {"roleLabel": "Project Owner", "users": [_EX_ID_1]},
                 ],
                 "activities": [
                     {
@@ -407,10 +411,10 @@ class TeamPageResponse(BaseModel):
                         "name": _EX_ACTIVITY_NAME,
                         "milestone": "Planning",
                         "concernedDivisions": ["IT_DIV", "LEGAL_DIV"],
-                        "owner": ["usr-0001"],
-                        "ownerApprover": ["usr-0002"],
-                        "divisionUsers": {"IT_DIV": ["usr-0001"], "LEGAL_DIV": ["usr-0002"]},
-                        "divisionApprovers": {"IT_DIV": ["usr-0002"], "LEGAL_DIV": ["usr-0001"]},
+                        "owner": [_EX_ID_1],
+                        "ownerApprover": [_EX_ID_2],
+                        "divisionUsers": {"IT_DIV": [_EX_ID_1], "LEGAL_DIV": [_EX_ID_2]},
+                        "divisionApprovers": {"IT_DIV": [_EX_ID_2], "LEGAL_DIV": [_EX_ID_1]},
                     }
                 ],
             }
@@ -555,7 +559,7 @@ class AssociatedUserEntry(BaseModel):
         populate_by_name=True,
         json_schema_extra={
             "example": {
-                "id": "usr-0001",
+                "id": _EX_ID_1,
                 "login": "rajesh.kumar",
                 "email": "rajesh.kumar@uidai.gov.in",
                 "firstName": "Rajesh",
@@ -589,7 +593,7 @@ class AssociatedUsersResponse(BaseModel):
             "example": {
                 "users": [
                     {
-                        "id": "usr-0001", "login": "rajesh.kumar",
+                        "id": _EX_ID_1, "login": "rajesh.kumar",
                         "email": "rajesh.kumar@uidai.gov.in",
                         "firstName": "Rajesh", "lastName": "Kumar",
                         "matchedOrganizations": [

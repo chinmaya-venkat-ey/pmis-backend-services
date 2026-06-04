@@ -150,9 +150,9 @@ async def create_milestone(
 def list_project_milestones(
     project_uuid: str,
     controller: Annotated[MilestoneController, Depends(get_milestone_controller)],
-    offset: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100, alias="pageSize"),
-    include_deleted: bool = Query(False, alias="includeDeleted"),
+    offset: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100, alias="pageSize")] = 20,
+    include_deleted: Annotated[bool, Query(alias="includeDeleted")] = False,
 ):
     return controller.list_for_project(
         project_uuid, offset=offset, page_size=page_size,

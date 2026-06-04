@@ -71,7 +71,7 @@ def validate_owner_pair(
     has_other = n_owner_other is not None and n_owner_other != ""
 
     if is_others:
-        if not has_other:
+        if not has_other:  # NOSONAR(S1066): nested structure groups owner=='others' rules
             raise ValidationError(
                 "ownerOther is required (non-empty) when owner is 'others'."
             )

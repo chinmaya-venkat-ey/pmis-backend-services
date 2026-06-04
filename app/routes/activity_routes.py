@@ -145,9 +145,9 @@ async def create_activity(
 def list_milestone_activities(
     milestone_id: str,
     controller: Annotated[ActivityController, Depends(get_activity_controller)],
-    offset: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100, alias="pageSize"),
-    include_deleted: bool = Query(False, alias="includeDeleted"),
+    offset: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100, alias="pageSize")] = 20,
+    include_deleted: Annotated[bool, Query(alias="includeDeleted")] = False,
 ):
     return controller.list_for_milestone(
         milestone_id, offset=offset, page_size=page_size,

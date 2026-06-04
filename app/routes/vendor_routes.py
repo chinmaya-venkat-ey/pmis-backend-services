@@ -180,7 +180,7 @@ def _apply_user_assignments(
     db: Session,
     vendor_id: str,
     assignments: List[Dict[str, Any]],
-    actor_id: Optional[str] = None,
+    actor_id: Optional[str] = None,  # NOSONAR(S1172): reserved for future audit-log instrumentation; caller already passes it
 ) -> None:
     if not assignments:
         return
@@ -233,10 +233,9 @@ def _apply_user_assignments(
 def list_vendors(
     request: Request,
     db: Annotated[Session, Depends(get_db)],
-    active_only: bool = Query(
-        False,
+    active_only: Annotated[bool, Query(
         description="When true, return only active vendors. Default false shows all (active + inactive).",
-    ),
+    )] = False,
 ) -> Dict[str, Any]:
     is_admin = getattr(request.state, "is_admin", False)
     caller_vendor_id = getattr(request.state, "user_vendor_id", None)

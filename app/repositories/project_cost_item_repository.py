@@ -144,7 +144,7 @@ class ProjectCostItemRepository:
             .where(ProjectCostItem.cost_type_code == "fixed")
             .where(ProjectCostItem.phase.is_not(None))
         ).all()
-        return {mid: phase for mid, phase in rows}
+        return dict(rows)
 
     def is_milestone_bound(self, milestone_id: str) -> bool:
         """True if the milestone is bound to ANY live cost row (i.e. it's on

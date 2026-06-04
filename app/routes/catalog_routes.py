@@ -47,7 +47,7 @@ router = APIRouter(tags=["catalog"])
 )
 def list_divisions(
     db: Annotated[Session, Depends(get_db)],
-    include_inactive: bool = Query(False),
+    include_inactive: Annotated[bool, Query()] = False,
 ) -> List[DivisionResponse]:
     stmt = select(Division)
     if not include_inactive:
@@ -65,7 +65,7 @@ def list_divisions(
 )
 def list_priorities(
     db: Annotated[Session, Depends(get_db)],
-    include_inactive: bool = Query(False),
+    include_inactive: Annotated[bool, Query()] = False,
 ) -> List[PriorityResponse]:
     stmt = select(Priority)
     if not include_inactive:
@@ -90,7 +90,7 @@ def list_priorities(
 )
 def list_resource_types(
     db: Annotated[Session, Depends(get_db)],
-    include_inactive: bool = Query(False),
+    include_inactive: Annotated[bool, Query()] = False,
 ) -> List[ResourceTypeResponse]:
     stmt = select(ResourceType)
     if not include_inactive:

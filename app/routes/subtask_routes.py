@@ -160,9 +160,9 @@ async def create_subtask_under_task(
 def list_task_subtasks(
     task_id: str,
     controller: Annotated[SubtaskController, Depends(get_subtask_controller)],
-    offset: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100, alias="pageSize"),
-    include_deleted: bool = Query(False, alias="includeDeleted"),
+    offset: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100, alias="pageSize")] = 20,
+    include_deleted: Annotated[bool, Query(alias="includeDeleted")] = False,
 ):
     # Monolith parity: no ``topLevelOnly`` filter — returns every subtask
     # under the task (nested + top-level alike).

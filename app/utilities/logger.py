@@ -32,7 +32,7 @@ class JsonFormatter(logging.Formatter):
 def configure_logging() -> None:
     level = getattr(logging, settings.log_level.upper(), logging.INFO)
     root = logging.getLogger()
-    for handler in list(root.handlers):
+    for handler in list(root.handlers):  # NOSONAR(S7504): list() snapshot required — removeHandler() mutates root.handlers during iteration
         root.removeHandler(handler)
     handler = logging.StreamHandler(sys.stdout)
     if settings.log_format.lower() == "json":

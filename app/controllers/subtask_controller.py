@@ -130,7 +130,7 @@ class SubtaskController:
     def list_for_task(
         self, task_id: str, *,
         offset=1, page_size=100,
-        include_deleted=False, top_level_only=False,
+        include_deleted=False, top_level_only=False,  # NOSONAR(S1172): kept for monolith-parity call site
     ):
         """Monolith parity: returns TOP-LEVEL subtasks only and embeds
         each subtask's nested descendants under a ``subtasks: [...]``

@@ -62,6 +62,9 @@ class CostItemCreateRequest(BaseModel):
     cost_type_code: Annotated[str, Field(min_length=1, max_length=32)]
     phase: Annotated[Optional[int], Field(default=None, ge=0)] = None
     cost: Annotated[Optional[Decimal], Field(default=None, ge=0)] = None
+    # Tax as an exact AMOUNT (cost + taxAmount = total). taxPercent is legacy
+    # (optional, unused).
+    tax_amount: Annotated[Optional[Decimal], Field(default=None, ge=0)] = None
     tax_percent: Annotated[Optional[Decimal], Field(default=None, ge=0, le=100)] = None
     milestone_ids: List[str] = Field(default_factory=list)
     position: Optional[int] = None
@@ -76,6 +79,7 @@ class CostItemUpdateRequest(BaseModel):
     cost_type_code: Annotated[Optional[str], Field(default=None, min_length=1, max_length=32)]
     phase: Annotated[Optional[int], Field(default=None, ge=0)] = None
     cost: Annotated[Optional[Decimal], Field(default=None, ge=0)] = None
+    tax_amount: Annotated[Optional[Decimal], Field(default=None, ge=0)] = None
     tax_percent: Annotated[Optional[Decimal], Field(default=None, ge=0, le=100)] = None
     milestone_ids: Optional[List[str]] = None
     position: Optional[int] = None
@@ -87,8 +91,9 @@ class CostItemResponse(ResponseModel):
     cost_type_code: Optional[str] = None
     phase: Optional[int] = None
     cost: Optional[Decimal] = None
-    tax_percent: Optional[Decimal] = None
-    total: Decimal = Decimal("0.00")          # derived: cost × (1 + tax/100)
+    tax_amount: Optional[Decimal] = None
+    tax_percent: Optional[Decimal] = None      # legacy (unused)
+    total: Decimal = Decimal("0.00")          # derived: cost + taxAmount
     milestone_ids: List[str] = Field(default_factory=list)
     position: int
     created_at: datetime
@@ -124,8 +129,8 @@ class PaymentTermResponse(ResponseModel):
     milestone_id: Optional[str] = None
     frequency_code: Optional[str] = None
     percent_of_payment: Optional[Decimal] = None
-    row_total: Decimal = Decimal("0.00")      # the cost row's total — the base for value/cap
-    value: Decimal = Decimal("0.00")          # derived: percent × rowTotal
+    row_total: Decimal = Decimal("0.00")      # the cost row's own total (informational)
+    value: Decimal = Decimal("0.00")          # derived: percent × the PHASE total
     position: int
     created_at: datetime
     updated_at: datetime

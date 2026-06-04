@@ -71,6 +71,10 @@ class ProjectCostItem(Base):
     phase: Mapped[Optional[int]] = mapped_column(Integer)
 
     cost: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 2))
+    # Tax is now an exact AMOUNT (e.g. 1000 on a 10000 cost). ``total`` =
+    # cost + tax_amount. ``tax_percent`` is the legacy column, kept (optional)
+    # but no longer used in calculations.
+    tax_amount: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 2))
     tax_percent: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2))
 
     position: Mapped[int] = mapped_column(Integer, default=0)

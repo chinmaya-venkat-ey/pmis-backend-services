@@ -119,6 +119,7 @@ class ProjectCostItemService:
                 cost_type_code=cost_type,
                 phase=phase,
                 cost=payload.cost,
+                tax_amount=payload.tax_amount,
                 tax_percent=payload.tax_percent,
                 position=position,
                 created_by=caller_user_id,

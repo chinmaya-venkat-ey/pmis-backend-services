@@ -56,9 +56,10 @@ class PaymentPageService:
         qrg_rows = self.phase_qrg.list_all_live(project_id)
         qrg_applied_by_phase = {q.phase: q.qrg_applied for q in qrg_rows}
 
-        # Row-based calc unit: each payment term's base is ITS cost row's total.
+        # Each cost row's own total (informational ``rowTotal`` per term).
+        # Payment value itself is PHASE-based (see below).
         row_total_by_ci = {
-            c.id: payment_calc.row_total(c.cost, c.tax_percent) for c in cost_rows
+            c.id: payment_calc.row_total(c.cost, c.tax_amount) for c in cost_rows
         }
 
         totals_d = payment_calc.contract_totals(cost_rows)
@@ -85,7 +86,9 @@ class PaymentPageService:
             phase_fixed = payment_calc.phase_fixed_total(cost_rows, phase)
             terms_in_phase = [t for t in term_rows if t.phase == phase]
             term_responses = [
-                _payment_term_response(t, row_total_by_ci.get(t.cost_item_id, Decimal("0")))
+                _payment_term_response(
+                    t, phase_fixed, row_total_by_ci.get(t.cost_item_id, Decimal("0")),
+                )
                 for t in terms_in_phase
             ]
             sum_percent = sum((t.percent_of_payment or Decimal("0")) for t in terms_in_phase)
@@ -174,23 +177,14 @@ class PaymentPageService:
         return project
 
     def _qrg_for_phase(self, project_id: str, phase: int, applied: bool) -> QrgResponse:
-        # NOTE: QRG is still PHASE-based and intentionally left isolated/pending
-        # its own discussion. Values are computed from the row-based payment
-        # values so it stays consistent with the rest of the page.
+        # NOTE: QRG is PHASE-based and intentionally left isolated/pending its
+        # own discussion.
         cost_rows = self.cost_items.list_all_live(project_id)
-        row_total_by_ci = {
-            c.id: payment_calc.row_total(c.cost, c.tax_percent) for c in cost_rows
-        }
         term_rows = [t for t in self.payment_terms.list_all_live(project_id) if t.phase == phase]
         phase_fixed = payment_calc.phase_fixed_total(cost_rows, phase)
         sum_percent = sum((t.percent_of_payment or Decimal("0")) for t in term_rows)
         sum_value = sum(
-            (
-                payment_calc.payment_value(
-                    t.percent_of_payment, row_total_by_ci.get(t.cost_item_id, Decimal("0")),
-                )
-                for t in term_rows
-            ),
+            (payment_calc.payment_value(t.percent_of_payment, phase_fixed) for t in term_rows),
             Decimal("0"),
         )
         return QrgResponse(
@@ -203,17 +197,18 @@ class PaymentPageService:
 
 def _cost_item_response(row, milestone_ids: List[str]) -> CostItemResponse:
     resp = CostItemResponse.model_validate(row)
-    resp.total = payment_calc.row_total(row.cost, row.tax_percent)
+    resp.total = payment_calc.row_total(row.cost, row.tax_amount)
     resp.milestone_ids = list(milestone_ids)
     return resp
 
 
-def _payment_term_response(row, row_base: Decimal) -> PaymentTermResponse:
-    """``row_base`` is the term's COST ROW total — the base for value and the
-    per-row cap. Exposed as ``rowTotal`` for transparency."""
+def _payment_term_response(row, phase_base: Decimal, row_base: Decimal) -> PaymentTermResponse:
+    """Value is PHASE-based: ``percent × phase_base`` (the whole phase total).
+    ``row_base`` is the term's own cost-row total, surfaced as ``rowTotal``
+    for information only."""
     resp = PaymentTermResponse.model_validate(row)
     resp.row_total = payment_calc.to_2dp(row_base)
-    resp.value = payment_calc.payment_value(row.percent_of_payment, row_base)
+    resp.value = payment_calc.payment_value(row.percent_of_payment, phase_base)
     return resp
 
 

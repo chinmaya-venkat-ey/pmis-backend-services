@@ -7,14 +7,17 @@ of truth for every derived figure on the payment page, used by the cost-item
 
 Calculation rules (everything is "on change" — recompute from the rows):
 
-* ``row_total``          — per cost row, ``cost × (1 + tax_percent/100)``.
+* ``row_total``          — per cost row, ``cost + tax_amount`` (tax is now an
+                           exact AMOUNT the user enters, not a percentage; the
+                           legacy ``tax_percent`` column is kept but unused).
 * ``total_contract_cost``— Σ ``row_total`` across every live cost row.
 * ``fixed_cost``         — Σ ``row_total`` of rows with cost_type 'fixed'.
 * ``one_time_cost``      — Σ ``row_total`` of rows with cost_type 'one_time'.
 * ``phase_fixed_total``  — Σ ``row_total`` of the FIXED cost rows in a phase.
                            This is the base a phase's payment terms split.
 * ``payment_value``      — per payment-term row,
-                           ``percent_of_payment/100 × phase_fixed_total``.
+                           ``percent_of_payment/100 × phase_fixed_total``
+                           (PHASE-based: the % is a share of the whole phase).
 * ``qrg_value``          — per phase (when QRG applied),
                            ``phase_fixed_total − Σ payment_value`` (the
                            unallocated balance carried forward). Never below 0.
@@ -50,15 +53,11 @@ def _round_money(value: Decimal) -> Decimal:
     return value.quantize(_QUANTIZE, rounding=ROUND_HALF_UP)
 
 
-def row_total(cost, tax_percent) -> Decimal:
-    """Inclusive-tax total for a single cost row: ``cost × (1 + tax/100)``."""
-    base = _to_decimal(cost)
-    tax = _to_decimal(tax_percent)
-    if base <= _ZERO:
-        return _ZERO
-    if tax <= _ZERO:
-        return _round_money(base)
-    return _round_money(base * (_HUNDRED + tax) / _HUNDRED)
+def row_total(cost, tax_amount) -> Decimal:
+    """Inclusive-tax total for a single cost row: ``cost + tax_amount``.
+    Tax is an exact amount (e.g. 1000 on a 10000 cost → total 11000). Both
+    inputs coerce NULL → 0."""
+    return _round_money(_to_decimal(cost) + _to_decimal(tax_amount))
 
 
 def payment_value(percent_of_payment, phase_fixed_total) -> Decimal:
@@ -103,7 +102,7 @@ def to_2dp(value) -> Decimal:
 
 # --------------------------------------------------------------------------
 # Aggregation over cost-item rows. ``items`` is any iterable of objects with
-# ``cost_type_code`` / ``phase`` / ``cost`` / ``tax_percent`` attributes
+# ``cost_type_code`` / ``phase`` / ``cost`` / ``tax_amount`` attributes
 # (ORM rows work directly). No DB access — the caller loads the rows.
 # --------------------------------------------------------------------------
 
@@ -117,7 +116,7 @@ def contract_totals(items) -> dict:
     fixed = _ZERO
     one_time = _ZERO
     for it in items:
-        rt = row_total(getattr(it, "cost", None), getattr(it, "tax_percent", None))
+        rt = row_total(getattr(it, "cost", None), getattr(it, "tax_amount", None))
         total += rt
         code = _code(it)
         if code == FIXED:
@@ -137,5 +136,5 @@ def phase_fixed_total(items, phase) -> Decimal:
     total = _ZERO
     for it in items:
         if _code(it) == FIXED and getattr(it, "phase", None) == phase:
-            total += row_total(getattr(it, "cost", None), getattr(it, "tax_percent", None))
+            total += row_total(getattr(it, "cost", None), getattr(it, "tax_amount", None))
     return _round_money(total)

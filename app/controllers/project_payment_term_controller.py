@@ -1,6 +1,6 @@
-"""ProjectPaymentTermController — shapes Project-Term responses. Calculations
-are ROW-based: a term's ``value`` = ``percent × its cost row's total``, so the
-controller resolves each term's cost row total as the base.
+"""ProjectPaymentTermController — shapes Project-Term responses. A term's
+``value`` is PHASE-based (``percent × the whole phase total``); ``rowTotal`` is
+the term's own cost-row total, surfaced for information only.
 
 Payment-term rows are auto-managed (created/removed by ProjectCostItemService
 from the cost milestone bundles), so this controller exposes GET + list +
@@ -24,15 +24,14 @@ class ProjectPaymentTermController:
         self.service = ProjectPaymentTermService(db)
         self.cost_items = ProjectCostItemRepository(db)
 
-    def _row_total_by_ci(self, project_id):
-        return {
-            c.id: payment_calc.row_total(c.cost, c.tax_percent)
-            for c in self.cost_items.list_all_live(project_id)
-        }
-
     def _to_response(self, row) -> PaymentTermResponse:
-        base = self._row_total_by_ci(row.project_id).get(row.cost_item_id, Decimal("0"))
-        return _payment_term_response(row, base)
+        cost_rows = self.cost_items.list_all_live(row.project_id)
+        phase_base = payment_calc.phase_fixed_total(cost_rows, row.phase)
+        row_base = next(
+            (payment_calc.row_total(c.cost, c.tax_amount) for c in cost_rows if c.id == row.cost_item_id),
+            Decimal("0"),
+        )
+        return _payment_term_response(row, phase_base, row_base)
 
     def get(self, term_id: str) -> PaymentTermResponse:
         return self._to_response(self.service.get_by_id(term_id))
@@ -47,9 +46,14 @@ class ProjectPaymentTermController:
         rows, total = self.service.list_for_project(
             project_id, offset=offset, page_size=page_size, include_deleted=include_deleted,
         )
-        base_by_ci = self._row_total_by_ci(project_id)
+        cost_rows = self.cost_items.list_all_live(project_id)
+        row_total_by_ci = {c.id: payment_calc.row_total(c.cost, c.tax_amount) for c in cost_rows}
         items = [
-            _payment_term_response(r, base_by_ci.get(r.cost_item_id, Decimal("0")))
+            _payment_term_response(
+                r,
+                payment_calc.phase_fixed_total(cost_rows, r.phase),
+                row_total_by_ci.get(r.cost_item_id, Decimal("0")),
+            )
             for r in rows
         ]
         return {

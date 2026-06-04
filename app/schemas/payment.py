@@ -151,9 +151,9 @@ class QrgUpdateRequest(BaseModel):
 
 class QrgResponse(ResponseModel):
     phase: int
-    applied: bool
+    applied: bool                             # true only on the single QRG phase
     percent: Optional[Decimal] = None         # derived: 100 − Σ percent_of_payment
-    value: Optional[Decimal] = None           # derived: phase fixed total − Σ value
+    value: Optional[Decimal] = None           # derived: QRG phase leftover (distributable amount)
 
 
 # ======================================================================= ccn cap
@@ -182,6 +182,11 @@ class CcnBlock(ResponseModel):
 class PhaseBlock(ResponseModel):
     phase: int
     phase_fixed_total: Decimal = Decimal("0.00")
+    # % cap for this phase's milestone allocations — 100 normally, raised when
+    # the phase receives a QRG share from an earlier QRG phase (Option A).
+    effective_cap_percent: Decimal = Decimal("100.00")
+    # QRG amount this phase received from the distribution (0 if none).
+    qrg_received: Decimal = Decimal("0.00")
     payment_terms: List[PaymentTermResponse] = Field(default_factory=list)
     qrg: QrgResponse
 

@@ -17,7 +17,7 @@ from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
-from app.core.errors import ProjectNotFoundError
+from app.core.errors import ConflictError, ProjectNotFoundError
 from app.repositories.project_audit_log_repository import ProjectAuditLogRepository
 from app.repositories.project_cost_item_repository import ProjectCostItemRepository
 from app.repositories.project_payment_term_repository import ProjectPaymentTermRepository
@@ -54,7 +54,11 @@ class PaymentPageService:
         ms_map = self.cost_items.milestone_ids_by_cost_item([c.id for c in cost_rows])
         term_rows = self.payment_terms.list_all_live(project_id)
         qrg_rows = self.phase_qrg.list_all_live(project_id)
-        qrg_applied_by_phase = {q.phase: q.qrg_applied for q in qrg_rows}
+
+        # QRG (Option A): at most one phase carries it; its leftover is split by
+        # amount across later phases, raising their cap. Pure calc over rows.
+        qrg_phase = self.phase_qrg.get_applied_phase(project_id)
+        qrg_dist = payment_calc.qrg_caps(cost_rows, term_rows, qrg_phase)
 
         # Each cost row's own total (informational ``rowTotal`` per term).
         # Payment value itself is PHASE-based (see below).
@@ -92,19 +96,21 @@ class PaymentPageService:
                 for t in terms_in_phase
             ]
             sum_percent = sum((t.percent_of_payment or Decimal("0")) for t in terms_in_phase)
-            sum_value = sum((r.value for r in term_responses), Decimal("0"))
-            applied = bool(qrg_applied_by_phase.get(phase, False))
+            applied = phase == qrg_phase
             qrg = QrgResponse(
                 phase=phase,
                 applied=applied,
+                # leftover (the QRG phase's distributable amount) + its percent
                 percent=payment_calc.qrg_percent(sum_percent) if applied else None,
-                value=payment_calc.qrg_value(phase_fixed, sum_value) if applied else None,
+                value=qrg_dist["leftover"] if applied else None,
             )
             phase_blocks.append(PhaseBlock(
                 phase=phase,
                 phase_fixed_total=phase_fixed,
                 payment_terms=term_responses,
                 qrg=qrg,
+                effective_cap_percent=qrg_dist["caps"].get(phase, Decimal("100")),
+                qrg_received=qrg_dist["received"].get(phase, Decimal("0")),
             ))
 
         cap_pct = payment_calc.to_2dp(project.ccn_cap_percent)
@@ -129,9 +135,20 @@ class PaymentPageService:
     def set_qrg(
         self, project_id: str, phase: int, applied: bool, *,
         caller_user_id: Optional[str], caller_is_admin: bool = False,
-    ) -> QrgResponse:
+    ) -> PaymentPageResponse:
         project = self._require_project(project_id)
         assert_payment_writable(project, caller_is_admin=caller_is_admin)
+
+        # At most ONE phase per project may carry QRG.
+        if applied:
+            existing = self.phase_qrg.get_applied_phase(project_id)
+            if existing is not None and existing != phase:
+                raise ConflictError(
+                    f"QRG is already applied to phase {existing}. Remove it from "
+                    f"that phase before applying it here.",
+                    code="conflict",
+                    details={"project_id": project_id, "qrg_phase": existing},
+                )
 
         row = self.phase_qrg.get_for_phase(project_id, phase)
         if row is None:
@@ -149,7 +166,8 @@ class PaymentPageService:
             changes={"phase": phase, "qrg_applied": applied},
         )
         self.db.commit()
-        return self._qrg_for_phase(project_id, phase, applied)
+        # QRG ripples across phases (later-phase caps), so return the full page.
+        return self.build_page(project_id)
 
     def update_ccn_cap(
         self, project_id: str, ccn_cap_percent: Decimal, *,
@@ -175,24 +193,6 @@ class PaymentPageService:
         if project is None:
             raise ProjectNotFoundError("The project could not be found.")
         return project
-
-    def _qrg_for_phase(self, project_id: str, phase: int, applied: bool) -> QrgResponse:
-        # NOTE: QRG is PHASE-based and intentionally left isolated/pending its
-        # own discussion.
-        cost_rows = self.cost_items.list_all_live(project_id)
-        term_rows = [t for t in self.payment_terms.list_all_live(project_id) if t.phase == phase]
-        phase_fixed = payment_calc.phase_fixed_total(cost_rows, phase)
-        sum_percent = sum((t.percent_of_payment or Decimal("0")) for t in term_rows)
-        sum_value = sum(
-            (payment_calc.payment_value(t.percent_of_payment, phase_fixed) for t in term_rows),
-            Decimal("0"),
-        )
-        return QrgResponse(
-            phase=phase,
-            applied=applied,
-            percent=payment_calc.qrg_percent(sum_percent) if applied else None,
-            value=payment_calc.qrg_value(phase_fixed, sum_value) if applied else None,
-        )
 
 
 def _cost_item_response(row, milestone_ids: List[str]) -> CostItemResponse:

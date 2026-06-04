@@ -42,7 +42,6 @@ from app.schemas.payment import (
     PaymentPageResponse,
     PaymentTermResponse,
     PaymentTermUpdateRequest,
-    QrgResponse,
     QrgUpdateRequest,
 )
 
@@ -269,8 +268,8 @@ def update_ccn_cap(
 
 @payment_page_router.put(
     "/{project_uuid}/phases/{phase}/qrg",
-    response_model=QrgResponse,
-    summary="Set the per-phase QRG-applied flag",
+    response_model=PaymentPageResponse,
+    summary="Apply/remove QRG on a phase (at most one phase; returns the recomputed page)",
     dependencies=[Depends(require_project_permission(PROJECTS_UPDATE_FINANCE))],
 )
 def set_phase_qrg(

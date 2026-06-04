@@ -138,3 +138,51 @@ def phase_fixed_total(items, phase) -> Decimal:
         if _code(it) == FIXED and getattr(it, "phase", None) == phase:
             total += row_total(getattr(it, "cost", None), getattr(it, "tax_amount", None))
     return _round_money(total)
+
+
+def qrg_caps(cost_rows, term_rows, qrg_phase) -> dict:
+    """QRG distribution (Option A — amount-based, money-conserving).
+
+    At most ONE phase carries QRG (``qrg_phase``; ``None`` = no QRG). Its
+    unallocated leftover (``phaseTotal − Σ payouts``) is split EQUALLY by
+    amount across the SUBSEQUENT phases (number > qrg_phase) that have cost
+    rows. Each such phase's 100% budget rises by its share, expressed as a
+    higher cap: ``effective_cap = 100 + share/phaseTotal × 100``. Milestone
+    ``value`` stays ``% × that phase's own total``; the higher cap just lets
+    the phase absorb its QRG share.
+
+    Returns ``{"caps": {phase: cap%}, "received": {phase: amount},
+    "leftover": amount, "distributed": amount}``. Caps default to 100, received
+    to 0. Pure — the caller loads the rows.
+    """
+    phases = sorted({
+        getattr(c, "phase", None) for c in cost_rows
+        if _code(c) == FIXED and getattr(c, "phase", None) is not None
+    })
+    caps = {p: _HUNDRED for p in phases}
+    received = {p: _ZERO for p in phases}
+    leftover = _ZERO
+    distributed = _ZERO
+
+    if qrg_phase is not None:
+        qpt = phase_fixed_total(cost_rows, qrg_phase)
+        allocated = _ZERO
+        for t in term_rows:
+            if getattr(t, "phase", None) == qrg_phase:
+                allocated += payment_value(getattr(t, "percent_of_payment", None), qpt)
+        leftover = qrg_value(qpt, allocated)
+        later = [p for p in phases if p > qrg_phase and phase_fixed_total(cost_rows, p) > _ZERO]
+        if later and leftover > _ZERO:
+            share = leftover / Decimal(len(later))
+            for p in later:
+                pt = phase_fixed_total(cost_rows, p)
+                received[p] = _round_money(share)
+                caps[p] = _round_money(_HUNDRED + share / pt * _HUNDRED)
+            distributed = _round_money(leftover)
+
+    return {
+        "caps": caps,
+        "received": received,
+        "leftover": _round_money(leftover),
+        "distributed": distributed,
+    }

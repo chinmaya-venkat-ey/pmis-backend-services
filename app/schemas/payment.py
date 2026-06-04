@@ -119,11 +119,13 @@ class PaymentTermUpdateRequest(BaseModel):
 class PaymentTermResponse(ResponseModel):
     id: str
     project_id: str
-    phase: Optional[int] = None
+    phase: Optional[int] = None               # display grouping only
+    cost_item_id: Optional[str] = None        # the cost row this term belongs to (calc unit)
     milestone_id: Optional[str] = None
     frequency_code: Optional[str] = None
     percent_of_payment: Optional[Decimal] = None
-    value: Decimal = Decimal("0.00")          # derived: percent × phase fixed total
+    row_total: Decimal = Decimal("0.00")      # the cost row's total — the base for value/cap
+    value: Decimal = Decimal("0.00")          # derived: percent × rowTotal
     position: int
     created_at: datetime
     updated_at: datetime

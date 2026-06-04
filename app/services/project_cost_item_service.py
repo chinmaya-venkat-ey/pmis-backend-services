@@ -233,43 +233,50 @@ class ProjectCostItemService:
 
     def _reconcile_payment_terms(self, project_id: str, caller_user_id: Optional[str]) -> None:
         """Make the live payment-term rows exactly match the milestones bound
-        to the live FIXED cost rows — one row per milestone, phase taken from
-        the cost binding. Preserves user-entered frequency/percent across
-        add → remove → re-add (restores the soft-deleted row)."""
-        ms_to_phase = self.repo.milestone_phase_map(project_id)
-        eligible = set(ms_to_phase.keys())
+        to the live FIXED cost rows — one row per milestone, carrying its cost
+        row (``cost_item_id``, the calc unit) and that row's phase (display).
+        Preserves user-entered frequency/percent across add → remove → re-add
+        (restores the soft-deleted row)."""
+        binding = self.repo.milestone_cost_binding(project_id)  # {ms: (cost_item_id, phase)}
+        eligible = set(binding.keys())
 
         live_terms = self.payment_terms.list_all_live(project_id)
         live_ms = {t.milestone_id for t in live_terms}
 
-        # Remove terms whose milestone is no longer on a cost row;
-        # move terms whose milestone changed phase.
+        # Remove terms whose milestone is no longer on a cost row; keep the
+        # cost-row / phase stamp current for the rest.
         for term in live_terms:
             if term.milestone_id not in eligible:
                 self.payment_terms.soft_delete(term)
-            elif term.phase != ms_to_phase[term.milestone_id]:
-                self.payment_terms.update(
-                    term, phase=ms_to_phase[term.milestone_id], updated_by=caller_user_id,
-                )
+                continue
+            cost_item_id, phase = binding[term.milestone_id]
+            updates = {}
+            if term.phase != phase:
+                updates["phase"] = phase
+            if term.cost_item_id != cost_item_id:
+                updates["cost_item_id"] = cost_item_id
+            if updates:
+                self.payment_terms.update(term, updated_by=caller_user_id, **updates)
 
         # Add a row for each newly-eligible milestone (restore if one was
         # previously removed, else create a blank row).
-        for milestone_id, phase in ms_to_phase.items():
+        for milestone_id, (cost_item_id, phase) in binding.items():
             if milestone_id in live_ms:
                 continue
             dead = self.payment_terms.get_soft_deleted_by_milestone(project_id, milestone_id)
             if dead is not None:
                 # Bring it back live in a single flush with a FRESH position
-                # (its old slot may be taken) and the current phase, preserving
-                # the user-entered frequency/percent.
+                # (its old slot may be taken) and the current cost row + phase,
+                # preserving the user-entered frequency/percent.
                 self.payment_terms.update(
-                    dead, deleted_at=None, phase=phase,
+                    dead, deleted_at=None, phase=phase, cost_item_id=cost_item_id,
                     position=self.payment_terms.next_position_for_project(project_id),
                     updated_by=caller_user_id,
                 )
             else:
                 self.payment_terms.create(
                     project_id=project_id, phase=phase, milestone_id=milestone_id,
+                    cost_item_id=cost_item_id,
                     frequency_code=None, percent_of_payment=None,
                     position=self.payment_terms.next_position_for_project(project_id),
                     created_by=caller_user_id, updated_by=caller_user_id,

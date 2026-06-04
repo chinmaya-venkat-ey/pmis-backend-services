@@ -99,11 +99,28 @@ class ProjectPaymentTermRepository:
         self, project_id: str, phase: int, *, exclude_id: Optional[str] = None,
     ) -> Decimal:
         """Σ ``percent_of_payment`` across LIVE payment terms in a phase
-        (optionally excluding one row) — for the 100%-per-phase cap."""
+        (optionally excluding one row). Retained for the (phase-based) QRG
+        helper; the per-row cap uses ``sum_percent_for_cost_item``."""
         stmt = (
             select(func.coalesce(func.sum(ProjectPaymentTerm.percent_of_payment), 0))
             .where(ProjectPaymentTerm.project_id == project_id)
             .where(ProjectPaymentTerm.phase == phase)
+            .where(ProjectPaymentTerm.deleted_at.is_(None))
+        )
+        if exclude_id is not None:
+            stmt = stmt.where(ProjectPaymentTerm.id != exclude_id)
+        return Decimal(self.db.execute(stmt).scalar_one())
+
+    def sum_percent_for_cost_item(
+        self, project_id: str, cost_item_id: str, *, exclude_id: Optional[str] = None,
+    ) -> Decimal:
+        """Σ ``percent_of_payment`` across LIVE payment terms belonging to the
+        same COST ROW (optionally excluding one row) — for the 100%-per-row
+        cap."""
+        stmt = (
+            select(func.coalesce(func.sum(ProjectPaymentTerm.percent_of_payment), 0))
+            .where(ProjectPaymentTerm.project_id == project_id)
+            .where(ProjectPaymentTerm.cost_item_id == cost_item_id)
             .where(ProjectPaymentTerm.deleted_at.is_(None))
         )
         if exclude_id is not None:

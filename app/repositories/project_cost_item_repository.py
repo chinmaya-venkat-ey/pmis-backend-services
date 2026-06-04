@@ -146,6 +146,25 @@ class ProjectCostItemRepository:
         ).all()
         return dict(rows)
 
+    def milestone_cost_binding(self, project_id: str) -> dict:
+        """Return ``{milestone_id: (cost_item_id, phase)}`` for every milestone
+        bound to a LIVE FIXED cost row in this project. A milestone is in
+        exactly one cost row (enforced), so the map is well-defined. Drives the
+        payment-term auto-sync (one row per milestone, carrying its cost row +
+        phase)."""
+        rows = self.db.execute(
+            select(
+                CostItemMilestone.milestone_id,
+                CostItemMilestone.cost_item_id,
+                ProjectCostItem.phase,
+            )
+            .join(ProjectCostItem, ProjectCostItem.id == CostItemMilestone.cost_item_id)
+            .where(ProjectCostItem.project_id == project_id)
+            .where(ProjectCostItem.deleted_at.is_(None))
+            .where(ProjectCostItem.cost_type_code == "fixed")
+        ).all()
+        return {mid: (cid, phase) for mid, cid, phase in rows}
+
     def is_milestone_bound(self, milestone_id: str) -> bool:
         """True if the milestone is bound to ANY live cost row (i.e. it's on
         the finance page). Used to block milestone deletion."""

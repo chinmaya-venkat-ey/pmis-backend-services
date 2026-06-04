@@ -70,16 +70,21 @@ class ProjectPaymentTermService:
         if "frequency_code" in updates:
             updates["frequency_code"] = validate_frequency_code(self.db, updates["frequency_code"])
 
-        # HARD per-phase cap: Σ percentOfPayment (live, this phase, excluding
-        # this row) + new value must be <= 100.
-        if "percent_of_payment" in updates and updates["percent_of_payment"] is not None:
+        # HARD per-COST-ROW cap: Σ percentOfPayment (live, same cost row,
+        # excluding this row) + new value must be <= 100. Each cost row is its
+        # own 100% budget, independent of other rows in the same phase.
+        if (
+            "percent_of_payment" in updates
+            and updates["percent_of_payment"] is not None
+            and row.cost_item_id is not None
+        ):
             new_pct = Decimal(str(updates["percent_of_payment"]))
-            others = self.repo.sum_percent_for_phase(
-                row.project_id, row.phase, exclude_id=row.id,
+            others = self.repo.sum_percent_for_cost_item(
+                row.project_id, row.cost_item_id, exclude_id=row.id,
             )
             if others + new_pct > _HUNDRED:
                 raise ValidationError(
-                    "Total % of payment for this phase cannot exceed 100. "
+                    "Total % of payment for this cost row cannot exceed 100. "
                     f"Already allocated {others}%, attempted to add {new_pct}% "
                     f"(headroom {_HUNDRED - others}%).",
                 )

@@ -227,7 +227,7 @@ class ActivityService:
         self.db.commit()
         return row
 
-    def update(
+    def update(  # NOSONAR(S3776): sequential validation gates with order-sensitive side effects (validate -> mutate -> audit -> commit -> depends_on cycle-check) -- refactor deferred to a sprint with FE regression coverage
         self, activity_id: str, payload: ActivityUpdateRequest,
         *, caller_user_id: Optional[str], request=None,
     ):
@@ -306,7 +306,6 @@ class ActivityService:
             or "actual_start_date" in updates or "actual_end_date" in updates
         ):
             milestone = self.milestones.get_by_id(row.milestone_id)
-            project = self.projects.get_by_id(row.project_id)
             new_start = updates.get("start_date", row.start_date)
             new_end = updates.get("end_date", row.end_date)
             new_actual_start = updates.get("actual_start_date", row.actual_start_date)

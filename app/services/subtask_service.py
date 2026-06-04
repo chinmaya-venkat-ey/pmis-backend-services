@@ -70,7 +70,7 @@ class SubtaskService:
             include_deleted=include_deleted, top_level_only=top_level_only,
         )
 
-    def create(
+    def create(  # NOSONAR(S3776): sequential validation gates with order-sensitive side effects (validate -> mutate -> audit -> commit -> depends_on cycle-check) -- refactor deferred to a sprint with FE regression coverage
         self,
         payload: SubtaskCreateRequest,
         *,
@@ -193,7 +193,7 @@ class SubtaskService:
         self.db.commit()
         return row
 
-    def update(
+    def update(  # NOSONAR(S3776): sequential validation gates with order-sensitive side effects (validate -> mutate -> audit -> commit -> depends_on cycle-check) -- refactor deferred to a sprint with FE regression coverage
         self, subtask_id: str, payload: SubtaskUpdateRequest,
         *, caller_user_id: Optional[str], request=None,
     ):

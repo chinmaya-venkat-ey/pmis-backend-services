@@ -142,7 +142,7 @@ class TaskService:
         self.db.commit()
         return row
 
-    def update(
+    def update(  # NOSONAR(S3776): sequential validation gates with order-sensitive side effects (validate -> mutate -> audit -> commit -> depends_on cycle-check) -- refactor deferred to a sprint with FE regression coverage
         self, task_id: str, payload: TaskUpdateRequest,
         *, caller_user_id: Optional[str], request=None,
     ):

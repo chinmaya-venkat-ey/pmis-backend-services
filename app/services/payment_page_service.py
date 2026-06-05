@@ -56,9 +56,11 @@ class PaymentPageService:
         qrg_rows = self.phase_qrg.list_all_live(project_id)
 
         # QRG (Option A): at most one phase carries it; its leftover is split by
-        # amount across later phases, raising their cap. Pure calc over rows.
+        # amount across later phases, GROWING each later phase's total. Pure
+        # calc over rows. effective_total = phaseFixedTotal + qrgReceived.
         qrg_phase = self.phase_qrg.get_applied_phase(project_id)
-        qrg_dist = payment_calc.qrg_caps(cost_rows, term_rows, qrg_phase)
+        qrg_dist = payment_calc.qrg_distribution(cost_rows, term_rows, qrg_phase)
+        qrg_received_by_phase = qrg_dist["received"]
 
         # Each cost row's own total (informational ``rowTotal`` per term).
         # Payment value itself is PHASE-based (see below).
@@ -88,10 +90,13 @@ class PaymentPageService:
         phase_blocks: List[PhaseBlock] = []
         for phase in phases:
             phase_fixed = payment_calc.phase_fixed_total(cost_rows, phase)
+            qrg_recv = qrg_received_by_phase.get(phase, Decimal("0"))
+            # The phase total GROWS by its QRG share; value/cap work on this.
+            effective_total = payment_calc.to_2dp(phase_fixed + qrg_recv)
             terms_in_phase = [t for t in term_rows if t.phase == phase]
             term_responses = [
                 _payment_term_response(
-                    t, phase_fixed, row_total_by_ci.get(t.cost_item_id, Decimal("0")),
+                    t, effective_total, row_total_by_ci.get(t.cost_item_id, Decimal("0")),
                 )
                 for t in terms_in_phase
             ]
@@ -107,10 +112,10 @@ class PaymentPageService:
             phase_blocks.append(PhaseBlock(
                 phase=phase,
                 phase_fixed_total=phase_fixed,
+                qrg_received=qrg_recv,
+                effective_phase_total=effective_total,
                 payment_terms=term_responses,
                 qrg=qrg,
-                effective_cap_percent=qrg_dist["caps"].get(phase, Decimal("100")),
-                qrg_received=qrg_dist["received"].get(phase, Decimal("0")),
             ))
 
         cap_pct = payment_calc.to_2dp(project.ccn_cap_percent)
@@ -203,9 +208,9 @@ def _cost_item_response(row, milestone_ids: List[str]) -> CostItemResponse:
 
 
 def _payment_term_response(row, phase_base: Decimal, row_base: Decimal) -> PaymentTermResponse:
-    """Value is PHASE-based: ``percent × phase_base`` (the whole phase total).
-    ``row_base`` is the term's own cost-row total, surfaced as ``rowTotal``
-    for information only."""
+    """Value is PHASE-based on the phase's EFFECTIVE total
+    (``phaseFixedTotal + qrgReceived``): ``percent × phase_base``. ``row_base``
+    is the term's own cost-row total, surfaced as ``rowTotal`` for info only."""
     resp = PaymentTermResponse.model_validate(row)
     resp.row_total = payment_calc.to_2dp(row_base)
     resp.value = payment_calc.payment_value(row.percent_of_payment, phase_base)

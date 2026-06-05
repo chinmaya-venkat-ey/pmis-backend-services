@@ -9,9 +9,9 @@ create / delete / restore.
 Enforces:
   - publish-lock (admin bypass)
   - frequency_code resolves to an active master (cross-schema mirror)
-  - HARD cap: the sum of percentOfPayment within a phase may not exceed the
-    phase's EFFECTIVE cap — normally 100, but raised when the phase receives a
-    QRG share from an earlier QRG phase (Option A).
+  - HARD cap: the sum of percentOfPayment within a phase may not exceed 100.
+    (QRG distribution GROWS a later phase's total, not its cap — so the cap
+    stays a flat 100% and the bigger value comes from the larger base.)
 Derived ``value`` is computed in the controller / page builder.
 """
 from __future__ import annotations
@@ -24,12 +24,9 @@ from sqlalchemy.orm import Session
 from app.core.errors import ProjectNotFoundError, ValidationError
 from app.models.project_payment_term import ProjectPaymentTerm
 from app.repositories.project_audit_log_repository import ProjectAuditLogRepository
-from app.repositories.project_cost_item_repository import ProjectCostItemRepository
 from app.repositories.project_payment_term_repository import ProjectPaymentTermRepository
-from app.repositories.project_phase_qrg_repository import ProjectPhaseQrgRepository
 from app.repositories.project_repository import ProjectRepository
 from app.schemas.payment import PaymentTermUpdateRequest
-from app.utilities import payment_calc
 from app.utilities.payment_lock import assert_payment_writable
 from app.utilities.payment_masters import validate_frequency_code
 
@@ -42,8 +39,6 @@ class ProjectPaymentTermService:
         self.repo = ProjectPaymentTermRepository(db)
         self.projects = ProjectRepository(db)
         self.audit = ProjectAuditLogRepository(db)
-        self.cost_items = ProjectCostItemRepository(db)
-        self.phase_qrg = ProjectPhaseQrgRepository(db)
 
     # ------------------------------------------------------------------ read
 
@@ -77,9 +72,9 @@ class ProjectPaymentTermService:
             updates["frequency_code"] = validate_frequency_code(self.db, updates["frequency_code"])
 
         # HARD per-PHASE cap: Σ percentOfPayment (live, this phase, excluding
-        # this row) + new value must be <= the phase's EFFECTIVE cap. The cap is
-        # 100 normally, but higher when this phase receives a QRG share from an
-        # earlier QRG phase (Option A — the share raises the budget).
+        # this row) + new value must be <= 100. (A QRG share grows this phase's
+        # base total, not its cap — so the cap is a flat 100% of that bigger
+        # total.)
         if (
             "percent_of_payment" in updates
             and updates["percent_of_payment"] is not None
@@ -89,12 +84,11 @@ class ProjectPaymentTermService:
             others = self.repo.sum_percent_for_phase(
                 row.project_id, row.phase, exclude_id=row.id,
             )
-            cap = self._effective_cap(row.project_id, row.phase)
-            if others + new_pct > cap:
+            if others + new_pct > _HUNDRED:
                 raise ValidationError(
-                    f"Total % of payment for this phase cannot exceed {cap}. "
+                    "Total % of payment for this phase cannot exceed 100. "
                     f"Already allocated {others}%, attempted to add {new_pct}% "
-                    f"(headroom {cap - others}%).",
+                    f"(headroom {_HUNDRED - others}%).",
                 )
 
         before = {k: getattr(row, k) for k in updates}
@@ -114,15 +108,6 @@ class ProjectPaymentTermService:
         if project is None:
             raise ProjectNotFoundError("The project could not be found.")
         return project
-
-    def _effective_cap(self, project_id: str, phase: int) -> Decimal:
-        """The phase's % cap — 100 normally, raised when it receives a QRG
-        share (Option A)."""
-        cost_rows = self.cost_items.list_all_live(project_id)
-        term_rows = self.repo.list_all_live(project_id)
-        qrg_phase = self.phase_qrg.get_applied_phase(project_id)
-        caps = payment_calc.qrg_caps(cost_rows, term_rows, qrg_phase)["caps"]
-        return caps.get(phase, _HUNDRED)
 
 
 def _s(value) -> Optional[str]:

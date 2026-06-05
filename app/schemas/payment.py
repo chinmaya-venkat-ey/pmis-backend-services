@@ -130,7 +130,7 @@ class PaymentTermResponse(ResponseModel):
     frequency_code: Optional[str] = None
     percent_of_payment: Optional[Decimal] = None
     row_total: Decimal = Decimal("0.00")      # the cost row's own total (informational)
-    value: Decimal = Decimal("0.00")          # derived: percent × the PHASE total
+    value: Decimal = Decimal("0.00")          # derived: percent × the phase's EFFECTIVE total (incl QRG share)
     position: int
     created_at: datetime
     updated_at: datetime
@@ -181,12 +181,12 @@ class CcnBlock(ResponseModel):
 
 class PhaseBlock(ResponseModel):
     phase: int
-    phase_fixed_total: Decimal = Decimal("0.00")
-    # % cap for this phase's milestone allocations — 100 normally, raised when
-    # the phase receives a QRG share from an earlier QRG phase (Option A).
-    effective_cap_percent: Decimal = Decimal("100.00")
-    # QRG amount this phase received from the distribution (0 if none).
+    phase_fixed_total: Decimal = Decimal("0.00")     # original cost-rows total of the phase
+    # QRG amount this phase received from an earlier QRG phase (0 if none).
     qrg_received: Decimal = Decimal("0.00")
+    # The base used for milestone value + the 100% cap: phaseFixedTotal + qrgReceived
+    # (e.g. 15000 + 2000 = 17000). Milestone value = % × this.
+    effective_phase_total: Decimal = Decimal("0.00")
     payment_terms: List[PaymentTermResponse] = Field(default_factory=list)
     qrg: QrgResponse
 

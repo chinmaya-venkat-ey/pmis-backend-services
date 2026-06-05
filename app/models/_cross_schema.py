@@ -70,11 +70,11 @@ class User(MirrorBase):
     __table_args__ = {"schema": "users"}
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    user_code: Mapped[Optional[str]] = mapped_column(String(16))
+    user_code: Mapped[Optional[str]] = mapped_column(String(24))
     login: Mapped[str] = mapped_column(String(64))
     email: Mapped[str] = mapped_column(String(255))
-    first_name: Mapped[Optional[str]] = mapped_column(String(64))
-    last_name: Mapped[Optional[str]] = mapped_column(String(64))
+    # Mirrors users.users.full_name; the app reads only full_name.
+    full_name: Mapped[Optional[str]] = mapped_column(String(510))
     status: Mapped[str] = mapped_column(String(16))
     vendor_id: Mapped[Optional[str]] = mapped_column(String(36))
     division: Mapped[Optional[str]] = mapped_column(String(64))

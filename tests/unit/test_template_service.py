@@ -77,7 +77,7 @@ def test_render_email_missing_placeholder_falls_back_to_empty_string():
     from app.services.template_service import TemplateService
 
     fake_template = MagicMock()
-    fake_template.subject = "Hi {first_name}"
+    fake_template.subject = "Hi {full_name}"
     fake_template.body = "Subject only: {nonexistent_placeholder}"
     fake_template.is_html = False
 
@@ -86,7 +86,7 @@ def test_render_email_missing_placeholder_falls_back_to_empty_string():
 
     try:
         svc = TemplateService(MagicMock())
-        subject, body, _ = svc.render_email("anything", {"first_name": "Alice"})
+        subject, body, _ = svc.render_email("anything", {"full_name": "Alice"})
         assert subject == "Hi Alice"
         # The {nonexistent_placeholder} renders as empty string, not raising
         assert "nonexistent_placeholder" not in body

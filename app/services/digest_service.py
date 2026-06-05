@@ -242,8 +242,12 @@ class DigestService:
             user = by_id.get(user_id)
             if user is None or not user.email:
                 continue
+            display_name = (user.full_name or user.login or "there")
             payload = {
-                "first_name": (user.first_name or user.login or "there"),
+                # ``full_name`` is the canonical key; ``first_name`` kept as a
+                # back-compat alias so a not-yet-reseeded template still renders.
+                "full_name": display_name,
+                "first_name": display_name,
                 "items_html": _render_items_html(items),
                 "portal_url": portal_url,
             }

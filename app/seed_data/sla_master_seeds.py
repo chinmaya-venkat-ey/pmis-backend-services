@@ -9,9 +9,12 @@ Numbers and bands track:
   * BSP    : 10 SLAs  — BSP-SLA001..010
   * MSAP   : 10 SLAs  — MSAP-SLA001, 002, 014..021
   * MSIP   : 10 SLAs  — MSIP-SLA001..010
-  * PMU    :  6 SLAs  — PMU-SLA001..006
+  * PMU    : 11 SLAs  — PMU-SLA001..011 (verbatim from RFP §5.28; see file).
 
-Total: 36.
+Total: 41.
+
+PMU note: the 11 PMU SLAs are RFP-verbatim. Other contract families remain
+RFP-adjacent placeholders pending the same treatment.
 """
 from __future__ import annotations
 
@@ -516,82 +519,329 @@ MSIP_SEEDS: List[Dict[str, Any]] = [
 # ---------------------------------------------------------------------------
 
 PMU_SEEDS: List[Dict[str, Any]] = [
+    # ── Phase 1 — deliverable-based SLAs (D1-D8) ──────────────────────────
+    #
+    # SLA 001 / 002 are linear-per-week LDs computed against deliverable cost.
+    # They have NO severity component in the RFP — LD% rises 0.5% (SLA 001)
+    # or 1% (SLA 002) for every week of delay. Until the linear_per_period
+    # evaluator is introduced (Phase 2 of this roadmap), we model the first
+    # 20 weeks of escalation as a fixed_escalation lookup. The cap is
+    # implicit via the per-quarter LD cap on project_ld_bands.
+
+    # RFP §5.28.2.b
     _sla("PMU-SLA001", "PMU", "fixed_escalation",
-         "Report Submission Delay",
-         metrics=[{"metric_key": "report_submission_delay_days",
-                   "display_name": "Report Submission Delay (days)", "unit": "days",
-                   "target_numeric": "0", "direction": "LOWER_BETTER", "is_primary": True}],
-         lookup_table=[
-             {"lookup_key": "on_time", "lookup_value": "0.00", "sort_order": 1},
-             {"lookup_key": "delay_1_3", "lookup_value": "0.10", "sort_order": 2},
-             {"lookup_key": "delay_4_7", "lookup_value": "0.25", "sort_order": 3},
-             {"lookup_key": "delay_8_plus", "lookup_value": "0.50", "sort_order": 4},
-         ]),
-    _sla("PMU-SLA002", "PMU", "band_accumulation",
-         "Site Visit Compliance Rate",
-         metrics=[{"metric_key": "site_visit_compliance_pct",
-                   "display_name": "Site Visit Compliance (%)", "unit": "%",
-                   "target_numeric": "95.0", "direction": "HIGHER_BETTER",
+         "Non-submission of deliverable",
+         description="Per RFP §5.28.2.b — 0.5% of deliverable cost for every "
+                     "week or part thereof of delay attributable to the consultant.",
+         measurement_interval="ONE_TIME",
+         reporting_interval="QUARTERLY",
+         ld_computation_base="FIXED_AMOUNT",
+         metrics=[{"metric_key": "deliverable_delay_weeks",
+                   "display_name": "Weeks delayed", "unit": "weeks",
+                   "target_numeric": "0", "direction": "LOWER_BETTER",
                    "is_primary": True}],
-         condition_bands=[
-             {"metric_key": "site_visit_compliance_pct", "band_label": "Green",
-              "range_min": "95.0", "range_max": None, "range_unit": "%",
-              "rate_percent": "0.00", "sort_order": 1},
-             {"metric_key": "site_visit_compliance_pct", "band_label": "Red",
-              "range_min": None, "range_max": "95.0", "range_unit": "%",
-              "rate_percent": "1.00", "sort_order": 2},
+         parameters=[
+             {"param_key": "ld_rate_per_week_percent", "param_value": "0.5"},
+             {"param_key": "ld_base", "param_value": "DELIVERABLE_COST"},
+         ],
+         lookup_table=[
+             {"lookup_key": f"week_{i}", "lookup_value": f"{i * 0.5:.2f}",
+              "sort_order": i + 1}
+             for i in range(0, 21)  # 0..20 weeks → 0%..10%
          ]),
+
+    # RFP §5.28.2.c
+    _sla("PMU-SLA002", "PMU", "fixed_escalation",
+         "Deliverable not acceptable / defects not rectified",
+         description="Per RFP §5.28.2.c — 1% of deliverable cost for every "
+                     "week or part thereof of delay until defects are rectified.",
+         measurement_interval="ONE_TIME",
+         reporting_interval="QUARTERLY",
+         ld_computation_base="FIXED_AMOUNT",
+         metrics=[{"metric_key": "rectification_delay_weeks",
+                   "display_name": "Weeks delayed in rectification", "unit": "weeks",
+                   "target_numeric": "0", "direction": "LOWER_BETTER",
+                   "is_primary": True}],
+         parameters=[
+             {"param_key": "ld_rate_per_week_percent", "param_value": "1.0"},
+             {"param_key": "ld_base", "param_value": "DELIVERABLE_COST"},
+         ],
+         lookup_table=[
+             {"lookup_key": f"week_{i}", "lookup_value": f"{i * 1.0:.2f}",
+              "sort_order": i + 1}
+             for i in range(0, 11)  # 0..10 weeks → 0%..10%
+         ]),
+
+    # ── Phase 2 & 3 — D9, D10 ────────────────────────────────────────────
+
+    # RFP §5.28.3.a
     _sla("PMU-SLA003", "PMU", "fixed_escalation",
-         "Query Response Delay",
-         metrics=[{"metric_key": "query_response_delay_days",
-                   "display_name": "Query Response Delay (days)", "unit": "days",
-                   "target_numeric": "0", "direction": "LOWER_BETTER", "is_primary": True}],
-         lookup_table=[
-             {"lookup_key": "on_time", "lookup_value": "0.00", "sort_order": 1},
-             {"lookup_key": "delay_1_2", "lookup_value": "0.10", "sort_order": 2},
-             {"lookup_key": "delay_3_plus", "lookup_value": "0.25", "sort_order": 3},
-         ]),
-    _sla("PMU-SLA004", "PMU", "fixed_escalation",
-         "Mean Time to Repair — PMU",
-         metrics=[{"metric_key": "mttr_hours", "display_name": "MTTR (hours)",
-                   "unit": "hours", "target_numeric": "4.0", "direction": "LOWER_BETTER",
+         "Resolution of contract / technical queries beyond 3 working days",
+         description="Per RFP §5.28.3.a — 0.1% LD on NPQP per day of delay "
+                     "beyond the 3 working day SLA, until resolved.",
+         measurement_interval="MONTHLY",
+         reporting_interval="QUARTERLY",
+         ld_computation_base="QUARTERLY_PAYMENT",
+         metrics=[{"metric_key": "query_resolution_delay_days",
+                   "display_name": "Days delayed beyond 3 working days", "unit": "days",
+                   "target_numeric": "0", "direction": "LOWER_BETTER",
                    "is_primary": True}],
+         parameters=[
+             {"param_key": "grace_days", "param_value": "3"},
+             {"param_key": "ld_rate_per_day_percent", "param_value": "0.1"},
+         ],
          lookup_table=[
-             {"lookup_key": "within_4h", "lookup_value": "0.00", "sort_order": 1},
-             {"lookup_key": "4_8h", "lookup_value": "0.25", "sort_order": 2},
-             {"lookup_key": "8_plus", "lookup_value": "1.00", "sort_order": 3},
+             {"lookup_key": f"day_{i}", "lookup_value": f"{i * 0.1:.2f}",
+              "sort_order": i + 1}
+             for i in range(0, 101)  # 0..100 days → 0%..10%
          ]),
-    _sla("PMU-SLA005", "PMU", "band_accumulation",
-         "Governance Tool Failures",
-         metrics=[{"metric_key": "governance_tool_failures_count",
-                   "display_name": "Governance Tool Failures (count)", "unit": "count",
-                   "target_numeric": "0", "direction": "LOWER_BETTER", "is_primary": True}],
-         condition_bands=[
-             {"metric_key": "governance_tool_failures_count", "band_label": "Zero",
-              "range_min": None, "range_max": "0", "range_unit": "count",
-              "rate_percent": "0.00", "sort_order": 1},
-             {"metric_key": "governance_tool_failures_count", "band_label": "1-3",
-              "range_min": "1", "range_max": "3", "range_unit": "count",
-              "rate_percent": "0.50", "sort_order": 2},
-             {"metric_key": "governance_tool_failures_count", "band_label": "4-plus",
-              "range_min": "3", "range_max": None, "range_unit": "count",
-              "rate_percent": "1.00", "sort_order": 3},
-         ]),
-    _sla("PMU-SLA006", "PMU", "band_accumulation",
-         "Incorrect Recommendations Count",
+
+    # RFP §5.28.3.b — severity-banded by occurrence count
+    _sla("PMU-SLA004", "PMU", "point_accumulation",
+         "Incorrect recommendation on acceptance of MSP deliverables",
+         description="Per RFP §5.28.3.b — severity escalates with the number "
+                     "of incorrect recommendations identified in the quarter.",
+         measurement_interval="QUARTERLY",
+         reporting_interval="QUARTERLY",
+         ld_computation_base="QUARTERLY_PAYMENT",
          metrics=[{"metric_key": "incorrect_recommendations_count",
-                   "display_name": "Incorrect Recommendations (count)", "unit": "count",
-                   "target_numeric": "0", "direction": "LOWER_BETTER", "is_primary": True}],
+                   "display_name": "Incorrect recommendations (count)",
+                   "unit": "count", "target_numeric": "0",
+                   "direction": "LOWER_BETTER", "is_primary": True}],
          condition_bands=[
-             {"metric_key": "incorrect_recommendations_count", "band_label": "Zero",
-              "range_min": None, "range_max": "0", "range_unit": "count",
-              "rate_percent": "0.00", "sort_order": 1},
-             {"metric_key": "incorrect_recommendations_count", "band_label": "1-2",
-              "range_min": "1", "range_max": "2", "range_unit": "count",
-              "rate_percent": "0.25", "sort_order": 2},
-             {"metric_key": "incorrect_recommendations_count", "band_label": "3-plus",
-              "range_min": "2", "range_max": None, "range_unit": "count",
-              "rate_percent": "0.75", "sort_order": 3},
+             {"metric_key": "incorrect_recommendations_count",
+              "band_label": "L0 None", "range_min": None, "range_max": "0",
+              "range_unit": "count", "severity_level": 0, "sort_order": 1},
+             {"metric_key": "incorrect_recommendations_count",
+              "band_label": "L2 One occurrence", "range_min": "0", "range_max": "1",
+              "range_unit": "count", "severity_level": 2, "sort_order": 2},
+             {"metric_key": "incorrect_recommendations_count",
+              "band_label": "L3 Two occurrences", "range_min": "1", "range_max": "2",
+              "range_unit": "count", "severity_level": 3, "sort_order": 3},
+             {"metric_key": "incorrect_recommendations_count",
+              "band_label": "L4 More than two", "range_min": "2", "range_max": None,
+              "range_unit": "count", "severity_level": 4, "sort_order": 4},
+         ]),
+
+    # ── D12 & D13 — Resource SLAs ────────────────────────────────────────
+
+    # RFP §5.28.3.c
+    _sla("PMU-SLA005", "PMU", "point_accumulation",
+         "Resource replacements per quarter",
+         description="Per RFP §5.28.3.c — Sev 0 up to 1 replacement; Sev 4 "
+                     "for every additional replacement in the quarter.",
+         measurement_interval="QUARTERLY",
+         reporting_interval="QUARTERLY",
+         ld_computation_base="QUARTERLY_PAYMENT",
+         metrics=[{"metric_key": "resource_replacements_count",
+                   "display_name": "Replacements initiated in quarter",
+                   "unit": "count", "target_numeric": "1",
+                   "direction": "LOWER_BETTER", "is_primary": True}],
+         condition_bands=[
+             {"metric_key": "resource_replacements_count",
+              "band_label": "L0 Up to 1 replacement",
+              "range_min": None, "range_max": "1",
+              "range_unit": "count", "severity_level": 0, "sort_order": 1},
+             {"metric_key": "resource_replacements_count",
+              "band_label": "L4 More than 1 replacement",
+              "range_min": "1", "range_max": None,
+              "range_unit": "count", "severity_level": 4, "sort_order": 2},
+         ]),
+
+    # RFP §5.28.3.d
+    _sla("PMU-SLA006", "PMU", "point_accumulation",
+         "Minimum knowledge-transfer overlap during resource replacement",
+         description="Per RFP §5.28.3.d — Sev 0 when overlap KT period "
+                     ">=20 working days; Sev 4 otherwise.",
+         measurement_interval="QUARTERLY",
+         reporting_interval="QUARTERLY",
+         ld_computation_base="QUARTERLY_PAYMENT",
+         metrics=[{"metric_key": "kt_overlap_working_days",
+                   "display_name": "KT overlap (working days)", "unit": "days",
+                   "target_numeric": "20", "direction": "HIGHER_BETTER",
+                   "is_primary": True}],
+         condition_bands=[
+             {"metric_key": "kt_overlap_working_days",
+              "band_label": "L0 >=20 working days",
+              "range_min": "20", "range_max": None,
+              "range_unit": "days", "severity_level": 0, "sort_order": 1},
+             {"metric_key": "kt_overlap_working_days",
+              "band_label": "L4 <20 working days",
+              "range_min": None, "range_max": "20",
+              "range_unit": "days", "severity_level": 4, "sort_order": 2},
+         ]),
+
+    # RFP §5.28.3.e — primary metric is business days. The "hours per month"
+    # arm of the AND condition is captured as a secondary metric and a guard
+    # so the FE can still collect both values; evaluator treats business
+    # days as authoritative until the per-band compound-condition table
+    # (Phase 2) lands.
+    _sla("PMU-SLA007", "PMU", "point_accumulation",
+         "Minimum resource availability per month",
+         description="Per RFP §5.28.3.e — Sev 0 when business days >=16 AND "
+                     "hours >=144; Sev 2 for 12-15 BD AND 108-135 hrs; Sev 4 "
+                     "when below either threshold. Hours captured separately "
+                     "until per-band AND-conditions are added.",
+         measurement_interval="MONTHLY",
+         reporting_interval="QUARTERLY",
+         ld_computation_base="QUARTERLY_PAYMENT",
+         compound_metric_rule="COMBINED",
+         metrics=[
+             {"metric_key": "resource_business_days",
+              "display_name": "Business days logged (per resource per month)",
+              "unit": "days", "target_numeric": "16",
+              "direction": "HIGHER_BETTER", "is_primary": True},
+             {"metric_key": "resource_logged_hours",
+              "display_name": "Hours logged (per resource per month)",
+              "unit": "hours", "target_numeric": "144",
+              "direction": "HIGHER_BETTER", "is_primary": False},
+         ],
+         condition_bands=[
+             {"metric_key": "resource_business_days",
+              "band_label": "L0 >=16 BD",
+              "range_min": "16", "range_max": None,
+              "range_unit": "days", "severity_level": 0, "sort_order": 1},
+             {"metric_key": "resource_business_days",
+              "band_label": "L2 12-15 BD",
+              "range_min": "12", "range_max": "16",
+              "range_unit": "days", "severity_level": 2, "sort_order": 2},
+             {"metric_key": "resource_business_days",
+              "band_label": "L4 <12 BD",
+              "range_min": None, "range_max": "12",
+              "range_unit": "days", "severity_level": 4, "sort_order": 3},
+         ],
+         guard_conditions=[
+             # Informational guard: if hours don't meet the AND-threshold,
+             # this flags the period for manual review. Evaluator picks up
+             # the guard result and surfaces it in the response.
+             {"metric_key": "resource_logged_hours",
+              "operator": "LT", "threshold_value": "144",
+              "action": "EXCLUDE",
+              "action_description":
+                  "Hours below 144 — verify business-day severity with manual review (Phase 2 will replace this with per-band AND-conditions)."}
+         ]),
+
+    # RFP §5.28.3.f — onboarding variance L-K (K = approval date, L = actual)
+    _sla("PMU-SLA008", "PMU", "point_accumulation",
+         "Onboarding of additional resources within agreed timeline",
+         description="Per RFP §5.28.3.f — variance = (actual onboarding date) "
+                     "- (approval date). Sev 0 if <=21 days; Sev 2 if 22-28; "
+                     "Sev 4 if >28. Continuing-quarter rule applies; not modelled "
+                     "in v1 (manual re-evaluation per quarter).",
+         measurement_interval="QUARTERLY",
+         reporting_interval="QUARTERLY",
+         ld_computation_base="QUARTERLY_PAYMENT",
+         metrics=[{"metric_key": "onboarding_variance_days",
+                   "display_name": "Onboarding variance (L - K, days)",
+                   "unit": "days", "target_numeric": "21",
+                   "direction": "LOWER_BETTER", "is_primary": True}],
+         condition_bands=[
+             {"metric_key": "onboarding_variance_days",
+              "band_label": "L0 <=K+21",
+              "range_min": None, "range_max": "21",
+              "range_unit": "days", "severity_level": 0, "sort_order": 1},
+             {"metric_key": "onboarding_variance_days",
+              "band_label": "L2 K+22 to K+28",
+              "range_min": "21", "range_max": "28",
+              "range_unit": "days", "severity_level": 2, "sort_order": 2},
+             {"metric_key": "onboarding_variance_days",
+              "band_label": "L4 >K+28",
+              "range_min": "28", "range_max": None,
+              "range_unit": "days", "severity_level": 4, "sort_order": 3},
+         ]),
+
+    # RFP §5.28.3.g
+    _sla("PMU-SLA009", "PMU", "point_accumulation",
+         "Delay onboarding replacement resource",
+         description="Per RFP §5.28.3.g — Sev 0 if replacement onboarded "
+                     "within 21 days of notification; Sev 2 if later. "
+                     "Continuing-quarter rule applies; not modelled in v1.",
+         measurement_interval="QUARTERLY",
+         reporting_interval="QUARTERLY",
+         ld_computation_base="QUARTERLY_PAYMENT",
+         metrics=[{"metric_key": "replacement_delay_days",
+                   "display_name": "Days from notification to onboarding",
+                   "unit": "days", "target_numeric": "21",
+                   "direction": "LOWER_BETTER", "is_primary": True}],
+         condition_bands=[
+             {"metric_key": "replacement_delay_days",
+              "band_label": "L0 <=21 days",
+              "range_min": None, "range_max": "21",
+              "range_unit": "days", "severity_level": 0, "sort_order": 1},
+             {"metric_key": "replacement_delay_days",
+              "band_label": "L2 >21 days",
+              "range_min": "21", "range_max": None,
+              "range_unit": "days", "severity_level": 2, "sort_order": 2},
+         ]),
+
+    # ── D11 — Governance Tool ────────────────────────────────────────────
+
+    # RFP §5.28.4.a — milestone tied to T0+6 months, bound at mapping time
+    _sla("PMU-SLA010", "PMU", "point_accumulation",
+         "Deployment & configuration of Governance tool (T0+6 months)",
+         description="Per RFP §5.28.4.a — variance vs the planned milestone "
+                     "P=T0+6 months. Sev levels: 0 at <=P, 1 at P+1..7d, 2 at "
+                     "P+8..14d, 3 at P+15..21d, 4 at >P+21d. T anchor is bound "
+                     "per mapping via overrides.t_anchor_date.",
+         measurement_interval="ONE_TIME",
+         reporting_interval="QUARTERLY",
+         ld_computation_base="QUARTERLY_PAYMENT",
+         metrics=[{"metric_key": "deployment_variance_days",
+                   "display_name": "Days past T0+6 month milestone",
+                   "unit": "days", "target_numeric": "0",
+                   "direction": "LOWER_BETTER", "is_primary": True}],
+         condition_bands=[
+             {"metric_key": "deployment_variance_days",
+              "band_label": "L0 On time (<=P)",
+              "range_min": None, "range_max": "0",
+              "range_unit": "days", "severity_level": 0, "sort_order": 1},
+             {"metric_key": "deployment_variance_days",
+              "band_label": "L1 P+1..7d",
+              "range_min": "0", "range_max": "7",
+              "range_unit": "days", "severity_level": 1, "sort_order": 2},
+             {"metric_key": "deployment_variance_days",
+              "band_label": "L2 P+8..14d",
+              "range_min": "7", "range_max": "14",
+              "range_unit": "days", "severity_level": 2, "sort_order": 3},
+             {"metric_key": "deployment_variance_days",
+              "band_label": "L3 P+15..21d",
+              "range_min": "14", "range_max": "21",
+              "range_unit": "days", "severity_level": 3, "sort_order": 4},
+             {"metric_key": "deployment_variance_days",
+              "band_label": "L4 >P+21d",
+              "range_min": "21", "range_max": None,
+              "range_unit": "days", "severity_level": 4, "sort_order": 5},
+         ]),
+
+    # RFP §5.28.4.b
+    _sla("PMU-SLA011", "PMU", "point_accumulation",
+         "Governance tool failures / uptime",
+         description="Per RFP §5.28.4.b — failures per quarter. Sev 2 for "
+                     "1-2; Sev 3 for 3-4; Sev 4 for >4.",
+         measurement_interval="QUARTERLY",
+         reporting_interval="QUARTERLY",
+         ld_computation_base="QUARTERLY_PAYMENT",
+         metrics=[{"metric_key": "governance_tool_failures_count",
+                   "display_name": "Failure occurrences per quarter",
+                   "unit": "count", "target_numeric": "0",
+                   "direction": "LOWER_BETTER", "is_primary": True}],
+         condition_bands=[
+             {"metric_key": "governance_tool_failures_count",
+              "band_label": "L0 No failures",
+              "range_min": None, "range_max": "0",
+              "range_unit": "count", "severity_level": 0, "sort_order": 1},
+             {"metric_key": "governance_tool_failures_count",
+              "band_label": "L2 1-2 failures",
+              "range_min": "0", "range_max": "2",
+              "range_unit": "count", "severity_level": 2, "sort_order": 2},
+             {"metric_key": "governance_tool_failures_count",
+              "band_label": "L3 3-4 failures",
+              "range_min": "2", "range_max": "4",
+              "range_unit": "count", "severity_level": 3, "sort_order": 3},
+             {"metric_key": "governance_tool_failures_count",
+              "band_label": "L4 >4 failures",
+              "range_min": "4", "range_max": None,
+              "range_unit": "count", "severity_level": 4, "sort_order": 4},
          ]),
 ]
 

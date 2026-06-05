@@ -1,18 +1,22 @@
-"""JWT auth middleware for pmis-contract-management.
+"""Auth middleware for pmis-contract-management — pure Policy Enforcement Point.
 
-Decodes the Bearer token and hydrates request.state with
-user_id / permissions / is_admin.
+Forwards the caller's ``Authorization`` header to user-management's
+``GET /api/v3/authz/context`` and hydrates ``request.state`` from the decided
+context. This service no longer resolves permissions from ``users.*`` itself —
+the old cross-schema ``RbacReadRepository`` is gone.
+
+Fails closed: if user-management is unreachable or errors, the request is
+treated as anonymous and the route's ``require_*`` gate returns 401/403.
 """
 from __future__ import annotations
 
-from typing import Set
+from typing import Dict, Optional, Set, Tuple
 
 from fastapi import Request
-from sqlalchemy.orm import Session
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from app.core.security import decode_access_token, extract_bearer_token
-from app.db import SessionLocal
+from app.core.security import extract_bearer_token
+from app.services.user_mgmt_client import UserMgmtClient
 from app.utilities.logger import get_logger
 
 
@@ -38,6 +42,22 @@ def _is_public_path(path: str) -> bool:
     return False
 
 
+def _decode_scoped(
+    raw: Optional[dict],
+) -> Dict[Tuple[str, Optional[str]], Set[str]]:
+    """Decode the wire `{"kind:id": [codes], "global": [codes]}` map back into
+    the `{(kind, id): set(codes)}` shape the scope-aware gates expect. A key
+    with no `:` (i.e. `global`) decodes to `(kind, None)`."""
+    out: Dict[Tuple[str, Optional[str]], Set[str]] = {}
+    for key, codes in (raw or {}).items():
+        if ":" in key:
+            kind, scope_id = key.split(":", 1)
+        else:
+            kind, scope_id = key, None
+        out[(kind, scope_id)] = set(codes or [])
+    return out
+
+
 def _set_anonymous(request: Request) -> None:
     request.state.user_id = None
     request.state.user_login = None
@@ -46,6 +66,7 @@ def _set_anonymous(request: Request) -> None:
     request.state.user_permissions = set()  # type: Set[str]
     request.state.scoped_permissions = {}
     request.state.is_admin = False
+    request.state.vendor_id = None
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -55,41 +76,21 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if _is_public_path(request.url.path):
             return await call_next(request)
 
-        token = extract_bearer_token(request.headers.get("authorization"))
+        authorization = request.headers.get("authorization")
+        token = extract_bearer_token(authorization)
         if not token:
             return await call_next(request)
 
-        claims = decode_access_token(token)
-        if not claims:
-            return await call_next(request)
-
-        user_id = claims.get("user_id") or claims.get("sub")
-        if not user_id:
-            return await call_next(request)
-
-        db: Session = SessionLocal()
         try:
-            # Lazy import to avoid circular deps at module load time.
-            from app.repositories.rbac_read_repository import RbacReadRepository
-            rbac = RbacReadRepository(db)
-            jti = claims.get("jti")
-            if jti and rbac.is_revoked(jti):
-                return await call_next(request)
-
-            perms: Set[str] = rbac.effective_permissions_for_user(user_id)
-            scoped = rbac.effective_permissions_by_scope(user_id)
-            is_admin: bool = rbac.is_admin(user_id)
-
-            request.state.user_id = user_id
-            request.state.user_login = claims.get("sub")
-            request.state.user_email = claims.get("email")
-            request.state.token_jti = jti
-            request.state.user_permissions = perms
-            request.state.scoped_permissions = scoped
-            request.state.is_admin = is_admin
+            ctx = UserMgmtClient().fetch_authz_context(authorization)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Auth hydration failed for user_id=%s: %s", user_id, exc)
-        finally:
-            db.close()
+            logger.warning("authz context fetch failed: %s", exc)
+            ctx = None
+
+        if ctx:
+            request.state.user_id = ctx.get("user_id")
+            request.state.user_permissions = set(ctx.get("permissions") or [])
+            request.state.scoped_permissions = _decode_scoped(ctx.get("scoped"))
+            request.state.vendor_id = ctx.get("vendor_id")
 
         return await call_next(request)

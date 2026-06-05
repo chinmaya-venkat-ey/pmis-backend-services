@@ -1,7 +1,26 @@
-"""RBAC dependency factories for pmis-project-management.
+"""RBAC dependency factories for pmis-contract-management.
 
 Duplicates the canonical declaration in
 services/pmis-user-management/app/core/rbac.py. Keep in sync.
+
+INTENTIONAL CURRENT STATE (2026-06-02 audit):
+  The contract service is still under active development and does NOT yet
+  apply permission gates on any of its routes — authentication is the
+  only check at the route layer today. The 16 permission codes declared
+  in app/core/permissions.py (contracts:*, slas:*, formulas:*,
+  observations:*, evaluations:*) are reserved names for the eventual
+  gating model; they are not enforced anywhere yet.
+
+  Gates will be added per route once the access-model design is finalized
+  (tracked as ISSUE-007 in
+  C:/Users/chinm/Coding/Office/PMIS/issues_in_permissions.md). Until then,
+  callers reach the contract endpoints with only an authenticated JWT;
+  defense-in-depth depends on network segmentation in the deploy environment.
+
+  Do NOT treat the absence of `require_*` calls in contract routes as a
+  bug — it's a deliberate "skip gating during development" choice. New
+  contract routes added before the access model lands should follow the
+  same pattern.
 """
 from __future__ import annotations
 
@@ -51,8 +70,7 @@ def require_permission(permission_code: Union[str, object]) -> Callable:
         uid = _user_id(request)
         if not uid:
             raise UnauthorizedError(AUTH_REQUIRED_MESSAGE, code="auth_required")
-        if _is_admin(request):
-            return uid
+        # A1 (2026-06-02 audit): no admin short-circuit.
         if code not in _user_permissions(request):
             raise ForbiddenError(
                 f"Permission denied: {code} required",
@@ -73,8 +91,7 @@ def require_any_permission(*permission_codes: Union[str, object]) -> Callable:
         uid = _user_id(request)
         if not uid:
             raise UnauthorizedError(AUTH_REQUIRED_MESSAGE, code="auth_required")
-        if _is_admin(request):
-            return uid
+        # A1: no admin short-circuit.
         held = _user_permissions(request)
         if not any(c in held for c in codes):
             raise ForbiddenError(
@@ -202,11 +219,12 @@ def _resolve_org_id_from_path(request: Request) -> Optional[str]:
 def _has_scoped_permission(
     request: Request, code: str, scope_key: Tuple[str, Optional[str]],
 ) -> bool:
-    """Round-8: removed the flat-set fallback that let a perm scoped to
+    """A1 (2026-06-02 audit): no admin short-circuit; admins must hold the
+    code explicitly at the requested scope or globally.
+
+    Round-8: removed the flat-set fallback that let a perm scoped to
     project P satisfy checks on project Q. A caller passes the gate iff
     they hold the code at the requested scope OR globally."""
-    if _is_admin(request):
-        return True
     scoped = _scoped_permissions(request)
     if code in scoped.get(("global", None), set()):
         return True
@@ -220,11 +238,8 @@ def require_project_permission(permission_code: Union[str, object]) -> Callable:
         uid = _user_id(request)
         if not uid:
             raise UnauthorizedError(AUTH_REQUIRED_MESSAGE, code="auth_required")
-        # Admin short-circuit: bypasses the project-id resolution (and
-        # its SQL ancestor walk) since admin / super_admin already pass
-        # every per-project check.
-        if _is_admin(request):
-            return uid
+        # A1 (2026-06-02 audit): no admin short-circuit; project-id
+        # resolution always runs.
         project_id = _resolve_project_id_from_path(request)
         if project_id is None:
             raise ForbiddenError(
@@ -294,8 +309,7 @@ def assert_field_writes_allowed(
     uid = _user_id(request)
     if not uid:
         raise UnauthorizedError(AUTH_REQUIRED_MESSAGE, code="auth_required")
-    if _is_admin(request):
-        return
+    # A1 (2026-06-02 audit): no admin short-circuit; admins hold codes explicitly.
 
     target_scope = scope_key or ("global", None)
     held_scoped = _scoped_permissions(request).get(target_scope, set())
@@ -347,8 +361,7 @@ def assert_action_allowed(
     uid = _user_id(request)
     if not uid:
         raise UnauthorizedError(AUTH_REQUIRED_MESSAGE, code="auth_required")
-    if _is_admin(request):
-        return
+    # A1 (2026-06-02 audit): no admin short-circuit.
     target_scope = scope_key or ("global", None)
     scoped = _scoped_permissions(request)
     if code in scoped.get(target_scope, set()):

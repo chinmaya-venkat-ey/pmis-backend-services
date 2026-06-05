@@ -18,5 +18,6 @@ from app.models.sla_lookup_row import SlaLookupRow  # noqa: F401
 # Activity binding
 from app.models.sla_activity_mapping import SlaActivityMapping  # noqa: F401
 
-# Mirror declarations (read-only; excluded from alembic autogenerate by env.py:include_object)
-from app.models import _cross_schema  # noqa: F401
+# Cross-schema users.* mirrors removed: RBAC is now resolved by calling
+# user-management's /authz/context (see app/middleware/auth_middleware.py),
+# so this service no longer declares read-only mirrors of the users schema.

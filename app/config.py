@@ -30,6 +30,13 @@ class Settings(BaseSettings):
     service_name: str = Field(default="pmis-masters-management")
     cors_origins: str = Field(default="http://localhost:3000")
 
+    # Base URL of pmis-user-management (the single Policy Decision Point).
+    # Auth/RBAC is resolved by calling its /api/v3/authz/context endpoint —
+    # this service no longer reads users.* for RBAC itself. When unset, every
+    # authed request is treated as anonymous (dev/standalone mode).
+    user_management_service_url: Optional[str] = Field(default=None)
+    user_management_service_timeout_seconds: float = Field(default=5.0)
+
     # === DB ===
     database_url: str = Field(default="postgresql+psycopg2://pmis_app:CHANGE-ME@localhost:5432/pmis")
     database_url_migrations: Optional[str] = Field(default=None)

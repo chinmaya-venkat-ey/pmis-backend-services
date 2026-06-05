@@ -140,7 +140,7 @@ def upgrade() -> None:
             (
                 'project_deadline_digest', 'email',
                 'PMIS — projects with upcoming deadlines',
-                '<p>Hello {first_name},</p><p>The following PMIS items have deadlines this week:</p>{items_html}<p><a href="{portal_url}">Open PMIS</a></p>',
+                '<p>Hello {full_name},</p><p>The following PMIS items have deadlines this week:</p>{items_html}<p><a href="{portal_url}">Open PMIS</a></p>',
                 true, true, true,
                 'Built-in: daily deadline-digest email (sent by notification-svc cron)'
             )

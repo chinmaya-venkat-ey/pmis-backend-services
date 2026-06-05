@@ -1,23 +1,33 @@
-"""JWT auth middleware for pmis-project-management.
+"""Auth middleware for pmis-project-management — pure Policy Enforcement Point.
 
-Decodes the Bearer token, checks `users.revoked_tokens` cross-schema, then
-hydrates request.state with user_id / permissions (flat + scoped) / is_admin.
+Forwards the caller's ``Authorization`` header to user-management's
+``GET /api/v3/authz/context`` and hydrates ``request.state`` from the decided
+context. This service no longer resolves permissions from ``users.*`` itself —
+the old cross-schema ``RbacReadRepository`` (and its §3.3 / Round-8 C5 drift)
+is gone.
 
-Doc-41 scoped_permissions is essential here — project-svc's
-`require_project_permission` reads it to compare against the path's
-project_uuid.
+``scoped_permissions`` is essential here — ``require_project_permission``
+reads it to compare against the path's project_uuid. The context already has
+the vendor->project projection applied, so no projection happens locally.
+
+``request.state.user_vendor_id`` (caller's own vendor, used for row-level
+scoping) is hydrated from the context's ``vendor_id``.
+
+No ``is_admin`` is hydrated: admin-ness is a capability code now
+(``projects:admin_override`` — see app/dependencies.get_caller_is_admin).
+
+Fails closed: if user-management is unreachable or errors, the request stays
+anonymous and the route's ``require_*`` gate returns 401/403.
 """
 from __future__ import annotations
 
-from typing import Set
+from typing import Dict, Optional, Set, Tuple
 
 from fastapi import Request
-from sqlalchemy.orm import Session
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from app.core.security import decode_access_token, extract_bearer_token
-from app.db import SessionLocal
-from app.repositories.rbac_read_repository import RbacReadRepository
+from app.core.security import extract_bearer_token
+from app.services.user_mgmt_client import UserMgmtClient
 from app.utilities.logger import get_logger
 
 
@@ -30,9 +40,8 @@ _PUBLIC_PREFIXES = (
     "/docs",
     "/redoc",
     "/openapi.json",
-    # Doc-35 dev fallback for attachment downloads. URLs are
-    # UUID-guarded; the route is only mounted when
-    # ``file_server_local_fallback_enabled`` is true.
+    # Doc-35 dev fallback for attachment downloads. URLs are UUID-guarded;
+    # the route is only mounted when ``file_server_local_fallback_enabled``.
     "/files",
 )
 _PUBLIC_EXACT = {"/"}
@@ -47,6 +56,22 @@ def _is_public_path(path: str) -> bool:
     return False
 
 
+def _decode_scoped(
+    raw: Optional[dict],
+) -> Dict[Tuple[str, Optional[str]], Set[str]]:
+    """Decode the wire `{"kind:id": [codes], "global": [codes]}` map back into
+    the `{(kind, id): set(codes)}` shape the scope-aware gates expect. A key
+    with no `:` (i.e. `global`) decodes to `(kind, None)`."""
+    out: Dict[Tuple[str, Optional[str]], Set[str]] = {}
+    for key, codes in (raw or {}).items():
+        if ":" in key:
+            kind, scope_id = key.split(":", 1)
+        else:
+            kind, scope_id = key, None
+        out[(kind, scope_id)] = set(codes or [])
+    return out
+
+
 def _set_anonymous(request: Request) -> None:
     request.state.user_id = None
     request.state.user_login = None
@@ -55,7 +80,7 @@ def _set_anonymous(request: Request) -> None:
     request.state.user_permissions = set()  # type: Set[str]
     request.state.scoped_permissions = {}
     request.state.is_admin = False
-    request.state.user_vendor_id = None  # hydrated below from users.users mirror
+    request.state.user_vendor_id = None
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -65,45 +90,21 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if _is_public_path(request.url.path):
             return await call_next(request)
 
-        token = extract_bearer_token(request.headers.get("authorization"))
+        authorization = request.headers.get("authorization")
+        token = extract_bearer_token(authorization)
         if not token:
             return await call_next(request)
 
-        claims = decode_access_token(token)
-        if not claims:
-            return await call_next(request)
-
-        user_id = claims.get("user_id") or claims.get("sub")
-        jti = claims.get("jti")
-        if not user_id:
-            return await call_next(request)
-
-        db: Session = SessionLocal()
         try:
-            rbac = RbacReadRepository(db)
-            if jti and rbac.is_revoked(jti):
-                return await call_next(request)
+            ctx = UserMgmtClient().fetch_authz_context(authorization)
+        except Exception as exc:  # noqa: BLE001 — never crash on the authz call
+            logger.warning("authz context fetch failed: %s", exc)
+            ctx = None
 
-            perms: Set[str] = rbac.effective_permissions_for_user(user_id)
-            scoped = rbac.effective_permissions_by_scope(user_id)
-            is_admin: bool = rbac.is_admin(user_id)
-
-            request.state.user_id = user_id
-            request.state.user_login = claims.get("sub")
-            request.state.user_email = claims.get("email")
-            request.state.token_jti = jti
-            request.state.user_permissions = perms
-            request.state.scoped_permissions = scoped
-            request.state.is_admin = is_admin
-
-            # Hydrate caller's vendor_id for row-level vendor scoping.
-            from app.models._cross_schema import User as MirrorUser
-            mirror_row = db.get(MirrorUser, user_id)
-            if mirror_row is not None:
-                request.state.user_vendor_id = mirror_row.vendor_id
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Auth hydration failed for user_id=%s: %s", user_id, exc)
-        finally:
-            db.close()
+        if ctx:
+            request.state.user_id = ctx.get("user_id")
+            request.state.user_permissions = set(ctx.get("permissions") or [])
+            request.state.scoped_permissions = _decode_scoped(ctx.get("scoped"))
+            request.state.user_vendor_id = ctx.get("vendor_id")
 
         return await call_next(request)

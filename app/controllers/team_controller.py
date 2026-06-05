@@ -25,8 +25,8 @@ class TeamController:
     def __init__(self, db: Session):
         self.service = TeamService(db)
 
-    def get_team(self, project_id: str) -> TeamReadResponse:
-        return self.service.get_team(project_id)
+    def get_team(self, project_id: str, *, authorization: str = "") -> TeamReadResponse:
+        return self.service.get_team(project_id, authorization=authorization)
 
     def save_team(
         self,
@@ -64,8 +64,8 @@ class TeamController:
     ) -> AssociatedUsersResponse:
         return self.service.get_associated_users(payload)
 
-    def get_team_page(self, project_id: str) -> TeamPageResponse:
-        return self.service.get_team_page(project_id)
+    def get_team_page(self, project_id: str, *, authorization: str = "") -> TeamPageResponse:
+        return self.service.get_team_page(project_id, authorization=authorization)
 
     def save_team_page(
         self,

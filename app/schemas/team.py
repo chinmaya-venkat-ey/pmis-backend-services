@@ -28,11 +28,11 @@ _EX_ID_1 = "usr-0001"
 _EX_ID_2 = "usr-0002"
 
 # ── Sample user chips reused across schema examples ─────────────────────────
-_EX_USER1 = {"id": _EX_ID_1, "login": "rajesh.kumar",  "email": "rajesh.kumar@uidai.gov.in",  "first_name": "Rajesh", "last_name": "Kumar"}
-_EX_USER2 = {"id": _EX_ID_2, "login": "priya.sharma",  "email": "priya.sharma@uidai.gov.in",  "first_name": "Priya",  "last_name": "Sharma"}
-_EX_USER3 = {"id": "usr-0003", "login": "amit.singh",    "email": "amit.singh@uidai.gov.in",    "first_name": "Amit",   "last_name": "Singh"}
-_EX_USER4 = {"id": "usr-0004", "login": "deepa.nair",    "email": "deepa.nair@uidai.gov.in",    "first_name": "Deepa",  "last_name": "Nair"}
-_EX_USER5 = {"id": "usr-0005", "login": "suresh.patel",  "email": "suresh.patel@uidai.gov.in",  "first_name": "Suresh", "last_name": "Patel"}
+_EX_USER1 = {"id": _EX_ID_1, "login": "rajesh.kumar",  "email": "rajesh.kumar@uidai.gov.in",  "full_name": "Rajesh Kumar"}
+_EX_USER2 = {"id": _EX_ID_2, "login": "priya.sharma",  "email": "priya.sharma@uidai.gov.in",  "full_name": "Priya Sharma"}
+_EX_USER3 = {"id": "usr-0003", "login": "amit.singh",    "email": "amit.singh@uidai.gov.in",    "full_name": "Amit Singh"}
+_EX_USER4 = {"id": "usr-0004", "login": "deepa.nair",    "email": "deepa.nair@uidai.gov.in",    "full_name": "Deepa Nair"}
+_EX_USER5 = {"id": "usr-0005", "login": "suresh.patel",  "email": "suresh.patel@uidai.gov.in",  "full_name": "Suresh Patel"}
 
 
 # ── Shared user chip ────────────────────────────────────────────────────────
@@ -45,8 +45,7 @@ class TeamUserChip(BaseModel):
     id: str
     login: str
     email: Optional[str] = None
-    first_name: Optional[str] = None
-    last_name: Optional[str] = None
+    full_name: Optional[str] = None
 
 
 # ── Org-level role bucket (from user_role_assignments) ──────────────────────
@@ -562,8 +561,7 @@ class AssociatedUserEntry(BaseModel):
                 "id": _EX_ID_1,
                 "login": "rajesh.kumar",
                 "email": "rajesh.kumar@uidai.gov.in",
-                "firstName": "Rajesh",
-                "lastName": "Kumar",
+                "fullName": "Rajesh Kumar",
                 "matchedOrganizations": [
                     {"id": "ven-aaaa-1111", "name": "Tata Consultancy Services"},
                 ],
@@ -577,8 +575,7 @@ class AssociatedUserEntry(BaseModel):
     id: str
     login: str
     email: Optional[str] = None
-    first_name: Optional[str] = None
-    last_name: Optional[str] = None
+    full_name: Optional[str] = None
     matched_organizations: List[VendorRef] = Field(default_factory=list)
     matched_owner_division: List[DivisionRef] = Field(default_factory=list)
     matched_division: List[DivisionRef] = Field(default_factory=list)
@@ -595,7 +592,7 @@ class AssociatedUsersResponse(BaseModel):
                     {
                         "id": _EX_ID_1, "login": "rajesh.kumar",
                         "email": "rajesh.kumar@uidai.gov.in",
-                        "firstName": "Rajesh", "lastName": "Kumar",
+                        "fullName": "Rajesh Kumar",
                         "matchedOrganizations": [
                             {"id": "ven-aaaa-1111", "name": "Tata Consultancy Services"},
                         ],

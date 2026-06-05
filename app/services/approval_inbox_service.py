@@ -848,10 +848,7 @@ class ApprovalInboxService:
             select(User).where(User.id == ctx.user_id)
         ).scalar_one_or_none()
         login = (user_row.login if user_row else ctx.user_id)
-        full_name = " ".join(filter(None, [
-            user_row.first_name if user_row else None,
-            user_row.last_name if user_row else None,
-        ])) or login
+        full_name = (user_row.full_name if user_row else None) or login
         return {
             "authToken": "",  # Java accepts empty when network is trusted (dev).
             "userInfo": {

@@ -41,7 +41,19 @@ def get_optional_current_user_id(request: Request) -> Optional[str]:
 
 
 def get_caller_is_admin(request: Request) -> bool:
-    return bool(getattr(request.state, "is_admin", False))
+    """True if the caller holds the platform-admin override capability.
+
+    Replaces the old ``request.state.is_admin`` flag (which the RBAC audit
+    found drifted — scoped admin assignments wrongly counted). Admin-ness is
+    now a capability code in the caller's GLOBAL permission set: admin /
+    super_admin hold ``projects:admin_override`` (user-svc migration r016);
+    project_admin and lower tiers do not. Every existing ``caller_is_admin``
+    site flows through this one dependency, so they all become code-driven.
+    """
+    from app.core.permissions import PROJECTS_ADMIN_OVERRIDE
+
+    held = getattr(request.state, "user_permissions", None) or set()
+    return PROJECTS_ADMIN_OVERRIDE in held
 
 
 # ---------------------------------------------------------------- controllers

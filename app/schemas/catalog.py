@@ -116,6 +116,5 @@ class UserSummary(ResponseModel):
     user_code: Optional[str] = None
     login: str
     email: str
-    first_name: Optional[str] = None
-    last_name: Optional[str] = None
+    full_name: Optional[str] = None
     status: str

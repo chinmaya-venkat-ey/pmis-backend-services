@@ -50,8 +50,7 @@ class AssignableUsersService:
                 "id": user.id,
                 "login": user.login,
                 "email": user.email,
-                "first_name": user.first_name,
-                "last_name": user.last_name,
+                "full_name": user.full_name,
                 "assignment_id": ura.id,
             })
         return {
@@ -63,13 +62,13 @@ class AssignableUsersService:
         }
 
     def list_assignable_users_for_project(
-        self, project_id: str,
+        self, project_id: str, *, authorization: str = "",
     ) -> Dict[str, Any]:
         project = self.projects.get_by_id(project_id)
         if project is None:
             raise ProjectNotFoundError(f"Project with ID {project_id} not found")
         users: List[Dict[str, Any]] = self.repo.list_assignable_users_for_project(
-            project_id,
+            project_id, authorization=authorization,
         )
         return {
             # Monolith parity: bare data envelope (no _type/_links wrap).

@@ -13,7 +13,7 @@ fields capture the operation. Note the WIRE surface does NOT expose
 column is preserved for audit but not serialized.
 
 Author surface (monolith parity): comment responses embed a nested
-``author`` object ``{id, login, firstName, lastName, email}`` instead of
+``author`` object ``{id, login, fullName, email}`` instead of
 a flat ``authorUserId`` string. The controller resolves the user from
 the cross-schema mirror at response-build time.
 """
@@ -51,13 +51,12 @@ class CommentAuthor(ResponseModel):
 
     Resolved from ``users.users`` mirror at response-build time.
     Reflects only the public-safe fields the monolith exposes on
-    comments: ``id``, ``login``, ``firstName``, ``lastName``, ``email``.
+    comments: ``id``, ``login``, ``fullName``, ``email``.
     """
 
     id: str
     login: Optional[str] = None
-    first_name: Optional[str] = None
-    last_name: Optional[str] = None
+    full_name: Optional[str] = None
     email: Optional[str] = None
 
 

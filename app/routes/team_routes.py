@@ -86,15 +86,15 @@ associated_users_router = APIRouter(tags=["team"])
                                     "project_id": "proj-1111-2222-3333-4444",
                                     "project_name": "National Digital Identity Platform",
                                     "org_members": [
-                                        {"role_id": 3, "role_name": "project_admin",  "users": [{"id": "usr-0001", "login": "rajesh.kumar",  "email": "rajesh.kumar@uidai.gov.in",  "first_name": "Rajesh", "last_name": "Kumar"}]},
+                                        {"role_id": 3, "role_name": "project_admin",  "users": [{"id": "usr-0001", "login": "rajesh.kumar",  "email": "rajesh.kumar@uidai.gov.in",  "full_name": "Rajesh Kumar"}]},
                                         {"role_id": 4, "role_name": "project_member", "users": [
-                                            {"id": "usr-0002", "login": "priya.sharma",  "email": "priya.sharma@uidai.gov.in",  "first_name": "Priya",  "last_name": "Sharma"},
-                                            {"id": "usr-0005", "login": "suresh.patel", "email": "suresh.patel@uidai.gov.in", "first_name": "Suresh", "last_name": "Patel"},
+                                            {"id": "usr-0002", "login": "priya.sharma",  "email": "priya.sharma@uidai.gov.in",  "full_name": "Priya Sharma"},
+                                            {"id": "usr-0005", "login": "suresh.patel", "email": "suresh.patel@uidai.gov.in", "full_name": "Suresh Patel"},
                                         ]},
                                     ],
                                     "ownership": {
-                                        "project_owner": [{"id": "usr-0001", "login": "rajesh.kumar", "email": "rajesh.kumar@uidai.gov.in", "first_name": "Rajesh", "last_name": "Kumar"}],
-                                        "approver":      [{"id": "usr-0002", "login": "priya.sharma", "email": "priya.sharma@uidai.gov.in", "first_name": "Priya",  "last_name": "Sharma"}],
+                                        "project_owner": [{"id": "usr-0001", "login": "rajesh.kumar", "email": "rajesh.kumar@uidai.gov.in", "full_name": "Rajesh Kumar"}],
+                                        "approver":      [{"id": "usr-0002", "login": "priya.sharma", "email": "priya.sharma@uidai.gov.in", "full_name": "Priya Sharma"}],
                                     },
                                     "activities": [
                                         {
@@ -103,15 +103,15 @@ associated_users_router = APIRouter(tags=["team"])
                                             "milestone_id": "ms-m001", "milestone_name": "Planning", "milestone_display_code": "M1",
                                             "concerned_divisions": ["IT_DIV", "LEGAL_DIV"],
                                             "assignments": {
-                                                "owner": [{"id": "usr-0003", "login": "amit.singh", "email": "amit.singh@uidai.gov.in", "first_name": "Amit", "last_name": "Singh"}],
-                                                "owner_approver": [{"id": "usr-0004", "login": "deepa.nair", "email": "deepa.nair@uidai.gov.in", "first_name": "Deepa", "last_name": "Nair"}],
+                                                "owner": [{"id": "usr-0003", "login": "amit.singh", "email": "amit.singh@uidai.gov.in", "full_name": "Amit Singh"}],
+                                                "owner_approver": [{"id": "usr-0004", "login": "deepa.nair", "email": "deepa.nair@uidai.gov.in", "full_name": "Deepa Nair"}],
                                                 "division_users": {
-                                                    "IT_DIV":    [{"id": "usr-0001", "login": "rajesh.kumar", "email": "rajesh.kumar@uidai.gov.in", "first_name": "Rajesh", "last_name": "Kumar"}, {"id": "usr-0002", "login": "priya.sharma", "email": "priya.sharma@uidai.gov.in", "first_name": "Priya", "last_name": "Sharma"}],
-                                                    "LEGAL_DIV": [{"id": "usr-0005", "login": "suresh.patel", "email": "suresh.patel@uidai.gov.in", "first_name": "Suresh", "last_name": "Patel"}],
+                                                    "IT_DIV":    [{"id": "usr-0001", "login": "rajesh.kumar", "email": "rajesh.kumar@uidai.gov.in", "full_name": "Rajesh Kumar"}, {"id": "usr-0002", "login": "priya.sharma", "email": "priya.sharma@uidai.gov.in", "full_name": "Priya Sharma"}],
+                                                    "LEGAL_DIV": [{"id": "usr-0005", "login": "suresh.patel", "email": "suresh.patel@uidai.gov.in", "full_name": "Suresh Patel"}],
                                                 },
                                                 "division_approvers": {
-                                                    "IT_DIV":    [{"id": "usr-0004", "login": "deepa.nair",   "email": "deepa.nair@uidai.gov.in",   "first_name": "Deepa",  "last_name": "Nair"}],
-                                                    "LEGAL_DIV": [{"id": "usr-0002", "login": "priya.sharma", "email": "priya.sharma@uidai.gov.in", "first_name": "Priya",  "last_name": "Sharma"}],
+                                                    "IT_DIV":    [{"id": "usr-0004", "login": "deepa.nair",   "email": "deepa.nair@uidai.gov.in",   "full_name": "Deepa Nair"}],
+                                                    "LEGAL_DIV": [{"id": "usr-0002", "login": "priya.sharma", "email": "priya.sharma@uidai.gov.in", "full_name": "Priya Sharma"}],
                                                 },
                                             },
                                         },
@@ -121,19 +121,19 @@ associated_users_router = APIRouter(tags=["team"])
                                             "milestone_id": "ms-m001", "milestone_name": "Planning", "milestone_display_code": "M1",
                                             "concerned_divisions": ["IT_DIV"],
                                             "assignments": {
-                                                "owner": [{"id": "usr-0003", "login": "amit.singh", "email": "amit.singh@uidai.gov.in", "first_name": "Amit", "last_name": "Singh"}],
-                                                "owner_approver": [{"id": "usr-0004", "login": "deepa.nair", "email": "deepa.nair@uidai.gov.in", "first_name": "Deepa", "last_name": "Nair"}],
-                                                "division_users":     {"IT_DIV": [{"id": "usr-0002", "login": "priya.sharma", "email": "priya.sharma@uidai.gov.in", "first_name": "Priya", "last_name": "Sharma"}]},
-                                                "division_approvers": {"IT_DIV": [{"id": "usr-0001", "login": "rajesh.kumar", "email": "rajesh.kumar@uidai.gov.in", "first_name": "Rajesh", "last_name": "Kumar"}]},
+                                                "owner": [{"id": "usr-0003", "login": "amit.singh", "email": "amit.singh@uidai.gov.in", "full_name": "Amit Singh"}],
+                                                "owner_approver": [{"id": "usr-0004", "login": "deepa.nair", "email": "deepa.nair@uidai.gov.in", "full_name": "Deepa Nair"}],
+                                                "division_users":     {"IT_DIV": [{"id": "usr-0002", "login": "priya.sharma", "email": "priya.sharma@uidai.gov.in", "full_name": "Priya Sharma"}]},
+                                                "division_approvers": {"IT_DIV": [{"id": "usr-0001", "login": "rajesh.kumar", "email": "rajesh.kumar@uidai.gov.in", "full_name": "Rajesh Kumar"}]},
                                             },
                                         },
                                     ],
                                     "assignable_users": [
-                                        {"id": "usr-0001", "login": "rajesh.kumar",  "email": "rajesh.kumar@uidai.gov.in",  "first_name": "Rajesh", "last_name": "Kumar"},
-                                        {"id": "usr-0002", "login": "priya.sharma",  "email": "priya.sharma@uidai.gov.in",  "first_name": "Priya",  "last_name": "Sharma"},
-                                        {"id": "usr-0003", "login": "amit.singh",    "email": "amit.singh@uidai.gov.in",    "first_name": "Amit",   "last_name": "Singh"},
-                                        {"id": "usr-0004", "login": "deepa.nair",    "email": "deepa.nair@uidai.gov.in",    "first_name": "Deepa",  "last_name": "Nair"},
-                                        {"id": "usr-0005", "login": "suresh.patel",  "email": "suresh.patel@uidai.gov.in",  "first_name": "Suresh", "last_name": "Patel"},
+                                        {"id": "usr-0001", "login": "rajesh.kumar",  "email": "rajesh.kumar@uidai.gov.in",  "full_name": "Rajesh Kumar"},
+                                        {"id": "usr-0002", "login": "priya.sharma",  "email": "priya.sharma@uidai.gov.in",  "full_name": "Priya Sharma"},
+                                        {"id": "usr-0003", "login": "amit.singh",    "email": "amit.singh@uidai.gov.in",    "full_name": "Amit Singh"},
+                                        {"id": "usr-0004", "login": "deepa.nair",    "email": "deepa.nair@uidai.gov.in",    "full_name": "Deepa Nair"},
+                                        {"id": "usr-0005", "login": "suresh.patel",  "email": "suresh.patel@uidai.gov.in",  "full_name": "Suresh Patel"},
                                     ],
                                 },
                             }
@@ -146,9 +146,11 @@ associated_users_router = APIRouter(tags=["team"])
 )
 def get_team(
     project_id: str,
+    request: Request,
     controller: Annotated[TeamController, Depends(get_team_controller)],
 ):
-    return controller.get_team(project_id)
+    authorization = request.headers.get("authorization") or ""
+    return controller.get_team(project_id, authorization=authorization)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -262,8 +264,8 @@ def save_team(
                             "ownership_set": {
                                 "summary": "Project has an owner and an approver assigned",
                                 "value": {
-                                    "project_owner": [{"id": "usr-0001", "login": "rajesh.kumar", "email": "rajesh.kumar@uidai.gov.in", "first_name": "Rajesh", "last_name": "Kumar"}],
-                                    "approver":      [{"id": "usr-0002", "login": "priya.sharma", "email": "priya.sharma@uidai.gov.in", "first_name": "Priya",  "last_name": "Sharma"}],
+                                    "project_owner": [{"id": "usr-0001", "login": "rajesh.kumar", "email": "rajesh.kumar@uidai.gov.in", "full_name": "Rajesh Kumar"}],
+                                    "approver":      [{"id": "usr-0002", "login": "priya.sharma", "email": "priya.sharma@uidai.gov.in", "full_name": "Priya Sharma"}],
                                 },
                             },
                             "ownership_empty": {
@@ -327,8 +329,8 @@ def get_ownership(
                             "after_save": {
                                 "summary": "Ownership after save — returns full user objects",
                                 "value": {
-                                    "project_owner": [{"id": "usr-0001", "login": "rajesh.kumar", "email": "rajesh.kumar@uidai.gov.in", "first_name": "Rajesh", "last_name": "Kumar"}],
-                                    "approver":      [{"id": "usr-0002", "login": "priya.sharma", "email": "priya.sharma@uidai.gov.in", "first_name": "Priya",  "last_name": "Sharma"}],
+                                    "project_owner": [{"id": "usr-0001", "login": "rajesh.kumar", "email": "rajesh.kumar@uidai.gov.in", "full_name": "Rajesh Kumar"}],
+                                    "approver":      [{"id": "usr-0002", "login": "priya.sharma", "email": "priya.sharma@uidai.gov.in", "full_name": "Priya Sharma"}],
                                 },
                             }
                         }
@@ -369,20 +371,20 @@ def save_ownership(
                             "with_two_divisions": {
                                 "summary": "Activity with IT and Legal divisions assigned",
                                 "value": {
-                                    "owner":         [{"id": "usr-0003", "login": "amit.singh",  "email": "amit.singh@uidai.gov.in",  "first_name": "Amit",  "last_name": "Singh"}],
-                                    "owner_approver":[{"id": "usr-0004", "login": "deepa.nair",  "email": "deepa.nair@uidai.gov.in",  "first_name": "Deepa", "last_name": "Nair"}],
+                                    "owner":         [{"id": "usr-0003", "login": "amit.singh",  "email": "amit.singh@uidai.gov.in",  "full_name": "Amit Singh"}],
+                                    "owner_approver":[{"id": "usr-0004", "login": "deepa.nair",  "email": "deepa.nair@uidai.gov.in",  "full_name": "Deepa Nair"}],
                                     "division_users": {
                                         "IT_DIV":    [
-                                            {"id": "usr-0001", "login": "rajesh.kumar", "email": "rajesh.kumar@uidai.gov.in", "first_name": "Rajesh", "last_name": "Kumar"},
-                                            {"id": "usr-0002", "login": "priya.sharma", "email": "priya.sharma@uidai.gov.in", "first_name": "Priya",  "last_name": "Sharma"},
+                                            {"id": "usr-0001", "login": "rajesh.kumar", "email": "rajesh.kumar@uidai.gov.in", "full_name": "Rajesh Kumar"},
+                                            {"id": "usr-0002", "login": "priya.sharma", "email": "priya.sharma@uidai.gov.in", "full_name": "Priya Sharma"},
                                         ],
                                         "LEGAL_DIV": [
-                                            {"id": "usr-0005", "login": "suresh.patel", "email": "suresh.patel@uidai.gov.in", "first_name": "Suresh", "last_name": "Patel"},
+                                            {"id": "usr-0005", "login": "suresh.patel", "email": "suresh.patel@uidai.gov.in", "full_name": "Suresh Patel"},
                                         ],
                                     },
                                     "division_approvers": {
-                                        "IT_DIV":    [{"id": "usr-0004", "login": "deepa.nair",   "email": "deepa.nair@uidai.gov.in",   "first_name": "Deepa",  "last_name": "Nair"}],
-                                        "LEGAL_DIV": [{"id": "usr-0002", "login": "priya.sharma", "email": "priya.sharma@uidai.gov.in", "first_name": "Priya",  "last_name": "Sharma"}],
+                                        "IT_DIV":    [{"id": "usr-0004", "login": "deepa.nair",   "email": "deepa.nair@uidai.gov.in",   "full_name": "Deepa Nair"}],
+                                        "LEGAL_DIV": [{"id": "usr-0002", "login": "priya.sharma", "email": "priya.sharma@uidai.gov.in", "full_name": "Priya Sharma"}],
                                     },
                                 },
                             },
@@ -459,18 +461,18 @@ def get_activity_assignments(
                             "after_save": {
                                 "summary": "Activity assignments after save — full user objects returned",
                                 "value": {
-                                    "owner":         [{"id": "usr-0003", "login": "amit.singh",  "email": "amit.singh@uidai.gov.in",  "first_name": "Amit",  "last_name": "Singh"}],
-                                    "owner_approver":[{"id": "usr-0004", "login": "deepa.nair",  "email": "deepa.nair@uidai.gov.in",  "first_name": "Deepa", "last_name": "Nair"}],
+                                    "owner":         [{"id": "usr-0003", "login": "amit.singh",  "email": "amit.singh@uidai.gov.in",  "full_name": "Amit Singh"}],
+                                    "owner_approver":[{"id": "usr-0004", "login": "deepa.nair",  "email": "deepa.nair@uidai.gov.in",  "full_name": "Deepa Nair"}],
                                     "division_users": {
                                         "IT_DIV":    [
-                                            {"id": "usr-0001", "login": "rajesh.kumar", "email": "rajesh.kumar@uidai.gov.in", "first_name": "Rajesh", "last_name": "Kumar"},
-                                            {"id": "usr-0002", "login": "priya.sharma", "email": "priya.sharma@uidai.gov.in", "first_name": "Priya",  "last_name": "Sharma"},
+                                            {"id": "usr-0001", "login": "rajesh.kumar", "email": "rajesh.kumar@uidai.gov.in", "full_name": "Rajesh Kumar"},
+                                            {"id": "usr-0002", "login": "priya.sharma", "email": "priya.sharma@uidai.gov.in", "full_name": "Priya Sharma"},
                                         ],
-                                        "LEGAL_DIV": [{"id": "usr-0005", "login": "suresh.patel", "email": "suresh.patel@uidai.gov.in", "first_name": "Suresh", "last_name": "Patel"}],
+                                        "LEGAL_DIV": [{"id": "usr-0005", "login": "suresh.patel", "email": "suresh.patel@uidai.gov.in", "full_name": "Suresh Patel"}],
                                     },
                                     "division_approvers": {
-                                        "IT_DIV":    [{"id": "usr-0004", "login": "deepa.nair",   "email": "deepa.nair@uidai.gov.in",   "first_name": "Deepa",  "last_name": "Nair"}],
-                                        "LEGAL_DIV": [{"id": "usr-0002", "login": "priya.sharma", "email": "priya.sharma@uidai.gov.in", "first_name": "Priya",  "last_name": "Sharma"}],
+                                        "IT_DIV":    [{"id": "usr-0004", "login": "deepa.nair",   "email": "deepa.nair@uidai.gov.in",   "full_name": "Deepa Nair"}],
+                                        "LEGAL_DIV": [{"id": "usr-0002", "login": "priya.sharma", "email": "priya.sharma@uidai.gov.in", "full_name": "Priya Sharma"}],
                                     },
                                 },
                             }
@@ -508,9 +510,11 @@ def save_activity_assignments(
 )
 def get_team_page(
     project_id: str,
+    request: Request,
     controller: Annotated[TeamController, Depends(get_team_controller)],
 ):
-    return controller.get_team_page(project_id)
+    authorization = request.headers.get("authorization") or ""
+    return controller.get_team_page(project_id, authorization=authorization)
 
 
 @project_team_router.put(

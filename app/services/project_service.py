@@ -94,6 +94,7 @@ class ProjectService:
         caller_user_id: Optional[str] = None,
         caller_is_admin: bool = False,
         caller_can_see_all: bool = False,
+        caller_project_ids: Optional[set] = None,
     ) -> Tuple[List, int]:
         return self.repo.list_(
             offset=offset, page_size=page_size,
@@ -101,6 +102,7 @@ class ProjectService:
             include_deleted=include_deleted,
             caller_user_id=caller_user_id, caller_is_admin=caller_is_admin,
             caller_can_see_all=caller_can_see_all,
+            caller_project_ids=caller_project_ids,
         )
 
     # ---------------------------------------------------------------- write

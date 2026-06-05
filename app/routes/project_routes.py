@@ -234,12 +234,15 @@ def list_projects(
     # Monolith parity (Doc-38): query schema is offset / pageSize / active
     # / includeDeleted ONLY — ``public`` + ``status`` were dropped.
     held = getattr(request.state, "user_permissions", None) or set()
+    scoped = getattr(request.state, "scoped_permissions", None) or {}
+    caller_project_ids = {pid for (kind, pid) in scoped if kind == "project" and pid}
     return controller.list_(
         offset=offset, page_size=page_size,
         status=None, active=active, public=None,
         include_deleted=False,
         caller_user_id=caller_user_id, caller_is_admin=caller_is_admin,
         caller_can_see_all=(PROJECTS_READ_ALL in held),
+        caller_project_ids=caller_project_ids,
     )
 
 
@@ -258,12 +261,15 @@ def list_all_projects(
     active: Annotated[Optional[bool], Query()] = None,
 ):
     held = getattr(request.state, "user_permissions", None) or set()
+    scoped = getattr(request.state, "scoped_permissions", None) or {}
+    caller_project_ids = {pid for (kind, pid) in scoped if kind == "project" and pid}
     return controller.list_(
         offset=offset, page_size=page_size,
         status=None, active=active, public=None,
         include_deleted=True,
         caller_user_id=caller_user_id, caller_is_admin=caller_is_admin,
         caller_can_see_all=(PROJECTS_READ_ALL in held),
+        caller_project_ids=caller_project_ids,
     )
 
 
@@ -434,15 +440,17 @@ def list_project_role_assignments(
         "project AND (b) every user with an org_admin role on the "
         "project's owning vendor(s). Admin / super_admin tier users are "
         "filtered out. Each entry carries ``id`` / ``login`` / "
-        "``firstName`` / ``lastName`` / ``email`` / ``orgRole``."
+        "``fullName`` / ``email`` / ``orgRole``."
     ),
     dependencies=[Depends(require_permission(PROJECT_MEMBERS_READ))],
 )
 def list_project_assignable_users(
     project_uuid: str,
+    request: Request,
     controller: Annotated[ProjectController, Depends(get_project_controller)],
 ):
-    return controller.assignable_users(project_uuid)
+    authorization = request.headers.get("authorization") or ""
+    return controller.assignable_users(project_uuid, authorization=authorization)
 
 
 # ---------------------------------------------------------------- audit-logs

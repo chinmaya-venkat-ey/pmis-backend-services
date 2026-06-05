@@ -94,7 +94,7 @@ class CommentController:
 
     def _resolve_author(self, user_id: str) -> Optional[CommentAuthor]:
         """Look up ``users.users`` mirror and build the
-        ``{id, login, firstName, lastName, email}`` object. Returns a
+        ``{id, login, fullName, email}`` object. Returns a
         minimal author with just the id when the user row is missing
         (deleted users still appear on historical comments)."""
         from sqlalchemy import select
@@ -102,16 +102,15 @@ class CommentController:
         row = self.db.execute(
             select(
                 MirrorUser.id, MirrorUser.login, MirrorUser.email,
-                MirrorUser.first_name, MirrorUser.last_name,
+                MirrorUser.full_name,
             )
             .where(MirrorUser.id == user_id)
         ).first()
         if not row:
             return CommentAuthor(id=user_id)
-        uid, login, email, first, last = row
+        uid, login, email, full_name = row
         return CommentAuthor(
-            id=uid, login=login, email=email,
-            first_name=first, last_name=last,
+            id=uid, login=login, email=email, full_name=full_name,
         )
 
     # --------------------------------------------------------------- list

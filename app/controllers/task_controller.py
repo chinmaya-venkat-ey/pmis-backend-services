@@ -98,14 +98,12 @@ class TaskController:
         from sqlalchemy import select
         from app.models._cross_schema import User as MirrorUser
         row = self.db.execute(
-            select(MirrorUser.first_name, MirrorUser.last_name)
+            select(MirrorUser.full_name)
             .where(MirrorUser.id == user_id)
         ).first()
         if not row:
             return None
-        first, last = row
-        parts = [p for p in (first, last) if p]
-        return " ".join(parts) if parts else None
+        return row[0] or None
 
     def get(self, task_id: str) -> TaskResponse:
         return self._to_response(self.service.get_by_id(task_id))

@@ -90,8 +90,7 @@ class TeamService:
                 id=uid,
                 login=by_id[uid].login if uid in by_id else uid,
                 email=by_id[uid].email if uid in by_id else None,
-                first_name=by_id[uid].first_name if uid in by_id else None,
-                last_name=by_id[uid].last_name if uid in by_id else None,
+                full_name=by_id[uid].full_name if uid in by_id else None,
             )
             for uid in user_ids
             if uid in by_id
@@ -223,8 +222,7 @@ class TeamService:
                 id=user.id,
                 login=user.login,
                 email=user.email,
-                first_name=user.first_name,
-                last_name=user.last_name,
+                full_name=user.full_name,
             ))
         return list(buckets.values())
 
@@ -264,7 +262,7 @@ class TeamService:
 
     # ── public methods ───────────────────────────────────────────────────────
 
-    def get_team(self, project_id: str) -> TeamReadResponse:
+    def get_team(self, project_id: str, *, authorization: str = "") -> TeamReadResponse:
         proj = self._get_project_or_404(project_id)
 
         org_members = self._read_org_members(project_id)
@@ -272,14 +270,15 @@ class TeamService:
         activities = self._read_team_activities(project_id)
 
         # Assignable users picker (same as task assignee picker)
-        raw_users = self.assignable_repo.list_assignable_users_for_project(project_id)
+        raw_users = self.assignable_repo.list_assignable_users_for_project(
+            project_id, authorization=authorization,
+        )
         assignable = [
             TeamUserChip(
                 id=u["id"],
                 login=u["login"],
                 email=u.get("email"),
-                first_name=u.get("first_name"),
-                last_name=u.get("last_name"),
+                full_name=u.get("full_name"),
             )
             for u in raw_users
         ]
@@ -488,8 +487,7 @@ class TeamService:
                 id=u.id,
                 login=u.login,
                 email=u.email,
-                first_name=u.first_name,
-                last_name=u.last_name,
+                full_name=u.full_name,
                 matched_organizations=matched_orgs,
                 matched_owner_division=matched_owner_div,
                 matched_division=matched_div,
@@ -501,14 +499,12 @@ class TeamService:
 
     @staticmethod
     def _format_display_name(user_dict: Dict[str, Any]) -> str:
-        """'First Last (login)' — same compact format as USER_DIRECTORY in HTML."""
-        parts = " ".join(
-            x for x in [user_dict.get("first_name"), user_dict.get("last_name")] if x
-        ).strip()
+        """'Full Name (login)' — same compact format as USER_DIRECTORY in HTML."""
+        parts = (user_dict.get("full_name") or "").strip()
         login = user_dict.get("login", "")
         return f"{parts} ({login})" if parts else login
 
-    def get_team_page(self, project_id: str) -> TeamPageResponse:
+    def get_team_page(self, project_id: str, *, authorization: str = "") -> TeamPageResponse:
         """Full UI state for GET /projects/{id}/team-page.
 
         Returns projectId/projectName, userDirectory (assignable users formatted
@@ -519,7 +515,9 @@ class TeamService:
         proj = self._get_project_or_404(project_id)
 
         # userDirectory — assignable users formatted for the user picker
-        raw_users = self.assignable_repo.list_assignable_users_for_project(project_id)
+        raw_users = self.assignable_repo.list_assignable_users_for_project(
+            project_id, authorization=authorization,
+        )
         user_directory = [
             UserDirectoryEntry(id=u["id"], name=self._format_display_name(u))
             for u in raw_users

@@ -1,54 +1,60 @@
-"""Cross-schema reader for the per-project user pickers.
+"""Per-project user pickers.
 
 Two read surfaces:
 
-  - ``list_role_assignments_for_project`` — every user with a
-    project-scoped role on this project, grouped by role. Powers
-    ``GET /project/projects/{uuid}/role-assignments``.
+  - ``list_role_assignments_for_project`` — every user with a project-scoped
+    role on this project, grouped by role (carries assignment ids for
+    revocation). Still reads the ``users.*`` mirror; the move to user-svc's
+    role-assignment endpoint (which carries the ids) is a separate change.
 
-  - ``list_assignable_users_for_project`` — union of (a) project-tier
-    role holders on this project AND (b) org_admin holders on the
-    project's vendor(s), minus admin/super_admin tier users. Powers
-    ``GET /project/projects/{uuid}/assignable-users``.
-
-Both read cross-schema mirrors (``users.users``, ``users.roles``,
-``users.user_roles``, ``users.user_role_assignments``) plus this
-service's own ``project.project_vendors`` table.
+  - ``list_assignable_users_for_project`` — union of (a) project-tier role
+    holders, (b) org_admin holders on the project's vendor(s), and (c) users
+    in the project's divisions, minus admin/super_admin tier. The RBAC half
+    now comes from user-svc's ``/authz/users`` (the single source of truth);
+    this service only supplies its OWN resource facts — the project's vendor
+    ids (``project.project_vendors``) and division codes (``project.projects``
+    owner + ``project.activities`` concerned_divisions) — and unions locally.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models._cross_schema import (
-    Role,
-    User as MirrorUser,
-    UserRole,
-    UserRoleAssignment,
-)
+from app.models._cross_schema import Role, User as MirrorUser, UserRoleAssignment
+from app.models.activity import Activity
+from app.models.project import Project
 from app.models.project_vendor import ProjectVendor
+from app.services.user_mgmt_client import UserMgmtClient
 
 
-_ADMIN_ROLE_NAMES = ("admin", "super_admin")
+# Display priority when projecting a single "orgRole" from the set of roles
+# a user holds (highest tier first).
 _ORG_ROLE_PRIORITY = (
     "super_admin", "admin", "org_admin", "project_admin", "project_member",
 )
+
+
+def _highest_org_role(roles: List[str]) -> Optional[str]:
+    held = set(roles or [])
+    for tier in _ORG_ROLE_PRIORITY:
+        if tier in held:
+            return tier
+    return None
 
 
 class AssignableUsersRepository:
     def __init__(self, db: Session):
         self.db = db
 
-    # ----- role assignments listing -----------------------------------
+    # ----- role assignments listing (still mirror-backed; needs ids) ---
 
     def list_role_assignments_for_project(
         self, project_id: str,
     ) -> List[Tuple[Any, Any, Any]]:
         """Return ``[(UserRoleAssignment, Role, User), ...]`` for users with
-        a project-scoped grant on ``project_id``. Newest-first ordering
-        by role name + user login keeps the FE grouping deterministic."""
+        a project-scoped grant on ``project_id``."""
         stmt = (
             select(UserRoleAssignment, Role, MirrorUser)
             .join(Role, Role.id == UserRoleAssignment.role_id)
@@ -59,94 +65,90 @@ class AssignableUsersRepository:
         )
         return [tuple(row) for row in self.db.execute(stmt).all()]
 
-    # ----- assignable users picker ------------------------------------
+    # ----- local resource facts (this service owns these tables) -------
 
-    def list_assignable_users_for_project(
-        self, project_id: str,
-    ) -> List[Dict[str, Any]]:
-        """Union of project-tier holders + org_admin holders on the
-        project's vendors. Admin / super_admin tier users are filtered
-        out per spec (admins don't appear in project pickers).
-
-        Each entry carries ``id`` / ``login`` / ``firstName`` /
-        ``lastName`` / ``email`` / ``orgRole`` ready for FE rendering.
-        """
-        # (a) Project-scoped holders.
-        project_users = self.db.execute(
-            select(MirrorUser)
-            .join(
-                UserRoleAssignment,
-                UserRoleAssignment.user_id == MirrorUser.id,
-            )
-            .where(UserRoleAssignment.project_id == project_id)
-            .where(MirrorUser.deleted_at.is_(None))
-        ).scalars().all()
-
-        # (b) Org-admin holders on the project's vendor(s).
-        vendor_ids = list(self.db.execute(
+    def vendor_ids_for_project(self, project_id: str) -> List[str]:
+        return list(self.db.execute(
             select(ProjectVendor.vendor_id)
             .where(ProjectVendor.project_id == project_id)
         ).scalars())
-        org_admin_users: List[Any] = []
+
+    def division_codes_for_project(self, project_id: str) -> Set[str]:
+        """Owner division + the union of every live activity's
+        concerned_divisions (Bug #173 — users added under a relevant
+        division must surface in the picker)."""
+        codes: Set[str] = set()
+        owner_code = self.db.execute(
+            select(Project.owner).where(Project.id == project_id)
+        ).scalar_one_or_none()
+        if owner_code:
+            codes.add(owner_code)
+        for (concerned,) in self.db.execute(
+            select(Activity.concerned_divisions)
+            .where(Activity.project_id == project_id)
+            .where(Activity.deleted_at.is_(None))
+        ).all():
+            if concerned:
+                for c in concerned:
+                    if isinstance(c, str) and c:
+                        codes.add(c)
+        return codes
+
+    # ----- assignable users picker (RBAC half from user-svc) -----------
+
+    def list_assignable_users_for_project(
+        self, project_id: str, *, authorization: str,
+    ) -> List[Dict[str, Any]]:
+        """Union of (a) project-role holders, (b) org_admins on the project's
+        vendor(s), and (c) users in the project's divisions — admin/super_admin
+        tier excluded. The three RBAC queries are answered by user-svc's
+        ``/authz/users``; this service supplies only the local resource facts.
+
+        Each entry carries ``id`` / ``login`` / ``email`` / ``full_name`` /
+        ``org_role`` (highest tier the user holds).
+        """
+        vendor_ids = self.vendor_ids_for_project(project_id)
+        division_codes = self.division_codes_for_project(project_id)
+
+        client = UserMgmtClient()
+        by_id: Dict[str, Dict[str, Any]] = {}
+
+        def _merge(users: List[dict]) -> None:
+            for u in users:
+                uid = u.get("id")
+                if uid and uid not in by_id:
+                    by_id[uid] = u
+
+        # (a) project-scoped role holders on this project.
+        _merge(client.fetch_users(
+            authorization=authorization,
+            project_id=project_id,
+            exclude_admin_tier=True,
+        ))
+        # (b) org_admin holders on the project's vendor(s).
         if vendor_ids:
-            org_admin_users = list(self.db.execute(
-                select(MirrorUser)
-                .join(
-                    UserRoleAssignment,
-                    UserRoleAssignment.user_id == MirrorUser.id,
-                )
-                .join(Role, Role.id == UserRoleAssignment.role_id)
-                .where(UserRoleAssignment.organization_id.in_(vendor_ids))
-                .where(Role.name == "org_admin")
-                .where(MirrorUser.deleted_at.is_(None))
-            ).scalars())
+            _merge(client.fetch_users(
+                authorization=authorization,
+                vendor_ids=vendor_ids,
+                role="org_admin",
+                exclude_admin_tier=True,
+            ))
+        # (c) users in the project's divisions.
+        if division_codes:
+            _merge(client.fetch_users(
+                authorization=authorization,
+                divisions=sorted(division_codes),
+                exclude_admin_tier=True,
+            ))
 
-        # Admin-tier exclusion set (any form: legacy user_roles OR
-        # scoped user_role_assignments global row).
-        admin_user_ids: set[str] = set()
-        admin_legacy = self.db.execute(
-            select(UserRole.user_id)
-            .join(Role, Role.id == UserRole.role_id)
-            .where(Role.name.in_(_ADMIN_ROLE_NAMES))
-        ).all()
-        admin_user_ids.update(uid for (uid,) in admin_legacy)
-        admin_scoped = self.db.execute(
-            select(UserRoleAssignment.user_id)
-            .join(Role, Role.id == UserRoleAssignment.role_id)
-            .where(Role.name.in_(_ADMIN_ROLE_NAMES))
-            .where(UserRoleAssignment.organization_id.is_(None))
-            .where(UserRoleAssignment.project_id.is_(None))
-        ).all()
-        admin_user_ids.update(uid for (uid,) in admin_scoped)
-
-        # Highest-tier orgRole projection per user.
-        def _org_role_of(user_obj) -> str | None:
-            held = {
-                n for (n,) in self.db.execute(
-                    select(Role.name)
-                    .join(
-                        UserRoleAssignment,
-                        UserRoleAssignment.role_id == Role.id,
-                    )
-                    .where(UserRoleAssignment.user_id == user_obj.id)
-                    .distinct()
-                ).all()
+        out = [
+            {
+                "id": u.get("id"),
+                "login": u.get("login"),
+                "email": u.get("email"),
+                "full_name": u.get("full_name"),
+                "org_role": _highest_org_role(u.get("roles") or []),
             }
-            for tier in _ORG_ROLE_PRIORITY:
-                if tier in held:
-                    return tier
-            return None
-
-        seen: Dict[str, Dict[str, Any]] = {}
-        for u in list(project_users) + list(org_admin_users):
-            if u.id in seen or u.id in admin_user_ids:
-                continue
-            seen[u.id] = {
-                "id": u.id,
-                "login": u.login,
-                "email": u.email,
-                "first_name": u.first_name,
-                "last_name": u.last_name,
-                "org_role": _org_role_of(u),
-            }
-        return sorted(seen.values(), key=lambda x: (x["login"] or ""))
+            for u in by_id.values()
+        ]
+        return sorted(out, key=lambda x: (x["login"] or ""))

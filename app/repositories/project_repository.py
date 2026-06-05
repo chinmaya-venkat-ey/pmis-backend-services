@@ -1,18 +1,17 @@
 """ProjectRepository — CRUD against project.projects + project.project_vendors.
 
-Doc-46 scoping is applied in `list_`: non-admin callers can opt to filter
-projects to those they have an assignment on (via users.user_role_assignments
-cross-schema). When `caller_user_id` is set + `caller_is_admin` is False,
-visibility narrows to projects the caller is on or that map to their vendor.
+Doc-46 scoping is applied in `list_`: non-broad callers see only the projects
+in their authorization context (``caller_project_ids`` — the ("project", id)
+scopes user-svc resolved for them, with the vendor->project projection
+already applied). This service no longer reads users.* to derive that set.
 """
 from __future__ import annotations
 
-from typing import List, Optional, Tuple
+from typing import List, Optional, Set, Tuple
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
-from app.models._cross_schema import UserRoleAssignment, User as MirrorUser
 from app.models.activity import Activity
 from app.models.activity_resource import ActivityResource
 from app.models.milestone import Milestone
@@ -75,13 +74,14 @@ class ProjectRepository:
         caller_user_id: Optional[str] = None,
         caller_is_admin: bool = False,
         caller_can_see_all: bool = False,
+        caller_project_ids: Optional[Set[str]] = None,
     ) -> Tuple[List[Project], int]:
-        """§3.1 (2026-06-02 audit) item 7: ``caller_can_see_all`` replaces
-        the ``caller_is_admin`` short-circuit. The caller passes the
-        broad-view check if they hold ``projects:read_all`` (admin/super_admin
-        hold it via r005). Otherwise the standard "own-assignments +
-        vendor-projects" scoping applies. ``caller_is_admin`` is retained
-        for backwards compatibility with existing test fixtures."""
+        """``caller_can_see_all`` (holds ``projects:read_all``) or
+        ``caller_is_admin`` (holds ``projects:admin_override``) grants the
+        broad view. Otherwise visibility is scoped to ``caller_project_ids`` —
+        the project ids in the caller's authorization context (direct project
+        grants + the vendor->project projection, already resolved by user-svc).
+        An empty set means the caller has no project scopes → sees nothing."""
         stmt = select(Project)
         count_stmt = select(func.count()).select_from(Project)
         clauses = []
@@ -95,28 +95,11 @@ class ProjectRepository:
             clauses.append(Project.public.is_(public))
         caller_passes_broad = caller_is_admin or caller_can_see_all
         if caller_user_id and not caller_passes_broad:
-            # Doc-46: non-admin sees projects they have an assignment on, OR
-            # projects mapped to their vendor.
-            caller_vendor_subq = (
-                select(MirrorUser.vendor_id)
-                .where(MirrorUser.id == caller_user_id)
-                .scalar_subquery()
-            )
-            assignment_subq = (
-                select(UserRoleAssignment.project_id)
-                .where(UserRoleAssignment.user_id == caller_user_id)
-                .where(UserRoleAssignment.project_id.is_not(None))
-            )
-            vendor_proj_subq = (
-                select(ProjectVendor.project_id)
-                .where(ProjectVendor.vendor_id == caller_vendor_subq)
-            )
-            clauses.append(
-                or_(
-                    Project.id.in_(assignment_subq),
-                    Project.id.in_(vendor_proj_subq),
-                )
-            )
+            # Doc-46: scope to the projects in the caller's authz context.
+            # That set already includes both direct project grants and the
+            # vendor->project projection (user-svc applied it), so no local
+            # users.* read or re-projection is needed. Empty set → no projects.
+            clauses.append(Project.id.in_(caller_project_ids or set()))
         if clauses:
             stmt = stmt.where(and_(*clauses))
             count_stmt = count_stmt.where(and_(*clauses))

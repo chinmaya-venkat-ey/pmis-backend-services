@@ -27,6 +27,14 @@ PROJECTS_PUBLISH: Final[str] = "projects:publish"
 PROJECTS_CLOSE: Final[str] = "projects:close"
 PROJECTS_REOPEN: Final[str] = "projects:reopen"
 
+# Platform-admin override capability — replaces the old `is_admin` flag at
+# the genuine "only a platform admin may do this" sites (edit finance after
+# the publish-lock; see new/draft projects). Held by admin / super_admin only
+# (seeded by user-svc migration r016); NOT in any project bundle, so
+# project_admin does not get it. get_caller_is_admin() checks it against the
+# caller's GLOBAL flat permission set.
+PROJECTS_ADMIN_OVERRIDE: Final[str] = "projects:admin_override"
+
 MILESTONES_READ: Final[str] = "milestones:read"
 MILESTONES_CREATE: Final[str] = "milestones:create"
 MILESTONES_DELETE: Final[str] = "milestones:delete"

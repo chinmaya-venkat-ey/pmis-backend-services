@@ -338,25 +338,11 @@ def _bulk_user_name_lookup(
         return {}
     out: Dict[str, str] = {}
     stmt = (
-        select(
-            MirrorUser.id,
-            MirrorUser.first_name,
-            MirrorUser.last_name,
-            MirrorUser.login,
-        )
+        select(MirrorUser.id, MirrorUser.full_name, MirrorUser.login)
         .where(MirrorUser.id.in_(ids))
     )
-    for uid, fn, ln, login in db.execute(stmt).all():
-        fn = (fn or "").strip()
-        ln = (ln or "").strip()
-        if fn and ln:
-            out[uid] = f"{fn} {ln}"
-        elif fn:
-            out[uid] = fn
-        elif ln:
-            out[uid] = ln
-        else:
-            out[uid] = login
+    for uid, full_name, login in db.execute(stmt).all():
+        out[uid] = (full_name or "").strip() or login
     return out
 
 

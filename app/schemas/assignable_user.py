@@ -21,8 +21,7 @@ class AssignableUser(BaseModel):
     id: str
     login: str
     email: Optional[str] = None
-    first_name: Optional[str] = None
-    last_name: Optional[str] = None
+    full_name: Optional[str] = None
     org_role: Optional[str] = None
 
 

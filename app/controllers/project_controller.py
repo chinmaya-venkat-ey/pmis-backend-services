@@ -207,6 +207,7 @@ class ProjectController:
         caller_user_id: Optional[str] = None,
         caller_is_admin: bool = False,
         caller_can_see_all: bool = False,
+        caller_project_ids: Optional[set] = None,
     ) -> Dict[str, Any]:
         rows, total = self.service.list_(
             offset=offset, page_size=page_size,
@@ -214,6 +215,7 @@ class ProjectController:
             include_deleted=include_deleted,
             caller_user_id=caller_user_id, caller_is_admin=caller_is_admin,
             caller_can_see_all=caller_can_see_all,
+            caller_project_ids=caller_project_ids,
         )
         return {
             "items": [self._to_response(r, with_attachments=False) for r in rows],
@@ -291,8 +293,12 @@ class ProjectController:
     def role_assignments(self, project_id: str) -> Dict[str, Any]:
         return self.assignable.list_role_assignments_for_project(project_id)
 
-    def assignable_users(self, project_id: str) -> Dict[str, Any]:
-        return self.assignable.list_assignable_users_for_project(project_id)
+    def assignable_users(
+        self, project_id: str, *, authorization: str = "",
+    ) -> Dict[str, Any]:
+        return self.assignable.list_assignable_users_for_project(
+            project_id, authorization=authorization,
+        )
 
     def list_attachments(self, project_id: str) -> Dict[str, Any]:
         return self.attachments.list_for_project(project_id)

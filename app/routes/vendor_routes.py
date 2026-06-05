@@ -486,8 +486,7 @@ def list_vendor_users(
             "id": u.id,
             "login": u.login,
             "email": u.email,
-            "firstName": u.first_name or "",
-            "lastName": u.last_name or "",
+            "fullName": u.full_name or "",
             "status": u.status,
         }
         for u in rows

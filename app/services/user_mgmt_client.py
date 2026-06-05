@@ -18,7 +18,7 @@ caller), with the upstream status + body included in ``details``.
 """
 from __future__ import annotations
 
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import httpx
 
@@ -56,6 +56,85 @@ class UserMgmtClient:
             self.mode = configured_mode
         else:
             self.mode = "real" if self.base_url else "mock"
+
+    def fetch_authz_context(self, authorization: str) -> Optional[dict]:
+        """GET user-management's /api/v3/authz/context for the caller's token.
+
+        Returns the resolved authz context dict (user_id / permissions /
+        scoped / vendor_id), or None when the token is anonymous/invalid
+        (HTTP 401) or no user-management URL is configured. Raises
+        ``httpx.HTTPError`` on connection failure / non-401 error so the
+        auth middleware can fail closed.
+
+        The caller's ``Authorization`` is forwarded verbatim — user-management
+        re-validates the token (signature / expiry / revocation) and resolves
+        the permission set itself (this service is a pure enforcement point).
+        """
+        if not self.base_url or not authorization:
+            return None
+
+        url = f"{self.base_url}/api/v3/authz/context"
+        headers = {"Authorization": authorization, "Accept": "application/json"}
+        with httpx.Client(timeout=self.timeout) as client:
+            resp = client.get(url, headers=headers)
+
+        if resp.status_code == 401:
+            return None
+        resp.raise_for_status()
+
+        body = resp.json()
+        # user-management HAL-wraps payloads as {data, message, error, status}.
+        if isinstance(body, dict) and "data" in body:
+            return body["data"]
+        return body
+
+    def fetch_users(
+        self,
+        *,
+        authorization: str,
+        project_id: Optional[str] = None,
+        vendor_ids: Optional[List[str]] = None,
+        divisions: Optional[List[str]] = None,
+        role: Optional[str] = None,
+        exclude_admin_tier: bool = False,
+    ) -> List[dict]:
+        """Discovery query against user-management's /api/v3/authz/users.
+
+        Exactly ONE selector must be supplied (project_id, vendor_ids, or
+        divisions) — see the endpoint contract. Returns the list of user
+        dicts (id / login / email / full_name / vendor_id /
+        division / roles), or [] when no user-management URL / token is
+        available. The caller supplies its own resource facts (vendor ids,
+        division codes) and unions the results locally.
+        """
+        if not self.base_url or not authorization:
+            return []
+
+        params: List[tuple] = []
+        if project_id:
+            params.append(("project_id", project_id))
+        for v in (vendor_ids or []):
+            params.append(("vendor_id", v))
+        for d in (divisions or []):
+            params.append(("division", d))
+        if role:
+            params.append(("role", role))
+        if exclude_admin_tier:
+            params.append(("exclude_admin_tier", "true"))
+
+        url = f"{self.base_url}/api/v3/authz/users"
+        headers = {"Authorization": authorization, "Accept": "application/json"}
+        with httpx.Client(timeout=self.timeout) as client:
+            resp = client.get(url, params=params, headers=headers)
+        resp.raise_for_status()
+
+        body = resp.json()
+        data = body.get("data") if isinstance(body, dict) else None
+        if isinstance(data, dict):
+            return (data.get("_embedded") or {}).get("elements") or []
+        if isinstance(data, list):
+            return data
+        return []
 
     def replace_project_role_assignments(
         self,

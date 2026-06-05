@@ -29,6 +29,13 @@ class Settings(BaseSettings):
     service_name: str = Field(default="pmis-file-store")
     cors_origins: str = Field(default="http://localhost:3000")
 
+    # Base URL of pmis-user-management (the single Policy Decision Point).
+    # Auth/RBAC is resolved by calling its /api/v3/authz/context endpoint —
+    # this service no longer reads users.* itself. When unset, every authed
+    # request is treated as anonymous (dev/standalone mode).
+    user_management_service_url: Optional[str] = Field(default=None)
+    user_management_service_timeout_seconds: float = Field(default=5.0)
+
     # === Database ===
     # Same shared PostgreSQL instance as all PMIS microservices.
     # This service creates/owns the `files` schema.

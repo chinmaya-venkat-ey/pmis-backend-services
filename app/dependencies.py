@@ -15,5 +15,6 @@ def get_current_user_id(request: Request) -> str:
     return getattr(request.state, "user_id", None) or ""
 
 
-def get_caller_is_admin(request: Request) -> bool:
-    return bool(getattr(request.state, "is_admin", False))
+# §3.14 (2026-06-02 audit): get_caller_is_admin removed — no route in
+# this service consumed it. Re-add when a service-layer admin check is
+# wired through a route (and replace with a permission-code check per A1).

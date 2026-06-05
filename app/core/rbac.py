@@ -40,8 +40,7 @@ def require_permission(permission_code: Union[str, object]) -> Callable:
         uid = _user_id(request)
         if not uid:
             raise UnauthorizedError("Authentication required", code="auth_required")
-        if _is_admin(request):
-            return uid
+        # A1 (2026-06-02 audit): no admin short-circuit.
         if code not in _user_permissions(request):
             raise ForbiddenError(
                 f"Permission denied: {code} required",
@@ -61,8 +60,7 @@ def require_any_permission(*permission_codes: Union[str, object]) -> Callable:
         uid = _user_id(request)
         if not uid:
             raise UnauthorizedError("Authentication required", code="auth_required")
-        if _is_admin(request):
-            return uid
+        # A1: no admin short-circuit.
         held = _user_permissions(request)
         if not any(c in held for c in codes):
             raise ForbiddenError(

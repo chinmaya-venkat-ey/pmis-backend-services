@@ -122,16 +122,68 @@ class UserRoleAssignmentRepository:
     # ------------------------------------------------------------------ cross-schema queries
 
     def list_projects_for_user(self, user_id: str) -> List[Project]:
-        """Distinct, non-deleted projects the user has any assignment in."""
-        stmt = (
+        """Distinct, non-deleted projects the user has any role-assignment
+        path into.
+
+        Two sources are unioned so this listing matches what the auth
+        layer (``rbac_repository.effective_permissions_by_scope`` —
+        Round-7 vendor->project projection) treats as the user's
+        effective project set:
+
+          (a) Direct project-scoped grants
+              ``user_role_assignment.project_id = P``.
+              After the r014 normalisation the bulk of grants —
+              project_admin, project_member — live here.
+
+          (b) Vendor-scope projection
+              ``user_role_assignment.organization_id = V``
+              (with ``project_id IS NULL``) → every project mapped to V
+              via ``project.project_vendors``. Currently this catches
+              org_admin; importantly the join carries NO role-name
+              filter, so any future role granted at vendor scope is
+              auto-included with no code change — matching how
+              Round-7 already behaves at permission-check time.
+
+        Bug-Hunter leak (b) follow-up: a user with only an org_admin
+        grant on UIDAI used to see an empty Projects list even though
+        they could open every UIDAI project at runtime. Source (b)
+        closes that gap.
+
+        SEE ALSO `<PMIS-root>/role-vendor-projection-option3.md` (local
+        design note, not committed) for Option 3 — making the
+        projection rule a `users.roles` column instead of "any
+        vendor-scoped row counts". The shape of THIS query stays the
+        same under Option 3; only source (b)'s join gains a
+        ``Role.vendor_projection IS TRUE`` filter.
+        """
+        # (a) direct project grants
+        stmt_direct = (
             select(Project)
             .join(UserRoleAssignment, UserRoleAssignment.project_id == Project.id)
             .where(UserRoleAssignment.user_id == user_id)
             .where(Project.deleted_at.is_(None))
-            .distinct()
-            .order_by(Project.name.asc())
         )
-        return list(self.db.execute(stmt).scalars().all())
+        # (b) vendor-scope projection — any role at vendor scope.
+        stmt_via_vendor = (
+            select(Project)
+            .join(
+                ProjectVendor,
+                ProjectVendor.project_id == Project.id,
+            )
+            .join(
+                UserRoleAssignment,
+                UserRoleAssignment.organization_id == ProjectVendor.vendor_id,
+            )
+            .where(UserRoleAssignment.user_id == user_id)
+            .where(UserRoleAssignment.project_id.is_(None))
+            .where(Project.deleted_at.is_(None))
+        )
+        out: dict[str, Project] = {}
+        for p in self.db.execute(stmt_direct).scalars().all():
+            out[p.id] = p
+        for p in self.db.execute(stmt_via_vendor).scalars().all():
+            out[p.id] = p
+        return sorted(out.values(), key=lambda p: (p.name or ""))
 
     def list_projects_for_vendor(self, vendor_id: str) -> List[Project]:
         """Mirror of masters-svc's same-named query, scoped here for the
@@ -147,7 +199,15 @@ class UserRoleAssignmentRepository:
 
     def list_users_for_vendor(self, vendor_id: str) -> List[User]:
         """Distinct users whose direct vendor_id matches OR who hold any
-        org-scoped assignment with this vendor."""
+        org-scoped assignment with this vendor OR who hold any
+        project-scoped assignment whose project is mapped to this vendor.
+
+        Bug #133: Project Mapping users (granted at project scope) were
+        invisible in the vendor's user list because the prior query only
+        checked direct vendor_id + org-scoped grants. Adding the third
+        source surfaces every user reachable through the vendor's
+        project_vendors mapping.
+        """
         stmt_direct = (
             select(User)
             .where(User.vendor_id == vendor_id)
@@ -159,10 +219,29 @@ class UserRoleAssignmentRepository:
             .where(UserRoleAssignment.organization_id == vendor_id)
             .where(User.deleted_at.is_(None))
         )
+        # Bug #133: include project-scoped role holders on any project
+        # mapped to this vendor. Skip projects whose Project row is
+        # soft-deleted (matches sibling list_projects_for_user /
+        # list_projects_for_vendor queries above; otherwise a deleted
+        # project's stale role assignments would leak the user here).
+        stmt_project = (
+            select(User)
+            .join(UserRoleAssignment, UserRoleAssignment.user_id == User.id)
+            .join(
+                ProjectVendor,
+                ProjectVendor.project_id == UserRoleAssignment.project_id,
+            )
+            .join(Project, Project.id == UserRoleAssignment.project_id)
+            .where(ProjectVendor.vendor_id == vendor_id)
+            .where(Project.deleted_at.is_(None))
+            .where(User.deleted_at.is_(None))
+        )
         out: dict[str, User] = {}
         for u in self.db.execute(stmt_direct).scalars().all():
             out[u.id] = u
         for u in self.db.execute(stmt_org).scalars().all():
+            out[u.id] = u
+        for u in self.db.execute(stmt_project).scalars().all():
             out[u.id] = u
         return sorted(out.values(), key=lambda u: u.login)
 

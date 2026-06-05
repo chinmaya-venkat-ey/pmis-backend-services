@@ -99,7 +99,7 @@ def test_reader_cannot_create_user(reader_client):
         "/api/v3/users/create",
         json={
             "login": "newuser", "email": "n@example.com",
-            "password": "S3cret!Pass", "first_name": "N", "last_name": "U",
+            "password": "S3cret!Pass", "fullName": "New User",
         },
     )
     assert resp.status_code == 403

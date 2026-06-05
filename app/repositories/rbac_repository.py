@@ -318,6 +318,25 @@ class RbacRepository:
           The same projection runs for the caller's OWN vendor_id (from
           users.users.vendor_id) when the caller holds an org-tier role at
           GLOBAL scope — common pattern for vendor-affiliated users.
+
+        ROLE-AGNOSTIC PROJECTION (current): the projection fires for any
+        vendor-scoped grant, regardless of role name. After r014 the only
+        roles that can sit at vendor scope are org_admin (and any future
+        role explicitly seeded vendor-allowed); PA / PM are blocked here
+        and are project-scoped only.
+
+        FUTURE — OPTION 3 (data-driven projection toggle):
+          Add a ``vendor_projection BOOL DEFAULT FALSE`` column to
+          ``users.roles``; flip it to TRUE in the seed for org_admin (and
+          any future role that should project onto vendor projects). This
+          method + ``list_projects_for_user`` then add
+          ``Role.vendor_projection IS TRUE`` to their org-scope JOINs.
+          Detailed migration / refactor checklist lives in the local
+          design note at
+          ``<PMIS-root>/role-vendor-projection-option3.md`` (not in any
+          git repo — design-track only). Mirror the change in
+          ``UserRoleAssignmentRepository.list_projects_for_user`` (the
+          (b) source) so the listing stays symmetric with this method.
         """
         if not user_id:
             return {}

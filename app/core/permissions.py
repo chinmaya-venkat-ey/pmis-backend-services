@@ -43,7 +43,13 @@ from typing import Final
 # Create / read / delete (action codes, not field codes)
 USERS_CREATE: Final[str] = "users:create"
 USERS_READ: Final[str] = "users:read"
-USERS_READ_ALL: Final[str] = "users:read_all"     # admin-style user directory
+USERS_READ_ALL: Final[str] = "users:read_all"     # can fetch any user by id
+# Bug #213: split off the system-wide LIST-view trigger from users:read_all.
+# Previously holding users:read_all (granted to org_admin via r001 seed)
+# silently bypassed vendor-scoping on GET /users — leaking every org's users
+# to Org Admin / Project Admin. users:list_all_orgs now governs the broad
+# list view; users:read_all keeps its individual-record meaning.
+USERS_LIST_ALL_ORGS: Final[str] = "users:list_all_orgs"  # admin / super_admin only
 USERS_DELETE_ALL: Final[str] = "users:delete_all"  # admin globally
 USERS_DELETE_VENDOR: Final[str] = "users:delete_vendor"  # org_admin: delete users in own vendor
 USERS_GRANT_SUPERADMIN: Final[str] = "users:grant_superadmin"  # super_admin only
@@ -52,6 +58,9 @@ USERS_GRANT_SUPERADMIN: Final[str] = "users:grant_superadmin"  # super_admin onl
 # Per round-7 Doc-44: nobody but self / admin / super_admin gets these.
 # org_admin / project_admin manage role-assignments, not user-row fields.
 USERS_UPDATE_EMAIL: Final[str] = "users:update:email"
+USERS_UPDATE_FULL_NAME: Final[str] = "users:update:full_name"
+# Legacy: first_name/last_name are no longer written (the name is full_name).
+# Constants kept for the seeded catalog rows; not in USER_FIELD_CODES anymore.
 USERS_UPDATE_FIRST_NAME: Final[str] = "users:update:first_name"
 USERS_UPDATE_LAST_NAME: Final[str] = "users:update:last_name"
 USERS_UPDATE_PHONE_NUMBER: Final[str] = "users:update:phone_number"
@@ -104,6 +113,14 @@ PROJECTS_DELETE_ALL: Final[str] = "projects:delete_all"  # admin/super_admin onl
 PROJECTS_PUBLISH: Final[str] = "projects:publish"
 PROJECTS_CLOSE: Final[str] = "projects:close"
 PROJECTS_REOPEN: Final[str] = "projects:reopen"
+
+# Platform-admin override capability. Replaces project-svc's `is_admin`
+# short-circuit at the genuine "only a platform admin may do this" sites
+# (edit finance after the publish-lock; see new/draft projects). Granted to
+# admin / super_admin ONLY (migration r016) — deliberately NOT part of any
+# project-domain bundle, so project_admin does NOT receive it. Checked against
+# the caller's GLOBAL flat permission set in project-svc's get_caller_is_admin.
+PROJECTS_ADMIN_OVERRIDE: Final[str] = "projects:admin_override"
 
 # PROJECTS — field-level writes (PATCH /project/projects/{uuid}/update)
 PROJECTS_UPDATE_NAME: Final[str] = "projects:update:name"
@@ -292,8 +309,7 @@ FREQUENCIES_MANAGE: Final[str] = "frequencies:manage"
 
 USER_FIELD_CODES: Final[dict[str, str]] = {
     "email": USERS_UPDATE_EMAIL,
-    "first_name": USERS_UPDATE_FIRST_NAME,
-    "last_name": USERS_UPDATE_LAST_NAME,
+    "full_name": USERS_UPDATE_FULL_NAME,
     "phone_number": USERS_UPDATE_PHONE_NUMBER,
     "vendor_id": USERS_UPDATE_VENDOR_ID,
     "division": USERS_UPDATE_DIVISION,
@@ -547,6 +563,20 @@ RESERVED_DIRECT_GRANT_CODES: Final[frozenset[str]] = frozenset({
 LOCKED_ROLE_NAMES: Final[frozenset[str]] = frozenset({
     SUPER_ADMIN_ROLE,
     ADMIN_ROLE,
+})
+
+
+# Bug-Hunter (a) follow-up: roles that may ONLY be granted at project scope.
+# project_admin and project_member must always name a project_id — granting
+# them at vendor scope ("the user is a project_admin on EVERY project this
+# vendor owns") creates a one-to-many shortcut that several read paths
+# couldn't reproduce, so the listing of "who has a role on this project?"
+# silently underreported. The runtime API now rejects PA/PM grants where
+# project_id IS NULL; the r014 migration expands any legacy vendor-scoped
+# PA/PM rows into per-project rows so this rule holds for existing data too.
+PROJECT_ONLY_ROLE_NAMES: Final[frozenset[str]] = frozenset({
+    PROJECT_ADMIN_ROLE,
+    PROJECT_MEMBER_ROLE,
 })
 
 

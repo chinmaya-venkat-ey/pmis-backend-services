@@ -12,6 +12,7 @@ from fastapi import APIRouter
 
 from app.routes import (
     auth_routes,
+    authz_routes,
     health_routes,
     permission_routes,
     role_assignment_routes,
@@ -23,6 +24,7 @@ from app.routes import (
 
 user_router = APIRouter(prefix="/api/v3")
 user_router.include_router(auth_routes.router)
+user_router.include_router(authz_routes.router)
 user_router.include_router(user_routes.router)
 user_router.include_router(role_routes.router)
 user_router.include_router(permission_routes.router)

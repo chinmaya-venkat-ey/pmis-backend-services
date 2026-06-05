@@ -11,6 +11,7 @@ from app.core.permissions import (
     USERS_CREATE,
     USERS_DELETE_ALL,
     USERS_DELETE_VENDOR,
+    USERS_LIST_ALL_ORGS,
     USERS_READ,
     USERS_READ_ALL,
 )
@@ -56,14 +57,17 @@ def list_users(
 ):
     caller_vendor_id = getattr(request.state, "vendor_id", None) if request else None
     held = getattr(request.state, "user_permissions", None) if request else None
+    # Bug #213: broad system-wide list view is gated on users:list_all_orgs
+    # (r013 grants this only to admin / super_admin). users:read_all retains
+    # its individual-record meaning for GET /users/{id} — Org Admin /
+    # Project Admin keep that ability but lose the broad list view, falling
+    # back to vendor-scoped listings via the #174 vendor_id hydration.
     return controller.list_(
         offset=offset, page_size=page_size,
         status=status, include_deleted=include_deleted,
         caller_vendor_id=caller_vendor_id,
         caller_is_admin=caller_is_admin,
-        # §3.1 (2026-06-02 audit) item 7: broad view requires users:read_all
-        # (admin/super_admin hold it via r005). Otherwise vendor-scoped.
-        caller_can_see_all=(USERS_READ_ALL in (held or set())),
+        caller_can_see_all=(USERS_LIST_ALL_ORGS in (held or set())),
     )
 
 

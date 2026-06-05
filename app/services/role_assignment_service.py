@@ -29,6 +29,7 @@ from app.core.permissions import (
 )
 from app.models.user import User
 from app.models.user_role_assignment import UserRoleAssignment
+from app.repositories.audit_log_repository import AuditLogRepository
 from app.repositories.rbac_repository import RbacRepository
 from app.repositories.user_repository import UserRepository
 from app.repositories.user_role_assignment_repository import UserRoleAssignmentRepository
@@ -49,6 +50,7 @@ class RoleAssignmentService:
         self.repo = UserRoleAssignmentRepository(db)
         self.rbac = RbacRepository(db)
         self.user_repo = UserRepository(db)
+        self.audit = AuditLogRepository(db)
 
     # ------------------------------------------------------------------ reads
 
@@ -143,6 +145,19 @@ class RoleAssignmentService:
                 project_id=pid,
                 created_by_user_id=caller_user_id,
             )
+            self.audit.record(
+                actor_user_id=caller_user_id,
+                action="role_assignment.create",
+                resource_type="user_role_assignment",
+                resource_id=str(row.id),
+                target_user_id=user_id,
+                after={
+                    "role": role.name,
+                    "role_id": role.id,
+                    "organization_id": org_id,
+                    "project_id": pid,
+                },
+            )
             results.append(
                 self._to_response(row, role=role, user=self.user_repo.get_by_id(user_id))
             )
@@ -213,6 +228,13 @@ class RoleAssignmentService:
                     project_id=project_id,
                     created_by_user_id=caller_user_id,
                 )
+            self.audit.record(
+                actor_user_id=caller_user_id,
+                action="role_assignment.bulk_replace",
+                resource_type="user_role_assignment",
+                resource_id=project_id,
+                after={"role": role_name, "user_ids": sorted(set(user_ids))},
+            )
 
         self.db.commit()
         return self.list_for_project(project_id)
@@ -241,6 +263,19 @@ class RoleAssignmentService:
 
         user = self.user_repo.get_by_id(row.user_id)
         response = self._to_response(row, role=role, user=user)
+        self.audit.record(
+            actor_user_id=caller_user_id,
+            action="role_assignment.delete",
+            resource_type="user_role_assignment",
+            resource_id=str(row.id),
+            target_user_id=row.user_id,
+            before={
+                "role": role.name,
+                "role_id": row.role_id,
+                "organization_id": row.organization_id,
+                "project_id": row.project_id,
+            },
+        )
         self.repo.delete(row)
         self.db.commit()
         return response
@@ -283,6 +318,7 @@ class RoleAssignmentService:
         from app.core.permissions import (
             ADMIN_ROLE,
             LOCKED_ROLE_NAMES,
+            PROJECT_ONLY_ROLE_NAMES,
             RBAC_ASSIGN,
         )
         from app.services.role_grants_service import is_grant_allowed
@@ -293,6 +329,26 @@ class RoleAssignmentService:
             raise CallerCannotGrantRoleError(
                 f"Role {role_name!r} can only be assigned globally "
                 f"(organization_id and project_id must be NULL).",
+                details={
+                    "role": role_name,
+                    "organization_id": organization_id,
+                    "project_id": project_id,
+                },
+            )
+
+        # ---- (1b) scope guard on project_admin / project_member ----------
+        # Bug-Hunter (a) follow-up: these roles must always name a project.
+        # Granting them at vendor scope creates a one-to-many shortcut the
+        # role-assignments listing can't reproduce, so per-project views
+        # underreport access. Callers must pass project_id; if the intent
+        # was "PA on every project this vendor owns", the caller must issue
+        # one grant per project (the batch project_ids path on this same
+        # endpoint already supports that shape).
+        if role_name in PROJECT_ONLY_ROLE_NAMES and project_id is None:
+            raise CallerCannotGrantRoleError(
+                f"Role {role_name!r} must be assigned with a project_id. "
+                f"Pass project_id (or batch project_ids) — vendor-scoped "
+                f"grants for this role are not supported.",
                 details={
                     "role": role_name,
                     "organization_id": organization_id,

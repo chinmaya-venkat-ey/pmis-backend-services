@@ -181,22 +181,19 @@ class UserService:
                         caller_is_admin=caller_is_admin,
                     )
 
-        first_name = payload.first_name
-        last_name = payload.last_name
-        full_name = " ".join(filter(None, [first_name, last_name])) or payload.login
+        full_name = payload.full_name
         row = self.repo.create(
             login=payload.login,
             email=str(payload.email),
             hashed_password=hash_password(payload.password),
-            first_name=first_name,
-            last_name=last_name,
+            full_name=full_name,
             phone_number=payload.phone_number,
             vendor_id=payload.vendor_id,
             division=payload.division,
             division_other=payload.division_other,
             org_role=payload.org_role,
             two_factor_enabled=payload.two_factor_enabled,
-            user_code=generate_user_code(full_name),
+            user_code=generate_user_code(full_name or payload.login),
             status="active",
         )
 
@@ -282,15 +279,8 @@ class UserService:
         # so future field_codes additions (e.g. full_name, project_ids,
         # admin) won't silently bypass the walker if a code is later mapped.
         touched = set(updates.keys())
-        # Split full_name → first_name / last_name when present
-        if "full_name" in updates and updates["full_name"]:
-            parts = updates.pop("full_name").split(None, 1)
-            if "first_name" not in updates:
-                updates["first_name"] = parts[0] if parts else None
-            if "last_name" not in updates:
-                updates["last_name"] = parts[1] if len(parts) > 1 else None
-        else:
-            updates.pop("full_name", None)
+        # full_name is written directly (gated by users:update:full_name via
+        # the field-walker). No more first_name/last_name split.
         # project_ids replacement is handled by role-assignment routes; ignore here.
         updates.pop("project_ids", None)
         updates.pop("admin", None)

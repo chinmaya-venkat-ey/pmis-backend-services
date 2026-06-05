@@ -44,6 +44,10 @@ class User(Base):
     login: Mapped[str] = mapped_column(String(64))
     email: Mapped[str] = mapped_column(String(255))
     hashed_password: Mapped[str] = mapped_column(String(255))
+    # Canonical name field — the API reads/writes this everywhere. The
+    # legacy first_name/last_name columns are kept (no longer written) only
+    # so cross-schema mirrors in other services don't break.
+    full_name: Mapped[Optional[str]] = mapped_column(String(510))
     first_name: Mapped[Optional[str]] = mapped_column(String(64))
     last_name: Mapped[Optional[str]] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(String(16), default="active")

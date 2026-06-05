@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, List, Optional
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from app.schemas._base import ResponseModel
 from app.schemas.role_assignment import RoleAssignmentSummary
@@ -26,11 +26,7 @@ class UserResponse(ResponseModel):
     user_code: Optional[str] = None
     login: str
     email: EmailStr
-    first_name: Optional[str] = None
-    last_name: Optional[str] = None
-    # Convenience concat populated by the controller: ``first_name + " " +
-    # last_name``, falling back to ``login`` when both names are empty.
-    # Monolith parity — saves the FE from doing this concat on every row.
+    # The single canonical name field (stored on users.users.full_name).
     full_name: Optional[str] = None
     status: str
     vendor_id: Optional[str] = None
@@ -67,19 +63,29 @@ class UserProjectAssignmentInput(BaseModel):
 
 
 class UserCreateRequest(BaseModel):
-    """POST /users/create — matches VM UserCreateRequest field names."""
+    """POST /users/create — matches VM UserCreateRequest field names.
 
-    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore", populate_by_name=True)
+    Accepts both camelCase (``fullName``, the FE form) and snake_case
+    (``full_name``) via the alias generator + populate_by_name — previously
+    only snake_case was accepted on create, so a ``fullName`` was silently
+    dropped and the new user had no name.
+    """
+
+    model_config = ConfigDict(
+        str_strip_whitespace=True,
+        extra="ignore",
+        alias_generator=lambda s: (
+            "".join(w.capitalize() if i else w for i, w in enumerate(s.split("_")))
+        ),
+        populate_by_name=True,
+    )
 
     login: Annotated[str, Field(min_length=3, max_length=50, pattern=r"^[a-zA-Z0-9_.-]+$")]
     email: EmailStr
     password: Annotated[str, Field(min_length=8, max_length=256)]
 
-    # Name: VM sends full_name (single string), split server-side.
-    # Alternatively first_name + last_name may be sent directly.
+    # The single canonical name field.
     full_name: Optional[str] = Field(default=None, max_length=510)
-    first_name: Optional[str] = Field(default=None, max_length=64)
-    last_name: Optional[str] = Field(default=None, max_length=64)
 
     phone_number: Optional[str] = Field(default=None, max_length=50)
     vendor_id: Optional[str] = Field(default=None, max_length=36)
@@ -94,15 +100,6 @@ class UserCreateRequest(BaseModel):
     # Project mapping — VM sends project_ids; legacy local format also accepted.
     project_ids: Optional[List[str]] = Field(default=None)
     project_assignments: List[UserProjectAssignmentInput] = Field(default_factory=list)
-
-    @model_validator(mode="after")
-    def _resolve_full_name(self):
-        """Split full_name into first_name/last_name when those are absent."""
-        if self.full_name and not self.first_name:
-            parts = self.full_name.split(None, 1)
-            object.__setattr__(self, "first_name", parts[0] if parts else None)
-            object.__setattr__(self, "last_name", parts[1] if len(parts) > 1 else None)
-        return self
 
 
 class UserUpdateRequest(BaseModel):
@@ -123,10 +120,8 @@ class UserUpdateRequest(BaseModel):
     )
 
     email: Optional[EmailStr] = None
-    # VM sends fullName (camelCase); first_name/last_name also accepted.
+    # VM sends fullName (camelCase) — the single canonical name field.
     full_name: Optional[str] = Field(default=None, max_length=510)
-    first_name: Optional[str] = Field(default=None, max_length=64)
-    last_name: Optional[str] = Field(default=None, max_length=64)
     phone_number: Optional[str] = Field(default=None, max_length=50)
     vendor_id: Optional[str] = Field(default=None, max_length=36)
     division: Optional[str] = Field(default=None, max_length=64)

@@ -112,10 +112,7 @@ PROJECT_MULTIPART_PROPERTIES: Dict[str, Dict[str, Any]] = {
     "statusExplanation": _multipart_string_prop(),
     "parentId": _multipart_string_prop("Parent project UUID (optional)."),
     "status": _multipart_string_prop("new / draft / published / closed."),
-    "owner": _multipart_string_prop("Division code: tmd1 / tmd2 / others."),
-    "ownerOther": _multipart_string_prop(
-        "Required (non-empty) when ``owner == 'others'``."
-    ),
+    "owner": _multipart_string_prop("Division code: tmd1 / tmd2."),
     "category": _multipart_string_prop(),
     "categoryOther": _multipart_string_prop(),
     "categoryOtherReason": _multipart_string_prop(),

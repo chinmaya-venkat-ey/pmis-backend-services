@@ -76,10 +76,9 @@ class ProjectResponse(ResponseModel):
     status: str
     owner: Optional[str] = None
     # Human-readable label of the owner division (resolved from masters.divisions).
-    # Null when owner is None, "others", or an unknown code. Lets the FE render
+    # Null when owner is None or an unknown code. Lets the FE render
     # the project owner column without a separate /master/divisions call.
     owner_label: Optional[str] = None
-    owner_other: Optional[str] = None
     category: Optional[str] = None
     category_other: Optional[str] = None
     category_other_reason: Optional[str] = None
@@ -154,7 +153,6 @@ class ProjectCreateRequest(BaseModel):
     # Monolith parity: status defaults to "new" on create/upsert.
     status: Annotated[Optional[str], Field(default="new", max_length=50)]
     owner: Annotated[Optional[str], Field(default=None, max_length=255)]
-    owner_other: Annotated[Optional[str], Field(default=None, max_length=255)]
     category: Annotated[Optional[str], Field(default=None, max_length=50)]
     category_other: Annotated[Optional[str], Field(default=None, max_length=255)]
     category_other_reason: Annotated[Optional[str], Field(default=None, max_length=1000)]
@@ -193,9 +191,7 @@ class ProjectCreateRequest(BaseModel):
     # Monolith parity: schema-level end-date check as a FIELD validator
     # (matches monolith ``@field_validator("end_date")``) so the
     # RequestValidationError's ``loc`` is ``["endDate"]`` and ``input``
-    # is just the bad value — not the whole request body. Note: no
-    # ``_owner_other_requires_value`` here; service-level
-    # ``validate_owner_pair`` produces the canonical camelCase message.
+    # is just the bad value — not the whole request body.
     @field_validator("end_date")
     @classmethod
     def _end_after_start(cls, v, info):
@@ -226,7 +222,6 @@ class ProjectUpdateRequest(BaseModel):
     # Monolith parity: status defaults to "new" on create/upsert.
     status: Annotated[Optional[str], Field(default="new", max_length=50)]
     owner: Annotated[Optional[str], Field(default=None, max_length=255)]
-    owner_other: Annotated[Optional[str], Field(default=None, max_length=255)]
     start_date: Optional[datetime] = None
     end_date: Optional[datetime] = None
     actual_start_date: Optional[datetime] = None
@@ -282,7 +277,6 @@ class ProjectUpsertRequest(BaseModel):
     # Monolith parity: status defaults to "new" on create/upsert.
     status: Annotated[Optional[str], Field(default="new", max_length=50)]
     owner: Annotated[Optional[str], Field(default=None, max_length=255)]
-    owner_other: Annotated[Optional[str], Field(default=None, max_length=255)]
     category: Annotated[Optional[str], Field(default=None, max_length=50)]
     category_other: Annotated[Optional[str], Field(default=None, max_length=255)]
     category_other_reason: Annotated[Optional[str], Field(default=None, max_length=1000)]

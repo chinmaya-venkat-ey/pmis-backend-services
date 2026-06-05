@@ -1,16 +1,9 @@
-"""Owner / OwnerOther pair validator.
+"""Owner-division validator.
 
-Matches the monolith's ``app/api/v3/projects/services/transitions.py::
-validate_owner_pair`` semantics:
-
-  * ``owner`` is a division code (``tmd1`` / ``tmd2`` / ``others`` plus any
-    admin-added rows in ``masters.divisions``).
-  * When ``owner == 'others'``: ``owner_other`` is required (non-empty,
-    max 255 chars) — free-text label of the actual division.
-  * When ``owner != 'others'``: ``owner_other`` MUST be empty.
+  * ``owner`` is a division code (``tmd1`` / ``tmd2`` plus any admin-added
+    rows in ``masters.divisions``). The free-text "others" option was
+    removed — owner must be a real catalog division.
   * ``require_owner=True`` (create flow) rejects an empty owner.
-  * Error messages quoted verbatim from the monolith so the FE renders
-    the same strings users have always seen.
 """
 from __future__ import annotations
 
@@ -38,18 +31,18 @@ def validate_owner_pair(
     db: Session,
     *,
     owner: Optional[str],
-    owner_other: Optional[str],
     require_owner: bool,
 ) -> None:
-    """Apply the four owner-pair rules. Raises ``ValidationError`` (HTTP
-    422) on the first violation. Error messages match the monolith
-    byte-for-byte.
+    """Validate the project owner division. Raises ``ValidationError`` (HTTP
+    422) on the first violation.
 
     ``require_owner=True`` on the create / upsert paths (owner is
     mandatory). ``False`` on the update path (omission = no-change).
+
+    The free-text "others" companion was removed — owner must be a real
+    division code from the catalog.
     """
     n_owner = normalize_owner_value(owner)
-    n_owner_other = (owner_other or "").strip() if owner_other is not None else None
 
     # 1. Owner required on create (when require_owner=True).
     if require_owner and not n_owner:
@@ -62,27 +55,7 @@ def validate_owner_pair(
     if n_owner is not None and not is_known_owner_division(db, n_owner):
         raise ValidationError(
             f"Owner '{n_owner}' is not a known division. Pick one "
-            f"from GET /divisions or use 'others' with a custom "
-            f"ownerOther label."
-        )
-
-    # 3 & 4. Rules around ``owner_other``.
-    is_others = (n_owner == "others")
-    has_other = n_owner_other is not None and n_owner_other != ""
-
-    if is_others:
-        if not has_other:  # NOSONAR(S1066): nested structure groups owner=='others' rules
-            raise ValidationError(
-                "ownerOther is required (non-empty) when owner is 'others'."
-            )
-        if len(n_owner_other) > 255:
-            raise ValidationError(
-                "ownerOther must be 1-255 characters."
-            )
-    elif n_owner is not None and has_other:
-        # Owner present (and not 'others') but ownerOther supplied — reject.
-        raise ValidationError(
-            "ownerOther may only be provided when owner is 'others'."
+            f"from GET /divisions."
         )
 
 

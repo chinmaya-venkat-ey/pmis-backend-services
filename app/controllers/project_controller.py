@@ -111,8 +111,8 @@ class ProjectController:
     def _resolve_owner_label(self, owner_code: Optional[str]) -> Optional[str]:
         """Look up the division label for the project owner via the
         masters.divisions cross-schema mirror. Returns None when the owner
-        is null, "others", or an unknown code."""
-        if not owner_code or owner_code.lower() == "others":
+        is null or an unknown code."""
+        if not owner_code:
             return None
         div = self.db.execute(
             select(_DivisionMirror).where(_DivisionMirror.code == owner_code)

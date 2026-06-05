@@ -516,7 +516,7 @@ class DashboardService:
             "organisations": _vendor_chips(vendors),
             "division": owner_code,
             "divisionLabel": div_labels.get(owner_code.lower(), owner_code),
-            "divisionOther": project.owner_other,
+            "divisionOther": None,
             "lifecycleStatus": project.status,
             "bucket": bucket,
             "progressPct": progress_pct,
@@ -590,7 +590,7 @@ class DashboardService:
                 "organisations": _vendor_chips(vendors_by_pid.get(p.id, [])),
                 "division": p_owner,
                 "divisionLabel": div_labels.get(p_owner.lower(), p_owner),
-                "divisionOther": p.owner_other,
+                "divisionOther": None,
                 "delayedItemCount": c["delayedItemCount"],
                 "maxDelayDays": c["maxDelayDays"],
             })
@@ -734,7 +734,7 @@ class DashboardService:
             project.project_code or "",
             project.name or "",
             project.owner or "",
-            project.owner_other or "",
+            "",
         ]
         haystack.extend([v[1] for v in vendors])
         return any(needle in (p or "").lower() for p in haystack)

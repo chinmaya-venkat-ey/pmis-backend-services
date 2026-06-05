@@ -84,7 +84,7 @@ async def _create_multipart(
             required_string_keys=("name",),
             string_keys=(
                 "description", "statusExplanation", "parentId", "status",
-                "owner", "ownerOther", "category", "categoryOther",
+                "owner", "category", "categoryOther",
                 "categoryOtherReason", "startDate", "endDate",
             ),
             array_keys=("vendorIds",),
@@ -103,7 +103,6 @@ async def _create_multipart(
         "parent_id": fields.get("parentId"),
         "status": fields.get("status"),
         "owner": fields.get("owner"),
-        "owner_other": fields.get("ownerOther"),
         "category": fields.get("category"),
         "category_other": fields.get("categoryOther"),
         "category_other_reason": fields.get("categoryOtherReason"),

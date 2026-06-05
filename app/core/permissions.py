@@ -81,7 +81,6 @@ PROJECTS_UPDATE_DESCRIPTION: Final[str] = "projects:update:description"
 PROJECTS_UPDATE_PUBLIC: Final[str] = "projects:update:public"
 PROJECTS_UPDATE_STATUS_EXPLANATION: Final[str] = "projects:update:status_explanation"
 PROJECTS_UPDATE_OWNER: Final[str] = "projects:update:owner"
-PROJECTS_UPDATE_OWNER_OTHER: Final[str] = "projects:update:owner_other"
 PROJECTS_UPDATE_START_DATE: Final[str] = "projects:update:start_date"
 PROJECTS_UPDATE_END_DATE: Final[str] = "projects:update:end_date"
 PROJECTS_UPDATE_ACTUAL_START_DATE: Final[str] = "projects:update:actual_start_date"
@@ -128,8 +127,6 @@ ACTIVITIES_UPDATE_ACTIVITY_STARTED: Final[str] = "activities:update:activity_sta
 # §3.8 (2026-06-02 audit): mirror of canonical; seeded + granted via r009.
 ACTIVITIES_UPDATE_CATEGORY: Final[str] = "activities:update:category"
 ACTIVITIES_UPDATE_CCN_VALUE: Final[str] = "activities:update:ccn_value"
-ACTIVITIES_UPDATE_OWNER_DIVISION_OTHER: Final[str] = "activities:update:owner_division_other"
-ACTIVITIES_UPDATE_CONCERNED_DIVISION_OTHER: Final[str] = "activities:update:concerned_division_other"
 ACTIVITIES_UPDATE_RESOURCE: Final[str] = "activities:update:resource"
 ACTIVITIES_UPDATE_DEPENDENCIES: Final[str] = "activities:update:dependencies"
 
@@ -172,7 +169,6 @@ PROJECT_FIELD_CODES: Final[dict[str, str]] = {
     "public": PROJECTS_UPDATE_PUBLIC,
     "status_explanation": PROJECTS_UPDATE_STATUS_EXPLANATION,
     "owner": PROJECTS_UPDATE_OWNER,
-    "owner_other": PROJECTS_UPDATE_OWNER_OTHER,
     "start_date": PROJECTS_UPDATE_START_DATE,
     "end_date": PROJECTS_UPDATE_END_DATE,
     "actual_start_date": PROJECTS_UPDATE_ACTUAL_START_DATE,
@@ -222,8 +218,6 @@ ACTIVITY_FIELD_CODES: Final[dict[str, str]] = {
     # §3.8 (2026-06-02 audit): close schema-accepted-but-ungated gap.
     "category": ACTIVITIES_UPDATE_CATEGORY,
     "ccn_value": ACTIVITIES_UPDATE_CCN_VALUE,
-    "owner_division_other": ACTIVITIES_UPDATE_OWNER_DIVISION_OTHER,
-    "concerned_division_other": ACTIVITIES_UPDATE_CONCERNED_DIVISION_OTHER,
     # §3.14 (2026-06-02 audit): "resource" key removed (UpdateRequest
     # schema rejects the field). Constant kept but inert.
     "depends_on": ACTIVITIES_UPDATE_DEPENDENCIES,

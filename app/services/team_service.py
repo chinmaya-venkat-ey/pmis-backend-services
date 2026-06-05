@@ -255,6 +255,7 @@ class TeamService:
                 milestone_id=act.milestone_id,
                 milestone_name=ms_name,
                 milestone_display_code=self._milestone_display_code(ms_pos),
+                owner_division=act.owner_division,
                 concerned_divisions=act.concerned_divisions or [],
                 assignments=assignments,
             ))
@@ -554,6 +555,7 @@ class TeamService:
                 milestone_id=row.milestone_id,
                 milestone_display_code=row.milestone_display_code,
                 milestone=row.milestone_name,
+                owner_division=row.owner_division,
                 concerned_divisions=row.concerned_divisions,
                 owner=[c.id for c in row.assignments.owner],
                 owner_approver=[c.id for c in row.assignments.owner_approver],

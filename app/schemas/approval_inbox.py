@@ -45,9 +45,7 @@ class _InboxActivityDetail(_InboxActivity):
     planned_start_date: Optional[datetime] = None
     planned_end_date: Optional[datetime] = None
     owner_division: Optional[str] = None
-    owner_division_other: Optional[str] = None
     consent_divisions: List[str] = Field(default_factory=list)
-    consent_division_other: Optional[str] = None
 
 
 class _SubmissionEntry(ResponseModel):

@@ -280,9 +280,7 @@ class ApprovalInboxService:
                 planned_start_date=activity.start_date,
                 planned_end_date=activity.end_date,
                 owner_division=activity.owner_division,
-                owner_division_other=activity.owner_division_other,
                 consent_divisions=list(activity.concerned_divisions or []),
-                consent_division_other=activity.concerned_division_other,
             ),
             project=_InboxProject(
                 id=project.id,

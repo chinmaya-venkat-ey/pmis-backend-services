@@ -118,7 +118,6 @@ class ProjectService:
         validate_owner_pair(
             self.db,
             owner=payload.owner,
-            owner_other=payload.owner_other,
             require_owner=True,
         )
         # Bug #141: project names must be unique among LIVE rows. Pre-check
@@ -150,7 +149,6 @@ class ProjectService:
             parent_id=payload.parent_id,
             status=payload.status or "new",
             owner=payload.owner,
-            owner_other=payload.owner_other,
             # Doc-38 ignore — see comment above.
             category=None,
             category_other=None,
@@ -217,13 +215,11 @@ class ProjectService:
             # Bug #141: live names are unique. Skip the check when the
             # incoming name equals the stored one (no-op edits).
             self._assert_name_unique(updates["name"], exclude_id=row.id)
-        if "owner" in updates or "owner_other" in updates:
+        if "owner" in updates:
             effective_owner = updates.get("owner", row.owner)
-            effective_other = updates.get("owner_other", row.owner_other)
             validate_owner_pair(
                 self.db,
                 owner=effective_owner,
-                owner_other=effective_other,
                 require_owner=False,
             )
         if "parent_id" in updates:
@@ -304,7 +300,6 @@ class ProjectService:
         validate_owner_pair(
             self.db,
             owner=payload.owner,
-            owner_other=payload.owner_other,
             require_owner=True,
         )
         # Doc-38 ignore: category fields force-NULL (see create()).
@@ -346,8 +341,7 @@ class ProjectService:
                 parent_id=payload.parent_id,
                 status=payload.status or "new",
                 owner=payload.owner,
-                owner_other=payload.owner_other,
-                # Doc-38 ignore.
+                    # Doc-38 ignore.
                 category=None,
                 category_other=None,
                 category_other_reason=None,
@@ -384,7 +378,6 @@ class ProjectService:
             "status_explanation": payload.status_explanation,
             "parent_id": payload.parent_id,
             "owner": payload.owner,
-            "owner_other": payload.owner_other,
             "category": None,
             "category_other": None,
             "category_other_reason": None,

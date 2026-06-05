@@ -32,7 +32,7 @@ def _project() -> ProjectResponse:
         description=None, active=True, public=False, is_public=False,
         status_explanation=None, parent_id=None,
         status="new", owner="tmd1",
-        owner_other=None, category=None, category_other=None,
+        category=None, category_other=None,
         category_other_reason=None,
         start_date=None, end_date=None,
         actual_start_date=None, actual_end_date=None,

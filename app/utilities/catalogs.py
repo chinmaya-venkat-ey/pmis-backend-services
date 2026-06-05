@@ -45,7 +45,7 @@ PRIORITY_CHOICES: Tuple[str, ...] = ("P1", "P2", "P3")
 
 PROJECT_CATEGORY_CHOICES: Tuple[str, ...] = ("MSAP", "MSIP", "BSP", "others")
 
-OWNER_DIVISION_CHOICES: Tuple[str, ...] = ("tmd1", "tmd2", "others")
+OWNER_DIVISION_CHOICES: Tuple[str, ...] = ("tmd1", "tmd2")
 """Built-in division codes seeded by masters-svc. Admin-added division
 codes are also accepted via the ``masters.divisions`` catalog lookup."""
 

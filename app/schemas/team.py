@@ -181,6 +181,7 @@ class TeamActivityRow(BaseModel):
     milestone_id: str
     milestone_name: str
     milestone_display_code: str
+    owner_division: Optional[str] = None
     concerned_divisions: List[str] = Field(default_factory=list)
     assignments: ActivityAssignmentsRead
 
@@ -363,6 +364,10 @@ class TeamPageActivity(BaseModel):
     milestone_id: str = Field(description="Milestone UUID (wire: milestoneId)")
     milestone_display_code: str = Field(description="Milestone display code, e.g. 'M1' (wire: milestoneDisplayCode)")
     milestone: str = Field(description="Milestone name (not ID)")
+    owner_division: Optional[str] = Field(
+        default=None,
+        description="This activity's own owner division code (wire: ownerDivision)",
+    )
     concerned_divisions: List[str] = Field(default_factory=list)
     owner: List[str] = Field(default_factory=list, description=_DESC_USER_IDS)
     owner_approver: List[str] = Field(

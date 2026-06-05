@@ -75,15 +75,9 @@ class ActivityResponse(ResponseModel):
     description: Optional[str] = None
     type: Optional[str] = None
     owner_division: Optional[str] = None
-    # Free-text label when owner_division is the catalog code 'others'.
-    # Null/empty for any other code. Service layer enforces the pair rule.
-    owner_division_other: Optional[str] = None
     # Singular Python name → singular wire (``concernedDivision``).
     # Value is a list (Doc-39 multi-division).
     concerned_division: Optional[List[Any]] = None
-    # Free-text label when 'others' appears in concerned_divisions.
-    # Single field per activity — one description suffices.
-    concerned_division_other: Optional[str] = None
     vendor_id: Optional[str] = None
     priority: Optional[str] = None
     start_date: datetime
@@ -135,17 +129,12 @@ class ActivityCreateRequest(BaseModel):
     priority: Annotated[Optional[str], Field(default=None, max_length=16)]
     position: Optional[int] = None
     owner_division: Annotated[Optional[str], Field(default=None, max_length=32)]
-    # Required when owner_division == 'others'; must be empty otherwise.
-    # Validated service-side. Wire alias is camelCase via _REQUEST_CONFIG.
-    owner_division_other: Annotated[Optional[str], Field(default=None, max_length=255)]
     # Monolith wire keeps the SINGULAR alias ``concernedDivision`` for FE
     # back-compat — only the datatype changed (string → list). Python
     # attribute stays plural to match the JSON DB column.
     concerned_divisions: Optional[List[str]] = Field(
         default=None, alias="concernedDivision",
     )
-    # Required when 'others' appears in concerned_divisions; empty otherwise.
-    concerned_division_other: Annotated[Optional[str], Field(default=None, max_length=255)]
     vendor_id: Annotated[Optional[str], Field(default=None, max_length=36)]
     depends_on: List[str] = Field(default_factory=list)
     # Finance — optional on the wire. Pre-publish creates IGNORE
@@ -227,12 +216,10 @@ class ActivityUpdateRequest(BaseModel):
     activity_started: Optional[bool] = None
     priority: Annotated[Optional[str], Field(default=None, max_length=16)]
     owner_division: Annotated[Optional[str], Field(default=None, max_length=32)]
-    owner_division_other: Annotated[Optional[str], Field(default=None, max_length=255)]
     # Monolith parity: singular wire alias on PATCH too.
     concerned_divisions: Optional[List[str]] = Field(
         default=None, alias="concernedDivision",
     )
-    concerned_division_other: Annotated[Optional[str], Field(default=None, max_length=255)]
     vendor_id: Annotated[Optional[str], Field(default=None, max_length=36)]
     position: Optional[int] = None
     depends_on: Optional[List[str]] = None

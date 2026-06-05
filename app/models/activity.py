@@ -81,16 +81,8 @@ class Activity(Base):
     type: Mapped[Optional[str]] = mapped_column(String(20))     # legacy; Doc-38 deprecated
 
     owner_division: Mapped[Optional[str]] = mapped_column(String(32))
-    # Free-text companion for owner_division. Required when owner_division
-    # is the catalog code 'others'; must stay NULL/empty otherwise. Enforced
-    # at the service layer (validate_division_other_pair).
-    owner_division_other: Mapped[Optional[str]] = mapped_column(String(255))
     concerned_division: Mapped[Optional[str]] = mapped_column(String(32))
     concerned_divisions: Mapped[Optional[list[Any]]] = mapped_column(JSONB)
-    # Free-text companion when concerned_divisions list contains 'others'.
-    # Single field (one description suffices regardless of how many other
-    # divisions are listed). Enforced at the service layer.
-    concerned_division_other: Mapped[Optional[str]] = mapped_column(String(255))
     vendor_id: Mapped[Optional[str]] = mapped_column(String(36))  # logical FK
 
     priority: Mapped[Optional[str]] = mapped_column(String(16))

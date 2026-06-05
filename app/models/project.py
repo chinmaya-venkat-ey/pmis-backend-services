@@ -79,7 +79,6 @@ class Project(Base):
     status: Mapped[str] = mapped_column(String(50), default="new")
     # Owner is a division code (logical FK to masters.divisions.code).
     owner: Mapped[Optional[str]] = mapped_column(String(255))
-    owner_other: Mapped[Optional[str]] = mapped_column(String(255))
     # Category is logical FK to masters.project_categories.code.
     category: Mapped[Optional[str]] = mapped_column(String(50))
     category_other: Mapped[Optional[str]] = mapped_column(String(255))

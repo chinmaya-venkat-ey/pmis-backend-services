@@ -547,6 +547,39 @@ class TeamService:
 
         # activities — flat list ordered milestone.position → activity.position
         team_activities = self._read_team_activities(project_id)
+
+        # ownerDivision / concernedDivisions — resolved against masters.divisions.
+        # Hydrate EVERY division code referenced on the page in a single lookup:
+        # the project owner + project concerned union, AND each activity's own
+        # owner + concerned codes — so the per-activity ownerDivision carries the
+        # masters label (id/code/name) just like the project-level one.
+        owner_division, concerned_codes = self.associated_repo.get_project_division_codes(
+            project_id,
+        )
+        all_codes = set(concerned_codes)
+        if owner_division:
+            all_codes.add(owner_division)
+        for row in team_activities:
+            if row.owner_division:
+                all_codes.add(row.owner_division)
+            all_codes.update(c for c in (row.concerned_divisions or []) if c)
+        division_rows = self.associated_repo.get_divisions_by_codes(sorted(all_codes))
+
+        def _to_ref(code: str) -> DivisionRef:
+            d = division_rows.get(code)
+            return DivisionRef(
+                id=d.id if d else None,
+                code=code,
+                name=d.label if d else None,
+            )
+
+        # Hydrated refs for EVERY referenced code. The FE keeps the per-activity
+        # concernedDivisions as bare codes (it keys division-user maps by code),
+        # so this list lets it resolve those codes to labels. A list (not a
+        # code->label dict) because the wrap layer camelizes dict keys and would
+        # mangle codes like 'DIV_X' -> 'DIVX'.
+        division_ref_list: List[DivisionRef] = [_to_ref(c) for c in sorted(all_codes)]
+
         activities = [
             TeamPageActivity(
                 id=row.id,
@@ -555,7 +588,7 @@ class TeamService:
                 milestone_id=row.milestone_id,
                 milestone_display_code=row.milestone_display_code,
                 milestone=row.milestone_name,
-                owner_division=row.owner_division,
+                owner_division=_to_ref(row.owner_division) if row.owner_division else None,
                 concerned_divisions=row.concerned_divisions,
                 owner=[c.id for c in row.assignments.owner],
                 owner_approver=[c.id for c in row.assignments.owner_approver],
@@ -571,21 +604,6 @@ class TeamService:
             for row in team_activities
         ]
 
-        # ownerDivision / concernedDivisions — resolved against masters.divisions.
-        owner_division, concerned_codes = self.associated_repo.get_project_division_codes(
-            project_id,
-        )
-        codes_to_hydrate = sorted(set(concerned_codes) | ({owner_division} if owner_division else set()))
-        division_rows = self.associated_repo.get_divisions_by_codes(codes_to_hydrate)
-
-        def _to_ref(code: str) -> DivisionRef:
-            d = division_rows.get(code)
-            return DivisionRef(
-                id=d.id if d else None,
-                code=code,
-                name=d.label if d else None,
-            )
-
         owner_division_ref: Optional[DivisionRef] = _to_ref(owner_division) if owner_division else None
         concerned_divisions_refs: List[DivisionRef] = [_to_ref(c) for c in concerned_codes]
 
@@ -595,6 +613,7 @@ class TeamService:
             project_name=proj.name,
             owner_division=owner_division_ref,
             concerned_divisions=concerned_divisions_refs,
+            division_refs=division_ref_list,
             user_directory=user_directory,
             org_user=org_user,
             project_owner=project_owner,

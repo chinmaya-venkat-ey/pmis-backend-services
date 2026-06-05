@@ -364,9 +364,10 @@ class TeamPageActivity(BaseModel):
     milestone_id: str = Field(description="Milestone UUID (wire: milestoneId)")
     milestone_display_code: str = Field(description="Milestone display code, e.g. 'M1' (wire: milestoneDisplayCode)")
     milestone: str = Field(description="Milestone name (not ID)")
-    owner_division: Optional[str] = Field(
+    owner_division: Optional["DivisionRef"] = Field(
         default=None,
-        description="This activity's own owner division code (wire: ownerDivision)",
+        description="This activity's own owner division, hydrated from "
+                    "masters.divisions (id/code/name) — wire: ownerDivision",
     )
     concerned_divisions: List[str] = Field(default_factory=list)
     owner: List[str] = Field(default_factory=list, description=_DESC_USER_IDS)
@@ -436,6 +437,15 @@ class TeamPageResponse(BaseModel):
         default_factory=list,
         description="Union of concerned_divisions across all live activities, "
                     "resolved against masters.divisions and sorted by code.",
+    )
+    division_refs: List["DivisionRef"] = Field(
+        default_factory=list,
+        description="Every division referenced anywhere on the page (project + "
+                    "activity owner/concerned), hydrated to id/code/name. Lets the "
+                    "FE resolve the per-activity concernedDivisions codes (kept as "
+                    "bare codes for division-user keying) to labels. Emitted as a "
+                    "list — not a code->label map — because the wrap layer camelizes "
+                    "dict keys and would mangle codes like 'DIV_X'.",
     )
     user_directory: List[UserDirectoryEntry] = Field(default_factory=list)
     org_user: List[OrgUserRow] = Field(default_factory=list)

@@ -226,6 +226,10 @@ class PaymentPageResponse(ResponseModel):
     project_code: Optional[str] = None
     status: str
     is_locked: bool
+    # Project's own date span + QUARTERLY cycle count over it (null if no dates).
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
+    cycle_count: Optional[int] = None
 
     cost_items: List[CostItemResponse] = Field(default_factory=list)
     totals: PaymentTotals

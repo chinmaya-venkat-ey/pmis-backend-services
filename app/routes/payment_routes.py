@@ -290,19 +290,6 @@ def set_phase_qrg(
     )
 
 
-@payment_page_router.get(
-    "/{project_uuid}/cycle-count",
-    response_model=CycleCountResponse,
-    summary="Project-level cycle count — quarterly cycles over the project's start/end dates",
-    dependencies=[Depends(require_project_permission(PROJECTS_READ))],
-)
-def get_project_cycle_count(
-    project_uuid: str,
-    controller: Annotated[PaymentPageController, Depends(get_payment_page_controller)],
-):
-    return controller.project_cycle_count(project_uuid)
-
-
 @payment_page_router.put(
     "/{project_uuid}/phases/{phase}/frequency",
     response_model=PaymentPageResponse,

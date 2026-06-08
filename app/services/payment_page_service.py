@@ -26,7 +26,6 @@ from app.repositories.project_repository import ProjectRepository
 from app.schemas.payment import (
     CcnBlock,
     CostItemResponse,
-    CycleCountResponse,
     PaymentPageResponse,
     PaymentTermResponse,
     PaymentTotals,
@@ -162,20 +161,16 @@ class PaymentPageService:
             project_code=project.project_code,
             status=project.status,
             is_locked=is_payment_locked(project.status),
+            start_date=project.start_date,
+            end_date=project.end_date,
+            # Project-level cycle count is QUARTERLY over the project's own span.
+            cycle_count=_safe_cycle_count(
+                project.start_date, project.end_date, cycle_calc.QUARTERLY,
+            ),
             cost_items=cost_items,
             totals=totals,
             phases=phase_blocks,
             ccn=ccn,
-        )
-
-    def project_cycle_count(self, project_id: str) -> CycleCountResponse:
-        """Project-level cycle count — QUARTERLY cycles over the project's own
-        stored start/end dates. Resilient: null when the project has no dates."""
-        project = self._require_project(project_id)
-        return CycleCountResponse(
-            cycles=_safe_cycle_count(
-                project.start_date, project.end_date, cycle_calc.QUARTERLY,
-            ),
         )
 
     # ----------------------------------------------------------------- write

@@ -39,6 +39,19 @@ class PaymentPageController:
             caller_user_id=caller_user_id, caller_is_admin=caller_is_admin,
         )
 
+    def project_cycle_count(self, project_id: str) -> CycleCountResponse:
+        """Project-level (quarterly) cycle count over the project's own dates."""
+        return self.service.project_cycle_count(project_id)
+
+    def set_phase_frequency(
+        self, project_id: str, phase: int, frequency_code: str, *,
+        caller_user_id: Optional[str], caller_is_admin: bool = False,
+    ) -> PaymentPageResponse:
+        return self.service.set_phase_frequency(
+            project_id, phase, frequency_code,
+            caller_user_id=caller_user_id, caller_is_admin=caller_is_admin,
+        )
+
     def cycle_count(
         self, start_date: datetime, end_date: datetime, frequency: str,
     ) -> CycleCountResponse:

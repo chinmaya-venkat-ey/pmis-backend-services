@@ -26,6 +26,7 @@ from app.repositories.project_repository import ProjectRepository
 from app.schemas.payment import (
     CcnBlock,
     CostItemResponse,
+    CycleCountResponse,
     PaymentPageResponse,
     PaymentTermResponse,
     PaymentTotals,
@@ -34,12 +35,14 @@ from app.schemas.payment import (
 )
 from app.utilities import cycle_calc, payment_calc
 from app.utilities.payment_lock import assert_payment_writable, is_payment_locked
+from app.utilities.payment_masters import validate_frequency_code
 
 
-def _phase_cycle_count(start, end, frequency) -> Optional[int]:
-    """Resilient cycle count for a phase — null (never raises) when a frequency
-    isn't applied yet, isn't a cycle frequency (one_time/daily), the dates are
-    missing, or the range is unusable. Keeps the read endpoint from ever 500ing."""
+def _safe_cycle_count(start, end, frequency) -> Optional[int]:
+    """Resilient cycle count for a project / phase / milestone span — null (never
+    raises) when a frequency isn't applied yet, isn't a cycle frequency
+    (one_time/daily), the dates are missing, or the range is unusable. Keeps the
+    read endpoints from ever 500ing."""
     if start is None or end is None or not frequency:
         return None
     try:
@@ -67,8 +70,10 @@ class PaymentPageService:
         term_rows = self.payment_terms.list_all_live(project_id)
         qrg_rows = self.phase_qrg.list_all_live(project_id)
         # Per-phase date span (earliest milestone start / latest milestone end)
-        # — inputs to the per-phase cycle count.
+        # — inputs to the per-phase cycle count. Per-milestone dates feed the
+        # per-term cycle count.
         phase_dates = self.cost_items.phase_milestone_date_bounds(project_id)
+        ms_dates = self.cost_items.milestone_date_map(project_id)
 
         # QRG (Option A): at most one phase carries it; its leftover is split by
         # amount across later phases, GROWING each later phase's total. Pure
@@ -111,12 +116,13 @@ class PaymentPageService:
             qrg_recv = qrg_received_by_phase.get(phase, Decimal("0"))
             effective_total = payment_calc.to_2dp(phase_base + qrg_recv)
             terms_in_phase = [t for t in term_rows if t.phase == phase]
-            term_responses = [
-                _payment_term_response(
+            term_responses = []
+            for t in terms_in_phase:
+                m_start, m_end = ms_dates.get(t.milestone_id, (None, None))
+                term_responses.append(_payment_term_response(
                     t, effective_total, row_total_by_ci.get(t.cost_item_id, Decimal("0")),
-                )
-                for t in terms_in_phase
-            ]
+                    cycle_count=_safe_cycle_count(m_start, m_end, t.frequency_code),
+                ))
             sum_percent = sum((t.percent_of_payment or Decimal("0")) for t in terms_in_phase)
             applied = phase == qrg_phase
             qrg = QrgResponse(
@@ -139,7 +145,7 @@ class PaymentPageService:
                 effective_phase_total=effective_total,
                 start_date=start_date,
                 end_date=end_date,
-                cycle_count=_phase_cycle_count(start_date, end_date, phase_frequency),
+                cycle_count=_safe_cycle_count(start_date, end_date, phase_frequency),
                 payment_terms=term_responses,
                 qrg=qrg,
             ))
@@ -161,7 +167,39 @@ class PaymentPageService:
             ccn=ccn,
         )
 
+    def project_cycle_count(self, project_id: str) -> CycleCountResponse:
+        """Project-level cycle count — QUARTERLY cycles over the project's own
+        stored start/end dates. Resilient: null when the project has no dates."""
+        project = self._require_project(project_id)
+        return CycleCountResponse(
+            cycles=_safe_cycle_count(
+                project.start_date, project.end_date, cycle_calc.QUARTERLY,
+            ),
+        )
+
     # ----------------------------------------------------------------- write
+
+    def set_phase_frequency(
+        self, project_id: str, phase: int, frequency_code: str, *,
+        caller_user_id: Optional[str], caller_is_admin: bool = False,
+    ) -> PaymentPageResponse:
+        """Set ONE frequency for the WHOLE phase — applied to every live payment
+        term in it (all milestones in a phase share one frequency). Returns the
+        recomputed page (cycle counts ripple)."""
+        project = self._require_project(project_id)
+        assert_payment_writable(project, caller_is_admin=caller_is_admin)
+        code = validate_frequency_code(self.db, frequency_code)
+
+        terms = [t for t in self.payment_terms.list_all_live(project_id) if t.phase == phase]
+        for t in terms:
+            self.payment_terms.update(t, frequency_code=code, updated_by=caller_user_id)
+        self.audit.write(
+            project_id=project_id, target_kind="project", target_id=project_id,
+            action="set_phase_frequency", actor_user_id=caller_user_id,
+            changes={"phase": phase, "frequency_code": code, "terms_updated": len(terms)},
+        )
+        self.db.commit()
+        return self.build_page(project_id)
 
     def set_qrg(
         self, project_id: str, phase: int, applied: bool, *,
@@ -233,13 +271,17 @@ def _cost_item_response(row, milestone_ids: List[str]) -> CostItemResponse:
     return resp
 
 
-def _payment_term_response(row, phase_base: Decimal, row_base: Decimal) -> PaymentTermResponse:
+def _payment_term_response(
+    row, phase_base: Decimal, row_base: Decimal, cycle_count: Optional[int] = None,
+) -> PaymentTermResponse:
     """Value is PHASE-based on the phase's EFFECTIVE total
     (``phaseFixedTotal + qrgReceived``): ``percent × phase_base``. ``row_base``
-    is the term's own cost-row total, surfaced as ``rowTotal`` for info only."""
+    is the term's own cost-row total, surfaced as ``rowTotal`` for info only.
+    ``cycle_count`` is the per-milestone FY-aligned cycle count (null until set)."""
     resp = PaymentTermResponse.model_validate(row)
     resp.row_total = payment_calc.to_2dp(row_base)
     resp.value = payment_calc.payment_value(row.percent_of_payment, phase_base)
+    resp.cycle_count = cycle_count
     return resp
 
 

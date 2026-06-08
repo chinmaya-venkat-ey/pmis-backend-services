@@ -16,7 +16,7 @@ from app.repositories.project_cost_item_repository import ProjectCostItemReposit
 from app.repositories.project_payment_term_repository import ProjectPaymentTermRepository
 from app.repositories.project_phase_qrg_repository import ProjectPhaseQrgRepository
 from app.schemas.payment import PaymentTermResponse
-from app.services.payment_page_service import _payment_term_response
+from app.services.payment_page_service import _payment_term_response, _safe_cycle_count
 from app.services.project_payment_term_service import ProjectPaymentTermService
 from app.utilities import payment_calc
 
@@ -48,7 +48,11 @@ class ProjectPaymentTermController:
             (payment_calc.row_total(c.cost, c.tax_amount) for c in cost_rows if c.id == row.cost_item_id),
             Decimal("0"),
         )
-        return _payment_term_response(row, eff_total, row_base)
+        m_start, m_end = self.cost_items.milestone_date_map(row.project_id).get(
+            row.milestone_id, (None, None),
+        )
+        cycle_count = _safe_cycle_count(m_start, m_end, row.frequency_code)
+        return _payment_term_response(row, eff_total, row_base, cycle_count)
 
     def get(self, term_id: str) -> PaymentTermResponse:
         return self._to_response(self.service.get_by_id(term_id))
@@ -66,14 +70,16 @@ class ProjectPaymentTermController:
         cost_rows = self.cost_items.list_all_live(project_id)
         received = self._received_by_phase(project_id, cost_rows)
         row_total_by_ci = {c.id: payment_calc.row_total(c.cost, c.tax_amount) for c in cost_rows}
-        items = [
-            _payment_term_response(
+        ms_dates = self.cost_items.milestone_date_map(project_id)
+        items = []
+        for r in rows:
+            m_start, m_end = ms_dates.get(r.milestone_id, (None, None))
+            items.append(_payment_term_response(
                 r,
                 self._effective_total(cost_rows, received, r.phase),
                 row_total_by_ci.get(r.cost_item_id, Decimal("0")),
-            )
-            for r in rows
-        ]
+                _safe_cycle_count(m_start, m_end, r.frequency_code),
+            ))
         return {
             "items": items,
             "total": total, "offset": offset, "page_size": page_size,

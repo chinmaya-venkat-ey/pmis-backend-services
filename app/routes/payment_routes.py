@@ -45,6 +45,7 @@ from app.schemas.payment import (
     PaymentPageResponse,
     PaymentTermResponse,
     PaymentTermUpdateRequest,
+    PhaseFrequencyUpdateRequest,
     QrgUpdateRequest,
 )
 
@@ -285,6 +286,39 @@ def set_phase_qrg(
 ):
     return controller.set_qrg(
         project_uuid, phase, payload.qrg_applied,
+        caller_user_id=caller_user_id, caller_is_admin=caller_is_admin,
+    )
+
+
+@payment_page_router.get(
+    "/{project_uuid}/cycle-count",
+    response_model=CycleCountResponse,
+    summary="Project-level cycle count — quarterly cycles over the project's start/end dates",
+    dependencies=[Depends(require_project_permission(PROJECTS_READ))],
+)
+def get_project_cycle_count(
+    project_uuid: str,
+    controller: Annotated[PaymentPageController, Depends(get_payment_page_controller)],
+):
+    return controller.project_cycle_count(project_uuid)
+
+
+@payment_page_router.put(
+    "/{project_uuid}/phases/{phase}/frequency",
+    response_model=PaymentPageResponse,
+    summary="Set ONE frequency for the whole phase (applies to all its terms; returns the page)",
+    dependencies=[Depends(require_project_permission(PROJECTS_UPDATE_FINANCE))],
+)
+def set_phase_frequency(
+    project_uuid: str,
+    payload: PhaseFrequencyUpdateRequest,
+    controller: Annotated[PaymentPageController, Depends(get_payment_page_controller)],
+    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
+    caller_is_admin: Annotated[bool, Depends(get_caller_is_admin)],
+    phase: Annotated[int, Path(ge=0)],
+):
+    return controller.set_phase_frequency(
+        project_uuid, phase, payload.frequency_code,
         caller_user_id=caller_user_id, caller_is_admin=caller_is_admin,
     )
 

@@ -132,6 +132,9 @@ class PaymentTermResponse(ResponseModel):
     percent_of_payment: Optional[Decimal] = None
     row_total: Decimal = Decimal("0.00")      # the cost row's own total (informational)
     value: Decimal = Decimal("0.00")          # derived: percent × the phase's EFFECTIVE total (incl QRG share)
+    # FY-aligned billing cycles over THIS milestone's own start/end at the
+    # phase's frequency. Null until a valid frequency is applied / dates missing.
+    cycle_count: Optional[int] = None
     position: int
     created_at: datetime
     updated_at: datetime
@@ -165,6 +168,18 @@ class CcnCapUpdateRequest(BaseModel):
     model_config = _REQUEST_CONFIG
 
     ccn_cap_percent: Annotated[Decimal, Field(ge=0, le=100)]
+
+
+# ================================================================ phase frequency
+
+class PhaseFrequencyUpdateRequest(BaseModel):
+    """PUT /projects/{uuid}/phases/{phase}/frequency — set ONE frequency for the
+    whole phase (applied to every payment term in it; all milestones in a phase
+    share one frequency)."""
+
+    model_config = _REQUEST_CONFIG
+
+    frequency_code: Annotated[str, Field(min_length=1, max_length=32)]
 
 
 # ================================================================ aggregated page
@@ -228,6 +243,7 @@ class CycleFrequency(str, Enum):
 
 
 class CycleCountResponse(ResponseModel):
-    """GET /payment/cycle-count → number of FY-aligned billing cycles."""
+    """Number of FY-aligned billing cycles. ``cycles`` is null only for the
+    project-level read when the project has no start/end dates set."""
 
-    cycles: int
+    cycles: Optional[int] = None

@@ -155,6 +155,22 @@ class ProjectCostItemRepository:
         ).all()
         return {phase: (start, end) for phase, start, end in rows}
 
+    def milestone_date_map(self, project_id: str) -> dict:
+        """Return ``{milestone_id: (start_date, end_date)}`` for milestones bound
+        to LIVE FIXED cost rows in this project — drives the per-milestone cycle
+        count (each term valued on its own milestone's date span)."""
+        rows = self.db.execute(
+            select(CostItemMilestone.milestone_id, Milestone.start_date, Milestone.end_date)
+            .select_from(CostItemMilestone)
+            .join(ProjectCostItem, ProjectCostItem.id == CostItemMilestone.cost_item_id)
+            .join(Milestone, Milestone.id == CostItemMilestone.milestone_id)
+            .where(ProjectCostItem.project_id == project_id)
+            .where(ProjectCostItem.deleted_at.is_(None))
+            .where(ProjectCostItem.cost_type_code == "fixed")
+            .where(Milestone.deleted_at.is_(None))
+        ).all()
+        return {mid: (start, end) for mid, start, end in rows}
+
     def milestone_phase_map(self, project_id: str) -> dict:
         """Return ``{milestone_id: phase}`` for every milestone bound to a
         LIVE FIXED cost row (with a phase) in this project. A milestone is in

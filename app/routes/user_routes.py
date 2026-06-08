@@ -15,7 +15,12 @@ from app.core.permissions import (
     USERS_READ,
     USERS_READ_ALL,
 )
-from app.core.rbac import require_any_permission, require_authenticated, require_permission
+from app.core.rbac import (
+    require_any_permission,
+    require_any_permission_any_scope,
+    require_authenticated,
+    require_permission,
+)
 from app.dependencies import (
     get_caller_is_admin,
     get_current_user_id,
@@ -43,7 +48,7 @@ router = APIRouter(prefix="/users", tags=["users"])
     "",
     response_model=dict,
     summary="List users",
-    dependencies=[Depends(require_any_permission(USERS_READ, USERS_READ_ALL))],
+    dependencies=[Depends(require_any_permission_any_scope(USERS_READ, USERS_READ_ALL))],
 )
 def list_users(
     controller: Annotated[UserController, Depends(get_user_controller)],

@@ -131,6 +131,41 @@ def require_any_permission(*permission_codes: Union[str, object]) -> Callable:
     return _checker
 
 
+def require_any_permission_any_scope(*permission_codes: Union[str, object]) -> Callable:
+    """Caller passes if they hold AT LEAST ONE of the codes at the GLOBAL
+    (flat) level OR at ANY org/project scope.
+
+    For *list-read* endpoints (e.g. ``GET /users``, ``GET /vendors``) whose
+    result set is itself narrowed by the service-layer vendor/project scoping.
+    §3.3 deliberately keeps scoped grants OUT of the flat ``user_permissions``
+    set so a project-scoped grant can't satisfy a GLOBAL write check — but a
+    read that is already scope-narrowed should admit the scoped holder
+    (Bug #167 / #177: an org_admin / project_admin holding ``users:read`` only
+    at org/project scope was getting 403 on the user/org list).
+    """
+    if not permission_codes:
+        raise ValueError("require_any_permission_any_scope needs at least one code")
+    codes = tuple(getattr(p, "value", p) for p in permission_codes)
+
+    def _checker(request: Request) -> str:
+        uid = _user_id(request)
+        if not uid:
+            raise UnauthorizedError(AUTH_REQUIRED_MESSAGE, code="AUTH_REQUIRED")
+        held = _user_permissions(request)
+        if any(c in held for c in codes):
+            return uid
+        for scoped_codes in _scoped_permissions(request).values():
+            if any(c in scoped_codes for c in codes):
+                return uid
+        raise ForbiddenError(
+            "Permission denied: caller lacks all of the required codes",
+            code="PERMISSION_DENIED",
+            details={"required_any": list(codes)},
+        )
+
+    return _checker
+
+
 def require_admin() -> Callable:
     """403 unless caller holds an admin-tier role (admin or super_admin)."""
 

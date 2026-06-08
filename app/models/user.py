@@ -17,7 +17,7 @@ from datetime import datetime
 from typing import Optional
 from uuid import uuid4
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -26,8 +26,13 @@ from app.db import Base
 class User(Base):
     __tablename__ = "users"
     __table_args__ = (
-        Index("ix_users_login", "login", unique=True),
-        Index("ix_users_email", "email", unique=True),
+        # Bug #138: login/email are unique among LIVE rows only — a deleted
+        # row (deleted_at set) frees its value for reuse; a deactivated row
+        # (deleted_at NULL) keeps it reserved. See r020 migration.
+        Index("ix_users_login", "login", unique=True,
+              postgresql_where=text("deleted_at IS NULL")),
+        Index("ix_users_email", "email", unique=True,
+              postgresql_where=text("deleted_at IS NULL")),
         Index("ix_users_user_code", "user_code", unique=True),
         Index("ix_users_status", "status"),
         Index("ix_users_created_at", "created_at"),

@@ -86,9 +86,9 @@ class UserService:
         )
 
     def check_login_available(self, login: str) -> UserCheckLoginResponse:
-        """Includes soft-deleted users (matches monolith behavior — a deleted
-        login is reserved until the row is hard-removed)."""
-        existing = self.repo.get_by_login(login, include_deleted=True)
+        """Bug #138: a DELETED login is free to reuse — only live rows
+        (deleted_at IS NULL, includes deactivated) reserve it."""
+        existing = self.repo.get_by_login(login, include_deleted=False)
         return UserCheckLoginResponse(login=login, available=existing is None)
 
     # ------------------------------------------------------------------ create
@@ -110,13 +110,15 @@ class UserService:
         Now every assignment passes through the same matrix the standalone
         role-assignment endpoint uses.
         """
-        # Uniqueness checks against active + soft-deleted rows.
-        if self.repo.get_by_login(payload.login, include_deleted=True) is not None:
+        # Bug #138: uniqueness is scoped to LIVE rows only — a deleted user's
+        # login/email is free to reuse; a deactivated user's (deleted_at NULL)
+        # stays reserved. The r020 partial unique index enforces this in the DB.
+        if self.repo.get_by_login(payload.login, include_deleted=False) is not None:
             raise UserLoginAlreadyInUseError(
                 f"Login {payload.login!r} already in use",
                 details={"login": payload.login},
             )
-        if self.repo.get_by_email(str(payload.email), include_deleted=True) is not None:
+        if self.repo.get_by_email(str(payload.email), include_deleted=False) is not None:
             raise UserEmailAlreadyInUseError(
                 f"Email {payload.email!r} already in use",
                 details={"email": str(payload.email)},
@@ -503,6 +505,23 @@ class UserService:
     def restore(self, user_id: str, *, caller_user_id: str, caller_is_admin: bool, request=None):
         target = self.get_by_id(user_id)
         self._assert_caller_can_delete_user(caller_user_id, target, caller_is_admin, request)
+        # Bug #138: the login/email may have been reused by a live user while
+        # this row was deleted. Restoring would re-collide on the r020 partial
+        # unique index — surface a clear 409 instead of a raw IntegrityError.
+        login_clash = self.repo.get_by_login(target.login, include_deleted=False)
+        if login_clash is not None and login_clash.id != target.id:
+            raise UserLoginAlreadyInUseError(
+                f"Login {target.login!r} is now in use by another user; "
+                "change it before restoring",
+                details={"login": target.login},
+            )
+        email_clash = self.repo.get_by_email(target.email, include_deleted=False)
+        if email_clash is not None and email_clash.id != target.id:
+            raise UserEmailAlreadyInUseError(
+                f"Email {target.email!r} is now in use by another user; "
+                "change it before restoring",
+                details={"email": target.email},
+            )
         self.repo.restore(target)
         self.db.commit()
         return target

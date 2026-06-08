@@ -29,7 +29,9 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request
+from typing import List
+
+from fastapi import APIRouter, Depends, Query, Request
 
 from app.core.permissions import PROJECT_MEMBERS_READ, PROJECT_MEMBERS_UPDATE
 from app.core.rbac import require_authenticated, require_permission
@@ -44,6 +46,7 @@ from app.schemas.team import (
     TeamPageRequest,
     TeamPageResponse,
     TeamReadResponse,
+    TeamUserChip,
     TeamWriteRequest,
     TeamWriteResponse,
 )
@@ -515,6 +518,82 @@ def get_team_page(
 ):
     authorization = request.headers.get("authorization") or ""
     return controller.get_team_page(project_id, authorization=authorization)
+
+
+# ── Bug #226: per-dropdown candidate endpoints ──────────────────────────────
+# Each returns List[TeamUserChip] the FE drops straight into that dropdown.
+# Project-owner pickers resolve the division from the project's owner; activity
+# pickers take the activity's concerned division as `divisionCode`. All are
+# UIDAI-scoped and return [] if the UIDAI org is absent.
+
+@project_team_router.get(
+    "/{project_id}/team-candidates/project-owners",
+    response_model=List[TeamUserChip],
+    summary="Candidate users for the Project Owner dropdown (Bug #226)",
+    description="division_owner holders in the project's owner division, within UIDAI.",
+    dependencies=[Depends(require_permission(PROJECT_MEMBERS_READ))],
+)
+def candidates_project_owners(
+    project_id: str,
+    request: Request,
+    controller: Annotated[TeamController, Depends(get_team_controller)],
+):
+    authorization = request.headers.get("authorization") or ""
+    return controller.candidates_project_owners(project_id, authorization=authorization)
+
+
+@project_team_router.get(
+    "/{project_id}/team-candidates/project-owner-approvers",
+    response_model=List[TeamUserChip],
+    summary="Candidate users for the Project Owner Approver dropdown (Bug #226)",
+    description="division_approver holders in the project's owner division, within UIDAI.",
+    dependencies=[Depends(require_permission(PROJECT_MEMBERS_READ))],
+)
+def candidates_project_owner_approvers(
+    project_id: str,
+    request: Request,
+    controller: Annotated[TeamController, Depends(get_team_controller)],
+):
+    authorization = request.headers.get("authorization") or ""
+    return controller.candidates_project_owner_approvers(project_id, authorization=authorization)
+
+
+@project_team_router.get(
+    "/{project_id}/team-candidates/activity-members",
+    response_model=List[TeamUserChip],
+    summary="Candidate users for an Activity Member dropdown (Bug #226)",
+    description="division_member holders in `divisionCode` (the activity's concerned division), within UIDAI.",
+    dependencies=[Depends(require_permission(PROJECT_MEMBERS_READ))],
+)
+def candidates_activity_members(
+    project_id: str,
+    request: Request,
+    controller: Annotated[TeamController, Depends(get_team_controller)],
+    division_code: str = Query(..., alias="divisionCode", description="The activity's concerned division code"),
+):
+    authorization = request.headers.get("authorization") or ""
+    return controller.candidates_activity_members(
+        project_id, division_code=division_code, authorization=authorization,
+    )
+
+
+@project_team_router.get(
+    "/{project_id}/team-candidates/activity-approvers",
+    response_model=List[TeamUserChip],
+    summary="Candidate users for an Activity Approver dropdown (Bug #226)",
+    description="division_approver holders in `divisionCode` (the activity's concerned division), within UIDAI.",
+    dependencies=[Depends(require_permission(PROJECT_MEMBERS_READ))],
+)
+def candidates_activity_approvers(
+    project_id: str,
+    request: Request,
+    controller: Annotated[TeamController, Depends(get_team_controller)],
+    division_code: str = Query(..., alias="divisionCode", description="The activity's concerned division code"),
+):
+    authorization = request.headers.get("authorization") or ""
+    return controller.candidates_activity_approvers(
+        project_id, division_code=division_code, authorization=authorization,
+    )
 
 
 @project_team_router.put(

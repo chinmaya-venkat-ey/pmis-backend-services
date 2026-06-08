@@ -28,6 +28,23 @@ class TeamController:
     def get_team(self, project_id: str, *, authorization: str = "") -> TeamReadResponse:
         return self.service.get_team(project_id, authorization=authorization)
 
+    # Bug #226: one delegator per Manage-Team candidate dropdown.
+    def candidates_project_owners(self, project_id: str, *, authorization: str = ""):
+        return self.service.candidates_project_owners(project_id, authorization=authorization)
+
+    def candidates_project_owner_approvers(self, project_id: str, *, authorization: str = ""):
+        return self.service.candidates_project_owner_approvers(project_id, authorization=authorization)
+
+    def candidates_activity_members(self, project_id: str, *, division_code, authorization: str = ""):
+        return self.service.candidates_activity_members(
+            project_id, division_code=division_code, authorization=authorization,
+        )
+
+    def candidates_activity_approvers(self, project_id: str, *, division_code, authorization: str = ""):
+        return self.service.candidates_activity_approvers(
+            project_id, division_code=division_code, authorization=authorization,
+        )
+
     def save_team(
         self,
         project_id: str,

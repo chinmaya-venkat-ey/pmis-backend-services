@@ -96,16 +96,18 @@ class UserMgmtClient:
         vendor_ids: Optional[List[str]] = None,
         divisions: Optional[List[str]] = None,
         role: Optional[str] = None,
+        org_id: Optional[str] = None,
         exclude_admin_tier: bool = False,
     ) -> List[dict]:
         """Discovery query against user-management's /api/v3/authz/users.
 
         Exactly ONE selector must be supplied (project_id, vendor_ids, or
-        divisions) — see the endpoint contract. Returns the list of user
-        dicts (id / login / email / full_name / vendor_id /
-        division / roles), or [] when no user-management URL / token is
-        available. The caller supplies its own resource facts (vendor ids,
-        division codes) and unions the results locally.
+        divisions) — see the endpoint contract. With the ``divisions``
+        selector, ``role`` selects users in those divisions who ALSO hold the
+        role and ``org_id`` restricts them to one organization (Bug #226).
+        Returns the list of user dicts (id / login / email / full_name /
+        vendor_id / division / roles), or [] when no user-management URL /
+        token is available.
         """
         if not self.base_url or not authorization:
             return []
@@ -119,6 +121,8 @@ class UserMgmtClient:
             params.append(("division", d))
         if role:
             params.append(("role", role))
+        if org_id:
+            params.append(("org_id", org_id))
         if exclude_admin_tier:
             params.append(("exclude_admin_tier", "true"))
 

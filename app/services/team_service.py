@@ -13,7 +13,7 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import select, delete
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.core.errors import NotFoundError, ValidationError
@@ -21,6 +21,7 @@ from app.models._cross_schema import (
     User,
     UserRoleAssignment,
     Role,
+    Vendor,
 )
 from app.models.activity import Activity
 from app.models.activity_assignment import ActivityAssignment
@@ -504,6 +505,82 @@ class TeamService:
         parts = (user_dict.get("full_name") or "").strip()
         login = user_dict.get("login", "")
         return f"{parts} ({login})" if parts else login
+
+    def _resolve_uidai_org_id(self) -> Optional[str]:
+        """The UIDAI organization's vendor id, resolved by name (it is
+        bootstrapped into masters.vendors per environment, so we never hardcode
+        the id). Returns None if no live UIDAI vendor exists."""
+        return self.db.execute(
+            select(Vendor.id)
+            .where(func.lower(Vendor.name) == "uidai")
+            .where(Vendor.deleted_at.is_(None))
+        ).scalars().first()
+
+    def _division_role_candidates(
+        self, *, role: str, division_code: Optional[str], authorization: str,
+    ) -> List[TeamUserChip]:
+        """Bug #226 core: holders of ``role`` whose ``users.division`` equals
+        ``division_code`` within the UIDAI organization. Empty when there is no
+        division to scope to, or no UIDAI org is configured."""
+        if not division_code:
+            return []
+        uidai_id = self._resolve_uidai_org_id()
+        if not uidai_id:
+            return []
+        rows = self.user_mgmt_client.fetch_users(
+            authorization=authorization,
+            divisions=[division_code],
+            role=role,
+            org_id=uidai_id,
+        )
+        return [
+            TeamUserChip(
+                id=u["id"],
+                login=u.get("login", ""),
+                email=u.get("email"),
+                full_name=u.get("full_name"),
+            )
+            for u in rows
+            if u.get("id")
+        ]
+
+    # ── Bug #226: per-dropdown candidate lists ──────────────────────────────
+    # One method per Manage-Team dropdown — the FE calls the matching endpoint
+    # and uses the result directly as that dropdown's options. Project-owner
+    # pickers resolve the division from the project's owner; activity pickers
+    # take the activity's concerned division as ``division_code``.
+
+    def candidates_project_owners(
+        self, project_id: str, *, authorization: str = "",
+    ) -> List[TeamUserChip]:
+        proj = self._get_project_or_404(project_id)
+        return self._division_role_candidates(
+            role="division_owner", division_code=proj.owner, authorization=authorization,
+        )
+
+    def candidates_project_owner_approvers(
+        self, project_id: str, *, authorization: str = "",
+    ) -> List[TeamUserChip]:
+        proj = self._get_project_or_404(project_id)
+        return self._division_role_candidates(
+            role="division_approver", division_code=proj.owner, authorization=authorization,
+        )
+
+    def candidates_activity_members(
+        self, project_id: str, *, division_code: str, authorization: str = "",
+    ) -> List[TeamUserChip]:
+        self._get_project_or_404(project_id)
+        return self._division_role_candidates(
+            role="division_member", division_code=division_code, authorization=authorization,
+        )
+
+    def candidates_activity_approvers(
+        self, project_id: str, *, division_code: str, authorization: str = "",
+    ) -> List[TeamUserChip]:
+        self._get_project_or_404(project_id)
+        return self._division_role_candidates(
+            role="division_approver", division_code=division_code, authorization=authorization,
+        )
 
     def get_team_page(self, project_id: str, *, authorization: str = "") -> TeamPageResponse:
         """Full UI state for GET /projects/{id}/team-page.

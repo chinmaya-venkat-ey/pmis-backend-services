@@ -122,6 +122,7 @@ class PaymentPageService:
                 term_responses.append(_payment_term_response(
                     t, effective_total, row_total_by_ci.get(t.cost_item_id, Decimal("0")),
                     cycle_count=_safe_cycle_count(m_start, m_end, t.frequency_code),
+                    start_date=m_start, end_date=m_end,
                 ))
             sum_percent = sum((t.percent_of_payment or Decimal("0")) for t in terms_in_phase)
             applied = phase == qrg_phase
@@ -273,14 +274,18 @@ def _cost_item_response(row, milestone_ids: List[str]) -> CostItemResponse:
 
 def _payment_term_response(
     row, phase_base: Decimal, row_base: Decimal, cycle_count: Optional[int] = None,
+    start_date=None, end_date=None,
 ) -> PaymentTermResponse:
     """Value is PHASE-based on the phase's EFFECTIVE total
     (``phaseFixedTotal + qrgReceived``): ``percent × phase_base``. ``row_base``
     is the term's own cost-row total, surfaced as ``rowTotal`` for info only.
-    ``cycle_count`` is the per-milestone FY-aligned cycle count (null until set)."""
+    ``start_date``/``end_date`` are the milestone's own span and ``cycle_count``
+    the per-milestone FY-aligned count over it (null until a frequency is set)."""
     resp = PaymentTermResponse.model_validate(row)
     resp.row_total = payment_calc.to_2dp(row_base)
     resp.value = payment_calc.payment_value(row.percent_of_payment, phase_base)
+    resp.start_date = start_date
+    resp.end_date = end_date
     resp.cycle_count = cycle_count
     return resp
 

@@ -132,6 +132,9 @@ class PaymentTermResponse(ResponseModel):
     percent_of_payment: Optional[Decimal] = None
     row_total: Decimal = Decimal("0.00")      # the cost row's own total (informational)
     value: Decimal = Decimal("0.00")          # derived: percent × the phase's EFFECTIVE total (incl QRG share)
+    # This milestone's own date span (drives the per-milestone cycle count).
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
     # FY-aligned billing cycles over THIS milestone's own start/end at the
     # phase's frequency. Null until a valid frequency is applied / dates missing.
     cycle_count: Optional[int] = None

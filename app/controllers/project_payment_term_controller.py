@@ -52,7 +52,7 @@ class ProjectPaymentTermController:
             row.milestone_id, (None, None),
         )
         cycle_count = _safe_cycle_count(m_start, m_end, row.frequency_code)
-        return _payment_term_response(row, eff_total, row_base, cycle_count)
+        return _payment_term_response(row, eff_total, row_base, cycle_count, m_start, m_end)
 
     def get(self, term_id: str) -> PaymentTermResponse:
         return self._to_response(self.service.get_by_id(term_id))
@@ -79,6 +79,7 @@ class ProjectPaymentTermController:
                 self._effective_total(cost_rows, received, r.phase),
                 row_total_by_ci.get(r.cost_item_id, Decimal("0")),
                 _safe_cycle_count(m_start, m_end, r.frequency_code),
+                m_start, m_end,
             ))
         return {
             "items": items,

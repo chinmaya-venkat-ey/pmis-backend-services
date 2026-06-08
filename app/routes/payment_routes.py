@@ -18,6 +18,7 @@ RBAC:
 """
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, Path, Query, status
@@ -26,7 +27,7 @@ from app.controllers.payment_page_controller import PaymentPageController
 from app.controllers.project_cost_item_controller import ProjectCostItemController
 from app.controllers.project_payment_term_controller import ProjectPaymentTermController
 from app.core.permissions import PROJECTS_READ, PROJECTS_UPDATE_FINANCE
-from app.core.rbac import require_permission, require_project_permission
+from app.core.rbac import require_authenticated, require_permission, require_project_permission
 from app.dependencies import (
     get_caller_is_admin,
     get_optional_current_user_id,
@@ -39,6 +40,8 @@ from app.schemas.payment import (
     CostItemCreateRequest,
     CostItemResponse,
     CostItemUpdateRequest,
+    CycleCountResponse,
+    CycleFrequency,
     PaymentPageResponse,
     PaymentTermResponse,
     PaymentTermUpdateRequest,
@@ -284,3 +287,24 @@ def set_phase_qrg(
         project_uuid, phase, payload.qrg_applied,
         caller_user_id=caller_user_id, caller_is_admin=caller_is_admin,
     )
+
+
+# ========================================================= cycle count (utility)
+# Stateless date-math helper — no project context, no data exposure. Any
+# authenticated caller may use it (lock down to a finance role later if needed).
+cycle_count_router = APIRouter(prefix="/payment", tags=["payment-page"])
+
+
+@cycle_count_router.get(
+    "/cycle-count",
+    response_model=CycleCountResponse,
+    summary="Number of FY-aligned billing cycles between two dates (FY Apr–Mar)",
+    dependencies=[Depends(require_authenticated())],
+)
+def get_cycle_count(
+    controller: Annotated[PaymentPageController, Depends(get_payment_page_controller)],
+    start_date: Annotated[datetime, Query(alias="startDate")],
+    end_date: Annotated[datetime, Query(alias="endDate")],
+    frequency: Annotated[CycleFrequency, Query()],
+):
+    return controller.cycle_count(start_date, end_date, frequency.value)

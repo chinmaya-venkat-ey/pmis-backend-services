@@ -31,6 +31,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
+from enum import Enum
 from typing import Annotated, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -204,3 +205,21 @@ class PaymentPageResponse(ResponseModel):
     totals: PaymentTotals
     phases: List[PhaseBlock] = Field(default_factory=list)
     ccn: CcnBlock
+
+
+# ==================================================================== cycle count
+
+class CycleFrequency(str, Enum):
+    """Frequencies the cycle-count endpoint supports — a subset of the frequency
+    master (weekly / daily / one_time excluded for now)."""
+
+    monthly = "monthly"
+    quarterly = "quarterly"
+    half_yearly = "half_yearly"
+    yearly = "yearly"
+
+
+class CycleCountResponse(ResponseModel):
+    """GET /payment/cycle-count → number of FY-aligned billing cycles."""
+
+    cycles: int

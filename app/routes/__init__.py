@@ -79,6 +79,7 @@ project_router.include_router(payment_routes.cost_item_router)
 project_router.include_router(payment_routes.payment_term_project_scoped_router)
 project_router.include_router(payment_routes.payment_term_router)
 project_router.include_router(payment_routes.payment_page_router)
+project_router.include_router(payment_routes.cycle_count_router)
 
 
 __all__ = ["project_router", "health_routes", "attachment_routes"]

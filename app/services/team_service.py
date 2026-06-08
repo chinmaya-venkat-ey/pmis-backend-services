@@ -57,6 +57,12 @@ from app.schemas.team import (
 )
 
 
+# Bug #161: the FE renders exactly these two "Organization User" rows, in this
+# order, and matches them to the API response by position. The backend must
+# always emit both, in this order.
+_ORG_USER_ROLE_ORDER = ("project_admin", "project_member")
+
+
 class TeamService:
     def __init__(self, db: Session):
         self.db = db
@@ -601,11 +607,20 @@ class TeamService:
             for u in raw_users
         ]
 
-        # orgUser — read from user_role_assignments (read-only on this endpoint)
+        # orgUser — read from user_role_assignments (read-only on this endpoint).
+        # Bug #161: always emit BOTH org-user rows in a fixed order
+        # (project_admin then project_member), even when one has no users. The
+        # FE merges these by array position and ignores roleLabel, so omitting
+        # an empty role (or reordering) shifts the other role's users onto the
+        # wrong row — making "saved Project Member users" appear under Project
+        # Admin (or vanish from the row they were added to).
         org_members = self._read_org_members(project_id)
+        users_by_role = {
+            bucket.role_name: [c.id for c in bucket.users] for bucket in org_members
+        }
         org_user = [
-            OrgUserRow(role_label=bucket.role_name, users=[c.id for c in bucket.users])
-            for bucket in org_members
+            OrgUserRow(role_label=role_name, users=users_by_role.get(role_name, []))
+            for role_name in _ORG_USER_ROLE_ORDER
         ]
 
         # projectOwner — Approver row always first (single=True), then Project Owner

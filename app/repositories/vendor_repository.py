@@ -113,11 +113,16 @@ class VendorRepository:
 
     def list_users_for_vendor(self, vendor_id: str) -> List[User]:
         """Cross-schema: users.users where vendor_id = vendor_id.
-        Read-only — masters-svc never writes to users.*"""
+        Read-only — masters-svc never writes to users.*
+
+        Bug #139: deactivated users (status='inactive') are excluded from the
+        Organization-Management vendor user list — reactivating them restores
+        their visibility automatically."""
         stmt = (
             select(User)
             .where(User.vendor_id == vendor_id)
             .where(User.deleted_at.is_(None))
+            .where(User.status != "inactive")
             .order_by(User.login.asc())
         )
         return list(self.db.execute(stmt).scalars().all())

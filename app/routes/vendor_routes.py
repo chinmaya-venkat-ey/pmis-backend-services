@@ -66,9 +66,13 @@ def list_vendors(
 )
 def get_vendor_details(
     vendor_id: str,
+    request: Request,
     controller: Annotated[VendorController, Depends(get_vendor_controller)],
 ) -> Dict[str, Any]:
-    return controller.get_details(vendor_id)
+    # Bug #128/#133: forward the caller's JWT so the controller can aggregate
+    # per-project role users from user-management's discovery endpoint.
+    authorization = request.headers.get("authorization") or ""
+    return controller.get_details(vendor_id, authorization=authorization)
 
 
 @router.get(

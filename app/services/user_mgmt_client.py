@@ -11,7 +11,7 @@ raises so the middleware can fail closed.
 """
 from __future__ import annotations
 
-from typing import Optional
+from typing import List, Optional
 
 import httpx
 
@@ -65,3 +65,38 @@ class UserMgmtClient:
         if isinstance(body, dict) and "data" in body:
             return body["data"]
         return body
+
+    def fetch_project_role_user_ids(
+        self, *, authorization: str, project_id: str, role: str,
+    ) -> List[str]:
+        """Bug #128/#133: user IDs holding ``role`` on ``project_id``, via
+        user-management's discovery endpoint (``GET /authz/users``). Used to
+        populate a vendor's per-project role assignments in Org Management.
+
+        Fail-soft: returns ``[]`` when no URL/token is configured or the call
+        fails, so the vendor detail never breaks on a transient user-mgmt issue.
+        """
+        if not self.base_url or not authorization:
+            return []
+        url = f"{self.base_url}/api/v3/authz/users"
+        params = {"project_id": project_id, "role": role}
+        headers = {"Authorization": authorization, "Accept": "application/json"}
+        try:
+            with httpx.Client(timeout=self.timeout) as client:
+                resp = client.get(url, params=params, headers=headers)
+            resp.raise_for_status()
+        except httpx.HTTPError as exc:
+            logger.warning(
+                "user_mgmt_client discovery failure project=%s role=%s err=%s",
+                project_id, role, exc,
+            )
+            return []
+        body = resp.json()
+        data = body.get("data") if isinstance(body, dict) else None
+        if isinstance(data, dict):
+            elements = (data.get("_embedded") or {}).get("elements") or []
+        elif isinstance(data, list):
+            elements = data
+        else:
+            elements = []
+        return [u["id"] for u in elements if isinstance(u, dict) and u.get("id")]

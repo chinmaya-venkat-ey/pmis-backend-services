@@ -62,6 +62,7 @@ class AuthzController:
         vendor_ids: Optional[Sequence[str]] = None,
         divisions: Optional[Sequence[str]] = None,
         role: Optional[str] = None,
+        org_id: Optional[str] = None,
         exclude_admin_tier: bool = False,
     ) -> List[AuthzUserSummary]:
         """Discovery query. Exactly ONE selector must be supplied:
@@ -71,8 +72,12 @@ class AuthzController:
           - ``divisions``   → users whose ``users.division`` is in the set
 
         ``role`` optionally narrows the project/org selectors to one role
-        (e.g. ``org_admin``). ``exclude_admin_tier`` drops admin/super_admin
-        tier users (the C5-correct definition lives in user-svc).
+        (e.g. ``org_admin``). With the ``divisions`` selector, supplying
+        ``role`` switches to the intersection "users in these divisions who
+        ALSO hold ``role``" (Bug #226), and ``org_id`` further restricts those
+        to one organization (``users.vendor_id``) — e.g. UIDAI.
+        ``exclude_admin_tier`` drops admin/super_admin tier users (the
+        C5-correct definition lives in user-svc).
         """
         vendor_ids = list(vendor_ids or [])
         divisions = list(divisions or [])
@@ -93,6 +98,10 @@ class AuthzController:
             users = self.query.users_by_project_role(project_id, role)
         elif vendor_ids:
             users = self.query.users_by_org_role(vendor_ids, role)
+        elif role:
+            # Bug #226: division ∩ role (+ optional org), used by the
+            # Manage-Team candidate pickers.
+            users = self.query.users_by_division_role(divisions, role, vendor_id=org_id)
         else:
             users = self.query.users_by_division(divisions)
 

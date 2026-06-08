@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional, Sequence, Set
 
-from sqlalchemy import select
+from sqlalchemy import and_, exists, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.role import Role
@@ -76,6 +76,49 @@ class AuthzQueryRepository:
             .where(User.division.in_(list(divisions)))
             .where(User.deleted_at.is_(None))
         )
+        return list(self.db.execute(stmt).scalars().unique().all())
+
+    def users_by_division_role(
+        self,
+        divisions: Sequence[str],
+        role_name: str,
+        vendor_id: Optional[str] = None,
+    ) -> List[User]:
+        """Users whose ``users.division`` is in ``divisions`` AND who hold
+        ``role_name`` in EITHER tier (legacy ``user_roles`` or Doc-41
+        ``user_role_assignments``), optionally restricted to one organization
+        via ``vendor_id``.
+
+        Bug #226: the Manage-Team role pickers must show only the relevant
+        role-holders — e.g. Activity Approvers = ``division_approver`` holders
+        whose division is this activity's concerned division and whose
+        ``vendor_id`` is the UIDAI organization.
+        """
+        if not divisions or not role_name:
+            return []
+        role_id = self.db.execute(
+            select(Role.id).where(Role.name == role_name)
+        ).scalar_one_or_none()
+        if role_id is None:
+            return []
+        holds_role = or_(
+            exists().where(and_(
+                UserRoleAssignment.user_id == User.id,
+                UserRoleAssignment.role_id == role_id,
+            )),
+            exists().where(and_(
+                UserRole.user_id == User.id,
+                UserRole.role_id == role_id,
+            )),
+        )
+        stmt = (
+            select(User)
+            .where(User.division.in_(list(divisions)))
+            .where(User.deleted_at.is_(None))
+            .where(holds_role)
+        )
+        if vendor_id:
+            stmt = stmt.where(User.vendor_id == vendor_id)
         return list(self.db.execute(stmt).scalars().unique().all())
 
     def admin_tier_user_ids(self) -> Set[str]:

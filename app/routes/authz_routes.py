@@ -57,6 +57,9 @@ def get_context(
         "`project_id` (project-scoped role holders), `vendor_id` (repeatable; "
         "org-scoped role holders), or `division` (repeatable; users in those "
         "divisions). `role` optionally narrows the project/org selectors; "
+        "with `division`, `role` selects users in those divisions who ALSO "
+        "hold that role (Bug #226), and `org_id` restricts them to one "
+        "organization (users.vendor_id). "
         "`exclude_admin_tier` drops admin/super_admin-tier users. The caller "
         "supplies its own resource facts and unions the results locally."
     ),
@@ -72,6 +75,7 @@ def list_users(
     vendor_id: Annotated[Optional[List[str]], Query()] = None,
     division: Annotated[Optional[List[str]], Query()] = None,
     role: Annotated[Optional[str], Query()] = None,
+    org_id: Annotated[Optional[str], Query()] = None,
     exclude_admin_tier: Annotated[bool, Query()] = False,
 ):
     return controller.list_users(
@@ -79,5 +83,6 @@ def list_users(
         vendor_ids=vendor_id,
         divisions=division,
         role=role,
+        org_id=org_id,
         exclude_admin_tier=exclude_admin_tier,
     )

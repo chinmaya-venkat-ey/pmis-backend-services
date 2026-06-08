@@ -21,9 +21,10 @@ Guards: ``end_date`` must be on/after ``start_date``; the window may not exceed
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 
 from app.core.errors import ValidationError
+from app.utilities.timezones import IST
 
 
 MAX_SPAN_YEARS = 10
@@ -106,3 +107,18 @@ def count_cycles(start_date: date, end_date: date, frequency: str) -> int:
             details={"supported": sorted(_INDEXERS)},
         )
     return indexer(end_date) - indexer(start_date) + 1
+
+
+def _to_ist_date(dt: datetime) -> date:
+    """Calendar date of ``dt`` in IST (tz-aware → IST before the date is taken,
+    so a UTC instant already 'tomorrow' in IST buckets correctly; naive values
+    pass through). Matches the project's IST-everywhere convention."""
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(IST)
+    return dt.date()
+
+
+def count_cycles_from_datetimes(start: datetime, end: datetime, frequency: str) -> int:
+    """``count_cycles`` for ``datetime`` inputs — the on-the-wire type used by
+    milestones/projects. Normalizes each to the IST calendar date first."""
+    return count_cycles(_to_ist_date(start), _to_ist_date(end), frequency)

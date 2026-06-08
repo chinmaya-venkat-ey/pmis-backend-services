@@ -188,6 +188,14 @@ class PhaseBlock(ResponseModel):
     # The base used for milestone value + the 100% cap: phaseFixedTotal + qrgReceived
     # (e.g. 15000 + 2000 = 17000). Milestone value = % × this.
     effective_phase_total: Decimal = Decimal("0.00")
+    # Phase date span — earliest milestone start / latest milestone end in the
+    # phase (null if the phase has no live milestone). Inputs to the cycle count.
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
+    # Number of FY-aligned billing cycles over [start_date, end_date] for the
+    # phase's applied frequency (all terms in a phase share one). Null until a
+    # valid frequency is applied / when dates are missing.
+    cycle_count: Optional[int] = None
     payment_terms: List[PaymentTermResponse] = Field(default_factory=list)
     qrg: QrgResponse
 

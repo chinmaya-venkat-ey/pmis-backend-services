@@ -17,7 +17,7 @@ from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
-from app.core.errors import ConflictError, ProjectNotFoundError
+from app.core.errors import ConflictError, ProjectNotFoundError, ValidationError
 from app.repositories.project_audit_log_repository import ProjectAuditLogRepository
 from app.repositories.project_cost_item_repository import ProjectCostItemRepository
 from app.repositories.project_payment_term_repository import ProjectPaymentTermRepository
@@ -32,8 +32,20 @@ from app.schemas.payment import (
     PhaseBlock,
     QrgResponse,
 )
-from app.utilities import payment_calc
+from app.utilities import cycle_calc, payment_calc
 from app.utilities.payment_lock import assert_payment_writable, is_payment_locked
+
+
+def _phase_cycle_count(start, end, frequency) -> Optional[int]:
+    """Resilient cycle count for a phase — null (never raises) when a frequency
+    isn't applied yet, isn't a cycle frequency (one_time/daily), the dates are
+    missing, or the range is unusable. Keeps the read endpoint from ever 500ing."""
+    if start is None or end is None or not frequency:
+        return None
+    try:
+        return cycle_calc.count_cycles_from_datetimes(start, end, frequency)
+    except ValidationError:
+        return None
 
 
 class PaymentPageService:
@@ -54,6 +66,9 @@ class PaymentPageService:
         ms_map = self.cost_items.milestone_ids_by_cost_item([c.id for c in cost_rows])
         term_rows = self.payment_terms.list_all_live(project_id)
         qrg_rows = self.phase_qrg.list_all_live(project_id)
+        # Per-phase date span (earliest milestone start / latest milestone end)
+        # — inputs to the per-phase cycle count.
+        phase_dates = self.cost_items.phase_milestone_date_bounds(project_id)
 
         # QRG (Option A): at most one phase carries it; its leftover is split by
         # amount across later phases, GROWING each later phase's total. Pure
@@ -111,11 +126,20 @@ class PaymentPageService:
                 percent=payment_calc.qrg_percent(sum_percent) if applied else None,
                 value=qrg_dist["leftover"] if applied else None,
             )
+            # Cycle count = count_cycles(phase span, phase frequency). All terms
+            # in a phase share one frequency; take the applied one (null until set).
+            start_date, end_date = phase_dates.get(phase, (None, None))
+            phase_frequency = next(
+                (t.frequency_code for t in terms_in_phase if t.frequency_code), None,
+            )
             phase_blocks.append(PhaseBlock(
                 phase=phase,
                 phase_fixed_total=phase_fixed,
                 qrg_received=qrg_recv,
                 effective_phase_total=effective_total,
+                start_date=start_date,
+                end_date=end_date,
+                cycle_count=_phase_cycle_count(start_date, end_date, phase_frequency),
                 payment_terms=term_responses,
                 qrg=qrg,
             ))

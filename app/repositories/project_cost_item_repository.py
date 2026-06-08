@@ -11,6 +11,7 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
 from app.models.cost_item_milestone import CostItemMilestone
+from app.models.milestone import Milestone
 from app.models.project_cost_item import ProjectCostItem
 
 
@@ -130,6 +131,29 @@ class ProjectCostItemRepository:
         for cid, mid in rows:
             out.setdefault(cid, []).append(mid)
         return out
+
+    def phase_milestone_date_bounds(self, project_id: str) -> dict:
+        """Return ``{phase: (min_start_date, max_end_date)}`` over the milestones
+        bound to LIVE FIXED cost rows in this project — i.e. each phase's date
+        span (earliest milestone start, latest milestone end). Drives the
+        per-phase cycle-count display. Phases with no live milestone are absent."""
+        rows = self.db.execute(
+            select(
+                ProjectCostItem.phase,
+                func.min(Milestone.start_date),
+                func.max(Milestone.end_date),
+            )
+            .select_from(CostItemMilestone)
+            .join(ProjectCostItem, ProjectCostItem.id == CostItemMilestone.cost_item_id)
+            .join(Milestone, Milestone.id == CostItemMilestone.milestone_id)
+            .where(ProjectCostItem.project_id == project_id)
+            .where(ProjectCostItem.deleted_at.is_(None))
+            .where(ProjectCostItem.cost_type_code == "fixed")
+            .where(ProjectCostItem.phase.is_not(None))
+            .where(Milestone.deleted_at.is_(None))
+            .group_by(ProjectCostItem.phase)
+        ).all()
+        return {phase: (start, end) for phase, start, end in rows}
 
     def milestone_phase_map(self, project_id: str) -> dict:
         """Return ``{milestone_id: phase}`` for every milestone bound to a

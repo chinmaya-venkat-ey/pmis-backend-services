@@ -2,7 +2,7 @@
 aggregated page, the per-phase QRG flag, and the CCN cap update."""
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import datetime
 from decimal import Decimal
 from typing import Optional
 
@@ -11,16 +11,6 @@ from sqlalchemy.orm import Session
 from app.schemas.payment import CycleCountResponse, PaymentPageResponse
 from app.services.payment_page_service import PaymentPageService
 from app.utilities import cycle_calc
-from app.utilities.timezones import IST
-
-
-def _ist_date(dt: datetime) -> date:
-    """Calendar date of ``dt`` in IST — matches the project's IST-everywhere
-    convention (tz-aware inputs are converted before the date is taken, so a
-    UTC instant that is already 'tomorrow' in IST buckets correctly)."""
-    if dt.tzinfo is not None:
-        dt = dt.astimezone(IST)
-    return dt.date()
 
 
 class PaymentPageController:
@@ -55,10 +45,8 @@ class PaymentPageController:
         """Number of FY-aligned billing cycles between two dates (stateless).
 
         Dates are ``datetime`` on the wire (same type milestones/projects use);
-        we normalize to the IST calendar date before counting.
+        the calc normalizes to the IST calendar date before counting.
         """
         return CycleCountResponse(
-            cycles=cycle_calc.count_cycles(
-                _ist_date(start_date), _ist_date(end_date), frequency,
-            ),
+            cycles=cycle_calc.count_cycles_from_datetimes(start_date, end_date, frequency),
         )

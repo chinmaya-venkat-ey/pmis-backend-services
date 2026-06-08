@@ -7,7 +7,10 @@ match this RBAC predicate?" — the half a boolean check API cannot serve
 supplies the resource facts (its own vendor/division/project data) and unions
 locally.
 
-Every query filters soft-deleted users out. Admin-tier detection mirrors the
+Every query filters out soft-deleted AND deactivated users (Bug #139: a user
+whose ``status`` is ``inactive`` must not surface in any picker / mapping /
+org-management list; flipping ``status`` back to ``active`` restores them
+automatically — no snapshot/restore needed). Admin-tier detection mirrors the
 hardened rule (legacy `user_roles` OR a GLOBAL-scope admin assignment — the
 Round-8 C5 definition), so consumers stop re-deriving it themselves.
 """
@@ -41,6 +44,7 @@ class AuthzQueryRepository:
             .join(UserRoleAssignment, UserRoleAssignment.user_id == User.id)
             .where(UserRoleAssignment.project_id == project_id)
             .where(User.deleted_at.is_(None))
+            .where(User.status != "inactive")
         )
         if role_name:
             stmt = stmt.join(Role, Role.id == UserRoleAssignment.role_id).where(
@@ -60,6 +64,7 @@ class AuthzQueryRepository:
             .join(UserRoleAssignment, UserRoleAssignment.user_id == User.id)
             .where(UserRoleAssignment.organization_id.in_(list(vendor_ids)))
             .where(User.deleted_at.is_(None))
+            .where(User.status != "inactive")
         )
         if role_name:
             stmt = stmt.join(Role, Role.id == UserRoleAssignment.role_id).where(
@@ -75,6 +80,7 @@ class AuthzQueryRepository:
             select(User)
             .where(User.division.in_(list(divisions)))
             .where(User.deleted_at.is_(None))
+            .where(User.status != "inactive")
         )
         return list(self.db.execute(stmt).scalars().unique().all())
 
@@ -115,6 +121,7 @@ class AuthzQueryRepository:
             select(User)
             .where(User.division.in_(list(divisions)))
             .where(User.deleted_at.is_(None))
+            .where(User.status != "inactive")
             .where(holds_role)
         )
         if vendor_id:

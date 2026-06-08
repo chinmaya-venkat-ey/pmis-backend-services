@@ -89,10 +89,12 @@ class PaymentPageService:
         })
         phase_blocks: List[PhaseBlock] = []
         for phase in phases:
+            # phaseFixedTotal = fixed-only (display). The payment BASE folds the
+            # One-Time amount into the FIRST phase, then QRG grows it further.
             phase_fixed = payment_calc.phase_fixed_total(cost_rows, phase)
+            phase_base = payment_calc.phase_payment_base(cost_rows, phase)
             qrg_recv = qrg_received_by_phase.get(phase, Decimal("0"))
-            # The phase total GROWS by its QRG share; value/cap work on this.
-            effective_total = payment_calc.to_2dp(phase_fixed + qrg_recv)
+            effective_total = payment_calc.to_2dp(phase_base + qrg_recv)
             terms_in_phase = [t for t in term_rows if t.phase == phase]
             term_responses = [
                 _payment_term_response(

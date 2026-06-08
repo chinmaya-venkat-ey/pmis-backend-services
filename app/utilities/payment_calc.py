@@ -131,13 +131,44 @@ def contract_totals(items) -> dict:
 
 
 def phase_fixed_total(items, phase) -> Decimal:
-    """Σ ``row_total`` of FIXED cost rows in ``phase`` — the base a phase's
-    payment terms split. Returns a 2dp Decimal."""
+    """Σ ``row_total`` of FIXED cost rows in ``phase`` — the FIXED-only total of
+    a phase. Returns a 2dp Decimal."""
     total = _ZERO
     for it in items:
         if _code(it) == FIXED and getattr(it, "phase", None) == phase:
             total += row_total(getattr(it, "cost", None), getattr(it, "tax_amount", None))
     return _round_money(total)
+
+
+def one_time_total(items) -> Decimal:
+    """Σ ``row_total`` of the ONE-TIME cost rows. Folded into the first phase's
+    payment base (see ``phase_payment_base``)."""
+    total = _ZERO
+    for it in items:
+        if _code(it) == ONE_TIME:
+            total += row_total(getattr(it, "cost", None), getattr(it, "tax_amount", None))
+    return _round_money(total)
+
+
+def first_phase(items):
+    """The lowest phase number present on the cost rows (dynamic — not
+    hard-coded to 1). ``None`` when no phased cost rows exist."""
+    phases = [
+        getattr(c, "phase", None) for c in items
+        if _code(c) == FIXED and getattr(c, "phase", None) is not None
+    ]
+    return min(phases) if phases else None
+
+
+def phase_payment_base(items, phase) -> Decimal:
+    """The base a phase's payment terms split — its FIXED total, PLUS the whole
+    One-Time amount when ``phase`` is the FIRST (lowest) phase. The One-Time row
+    has no phase of its own; its amount is folded into the first phase so the
+    milestone %s there are valued on ``fixed + one_time`` together."""
+    base = phase_fixed_total(items, phase)
+    if phase == first_phase(items):
+        base += one_time_total(items)
+    return _round_money(base)
 
 
 def qrg_distribution(cost_rows, term_rows, qrg_phase) -> dict:
@@ -163,13 +194,13 @@ def qrg_distribution(cost_rows, term_rows, qrg_phase) -> dict:
     distributed = _ZERO
 
     if qrg_phase is not None:
-        qpt = phase_fixed_total(cost_rows, qrg_phase)
+        qpt = phase_payment_base(cost_rows, qrg_phase)
         allocated = _ZERO
         for t in term_rows:
             if getattr(t, "phase", None) == qrg_phase:
                 allocated += payment_value(getattr(t, "percent_of_payment", None), qpt)
         leftover = qrg_value(qpt, allocated)
-        later = [p for p in phases if p > qrg_phase and phase_fixed_total(cost_rows, p) > _ZERO]
+        later = [p for p in phases if p > qrg_phase and phase_payment_base(cost_rows, p) > _ZERO]
         if later and leftover > _ZERO:
             share = leftover / Decimal(len(later))
             for p in later:

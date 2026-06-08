@@ -35,8 +35,9 @@ class ProjectPaymentTermController:
         return payment_calc.qrg_distribution(cost_rows, term_rows, qrg_phase)["received"]
 
     def _effective_total(self, cost_rows, received, phase) -> Decimal:
+        # Base = phase_payment_base (fixed + One-Time on the first phase) + QRG share.
         return payment_calc.to_2dp(
-            payment_calc.phase_fixed_total(cost_rows, phase) + received.get(phase, Decimal("0"))
+            payment_calc.phase_payment_base(cost_rows, phase) + received.get(phase, Decimal("0"))
         )
 
     def _to_response(self, row) -> PaymentTermResponse:

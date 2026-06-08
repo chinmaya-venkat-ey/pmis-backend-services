@@ -20,6 +20,11 @@ class DivisionRepository:
         stmt = select(Division).where(Division.code == code)
         return self.db.execute(stmt).scalars().first()
 
+    def get_by_label(self, label: str) -> Optional[Division]:
+        """Case-insensitive label lookup (Bug #220 name uniqueness)."""
+        stmt = select(Division).where(func.lower(Division.label) == label.strip().lower())
+        return self.db.execute(stmt).scalars().first()
+
     def list_(self, *, include_inactive: bool = False) -> List[Division]:
         stmt = select(Division)
         if not include_inactive:

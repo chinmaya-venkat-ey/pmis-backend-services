@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, Query, Request, Response, status
 
 from app.controllers.vendor_controller import VendorController
 from app.core.permissions import VENDORS_MANAGE, VENDORS_READ
-from app.core.rbac import require_permission
+from app.core.rbac import require_permission, require_permission_any_scope
 from app.dependencies import get_vendor_controller
 from app.schemas.vendor import VendorCreateRequest, VendorUpdateRequest
 from app.schemas.vendor_user import VendorUserSummary
@@ -35,7 +35,7 @@ router = APIRouter(prefix="/vendors", tags=["vendors"])
         "Pass active_only=true (picker dropdowns) to show only active. "
         "Requires vendors:read."
     ),
-    dependencies=[Depends(require_permission(VENDORS_READ))],
+    dependencies=[Depends(require_permission_any_scope(VENDORS_READ))],
 )
 def list_vendors(
     request: Request,
@@ -61,7 +61,7 @@ def list_vendors(
     "/{vendor_id}",
     summary="Get vendor details",
     description="Returns one vendor by UUID with embedded projects. 404 if not found. Requires vendors:read.",
-    dependencies=[Depends(require_permission(VENDORS_READ))],
+    dependencies=[Depends(require_permission_any_scope(VENDORS_READ))],
     responses={404: {"description": "Vendor not found"}},
 )
 def get_vendor_details(
@@ -78,7 +78,7 @@ def get_vendor_details(
         "Returns all active (non-deleted) users whose vendor_id matches the given "
         "vendor UUID. Cross-schema read from users.users. Requires vendors:read."
     ),
-    dependencies=[Depends(require_permission(VENDORS_READ))],
+    dependencies=[Depends(require_permission_any_scope(VENDORS_READ))],
     responses={404: {"description": "Vendor not found"}},
 )
 def list_users_for_vendor(
@@ -95,7 +95,7 @@ def list_users_for_vendor(
         "Returns a Collection of slim project entries. Excludes soft-deleted, "
         "closed, and completed projects. Requires vendors:read."
     ),
-    dependencies=[Depends(require_permission(VENDORS_READ))],
+    dependencies=[Depends(require_permission_any_scope(VENDORS_READ))],
     responses={404: {"description": "Vendor not found"}},
 )
 def list_projects_for_vendor(

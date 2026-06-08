@@ -99,6 +99,40 @@ def require_any_permission(*permission_codes: str) -> Callable:
     return _checker
 
 
+def _scoped_permissions_from_state(request: Request) -> dict:
+    scoped = getattr(request.state, "scoped_permissions", None)
+    return scoped if isinstance(scoped, dict) else {}
+
+
+def require_permission_any_scope(permission_code: str) -> Callable:
+    """Like ``require_permission`` but admits a caller holding the code at
+    ANY org/project scope, not only globally.
+
+    For scope-narrowed *list* reads (Organization Management vendor lists):
+    an org_admin / project_admin holding ``vendors:read`` only at org/project
+    scope must be admitted — §3.3 keeps scoped grants out of the flat set to
+    guard GLOBAL writes, but that protection does not apply to a read
+    (Bug #167 / #177).
+    """
+
+    def _checker(request: Request) -> str:
+        user_id = _user_id_from_state(request)
+        if not user_id:
+            raise UnauthorizedError(AUTH_REQUIRED_MESSAGE, code="AUTH_REQUIRED")
+        if permission_code in _user_permissions_from_state(request):
+            return user_id
+        for codes in _scoped_permissions_from_state(request).values():
+            if permission_code in codes:
+                return user_id
+        raise ForbiddenError(
+            f"Permission denied: {permission_code} required",
+            code="PERMISSION_DENIED",
+            details={"required": permission_code},
+        )
+
+    return _checker
+
+
 def require_admin() -> Callable:
     """Dependency factory: 403 unless the user holds an admin-tier role."""
 

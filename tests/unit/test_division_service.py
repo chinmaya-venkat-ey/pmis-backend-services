@@ -27,22 +27,44 @@ def _make_division(*, code="tmd1", is_builtin=False, active=True):
     return row
 
 
-def test_create_division_conflict_when_code_exists():
+def test_create_division_conflict_when_name_exists():
+    """Bug #220: create is rejected when the display name already exists."""
     from app.services.division_service import DivisionService
 
     db = MagicMock()
     svc = DivisionService(db)
-    svc.repo.get_by_code = MagicMock(return_value=_make_division(code="tmd1"))
+    svc.repo.get_by_label = MagicMock(return_value=_make_division(code="tmd1"))
 
     with pytest.raises(CatalogEntryConflictError) as exc_info:
         svc.create(DivisionCreateRequest(
-            code="tmd1",
             label="Duplicate",
             email="x@y.com",
             phone_number="+910000000000",
         ))
-    assert "tmd1" in exc_info.value.message
+    assert "Duplicate" in exc_info.value.message
     assert exc_info.value.code == "CATALOG_ENTRY_CONFLICT"
+
+
+def test_create_generates_code_from_label_ignoring_client_code():
+    """Bug #220: the wire code is derived from the label; any client-supplied
+    code is ignored, and slug collisions get a numeric suffix."""
+    from app.services.division_service import DivisionService
+
+    db = MagicMock()
+    svc = DivisionService(db)
+    svc.repo.get_by_label = MagicMock(return_value=None)
+    # First slug candidate collides, second is free.
+    svc.repo.get_by_code = MagicMock(side_effect=[_make_division(), None])
+    captured = {}
+    svc.repo.create = MagicMock(side_effect=lambda **kw: captured.update(kw) or _make_division())
+
+    svc.create(DivisionCreateRequest(
+        code="hacked-code",
+        label="Field & Operations",
+        email="x@y.com",
+        phone_number="+910000000000",
+    ))
+    assert captured["code"] == "field-operations-2"  # not 'hacked-code'
 
 
 def test_get_by_code_not_found():
@@ -79,6 +101,7 @@ def test_update_passes_only_set_fields():
     svc = DivisionService(db)
     row = _make_division()
     svc.repo.get_by_code = MagicMock(return_value=row)
+    svc.repo.get_by_label = MagicMock(return_value=None)  # no name clash on rename
     svc.repo.update = MagicMock(return_value=row)
 
     svc.update("tmd1", DivisionUpdateRequest(label="New Label"))

@@ -14,10 +14,12 @@ class DivisionCreateRequest(BaseModel):
 
     model_config = ConfigDict(str_strip_whitespace=True, extra="ignore", populate_by_name=True)
 
-    code: Annotated[str, Field(min_length=1, max_length=64, pattern=r"^[a-z0-9_-]+$",
-                               description="Lowercase wire code, unique")]
+    # Bug #220: the wire `code` is NOT accepted from the client — it is
+    # derived server-side from `label` (see DivisionService.create). Any
+    # client-supplied `code` is ignored (extra="ignore").
     label: Annotated[str, Field(min_length=1, max_length=255,
-                                description="Display label (e.g. 'TMD1', 'Engineering')")]
+                                description="Display label (e.g. 'TMD1', 'Engineering'). "
+                                            "Unique; the wire code is generated from it.")]
     # FE sends camelCase `requiresOther`; alias maps it to this field.
     requires_other: bool = Field(default=False, alias="requiresOther",
                                  description="If true, the FE shows a free-text 'specify other' input")

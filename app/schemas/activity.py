@@ -107,6 +107,28 @@ class ActivityResponse(ResponseModel):
     comment: Optional[CommentResponse] = None
 
 
+class ActivityAttachmentInput(BaseModel):
+    """One inline attachment on a MEETING activity-create payload.
+
+    The meeting (governance/mom) service forwards documents captured in
+    the meeting form as base64 inside the JSON create body so the request
+    stays JSON (not multipart). ``content`` is the raw base64 string with
+    NO ``data:...;base64,`` prefix (the FE strips it). Honoured only when
+    the parent milestone is the project's meeting milestone — otherwise
+    rejected (see ``ActivityService.create``).
+    """
+
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        populate_by_name=True,
+        extra="ignore",
+    )
+
+    filename: Annotated[str, Field(min_length=1, max_length=255)]
+    content_type: Annotated[Optional[str], Field(default=None, max_length=255)]
+    content: str
+
+
 class ActivityCreateRequest(BaseModel):
     """POST /project/milestones/{milestone_id}/activities/create body — JSON arm.
 
@@ -143,6 +165,14 @@ class ActivityCreateRequest(BaseModel):
     # when category='ccn'. See activity_service.create for full lifecycle.
     category: Annotated[Optional[str], Field(default=None, max_length=16)]
     ccn_value: Annotated[Optional[Decimal], Field(default=None, ge=0)]
+    # Inline attachments for MEETING activities only — the meeting service
+    # forwards meeting documents base64-encoded inside this JSON create
+    # body. Honoured only when the parent milestone is the project's
+    # meeting milestone; rejected with a 422 otherwise (see
+    # ActivityService.create). The project-management FE never sends this
+    # field (it attaches after create via the multipart /comments path),
+    # so existing create flows are unaffected.
+    attachments: Optional[List[ActivityAttachmentInput]] = Field(default=None)
 
     @field_validator("priority", mode="before")
     @classmethod

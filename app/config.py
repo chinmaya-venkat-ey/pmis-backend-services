@@ -42,6 +42,15 @@ class Settings(BaseSettings):
     attachments_allowed_extensions: str = Field(
         default="pdf,docx,xlsx,txt,csv,jpg,jpeg,png,heic,mp4,webm,mov"
     )
+    # Meeting-activity attachments accept a wider document set than the
+    # global allow-list (meeting decks / minutes are often .ppt/.pptx/.doc/
+    # .xls). Applied ONLY on the meeting-milestone activity-create path
+    # (see ActivityService.create); every other attachment surface keeps
+    # ``attachments_allowed_extensions``. Magic-byte verification already
+    # recognises these office types (see utilities/file_signature.py).
+    meeting_attachments_allowed_extensions: str = Field(
+        default="pdf,doc,docx,xls,xlsx,ppt,pptx,txt,csv,jpg,jpeg,png,heic"
+    )
     attachments_subdir_strategy: str = Field(default="year_month")
     attachments_retention_days: int = Field(default=90)
     attachments_on_unavailable: str = Field(default="fail")

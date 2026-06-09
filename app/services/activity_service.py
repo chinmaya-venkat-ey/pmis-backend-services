@@ -1,7 +1,10 @@
 """ActivityService — CRUD + dependency cycle guard + inline-comment / files."""
 from __future__ import annotations
 
+import base64
+import binascii
 import re
+from io import BytesIO
 from typing import List, Optional
 
 # FE normalizes activity node.id to the WBS display code (e.g. "A1.2") after
@@ -10,9 +13,11 @@ from typing import List, Optional
 _ACTIVITY_DISPLAY_CODE_RE = re.compile(r"^A(\d+)\.(\d+)$", re.IGNORECASE)
 
 from sqlalchemy.orm import Session
+from starlette.datastructures import Headers, UploadFile
 
 from decimal import Decimal
 
+from app.config import settings
 from app.core.errors import (
     ActivityNotFoundError,
     ConflictError,
@@ -27,7 +32,11 @@ from app.repositories.finance_repository import FinanceRepository
 from app.repositories.milestone_repository import MilestoneRepository
 from app.repositories.project_audit_log_repository import ProjectAuditLogRepository
 from app.repositories.project_repository import ProjectRepository
-from app.schemas.activity import ActivityCreateRequest, ActivityUpdateRequest
+from app.schemas.activity import (
+    ActivityAttachmentInput,
+    ActivityCreateRequest,
+    ActivityUpdateRequest,
+)
 from app.utilities import ccn_calc
 from app.utilities.catalogs import (
     active_activity_statuses,
@@ -39,6 +48,10 @@ from app.utilities.catalogs import (
     is_terminal_status,
 )
 from app.utilities.date_rules import validate_entity_dates
+from app.utilities.multipart_form import (
+    pre_validate_files,
+    upload_files_via_client,
+)
 from app.utilities.project_lock import assert_milestone_activity_writable
 from app.utilities.vendor_resolver import assert_vendor_in_project
 
@@ -122,6 +135,16 @@ class ActivityService:
             entity_label="activity",
             parent_label="milestone",
         )
+        # Meeting-activity inline attachments (base64) — see schema
+        # ``ActivityAttachmentInput``. Decoded, validated, and written to
+        # storage HERE (before the row is inserted) so a rejected file
+        # never leaves an orphan activity — mirroring the multipart route's
+        # upload-before-create ordering. Permitted only for meeting
+        # milestones; the envelopes are persisted on the inline comment row
+        # built below.
+        meeting_attachment_envelopes = self._prepare_meeting_attachments(
+            milestone, payload.attachments,
+        )
         position = (
             payload.position
             if payload.position is not None and payload.position > 0
@@ -166,6 +189,8 @@ class ActivityService:
         # comment back on the multipart-create response (monolith parity).
         body_clean = (body or "").strip() or None
         atts = list(attachments or [])
+        if meeting_attachment_envelopes:
+            atts.extend(meeting_attachment_envelopes)
         row._inline_comment = None
         if body_clean or atts:
             row._inline_comment = self.comments.create(
@@ -211,6 +236,74 @@ class ActivityService:
         self._cascade_revert_from_new_child(row, caller_user_id=caller_user_id)
         self.db.commit()
         return row
+
+    def _prepare_meeting_attachments(
+        self, milestone, attachments: Optional[List[ActivityAttachmentInput]],
+    ) -> List[dict]:
+        """Decode + validate + store inline (base64) meeting attachments.
+
+        Returns the list of attachment envelopes (``{url, filename,
+        mimeType, sizeBytes, uploadedAt}``) ready to persist on the new
+        activity's comment row, or an empty list when there are none.
+
+        Only permitted when ``milestone.is_meeting`` is True — the meeting
+        (governance/mom) service is the sole caller that sends inline
+        attachments, and they belong exclusively to meeting-type
+        activities. The extension allow-list is widened to the meeting
+        document set (``MEETING_ATTACHMENTS_ALLOWED_EXTENSIONS``); the size
+        and magic-byte checks are identical to every other upload, and the
+        files are written to storage through the same client + envelope
+        shape as the multipart path.
+
+        Raises ``ValidationError`` (HTTP 422) when attachments are supplied
+        for a non-meeting milestone, or when any ``content`` is not valid
+        base64 / decodes to empty. Size / extension / magic-byte failures
+        surface as their usual attachment errors.
+        """
+        if not attachments:
+            return []
+        if not getattr(milestone, "is_meeting", False):
+            raise ValidationError(
+                "Attachments can only be added on create for meeting "
+                "activities.",
+                details={"milestone_id": milestone.id},
+            )
+        uploads: List[UploadFile] = []
+        for att in attachments:
+            try:
+                raw = base64.b64decode(att.content or "", validate=False)
+            except (binascii.Error, ValueError):
+                raise ValidationError(
+                    f"Attachment {att.filename!r} has invalid base64 content.",
+                    details={"filename": att.filename},
+                )
+            if not raw:
+                raise ValidationError(
+                    f"Attachment {att.filename!r} is empty.",
+                    details={"filename": att.filename},
+                )
+            uploads.append(
+                UploadFile(
+                    file=BytesIO(raw),
+                    filename=att.filename,
+                    headers=Headers(
+                        {
+                            "content-type": (
+                                att.content_type or "application/octet-stream"
+                            )
+                        }
+                    ),
+                )
+            )
+        allowed = {
+            e.strip().lower().lstrip(".")
+            for e in (
+                settings.meeting_attachments_allowed_extensions or ""
+            ).split(",")
+            if e.strip()
+        }
+        pre_validate_files(uploads, allowed=allowed)
+        return upload_files_via_client(uploads)
 
     def update(  # NOSONAR(S3776): sequential validation gates with order-sensitive side effects (validate -> mutate -> audit -> commit -> depends_on cycle-check) -- refactor deferred to a sprint with FE regression coverage
         self, activity_id: str, payload: ActivityUpdateRequest,

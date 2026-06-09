@@ -302,7 +302,9 @@ def _validate_one_upload(
     detect_and_verify(upload.file, upload.filename or "unnamed")
 
 
-def pre_validate_files(files: List[UploadFile]) -> None:
+def pre_validate_files(
+    files: List[UploadFile], *, allowed: Optional[set] = None,
+) -> None:
     """Reject "bad file" cases BEFORE the parent row is inserted.
 
     Guarantees that a rejected file means no entity was created — the FE
@@ -314,6 +316,12 @@ def pre_validate_files(files: List[UploadFile]) -> None:
       2. Extension against the allow-list.
       3. Magic-byte content sniff.
 
+    ``allowed`` defaults to the global ``ATTACHMENTS_ALLOWED_EXTENSIONS``
+    set. A caller may pass an explicit set to widen / narrow the extension
+    allow-list for one surface (e.g. the meeting-activity create path
+    accepts a broader document set) — when omitted the behaviour is
+    byte-for-byte unchanged for every existing caller.
+
     Raises ``AttachmentTooLargeError`` (HTTP 409) or
     ``AttachmentDisallowedExtensionError`` (HTTP 409) on the first failing
     file. Files are checked in caller order; the first failing file's
@@ -321,7 +329,8 @@ def pre_validate_files(files: List[UploadFile]) -> None:
     """
     if not files:
         return
-    allowed = _allowed_extensions()
+    if allowed is None:
+        allowed = _allowed_extensions()
     max_bytes = settings.attachments_max_bytes
     for upload in files:
         _validate_one_upload(upload, max_bytes, allowed)

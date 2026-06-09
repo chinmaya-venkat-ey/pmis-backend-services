@@ -29,6 +29,7 @@ from app.core.errors import (
 from app.core.permissions import ADMIN_ROLE, SUPER_ADMIN_ROLE
 from app.core.security import hash_password
 from app.repositories.rbac_repository import RbacRepository
+from app.repositories.refresh_token_repository import RefreshTokenRepository
 from app.repositories.user_repository import UserRepository
 from app.repositories.user_role_assignment_repository import UserRoleAssignmentRepository
 from app.schemas.user import (
@@ -46,6 +47,7 @@ class UserService:
         self.repo = UserRepository(db)
         self.rbac = RbacRepository(db)
         self.assignments = UserRoleAssignmentRepository(db)
+        self.refresh_repo = RefreshTokenRepository(db)
 
     # ------------------------------------------------------------------ read
 
@@ -476,7 +478,7 @@ class UserService:
         target = self.get_by_id(user_id)
         self.repo.set_password(target, hash_password(payload.password))
         # Invalidate refresh state — force re-login after password change.
-        self.repo.rotate_refresh_token(target, new_jti=None, grace_seconds=0)
+        self.refresh_repo.revoke_all_for_user(target.id)
         self.db.commit()
         return target
 
@@ -498,7 +500,7 @@ class UserService:
             )
         self.repo.soft_delete(target, deleted_by_user_id=caller_user_id)
         # Revoke refresh tokens
-        self.repo.rotate_refresh_token(target, new_jti=None, grace_seconds=0)
+        self.refresh_repo.revoke_all_for_user(target.id)
         self.db.commit()
         return target
 

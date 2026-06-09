@@ -31,6 +31,7 @@ from app.core.security import (
 )
 from app.repositories.otp_code_repository import OtpCodeRepository
 from app.repositories.rbac_repository import RbacRepository
+from app.repositories.refresh_token_repository import RefreshTokenRepository
 from app.repositories.revoked_token_repository import RevokedTokenRepository
 from app.repositories.user_repository import UserRepository
 from app.schemas.auth import (
@@ -55,6 +56,7 @@ class AuthService:
         self.otp_repo = OtpCodeRepository(db)
         self.rbac = RbacRepository(db)
         self.revoked = RevokedTokenRepository(db)
+        self.refresh_repo = RefreshTokenRepository(db)
 
     # ------------------------------------------------------------------ login
 
@@ -122,8 +124,21 @@ class AuthService:
             datetime.fromtimestamp(access_exp, tz=timezone.utc) if access_exp else _utcnow()
         )
 
-        # Persist new refresh_token_jti and clear any grace-window remnant.
-        self.user_repo.rotate_refresh_token(user, new_jti=refresh_jti, grace_seconds=0)
+        # Multi-session: record THIS login as its own refresh-token row. A
+        # 2nd login/device/tab adds another row and never invalidates the
+        # others (the old single-column model was the root of the "logged out
+        # for no reason" bug).
+        self.refresh_repo.create(
+            user_id=user.id, jti=refresh_jti, expires_at=refresh_expires_at,
+        )
+        # Bound concurrent sessions per account (revoke oldest beyond the cap)
+        # and drop this user's stale rows so the table can't grow unbounded.
+        self.refresh_repo.enforce_session_cap(
+            user.id, max_active=settings.refresh_token_max_sessions,
+        )
+        self.refresh_repo.delete_stale_for_user(
+            user.id, grace_seconds=settings.refresh_token_grace_seconds,
+        )
         # Login audit: shift prior login -> previous_login_at, stamp this login.
         # Both password and 2FA logins funnel through here; refresh does not.
         self.user_repo.record_login(user, _utcnow())
@@ -178,9 +193,10 @@ class AuthService:
         """Revoke the access token's jti AND clear the refresh state."""
         if jti:
             self.revoked.revoke(jti=jti, user_id=user_id)
-        user = self.user_repo.get_by_id(user_id)
-        if user is not None:
-            self.user_repo.rotate_refresh_token(user, new_jti=None, grace_seconds=0)
+        # Revoke this user's refresh sessions. (Logout = sign out everywhere,
+        # matching the prior single-column behaviour; per-device logout can be
+        # added later via a session id on the tokens.)
+        self.refresh_repo.revoke_all_for_user(user_id)
         self.db.commit()
         return LogoutResponse()
 

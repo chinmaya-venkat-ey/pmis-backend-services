@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = Field(default=120)
     refresh_token_expire_days: int = Field(default=7)
     refresh_token_grace_seconds: int = Field(default=120)
+    # Max concurrent live sessions per user (oldest revoked beyond this on
+    # login). Bounds login-spam / runaway session growth. Generous default.
+    refresh_token_max_sessions: int = Field(default=30)
 
     # === Bootstrap (only consumed by alembic bootstrap data-migration) ===
     bootstrap_superadmin_login: str = Field(default="superadmin")

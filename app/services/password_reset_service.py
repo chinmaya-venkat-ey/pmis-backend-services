@@ -15,6 +15,7 @@ from app.config import settings
 from app.core.errors import PasswordResetTokenInvalidError, UserNotFoundError
 from app.core.security import hash_password
 from app.repositories.password_reset_token_repository import PasswordResetTokenRepository
+from app.repositories.refresh_token_repository import RefreshTokenRepository
 from app.repositories.user_repository import UserRepository
 from app.schemas.password import ForgotPasswordResponse, ResetPasswordResponse
 from app.services.notification_client import NotificationClient
@@ -34,6 +35,7 @@ class PasswordResetService:
         self.db = db
         self.user_repo = UserRepository(db)
         self.token_repo = PasswordResetTokenRepository(db)
+        self.refresh_repo = RefreshTokenRepository(db)
         self.notify = NotificationClient(db)
 
     def request_reset(self, login: str, channel: str) -> ForgotPasswordResponse:
@@ -89,7 +91,7 @@ class PasswordResetService:
 
         # Set new password + invalidate any current refresh state (logout-everywhere).
         self.user_repo.set_password(user, hash_password(new_password))
-        self.user_repo.rotate_refresh_token(user, new_jti=None, grace_seconds=0)
+        self.refresh_repo.revoke_all_for_user(user.id)
         self.token_repo.mark_consumed(row)
         self.db.commit()
         return ResetPasswordResponse()

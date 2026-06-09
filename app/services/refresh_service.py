@@ -27,6 +27,7 @@ from app.core.security import (
 from app.models.user_role import UserRole
 from app.models.user_role_assignment import UserRoleAssignment
 from app.repositories.rbac_repository import RbacRepository
+from app.repositories.refresh_token_repository import RefreshTokenRepository
 from app.repositories.user_repository import UserRepository
 from app.schemas.auth import LoginUserSummary, RefreshResponse
 
@@ -35,6 +36,7 @@ class RefreshService:
     def __init__(self, db: Session):
         self.db = db
         self.user_repo = UserRepository(db)
+        self.refresh_repo = RefreshTokenRepository(db)
         self.rbac = RbacRepository(db)
 
     def refresh(self, refresh_token: str) -> RefreshResponse:
@@ -47,11 +49,17 @@ class RefreshService:
         if not jti or not user_id:
             raise RefreshTokenInvalidError("Refresh token missing required claims")
 
-        # Look up by jti — accepts either current or grace-window jti.
-        user = self.user_repo.get_by_refresh_token_jti(jti)
-        if user is None:
+        # Multi-session lookup: find this token's row. Valid = not revoked,
+        # not expired, and (not rotated OR still within the post-rotation grace
+        # window). No single-slot eviction, so a 2nd session/device and
+        # concurrent refreshes can't invalidate this token.
+        token_row = self.refresh_repo.get_active_by_jti(
+            jti, grace_seconds=settings.refresh_token_grace_seconds,
+        )
+        if token_row is None:
             raise RefreshTokenInvalidError("Refresh token not recognized")
-        if user.deleted_at is not None or user.status != "active":
+        user = self.user_repo.get_by_id(token_row.user_id)
+        if user is None or user.deleted_at is not None or user.status != "active":
             raise RefreshTokenInvalidError("Account is not active")
 
         new_claims = {
@@ -62,11 +70,14 @@ class RefreshService:
         access_token = create_access_token(new_claims)
         new_refresh_token, new_jti, new_refresh_expires = create_refresh_token(new_claims)
 
-        # Rotate: current jti -> previous slot with grace window; new jti -> current
-        self.user_repo.rotate_refresh_token(
-            user,
-            new_jti=new_jti,
-            grace_seconds=settings.refresh_token_grace_seconds,
+        # Rotate within this session's chain: stamp the old row (it stays valid
+        # for the grace window) and mint a fresh row. Never evicts.
+        self.refresh_repo.rotate(
+            token_row, new_jti=new_jti, new_expires_at=new_refresh_expires,
+        )
+        # Keep the table bounded — drop this user's expired / past-grace rows.
+        self.refresh_repo.delete_stale_for_user(
+            user.id, grace_seconds=settings.refresh_token_grace_seconds,
         )
         self.db.commit()
 

@@ -133,6 +133,9 @@ class RoleAssignmentController:
         include_deleted: bool,
     ) -> dict:
         rows = self.assignments.list_users_for_vendor(vendor_id)
+        # Bug #139: deactivated users must not surface in the org-management
+        # vendor user list (reactivating restores them automatically).
+        rows = [u for u in rows if u.status != "inactive"]
         if not include_deleted:
             rows = [u for u in rows if u.deleted_at is None]
         total = len(rows)

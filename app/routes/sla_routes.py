@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 from app.controllers.sla_controller import SlaController
 from app.core.response import api_response, hal_collection, hal_resource
 from app.dependencies import get_sla_controller
-from app.schemas.sla import SlaOnboardRequest, SlaUpdateRequest
+from app.schemas.sla import SlaFromRfpRequest, SlaOnboardRequest, SlaUpdateRequest
 
 
 class SlaSeedRequest(BaseModel):
@@ -203,6 +203,37 @@ def delete_sla(
         ),
         message=f"SLA '{result.sla_ref}' deleted",
         status=200,
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /sla-masters/from-rfp — non-technical onboarding entry point
+#
+# Mirrors the UIDAI PMU SLA tables in the RFP 1:1. Use this from the FE
+# wizard so users can fill the form by copying directly from the contract
+# PDF without ever seeing metric_key, sort_order, range_min, etc. Backend
+# derives those from the friendly fields the user provides.
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/sla-masters/from-rfp",
+    status_code=201,
+    summary="Onboard an SLA using the RFP-shape payload (non-technical form)",
+)
+def onboard_sla_from_rfp(
+    payload: SlaFromRfpRequest,
+    ctrl: SlaController = Depends(get_sla_controller),
+):
+    result = ctrl.onboard_from_rfp(payload)
+    return api_response(
+        data=hal_resource(
+            "SlaMaster",
+            result.model_dump(),
+            self_link=f"{_BASE}/{result.id}",
+            extra_links=_sla_links(result.id),
+        ),
+        message=f"SLA '{result.sla_ref}' onboarded from RFP form",
+        status=201,
     )
 
 

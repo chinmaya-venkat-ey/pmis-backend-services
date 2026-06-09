@@ -119,6 +119,44 @@ def _generate_dsl(
 
 
 # ---------------------------------------------------------------------------
+# RFP-shape onboarding helpers
+# ---------------------------------------------------------------------------
+
+# Words in a measurement display name that suggest "lower is better". When
+# none of these match, we fall back to HIGHER_BETTER. The user can change
+# the direction later via PATCH if the heuristic gets it wrong.
+_LOWER_BETTER_HINTS = (
+    "delay", "delayed", "variance", "fail", "failure", "defect", "error",
+    "downtime", "mttr", "outage", "incident", "replacement", "miss",
+)
+
+
+def _smart_direction(display_name: str) -> str:
+    """Guess metric direction from the display name. Fallback: HIGHER_BETTER.
+
+    Most PMU SLAs measure something where higher = worse (days delayed,
+    replacements, failures), so detect that and flip the default.
+    """
+    name = (display_name or "").lower()
+    return "LOWER_BETTER" if any(h in name for h in _LOWER_BETTER_HINTS) else "HIGHER_BETTER"
+
+
+def _band_default_label(row) -> str:
+    """Generate a readable band label when the user didn't type one.
+
+    Produces e.g. "0 < x <= 7" or "x > 30" or "x <= 0".
+    """
+    lo, hi = row.from_value, row.to_value
+    if lo is None and hi is not None:
+        return f"x <= {hi}"
+    if lo is not None and hi is None:
+        return f"x > {lo}"
+    if lo is not None and hi is not None:
+        return f"{lo} < x <= {hi}"
+    return "any"
+
+
+# ---------------------------------------------------------------------------
 # Service
 # ---------------------------------------------------------------------------
 
@@ -201,6 +239,118 @@ class SlaService:
             created_at=defn.created_at,
             updated_at=defn.updated_at,
         )
+
+    # ---------------------------------------------------------------- RFP-shape onboarding
+
+    def create_from_rfp(self, payload, created_by: Optional[str] = None):
+        """RFP-shape onboarding entry point — translates and delegates.
+
+        Takes the friendly RFP-shape payload, derives every technical field
+        (formula_type, metric_key, sort_order, band rows, lookup rows) from
+        a category lookup + simple slugification, then hands off to the
+        existing create_from_form so seeds / PATCH / evaluator stay on the
+        same code path.
+        """
+        # Avoid a circular import — these schemas live in the same module
+        # that's already importing SlaService at module load.
+        from app.schemas.sla import (
+            SlaConditionBandInput, SlaLookupRowInput, SlaMetricInput,
+            SlaOnboardRequest,
+        )
+
+        # 1. Resolve category → engine via sla_category_master.
+        category = self.master_repo.get_sla_category(payload.category_code)
+        if category is None:
+            raise ValidationError(
+                f"Unknown SLA category '{payload.category_code}'. Pick one from GET /api/v3/sla-categories.",
+                code="unknown_sla_category",
+            )
+        formula_type = category.formula_type
+
+        # 2. Slugify display name -> stable metric_key.
+        def _slug(name: str) -> str:
+            slug = "".join(c.lower() if c.isalnum() else "_" for c in name).strip("_")
+            # Collapse runs of underscores.
+            while "__" in slug:
+                slug = slug.replace("__", "_")
+            return slug or "value"
+
+        primary_key = _slug(payload.measurement.display_name)
+        metrics = [
+            SlaMetricInput(
+                metric_key=primary_key,
+                display_name=payload.measurement.display_name,
+                unit=payload.measurement.unit,
+                target_numeric=payload.measurement.target_value,
+                direction=_smart_direction(payload.measurement.display_name),
+                is_primary=True,
+            )
+        ]
+        if payload.secondary_measurement:
+            secondary_key = _slug(payload.secondary_measurement.display_name)
+            if secondary_key == primary_key:
+                secondary_key += "_2"
+            metrics.append(SlaMetricInput(
+                metric_key=secondary_key,
+                display_name=payload.secondary_measurement.display_name,
+                unit=payload.secondary_measurement.unit,
+                target_numeric=payload.secondary_measurement.target_value,
+                direction=_smart_direction(payload.secondary_measurement.display_name),
+                is_primary=False,
+            ))
+
+        # 3. Build condition_bands from the RFP "Target" rows (severity SLAs)
+        #    OR a lookup_table from linear escalation (deliverable / query SLAs).
+        condition_bands: List = []
+        lookup_table: List = []
+        if payload.target_rows:
+            for idx, row in enumerate(payload.target_rows):
+                condition_bands.append(SlaConditionBandInput(
+                    metric_key=primary_key,
+                    band_label=row.threshold_label
+                        or f"L{row.severity} {_band_default_label(row)}",
+                    range_min=row.from_value,
+                    range_max=row.to_value,
+                    range_unit=payload.measurement.unit or None,
+                    severity_level=row.severity,
+                    sort_order=idx + 1,
+                ))
+        if payload.linear_escalation:
+            esc = payload.linear_escalation
+            rate = esc.rate_per_unit_percent
+            grace = esc.grace_units
+            # Tier `i` units of delay = max(0, i - grace) * rate %.
+            for i in range(0, esc.max_units + 1):
+                effective_units = max(0, i - grace)
+                ld_pct = (Decimal(effective_units) * rate).quantize(Decimal("0.01"))
+                lookup_table.append(SlaLookupRowInput(
+                    lookup_key=f"{esc.unit}_{i}",
+                    lookup_value=ld_pct,
+                    sort_order=i + 1,
+                ))
+
+        # 4. Hand the translated payload to the existing onboarding path.
+        full = SlaOnboardRequest(
+            sla_ref=payload.sla_ref,
+            title=payload.title,
+            contract_type=payload.contract_type,
+            formula_type=formula_type,
+            description=payload.definition,
+            category=category.display_name,
+            scope_text=payload.scope,
+            data_source=payload.data_source,
+            calculation_method=payload.calculation,
+            reports_submitted_to=payload.reports_submitted_to,
+            measurement_interval=payload.measurement_interval,
+            reporting_interval=payload.reporting_interval,
+            ld_computation_base=payload.applied_on,
+            effective_from=payload.effective_from,
+            effective_until=payload.effective_until,
+            metrics=metrics,
+            condition_bands=condition_bands,
+            lookup_table=lookup_table,
+        )
+        return self.create_from_form(full, created_by=created_by)
 
     # ---------------------------------------------------------------- seed defaults
 

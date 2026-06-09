@@ -9,6 +9,7 @@ from app.schemas.sla import (
     SlaDefinitionResponse,
     SlaDetailResponse,
     SlaDslResponse,
+    SlaFromRfpRequest,
     SlaOnboardRequest,
     SlaOnboardResponse,
     SlaUpdateRequest,
@@ -24,6 +25,11 @@ class SlaController:
         self, payload: SlaOnboardRequest, created_by: Optional[str] = None
     ) -> SlaOnboardResponse:
         return self.service.create_from_form(payload, created_by=created_by)
+
+    def onboard_from_rfp(
+        self, payload: SlaFromRfpRequest, created_by: Optional[str] = None
+    ) -> SlaOnboardResponse:
+        return self.service.create_from_rfp(payload, created_by=created_by)
 
     def list_slas(
         self,

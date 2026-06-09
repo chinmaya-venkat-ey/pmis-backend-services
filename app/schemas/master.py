@@ -139,7 +139,10 @@ class SeverityLevelUpdateRequest(BaseModel):
 
 
 class SeverityLevelInput(BaseModel):
-    level: int = Field(..., ge=0, le=4)
+    # Levels are open-ended — the RFP uses 0-4 but a project can extend the
+    # ladder upward (or downward) as needed; PATCH severity-master/{level}
+    # creates whatever level you reference. No upper or lower bound enforced.
+    level: int = Field(..., ge=0)
     points: int = Field(..., ge=-100, le=100)
     label: str = Field(..., min_length=1, max_length=100)
 

@@ -189,13 +189,39 @@ class MasterService:
     def update_severity_level(
         self, project_id: str, level: int, payload: SeverityLevelUpdateRequest
     ) -> SeverityMaster:
-        if level not in range(5):
-            raise ValidationError("Severity level must be 0-4")
+        """Upsert a severity level for a project.
+
+        Levels are open-ended (L0, L1, ..., L4, L5, ... — no hard cap). PATCH is
+        the only way to create a row for a level that doesn't exist yet, which
+        keeps the API surface small and avoids drift between separate "create"
+        and "update" endpoints.
+
+        Behaviour:
+
+          * Row exists — applies the patch as a partial update. Either ``points``
+            or ``label`` (or both) may be supplied; omitted fields are left
+            unchanged. An empty body is a no-op and returns the current row.
+          * Row missing — creates a new row at this level. Both ``points`` and
+            ``label`` are required for creation so we never persist a half-
+            populated row; otherwise we surface a 400 to the caller.
+        """
         row = self.repo.get_level(project_id, level)
         if row is None:
-            raise NotFoundError(
-                f"Severity level {level} not found for project '{project_id}'"
+            if payload.points is None or payload.label is None:
+                raise ValidationError(
+                    f"Severity level {level} doesn't exist yet for project '{project_id}'. "
+                    "Supply both 'points' and 'label' to create it.",
+                    code="severity_level_create_requires_both_fields",
+                )
+            new_row = SeverityMaster(
+                id=str(uuid4()),
+                project_id=project_id,
+                level=level,
+                points=payload.points,
+                label=payload.label,
             )
+            created = self.repo.bulk_create([new_row])
+            return created[0]
         updates = payload.model_dump(exclude_unset=True)
         if not updates:
             return row

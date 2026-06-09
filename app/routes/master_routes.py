@@ -293,7 +293,13 @@ def list_severity_levels(
 
 @router.patch(
     "/projects/{project_id}/severity-master/{level}",
-    summary="Update points or label for a severity level (0-4)",
+    summary="Upsert a severity level — updates the row if it exists, otherwise creates it",
+    description=(
+        "Levels are open-ended (the RFP defines 0-4 but you can extend higher). "
+        "If the row already exists, supply only the fields you want to change. "
+        "If the row doesn't exist yet, supply BOTH `points` and `label` to "
+        "create it — the endpoint refuses to persist a half-populated row."
+    ),
 )
 def update_severity_level(
     project_id: str,
@@ -308,7 +314,7 @@ def update_severity_level(
             result.model_dump(),
             self_link=f"/api/v3/projects/{project_id}/severity-master/{level}",
         ),
-        message=f"Severity level {level} updated",
+        message=f"Severity level {level} saved",
         status=200,
     )
 

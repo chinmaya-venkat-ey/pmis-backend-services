@@ -31,7 +31,9 @@ class SlaSeedRequest(BaseModel):
       * Send ``{"contract_types": ["all"]}`` (or ``["ALL"]`` / ``["*"]``)
       * Send ``{"contract_types": ["BSP","MSAP","MSIP","PMU"]}``
 
-    To seed a subset, list just those codes.
+    To seed a subset, list just those codes. Pass ``overwrite: true`` to refresh
+    the basic RFP-presentation fields on SLAs that were seeded under an older
+    version of the seed bundle.
     """
     contract_types: Optional[List[str]] = Field(
         default=None,
@@ -40,6 +42,15 @@ class SlaSeedRequest(BaseModel):
                     "expands to every supported contract. Omit or send an empty list "
                     "for the same effect as 'all'.",
         examples=[["all"], ["BSP", "MSAP"]],
+    )
+    overwrite: bool = Field(
+        default=False,
+        description="When true, SLAs that already exist are refreshed in place with "
+                    "the latest seed values for the basic RFP fields (description, "
+                    "category, scope_text, data_source, calculation_method, "
+                    "reports_submitted_to, cadence, ld_computation_base, dates). "
+                    "Sub-tables (metrics / bands / lookup / parameters / guards) are "
+                    "NOT touched; delete then re-seed if you need a full reset.",
     )
 
 router = APIRouter(tags=["SLA Masters"])
@@ -257,12 +268,15 @@ def seed_sla_defaults(
     populate a fresh contract DB with the 36 RFP-default SLAs across BSP,
     MSAP, MSIP and PMU.
     """
-    summary = ctrl.seed_defaults(payload.contract_types)
-    msg = (
-        f"Seeded {summary['seeded']} new, skipped {summary['skipped_existing']} existing"
-        + (f", failed {len(summary['failed'])}" if summary["failed"] else "")
-        + f" (of {summary['total_candidates']} candidates)"
-    )
+    summary = ctrl.seed_defaults(payload.contract_types, overwrite=payload.overwrite)
+    parts = [f"seeded {summary['seeded']} new"]
+    if summary.get("overwritten"):
+        parts.append(f"refreshed {summary['overwritten']} existing")
+    parts.append(f"skipped {summary['skipped_existing']} existing")
+    if summary["failed"]:
+        parts.append(f"failed {len(summary['failed'])}")
+    parts.append(f"(of {summary['total_candidates']} candidates)")
+    msg = ", ".join(parts)
     return api_response(
         data=hal_resource(
             "SlaSeedSummary",

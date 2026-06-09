@@ -64,5 +64,8 @@ class SlaController:
         self,
         contract_types: Optional[List[str]] = None,
         created_by: Optional[str] = None,
+        overwrite: bool = False,
     ) -> dict:
-        return self.service.seed_default_slas(contract_types, created_by=created_by)
+        return self.service.seed_default_slas(
+            contract_types, created_by=created_by, overwrite=overwrite,
+        )

@@ -52,6 +52,14 @@ def _generate_dsl(
         "sla_ref": defn.sla_ref,
         "title": defn.title,
         "description": defn.description,
+        # RFP-native presentation fields (UIDAI RFP §5.28 row headers). Emitted
+        # in the DSL so a round-trip through the YAML preserves the full SLA
+        # exactly as the contract document describes it.
+        "category": defn.category,
+        "scope_text": defn.scope_text,
+        "data_source": defn.data_source,
+        "calculation_method": defn.calculation_method,
+        "reports_submitted_to": defn.reports_submitted_to,
         "contract_type": defn.contract_type,
         "formula_type": formula_type,
         "measurement_interval": defn.measurement_interval,
@@ -358,23 +366,38 @@ class SlaService:
         self,
         contract_types: Optional[List[str]] = None,
         created_by: Optional[str] = None,
+        overwrite: bool = False,
     ) -> dict:
-        """Idempotent fan-out onboarding of RFP-default SLAs.
+        """Fan-out onboarding of RFP-default SLAs.
 
         Reads payloads from ``app.seed_data.sla_master_seeds`` and pushes each
-        through ``create_from_form``. SLAs that already exist (matched by
-        ``sla_ref`` or by ``(contract_type, title)``) are skipped — neither
-        a re-run nor a partial seed should produce duplicate rows or errors.
+        through ``create_from_form``. By default the seeder is idempotent: SLAs
+        that already exist (matched by ``sla_ref`` or by
+        ``(contract_type, title)``) are skipped.
 
         Args:
             contract_types: filter to only these codes (BSP / MSAP / MSIP / PMU).
                 None = seed everything in the bundle.
+            overwrite: when True, SLAs that already exist are *refreshed in place*
+                with the latest seed values for the basic RFP-presentation fields
+                (description, category, scope_text, data_source, calculation_method,
+                reports_submitted_to, cadence, ld_computation_base, effective dates).
+                Sub-tables (metrics, condition_bands, lookup_table, parameters,
+                guards) are intentionally NOT touched — touching them risks
+                breaking activity mappings that already reference the bands by
+                id. Run ``DELETE`` then a fresh seed if you need a full reset.
 
         Returns:
-            {"seeded": N, "skipped_existing": M, "failed": [{sla_ref, error}, ...]}
+            {
+              "seeded":            N,
+              "overwritten":       N,  # only non-zero when overwrite=True
+              "skipped_existing":  N,
+              "failed":            [{sla_ref, error}, ...],
+              "total_candidates":  N,
+            }
         """
         from app.seed_data import ALL_SEED_SLAS, SEEDS_BY_CONTRACT
-        from app.schemas.sla import SlaOnboardRequest
+        from app.schemas.sla import SlaOnboardRequest, SlaUpdateRequest
 
         # Pick the seed list. Unknown contract codes are tolerated — they just
         # contribute zero rows. "ALL" / "*" tokens (case-insensitive) expand to
@@ -390,27 +413,58 @@ class SlaService:
         else:
             payloads = list(ALL_SEED_SLAS)
 
+        # Fields that overwrite mode refreshes on existing rows. Notably absent:
+        # sla_ref (the identity), contract_type, formula_type (changing those
+        # would invalidate downstream evaluator state) and sub-tables.
+        _OVERWRITE_FIELDS = (
+            "title", "description", "category", "scope_text", "data_source",
+            "calculation_method", "reports_submitted_to",
+            "measurement_interval", "reporting_interval", "ld_computation_base",
+            "effective_from", "effective_until",
+        )
+
         seeded = 0
+        overwritten = 0
         skipped = 0
         failed: List[dict] = []
         for raw in payloads:
+            sla_ref = raw.get("sla_ref")
             try:
                 req = SlaOnboardRequest(**raw)
             except Exception as exc:  # pragma: no cover — defensive
-                failed.append({"sla_ref": raw.get("sla_ref"), "error": f"schema: {exc}"})
+                failed.append({"sla_ref": sla_ref, "error": f"schema: {exc}"})
                 continue
             try:
                 self.create_from_form(req, created_by=created_by)
                 seeded += 1
             except ConflictError:
-                # Already onboarded — fine. The whole point of a seeder is to
-                # be safe to run twice.
-                skipped += 1
+                if not overwrite:
+                    skipped += 1
+                    continue
+                # Refresh the basic fields on the existing row so SLAs seeded
+                # before the RFP-fields enrichment pick up category / scope_text /
+                # data_source / calculation_method / reports_submitted_to.
+                existing = self.repo.get_by_ref(sla_ref)
+                if existing is None:
+                    # Title-collision conflict (different sla_ref, same title in
+                    # the same contract_type). Can't safely refresh — skip.
+                    skipped += 1
+                    continue
+                try:
+                    update_payload = SlaUpdateRequest(**{
+                        k: getattr(req, k) for k in _OVERWRITE_FIELDS
+                        if getattr(req, k, None) is not None
+                    })
+                    self.update_basic(existing.id, update_payload)
+                    overwritten += 1
+                except Exception as exc:
+                    failed.append({"sla_ref": sla_ref, "error": f"overwrite: {exc}"})
             except Exception as exc:
-                failed.append({"sla_ref": raw.get("sla_ref"), "error": str(exc)})
+                failed.append({"sla_ref": sla_ref, "error": str(exc)})
 
         return {
             "seeded": seeded,
+            "overwritten": overwritten,
             "skipped_existing": skipped,
             "failed": failed,
             "total_candidates": len(payloads),

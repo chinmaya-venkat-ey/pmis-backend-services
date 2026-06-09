@@ -95,6 +95,7 @@ class AssociatedUsersRepository:
         stmt = (
             select(MirrorUser)
             .where(MirrorUser.deleted_at.is_(None))
+            .where(MirrorUser.status != "inactive")  # Bug #139: hide deactivated users
             .where(or_(*conditions) if len(conditions) > 1 else conditions[0])
             .order_by(MirrorUser.login.asc())
         )

@@ -124,6 +124,9 @@ class AuthService:
 
         # Persist new refresh_token_jti and clear any grace-window remnant.
         self.user_repo.rotate_refresh_token(user, new_jti=refresh_jti, grace_seconds=0)
+        # Login audit: shift prior login -> previous_login_at, stamp this login.
+        # Both password and 2FA logins funnel through here; refresh does not.
+        self.user_repo.record_login(user, _utcnow())
         self.db.commit()
 
         return LoginResponse(

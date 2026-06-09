@@ -190,3 +190,13 @@ class UserRepository:
         row.refresh_token_jti = new_jti
         self.db.flush()
         return row
+
+    def record_login(self, row: User, now: datetime) -> User:
+        """Stamp a successful login: shift the prior login into
+        ``previous_login_at`` (the "Last Login" the profile shows) and set
+        ``last_login_at`` to this login. First-ever login leaves
+        ``previous_login_at`` NULL."""
+        row.previous_login_at = row.last_login_at
+        row.last_login_at = now
+        self.db.flush()
+        return row

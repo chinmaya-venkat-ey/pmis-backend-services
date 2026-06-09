@@ -47,6 +47,10 @@ class UserResponse(ResponseModel):
     is_admin: bool = False
     is_super_admin: bool = False
     two_factor_enabled: bool = False
+    # Login audit (IST). previous_login_at is the "Last Login" the profile shows
+    # (the session before the current one); last_login_at is the current login.
+    last_login_at: Optional[datetime] = None
+    previous_login_at: Optional[datetime] = None
     deleted_at: Optional[datetime] = None
     deleted_by: Optional[str] = None
     created_at: datetime

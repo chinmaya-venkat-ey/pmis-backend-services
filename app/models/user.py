@@ -76,6 +76,12 @@ class User(Base):
 
     two_factor_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    # Login audit. last_login_at = the most-recent login; previous_login_at = the
+    # login BEFORE it — the "Last Login" the profile UI shows (the prior session).
+    # Both stamped in AuthService._issue_login (password + 2FA paths).
+    last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    previous_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=datetime.utcnow
     )

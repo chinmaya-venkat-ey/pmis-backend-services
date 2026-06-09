@@ -13,18 +13,18 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.errors import ProjectNotFoundError
-from app.models._cross_schema import Division, User, Vendor
+from app.models._cross_schema import Division, Role, User, UserRoleAssignment, Vendor
 from app.repositories.project_audit_log_repository import ProjectAuditLogRepository
 from app.repositories.project_repository import ProjectRepository
 
 
-def _serialize_entry(row, actor_map: dict) -> Dict[str, Any]:
+def _serialize_entry(row, actor_map: dict, actor_role_map: dict) -> Dict[str, Any]:
     """Convert a ProjectAuditLog ORM row to a JSON-safe dict.
 
     Transformations applied for FE compatibility (Bug #10):
     - ``changes`` is flattened: per-field {before, after} deltas are
       aggregated into top-level ``before`` and ``after`` dicts.
-    - Actor identity (login, user_code) is injected from ``actor_map``.
+    - Actor identity (login, user_code, role) is injected from the actor maps.
     """
     changes: dict = row.changes or {}
 
@@ -41,6 +41,7 @@ def _serialize_entry(row, actor_map: dict) -> Dict[str, Any]:
 
     actor_login = "—"
     actor_code = "—"
+    actor_role = "—"
     if row.actor_user_id:
         u = actor_map.get(row.actor_user_id)
         if u:
@@ -48,6 +49,7 @@ def _serialize_entry(row, actor_map: dict) -> Dict[str, Any]:
             actor_code = u[1] or row.actor_user_id
         else:
             actor_code = row.actor_user_id
+        actor_role = actor_role_map.get(row.actor_user_id) or "—"
 
     entry: Dict[str, Any] = {
         "id": row.id,
@@ -58,6 +60,7 @@ def _serialize_entry(row, actor_map: dict) -> Dict[str, Any]:
         "actor_user_id": row.actor_user_id,
         "actor_login": actor_login,
         "actor_code": actor_code,
+        "actor_role": actor_role,
         "before": before,
         "after": after,
         "changes": changes,
@@ -86,6 +89,37 @@ class AuditLogService:
             select(User.id, User.login, User.user_code).where(User.id.in_(actor_ids))
         ).all()
         return {uid: (login, code) for uid, login, code in rows}
+
+    def _load_actor_roles(self, actor_ids: List[str]) -> Dict[str, str]:
+        """Batch-resolve each actor's display ROLE for the audit-log Role column
+        (Bug: roles not coming in audit logs). Joins the mirrored
+        ``users.user_role_assignments`` → ``users.roles``. Prefers the actor's
+        GLOBAL-scoped role(s) (org+project NULL — their tier, e.g. super_admin /
+        admin); otherwise any role they hold. Distinct names are comma-joined.
+        Returns ``{user_id: role_label}`` (absent when the actor holds no role)."""
+        if not actor_ids:
+            return {}
+        rows = self.db.execute(
+            select(
+                UserRoleAssignment.user_id,
+                Role.name,
+                UserRoleAssignment.organization_id,
+                UserRoleAssignment.project_id,
+            )
+            .join(Role, Role.id == UserRoleAssignment.role_id)
+            .where(UserRoleAssignment.user_id.in_(actor_ids))
+        ).all()
+        global_roles: Dict[str, set] = {}
+        scoped_roles: Dict[str, set] = {}
+        for uid, name, org_id, project_id in rows:
+            bucket = global_roles if (org_id is None and project_id is None) else scoped_roles
+            bucket.setdefault(uid, set()).add(name)
+        out: Dict[str, str] = {}
+        for uid in set(global_roles) | set(scoped_roles):
+            names = global_roles.get(uid) or scoped_roles.get(uid)
+            if names:
+                out[uid] = ", ".join(sorted(names))
+        return out
 
     def _resolve_dep_codes(self, target_kind: str, project_id: str, uuids) -> List[str]:
         """Resolve a list of dependency-target UUIDs to their WBS display
@@ -183,10 +217,11 @@ class AuditLogService:
 
         actor_ids = list({r.actor_user_id for r in rows if r.actor_user_id})
         actor_map = self._load_actor_map(actor_ids)
+        actor_role_map = self._load_actor_roles(actor_ids)
 
         elements = []
         for r in rows:
-            entry = _serialize_entry(r, actor_map)
+            entry = _serialize_entry(r, actor_map, actor_role_map)
             self._enrich_dependency_display(entry, r)
             self._enrich_vendor_display(entry, r)
             elements.append(entry)

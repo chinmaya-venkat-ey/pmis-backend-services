@@ -11,6 +11,7 @@ from app.models.data_field_master import DataFieldMaster
 from app.models.formula_library import FormulaLibrary
 from app.models.project_ld_band import ProjectLdBand
 from app.models.severity_master import SeverityMaster
+from app.models.sla_category_master import SlaCategoryMaster
 
 
 class MasterRepository:
@@ -167,6 +168,23 @@ class MasterRepository:
         self.db.execute(
             delete(ProjectLdBand).where(ProjectLdBand.project_id == project_id)
         )
+
+    # ---------------------------------------------------------------- sla categories
+
+    def list_sla_categories(self, *, active_only: bool = True) -> List[SlaCategoryMaster]:
+        stmt = select(SlaCategoryMaster)
+        if active_only:
+            stmt = stmt.where(SlaCategoryMaster.is_active.is_(True))
+        return list(
+            self.db.execute(
+                stmt.order_by(SlaCategoryMaster.sort_order, SlaCategoryMaster.display_name)
+            ).scalars().all()
+        )
+
+    def get_sla_category(self, code: str) -> Optional[SlaCategoryMaster]:
+        return self.db.execute(
+            select(SlaCategoryMaster).where(SlaCategoryMaster.code == code)
+        ).scalar_one_or_none()
 
     # ---------------------------------------------------------------- formula library
 

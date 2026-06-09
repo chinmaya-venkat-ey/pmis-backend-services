@@ -6,6 +6,7 @@ from app.models.severity_master import SeverityMaster  # noqa: F401
 from app.models.project_ld_band import ProjectLdBand  # noqa: F401
 from app.models.contract_type_master import ContractTypeMaster  # noqa: F401
 from app.models.data_field_master import DataFieldMaster  # noqa: F401
+from app.models.sla_category_master import SlaCategoryMaster  # noqa: F401
 
 # SLA master tables
 from app.models.sla_definition import SlaDefinition  # noqa: F401

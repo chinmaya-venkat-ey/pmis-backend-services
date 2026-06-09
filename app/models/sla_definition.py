@@ -19,6 +19,7 @@ class SlaDefinition(Base):
         Index("ix_sla_def_contract_type", "contract_type"),
         Index("ix_sla_def_formula_id", "formula_id"),
         Index("ix_sla_def_status", "status"),
+        Index("ix_sla_def_category", "category"),
         UniqueConstraint("sla_ref", name="ix_sla_def_sla_ref"),
         {"schema": "contract"},
     )
@@ -39,6 +40,14 @@ class SlaDefinition(Base):
     ld_aggregation_method: Mapped[str] = mapped_column(String(20), nullable=False, server_default="SUM")
     ld_computation_base: Mapped[str] = mapped_column(String(30), nullable=False, server_default="QUARTERLY_PAYMENT")
     metadata_: Mapped[dict] = mapped_column("metadata", JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    # ── RFP-native presentation fields (UIDAI RFP §5.28 row headers) ──
+    # category replaces formula_type for user-facing display; formula_type
+    # stays on the row as the evaluator-dispatch key.
+    category: Mapped[Optional[str]] = mapped_column(String(50))
+    scope_text: Mapped[Optional[str]] = mapped_column(Text)
+    data_source: Mapped[Optional[str]] = mapped_column(String(255))
+    calculation_method: Mapped[Optional[str]] = mapped_column(Text)
+    reports_submitted_to: Mapped[Optional[str]] = mapped_column(String(255))
     status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="ACTIVE")
     effective_from: Mapped[date] = mapped_column(Date, nullable=False)
     effective_until: Mapped[Optional[date]] = mapped_column(Date)

@@ -195,6 +195,24 @@ class LdBandSetRequest(BaseModel):
     )
 
 
+# --------------------------------------------------------------------------- SLA Categories
+
+class SlaCategoryResponse(BaseModel):
+    """User-facing SLA category. Replaces formula_type as the picker label.
+
+    ``formula_type`` is included on the response so the FE knows which engine
+    will run behind the scenes — useful for showing a hint ("uses
+    point_accumulation under the hood") without making the user pick it.
+    """
+    code: str
+    display_name: str
+    formula_type: str
+    description: Optional[str] = None
+    sort_order: int
+    is_active: bool
+    model_config = {"from_attributes": True}
+
+
 # --------------------------------------------------------------------------- Formula Library
 
 _OBS_INPUT_TYPE: Dict[str, str] = {

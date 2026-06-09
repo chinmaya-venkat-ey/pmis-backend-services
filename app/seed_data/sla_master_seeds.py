@@ -40,6 +40,12 @@ def _sla(
     lookup_table: Optional[List[Dict]] = None,
     guard_conditions: Optional[List[Dict]] = None,
     description: Optional[str] = None,
+    # ── RFP-native presentation fields (UIDAI RFP §5.28 row headers) ──
+    category: Optional[str] = None,
+    scope_text: Optional[str] = None,
+    data_source: Optional[str] = None,
+    calculation_method: Optional[str] = None,
+    reports_submitted_to: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Helper mirroring tests/test_sla_onboard_all_contracts._sla.
 
@@ -52,6 +58,11 @@ def _sla(
         "formula_type": formula_type,
         "title": title,
         "description": description,
+        "category": category,
+        "scope_text": scope_text,
+        "data_source": data_source,
+        "calculation_method": calculation_method,
+        "reports_submitted_to": reports_submitted_to,
         "measurement_interval": measurement_interval,
         "reporting_interval": reporting_interval,
         "baseline_type": baseline_type,
@@ -65,6 +76,10 @@ def _sla(
         "lookup_table": lookup_table or [],
         "guard_conditions": guard_conditions or [],
     }
+
+
+# Reports authority used by every PMU SLA per the RFP table.
+_PMU_TMD = "Technology Management Division, UIDAI HO"
 
 
 # ---------------------------------------------------------------------------
@@ -533,6 +548,14 @@ PMU_SEEDS: List[Dict[str, Any]] = [
          "Non-submission of deliverable",
          description="Per RFP §5.28.2.b — 0.5% of deliverable cost for every "
                      "week or part thereof of delay attributable to the consultant.",
+         category="Deliverable Submission",
+         scope_text="Applies to every deliverable D1-D8 in Phase 1, where the "
+                    "agreed submission schedule is missed for reasons "
+                    "attributable to the consultant.",
+         data_source="Manual — submission log maintained by UIDAI Project Office",
+         calculation_method="LD = 0.5% × weeks delayed × cost of deliverable. "
+                            "A part-week counts as a full week.",
+         reports_submitted_to=_PMU_TMD,
          measurement_interval="ONE_TIME",
          reporting_interval="QUARTERLY",
          ld_computation_base="FIXED_AMOUNT",
@@ -555,6 +578,15 @@ PMU_SEEDS: List[Dict[str, Any]] = [
          "Deliverable not acceptable / defects not rectified",
          description="Per RFP §5.28.2.c — 1% of deliverable cost for every "
                      "week or part thereof of delay until defects are rectified.",
+         category="Deliverable Submission",
+         scope_text="Applies to every deliverable D1-D8 in Phase 1 once the "
+                    "purchaser has identified defects and the consultant has "
+                    "missed the stipulated rectification window.",
+         data_source="Manual — defect register reviewed by UIDAI Project Office",
+         calculation_method="LD = 1% × weeks delayed × cost of deliverable, "
+                            "starting from the rectification deadline. A "
+                            "part-week counts as a full week.",
+         reports_submitted_to=_PMU_TMD,
          measurement_interval="ONE_TIME",
          reporting_interval="QUARTERLY",
          ld_computation_base="FIXED_AMOUNT",
@@ -579,6 +611,13 @@ PMU_SEEDS: List[Dict[str, Any]] = [
          "Resolution of contract / technical queries beyond 3 working days",
          description="Per RFP §5.28.3.a — 0.1% LD on NPQP per day of delay "
                      "beyond the 3 working day SLA, until resolved.",
+         category="Query Resolution",
+         scope_text="Applies to contractual or technical queries initiated by "
+                    "UIDAI under deliverable D10 (Phase 2 & Phase 3).",
+         data_source="Manual — query register tracked by UIDAI",
+         calculation_method="LD = 0.1% × days delayed beyond 3 working days × NPQP. "
+                            "The 3-day grace window is excluded from the count.",
+         reports_submitted_to=_PMU_TMD,
          measurement_interval="MONTHLY",
          reporting_interval="QUARTERLY",
          ld_computation_base="QUARTERLY_PAYMENT",
@@ -601,6 +640,15 @@ PMU_SEEDS: List[Dict[str, Any]] = [
          "Incorrect recommendation on acceptance of MSP deliverables",
          description="Per RFP §5.28.3.b — severity escalates with the number "
                      "of incorrect recommendations identified in the quarter.",
+         category="Recommendation Quality",
+         scope_text="Applies whenever it is identified that the consultant has "
+                    "given UIDAI an incorrect recommendation on the acceptance "
+                    "of any deliverable of an MSP.",
+         data_source="Manual — identified during UIDAI review of MSP deliverables",
+         calculation_method="Severity assigned by the count of incorrect "
+                            "recommendations in the quarter: 1 occurrence → Sev 2, "
+                            "2 → Sev 3, more than 2 → Sev 4.",
+         reports_submitted_to=_PMU_TMD,
          measurement_interval="QUARTERLY",
          reporting_interval="QUARTERLY",
          ld_computation_base="QUARTERLY_PAYMENT",
@@ -630,6 +678,14 @@ PMU_SEEDS: List[Dict[str, Any]] = [
          "Resource replacements per quarter",
          description="Per RFP §5.28.3.c — Sev 0 up to 1 replacement; Sev 4 "
                      "for every additional replacement in the quarter.",
+         category="Resource Management",
+         scope_text="Applies to all resources committed under deliverables D12 "
+                    "and D13 for whom a replacement is initiated by the consultant.",
+         data_source="Manual — UIDAI biometric attendance system",
+         calculation_method="Count of resource replacements initiated by the "
+                            "consultant in the quarter. Up to 1 replacement is "
+                            "Sev 0; any increase beyond 1 is Sev 4.",
+         reports_submitted_to=_PMU_TMD,
          measurement_interval="QUARTERLY",
          reporting_interval="QUARTERLY",
          ld_computation_base="QUARTERLY_PAYMENT",
@@ -653,6 +709,16 @@ PMU_SEEDS: List[Dict[str, Any]] = [
          "Minimum knowledge-transfer overlap during resource replacement",
          description="Per RFP §5.28.3.d — Sev 0 when overlap KT period "
                      ">=20 working days; Sev 4 otherwise.",
+         category="Resource Management",
+         scope_text="Applies to every resource for whom a replacement is "
+                    "initiated by either the consultant or UIDAI.",
+         data_source="Manual — UIDAI biometric attendance system. Working days "
+                     "counted at the UIDAI office where the outgoing resource "
+                     "is attached.",
+         calculation_method="Overlap = number of working days where both "
+                            "outgoing and incoming resources are present on the "
+                            "UIDAI premises during knowledge transfer.",
+         reports_submitted_to=_PMU_TMD,
          measurement_interval="QUARTERLY",
          reporting_interval="QUARTERLY",
          ld_computation_base="QUARTERLY_PAYMENT",
@@ -682,6 +748,16 @@ PMU_SEEDS: List[Dict[str, Any]] = [
                      "hours >=144; Sev 2 for 12-15 BD AND 108-135 hrs; Sev 4 "
                      "when below either threshold. Hours captured separately "
                      "until per-band AND-conditions are added.",
+         category="Resource Management",
+         scope_text="Applies to all resources deployed by the consultant under "
+                    "the contract. Resources whose replacement was initiated by "
+                    "UIDAI are excluded from the calculation.",
+         data_source="Manual — UIDAI biometric attendance system",
+         calculation_method="Per resource per month: count business days and "
+                            "total hours logged. Sev 0 when business days ≥ 16 "
+                            "AND hours ≥ 144. Sev 2 when both are in the 12-15 "
+                            "BD AND 108-135 hrs range. Sev 4 when below either.",
+         reports_submitted_to=_PMU_TMD,
          measurement_interval="MONTHLY",
          reporting_interval="QUARTERLY",
          ld_computation_base="QUARTERLY_PAYMENT",
@@ -728,6 +804,16 @@ PMU_SEEDS: List[Dict[str, Any]] = [
                      "- (approval date). Sev 0 if <=21 days; Sev 2 if 22-28; "
                      "Sev 4 if >28. Continuing-quarter rule applies; not modelled "
                      "in v1 (manual re-evaluation per quarter).",
+         category="Resource Management",
+         scope_text="Applies to the onboarding of additional resources mutually "
+                    "agreed by both parties.",
+         data_source="Manual — UIDAI biometric attendance system",
+         calculation_method="Daily variance = actual onboarding date − approval "
+                            "date. Sev 0 if variance ≤ 21 days; Sev 2 if 22-28 "
+                            "days; Sev 4 if > 28 days. If not onboarded in the "
+                            "planned quarter, Sev 4 is applicable every "
+                            "subsequent quarter until onboarding occurs.",
+         reports_submitted_to=_PMU_TMD,
          measurement_interval="QUARTERLY",
          reporting_interval="QUARTERLY",
          ld_computation_base="QUARTERLY_PAYMENT",
@@ -756,6 +842,15 @@ PMU_SEEDS: List[Dict[str, Any]] = [
          description="Per RFP §5.28.3.g — Sev 0 if replacement onboarded "
                      "within 21 days of notification; Sev 2 if later. "
                      "Continuing-quarter rule applies; not modelled in v1.",
+         category="Resource Management",
+         scope_text="Applies to onboarding of replacement resources within 21 "
+                    "days of the date of notification.",
+         data_source="Manual — UIDAI biometric attendance system",
+         calculation_method="Daily variance = actual onboarding date − date of "
+                            "notification. Sev 0 if ≤ 21 days; Sev 2 if > 21. "
+                            "Sev 2 is applicable every quarter until the "
+                            "replacement is onboarded.",
+         reports_submitted_to=_PMU_TMD,
          measurement_interval="QUARTERLY",
          reporting_interval="QUARTERLY",
          ld_computation_base="QUARTERLY_PAYMENT",
@@ -783,6 +878,16 @@ PMU_SEEDS: List[Dict[str, Any]] = [
                      "P=T0+6 months. Sev levels: 0 at <=P, 1 at P+1..7d, 2 at "
                      "P+8..14d, 3 at P+15..21d, 4 at >P+21d. T anchor is bound "
                      "per mapping via overrides.t_anchor_date.",
+         category="Governance Tool",
+         scope_text="Applies to the consultant's obligation to deploy and "
+                    "configure the Governance tool (deliverable D11) within "
+                    "the T0+6 month milestone.",
+         data_source="Manual — verified by UIDAI",
+         calculation_method="Variance = actual completion date of governance "
+                            "tool deployment − planned completion date "
+                            "(T0+6 months). Sev 0 at on-time; Sev 1, 2, 3, 4 "
+                            "for each successive 7-day slip past the milestone.",
+         reports_submitted_to="Concerned UIDAI Stakeholders",
          measurement_interval="ONE_TIME",
          reporting_interval="QUARTERLY",
          ld_computation_base="QUARTERLY_PAYMENT",
@@ -818,6 +923,17 @@ PMU_SEEDS: List[Dict[str, Any]] = [
          "Governance tool failures / uptime",
          description="Per RFP §5.28.4.b — failures per quarter. Sev 2 for "
                      "1-2; Sev 3 for 3-4; Sev 4 for >4.",
+         category="Governance Tool",
+         scope_text="Applies to events of failure identified by UIDAI in the "
+                    "performance or deliverable of the Governance tool. "
+                    "Examples include out-of-date Minutes of Meetings, dashboard "
+                    "showing incorrect data, missed obligations or alerts, and "
+                    "stakeholder activities not assigned in a timely manner.",
+         data_source="Manual — verified by UIDAI",
+         calculation_method="Count of failure occurrences observed in the "
+                            "quarter. 1-2 failures → Sev 2; 3-4 failures → "
+                            "Sev 3; more than 4 failures → Sev 4.",
+         reports_submitted_to=_PMU_TMD,
          measurement_interval="QUARTERLY",
          reporting_interval="QUARTERLY",
          ld_computation_base="QUARTERLY_PAYMENT",

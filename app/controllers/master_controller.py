@@ -19,6 +19,7 @@ from app.schemas.master import (
     SeverityLevelResponse,
     SeverityLevelUpdateRequest,
     SeverityMasterSetRequest,
+    SlaCategoryResponse,
 )
 from app.services.master_service import MasterService
 
@@ -40,6 +41,9 @@ class MasterController:
 
     def delete_contract_type(self, code: str) -> ContractTypeResponse:
         return ContractTypeResponse.model_validate(self.service.delete_contract_type(code))
+
+    def list_sla_categories(self) -> List[SlaCategoryResponse]:
+        return [SlaCategoryResponse.model_validate(r) for r in self.service.list_sla_categories()]
 
     def list_formula_library(self) -> List[FormulaLibraryResponse]:
         return [

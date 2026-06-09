@@ -121,6 +121,29 @@ def list_sla_enums():
 
 
 # ---------------------------------------------------------------------------
+# SLA categories — user-facing labels shown on the onboarding form. Each
+# category resolves to a formula_type behind the scenes. Seeded by
+# migration 0015 and editable via direct DB writes for now (no admin UI
+# yet, but the table follows the same pattern as contract_type_master).
+# ---------------------------------------------------------------------------
+
+@router.get("/sla-categories", summary="List active SLA categories (FE picker)")
+def list_sla_categories(ctrl: MasterController = Depends(get_master_controller)):
+    items = ctrl.list_sla_categories()
+    elements = [
+        hal_resource(
+            "SlaCategory", r.model_dump(),
+            self_link=f"/api/v3/sla-categories/{r.code}",
+        )
+        for r in items
+    ]
+    return api_response(
+        data=hal_collection(elements, total=len(elements), page_size=len(elements) or 1),
+        status=200,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Formula library — SLA formula catalogue (read-only, seeded at migration)
 # ---------------------------------------------------------------------------
 

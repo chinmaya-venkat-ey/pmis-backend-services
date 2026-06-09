@@ -136,6 +136,11 @@ class MasterService:
             )
         return self.repo.update_data_field(row, is_active=False)
 
+    # ---------------------------------------------------------------- sla categories
+
+    def list_sla_categories(self):
+        return self.repo.list_sla_categories()
+
     # ---------------------------------------------------------------- formula library
 
     def list_formula_library(self):

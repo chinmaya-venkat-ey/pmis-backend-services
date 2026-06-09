@@ -88,6 +88,30 @@ class SlaOnboardRequest(BaseModel):
     effective_from: date
     effective_until: Optional[date] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
+    # ── RFP-native presentation fields (UIDAI RFP §5.28 row headers) ──
+    # All optional for backward compatibility. category replaces
+    # formula_type for the user-facing form; formula_type still drives
+    # evaluator dispatch.
+    category: Optional[str] = Field(
+        None, max_length=50,
+        description='User-facing SLA category (e.g. "Deliverable Submission", '
+                    '"Resource Management", "Governance Tool"). Replaces '
+                    'formula_type on the form.',
+    )
+    scope_text: Optional[str] = Field(
+        None, description='RFP row "Scope of SLA".',
+    )
+    data_source: Optional[str] = Field(
+        None, max_length=255,
+        description='RFP row "Process to capture raw data for SLA calculations".',
+    )
+    calculation_method: Optional[str] = Field(
+        None, description='RFP row "SLA calculation" — plain-English formula.',
+    )
+    reports_submitted_to: Optional[str] = Field(
+        None, max_length=255,
+        description='RFP row "Reports and Data submitted to".',
+    )
     metrics: List[SlaMetricInput] = Field(..., min_length=1)
     parameters: List[SlaParameterInput] = Field(default_factory=list)
     condition_bands: List[SlaConditionBandInput] = Field(default_factory=list)
@@ -115,6 +139,12 @@ class SlaUpdateRequest(BaseModel):
     effective_until: Optional[date] = None
     status: Optional[str] = Field(None, pattern=r"^(ACTIVE|INACTIVE)$")
     metadata: Optional[Dict[str, Any]] = None
+    # RFP-native fields — all optional partial-update.
+    category: Optional[str] = Field(None, max_length=50)
+    scope_text: Optional[str] = None
+    data_source: Optional[str] = Field(None, max_length=255)
+    calculation_method: Optional[str] = None
+    reports_submitted_to: Optional[str] = Field(None, max_length=255)
 
 
 # ---------------------------------------------------------------------------
@@ -197,6 +227,12 @@ class SlaDefinitionResponse(BaseModel):
     sla_ref: str
     title: str
     description: Optional[str] = None
+    # RFP-native presentation fields.
+    category: Optional[str] = None
+    scope_text: Optional[str] = None
+    data_source: Optional[str] = None
+    calculation_method: Optional[str] = None
+    reports_submitted_to: Optional[str] = None
     measurement_interval: str
     reporting_interval: str
     baseline_type: str

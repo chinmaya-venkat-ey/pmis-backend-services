@@ -51,6 +51,10 @@ class Settings(BaseSettings):
     require_2fa: bool = Field(default=True)
     otp_ttl_seconds: int = Field(default=300)
     otp_resend_cooldown_seconds: int = Field(default=60)
+    # Bug #240: the login-attempt session lives longer than a single OTP code,
+    # so a user can resend a fresh code (without re-entering credentials) even
+    # after the current code expires — up to this cap from the login.
+    otp_session_ttl_seconds: int = Field(default=900)
     otp_max_attempts: int = Field(default=5)
     otp_code_length: int = Field(default=6)
     otp_hash_pepper: str = Field(default="replace-me")

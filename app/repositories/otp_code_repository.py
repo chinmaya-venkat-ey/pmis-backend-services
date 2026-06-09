@@ -65,6 +65,25 @@ class OtpCodeRepository:
         )
         return self.db.execute(stmt).scalars().first()
 
+    def get_resumable_by_ephemeral_token(
+        self, ephemeral_token_hash: str, *, session_ttl_seconds: int,
+    ) -> Optional[OtpCode]:
+        """Bug #240: find a non-consumed OTP row whose LOGIN-ATTEMPT SESSION is
+        still alive (``generated_at`` within ``session_ttl_seconds``) — even if
+        the current code has already expired. Used by resend/verify so a user
+        can get a fresh code without re-entering credentials. Verify still
+        checks the code's own ``expires_at`` separately."""
+        now = _utcnow()
+        session_floor = now - timedelta(seconds=session_ttl_seconds)
+        stmt = (
+            select(OtpCode)
+            .where(OtpCode.ephemeral_token_hash == ephemeral_token_hash)
+            .where(OtpCode.consumed_at.is_(None))
+            .where(OtpCode.generated_at >= session_floor)
+            .order_by(OtpCode.id.desc())
+        )
+        return self.db.execute(stmt).scalars().first()
+
     def set_code(
         self,
         row: OtpCode,

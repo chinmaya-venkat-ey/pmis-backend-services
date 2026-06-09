@@ -102,6 +102,18 @@ class OtpAttemptsExceededError(UnauthorizedError):
     default_code = "OTP_ATTEMPTS_EXCEEDED"
 
 
+class TooManyRequestsError(DomainError):
+    status_code = 429
+    default_code = "TOO_MANY_REQUESTS"
+
+
+class OtpResendCooldownError(TooManyRequestsError):
+    """Resend requested before the cooldown elapsed. ``details`` carries
+    ``remaining_seconds`` so the FE can render a countdown."""
+
+    default_code = "OTP_RESEND_COOLDOWN"
+
+
 class RefreshTokenInvalidError(UnauthorizedError):
     default_code = "REFRESH_TOKEN_INVALID"
 

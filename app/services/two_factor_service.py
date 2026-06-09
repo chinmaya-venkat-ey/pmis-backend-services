@@ -26,6 +26,7 @@ from app.core.errors import (
     OtpAttemptsExceededError,
     OtpExpiredError,
     OtpInvalidError,
+    OtpResendCooldownError,
     UserNotFoundError,
 )
 from app.repositories.otp_code_repository import OtpCodeRepository
@@ -68,7 +69,14 @@ class TwoFactorService:
 
     def send_otp(self, ephemeral_token: str, channel: str) -> OtpSendResponse:
         eph_hash = hash_ephemeral_token(ephemeral_token)
-        row = self.otp_repo.get_active_by_ephemeral_token(eph_hash)
+        # Bug #240: resolve by the SESSION window (generated_at within
+        # otp_session_ttl), not the current code's expiry — so a user can
+        # request a fresh code even after the previous one expired, without
+        # re-entering credentials. The session is still capped, so a stale
+        # ephemeral token can't keep an attempt alive forever.
+        row = self.otp_repo.get_resumable_by_ephemeral_token(
+            eph_hash, session_ttl_seconds=settings.otp_session_ttl_seconds,
+        )
         if row is None:
             raise OtpInvalidError("OTP session not found or expired")
 
@@ -76,13 +84,18 @@ class TwoFactorService:
         if user is None or user.deleted_at is not None:
             raise UserNotFoundError("User no longer available for this OTP session")
 
-        # Round-8 A4 (monolith parity, two_factor.py:157-177): enforce a
-        # resend cooldown. The first send-otp on a freshly-created row has
-        # `last_sent_at = None` (or close to created_at) and passes
-        # immediately. Subsequent resends within the cooldown window are
-        # rejected with 429 + `{remaining_seconds}` so the FE can render
-        # "wait N seconds" without leaking timing.
         now = datetime.now(timezone.utc)
+        # Gap G4: enforce the resend cooldown. The first dispatch (row has no
+        # code yet) is exempt; resends within the window are rejected with 429
+        # + remaining_seconds so the FE can render "wait N seconds".
+        if row.code_hash is not None and row.last_sent_at is not None:
+            elapsed = (now - row.last_sent_at).total_seconds()
+            if elapsed < settings.otp_resend_cooldown_seconds:
+                remaining = max(1, int(settings.otp_resend_cooldown_seconds - elapsed))
+                raise OtpResendCooldownError(
+                    f"Please wait {remaining}s before requesting another code",
+                    details={"remaining_seconds": remaining},
+                )
 
         recipient = self._recipient_for_channel(user, channel)
         code = generate_otp_code(settings.otp_code_length)
@@ -118,15 +131,19 @@ class TwoFactorService:
 
     def verify_otp(self, ephemeral_token: str, code: str) -> LoginResponse:
         eph_hash = hash_ephemeral_token(ephemeral_token)
-        row = self.otp_repo.get_active_by_ephemeral_token(eph_hash)
+        # Bug #240: resolve by session window so an expired code yields a clear
+        # "expired — request a new code" rather than "session not found". The
+        # code's own expiry is enforced explicitly just below.
+        row = self.otp_repo.get_resumable_by_ephemeral_token(
+            eph_hash, session_ttl_seconds=settings.otp_session_ttl_seconds,
+        )
         if row is None:
             raise OtpInvalidError("OTP session not found")
         if row.consumed_at is not None:
             raise OtpInvalidError("OTP already used")
-        # expiry already filtered by repo.get_active_by_ephemeral_token; double-check
         from datetime import datetime, timezone
         if row.expires_at and row.expires_at < datetime.now(timezone.utc):
-            raise OtpExpiredError("OTP has expired")
+            raise OtpExpiredError("OTP has expired — please request a new code")
         if row.attempt_count >= settings.otp_max_attempts:
             raise OtpAttemptsExceededError("OTP max attempts exceeded")
 

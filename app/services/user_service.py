@@ -102,15 +102,14 @@ class UserService:
         created_by_user_id: Optional[str] = None,
         caller_is_admin: bool = False,
     ):
-        """Round-8 C2: each `project_assignments[i].role_id` is now validated
-        against the Doc-42b matrix BEFORE the user row is committed.
+        """Single role-assignment path: ``orgRole`` is the role; ``project_ids``
+        lists the projects and is honored ONLY for project-scoped roles
+        (project_admin / project_member) — ignored for org/global roles.
 
-        Previously this method wrote directly to UserRoleAssignmentRepository,
-        bypassing `RoleAssignmentService._assert_caller_can_grant` — an admin
-        could thus inject `role_id=<super_admin>` via the user-create body
-        and mint a super_admin without holding `users:grant_superadmin`.
-        Now every assignment passes through the same matrix the standalone
-        role-assignment endpoint uses.
+        Every project-scoped grant is validated against the Doc-42b matrix via
+        ``RoleAssignmentService._assert_caller_can_grant`` BEFORE the user row is
+        committed, so an admin can't inject e.g. ``org_role="super_admin"`` and
+        mint a peer/superior without holding the right grant authority.
         """
         # Bug #138: uniqueness is scoped to LIVE rows only — a deleted user's
         # login/email is free to reuse; a deactivated user's (deleted_at NULL)
@@ -143,40 +142,26 @@ class UserService:
                     details={"org_role": payload.org_role},
                 )
 
-        # Round-8 C2: validate each project_assignment against the matrix
-        # BEFORE creating the user. We resolve every role_id to its name,
-        # then call the same guard `_assert_caller_can_grant` that the
-        # /role-assignments/create route uses.
-        if payload.project_assignments and created_by_user_id is not None:
-            from app.services.role_assignment_service import RoleAssignmentService
+        # ONE path for project mapping: orgRole = the role, project_ids = the
+        # projects. project_ids is honored ONLY for project-scoped roles
+        # (project_admin / project_member); for org/global roles it is
+        # meaningless and ignored (no validation, no rows). Validate the grant
+        # for each project up-front (before the user row is created) so an
+        # unauthorized caller can't self-assign (§3.4.1 2026-06-02 audit).
+        from app.core.permissions import PROJECT_ONLY_ROLE_NAMES
+        from app.services.role_assignment_service import RoleAssignmentService
 
-            grant_guard = RoleAssignmentService(self.db)
-            for assignment in payload.project_assignments:
-                role = self.rbac.get_role(assignment.role_id)
-                if role is None:
-                    raise UserNotFoundError(
-                        f"Role {assignment.role_id} in project_assignments[] "
-                        f"does not exist."
-                    )
-                grant_guard._assert_caller_can_grant(
-                    role_name=role.name,
-                    organization_id=None,
-                    project_id=assignment.project_id,
-                    caller_user_id=created_by_user_id,
-                    caller_is_admin=caller_is_admin,
-                )
-
-        # §3.4.1 (2026-06-02 audit): the VM-style branch below
-        # (project_ids + org_role) used to bypass _assert_caller_can_grant
-        # entirely — an admin could POST {project_ids=[...], org_role=
-        # "super_admin"} and self-assign every project. Validate up-front.
-        if payload.project_ids and payload.org_role and created_by_user_id is not None:
-            from app.services.role_assignment_service import RoleAssignmentService
-
+        org_role_is_project = (
+            (payload.org_role or "").strip().lower() in PROJECT_ONLY_ROLE_NAMES
+        )
+        scoped_project_ids = (
+            list(payload.project_ids or []) if org_role_is_project else []
+        )
+        if scoped_project_ids and created_by_user_id is not None:
             vm_guard = RoleAssignmentService(self.db)
             vm_role = self.rbac.get_role_by_name(payload.org_role)
             if vm_role is not None:
-                for pid in payload.project_ids:
+                for pid in scoped_project_ids:
                     vm_guard._assert_caller_can_grant(
                         role_name=vm_role.name,
                         organization_id=None,
@@ -201,47 +186,29 @@ class UserService:
             status="active",
         )
 
-        # Legacy project_assignments[] (local format: {project_id, role_id}).
-        for assignment in payload.project_assignments:
-            self.assignments.create(
-                user_id=row.id,
-                role_id=assignment.role_id,
-                project_id=assignment.project_id,
-                created_by_user_id=created_by_user_id,
-            )
-
-        # VM-style: project_ids + org_role — create one scoped assignment per project.
-        if payload.project_ids and payload.org_role:
+        # Project-scoped role → one assignment per project, role taken from
+        # orgRole. (scoped_project_ids is empty for org/global roles.)
+        if scoped_project_ids:
             role = self.rbac.get_role_by_name(payload.org_role)
             if role is not None:
-                already_assigned = {a.project_id for a in payload.project_assignments}
-                for pid in payload.project_ids:
-                    if pid not in already_assigned:
-                        self.assignments.create(
-                            user_id=row.id,
-                            role_id=role.id,
-                            project_id=pid,
-                            created_by_user_id=created_by_user_id,
-                        )
+                for pid in scoped_project_ids:
+                    self.assignments.create(
+                        user_id=row.id,
+                        role_id=role.id,
+                        project_id=pid,
+                        created_by_user_id=created_by_user_id,
+                    )
 
-        # 2026-06-02 (CEO-class fix + multi-role create support):
-        # ALWAYS sync the global role-assignment row when ``org_role`` is
-        # set on create, regardless of project_ids / project_assignments.
-        # Symmetric with PATCH /users/{id}'s _sync_org_role_assignment.
-        #
-        # Effect:
-        #   * Pattern A (org_role only) → 1 global row.
-        #   * Pattern B (org_role + project_ids) → 1 global row + N project
-        #     rows of the same role. Effectively-redundant (global already
-        #     covers all projects) but harmless under union semantics: the
-        #     user's effective code set is the union of all granted codes,
-        #     so duplicate rows don't change behavior.
-        #   * Pattern E (org_role + project_assignments[]) → 1 global row
-        #     for org_role + N per-project rows for the project_assignments
-        #     entries (which may carry DIFFERENT role_ids). This is the
-        #     "global admin + project_member on Project X in one call"
-        #     case — now supported in a single request.
-        if payload.org_role and created_by_user_id is not None:
+        # Global / org-tier roles (admin, super_admin, org_admin, …) materialize
+        # as a single GLOBAL org_role assignment. Project-only roles are never
+        # held globally — they were scoped per-project above — so skip the global
+        # sync for them (no error), which is what lets orgRole=<project role> +
+        # project_ids work. Symmetric with PATCH /users/{id}.
+        if (
+            payload.org_role
+            and created_by_user_id is not None
+            and not org_role_is_project
+        ):
             self._sync_org_role_assignment(
                 target=row,
                 new_org_role=payload.org_role,

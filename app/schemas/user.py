@@ -58,14 +58,6 @@ class UserResponse(ResponseModel):
     projects: List[UserProjectSummary] = Field(default_factory=list)
 
 
-class UserProjectAssignmentInput(BaseModel):
-    """Legacy local format for project_assignments[] on user create."""
-
-    model_config = ConfigDict(extra="forbid")
-    project_id: str
-    role_id: int
-
-
 class UserCreateRequest(BaseModel):
     """POST /users/create — matches VM UserCreateRequest field names.
 
@@ -101,9 +93,9 @@ class UserCreateRequest(BaseModel):
     admin: bool = False
     two_factor_enabled: bool = False
 
-    # Project mapping — VM sends project_ids; legacy local format also accepted.
+    # Project mapping — project_ids, honored only for project-scoped orgRole
+    # values (project_admin / project_member); ignored for org/global roles.
     project_ids: Optional[List[str]] = Field(default=None)
-    project_assignments: List[UserProjectAssignmentInput] = Field(default_factory=list)
 
 
 class UserUpdateRequest(BaseModel):

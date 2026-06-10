@@ -370,6 +370,10 @@ class TeamPageActivity(BaseModel):
                     "masters.divisions (id/code/name) — wire: ownerDivision",
     )
     concerned_divisions: List[str] = Field(default_factory=list)
+    # Bug #222: same codes hydrated to {id, code, name} so the FE can show the
+    # division NAME inline on the activity (the bare codes above are kept — the
+    # FE still keys division-user maps by code). wire: concernedDivisionsRefs
+    concerned_divisions_refs: List["DivisionRef"] = Field(default_factory=list)
     owner: List[str] = Field(default_factory=list, description=_DESC_USER_IDS)
     owner_approver: List[str] = Field(
         default_factory=list, description=_DESC_USER_IDS_APPROVER

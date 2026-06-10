@@ -682,6 +682,9 @@ class TeamService:
                 milestone=row.milestone_name,
                 owner_division=_to_ref(row.owner_division) if row.owner_division else None,
                 concerned_divisions=row.concerned_divisions,
+                concerned_divisions_refs=[
+                    _to_ref(c) for c in (row.concerned_divisions or [])
+                ],
                 owner=[c.id for c in row.assignments.owner],
                 owner_approver=[c.id for c in row.assignments.owner_approver],
                 division_users={

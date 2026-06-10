@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import List, Optional, Tuple
 
-from sqlalchemy import and_, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.formula_library import FormulaLibrary
@@ -82,3 +82,17 @@ class SlaActivityMappingRepository:
         if row is None:
             return None
         return (row[0], row[1], row[2])
+
+    def list_by_sla(
+        self, sla_id: str
+    ) -> List[Tuple[SlaActivityMapping, SlaDefinition, Optional[str]]]:
+        """All mappings attached to a given SLA template — for the FE's
+        'Mapped Activities' panel on the SLA detail view."""
+        stmt = (
+            select(SlaActivityMapping, SlaDefinition, FormulaLibrary.formula_type)
+            .join(SlaDefinition, SlaActivityMapping.sla_id == SlaDefinition.id)
+            .join(FormulaLibrary, SlaDefinition.formula_id == FormulaLibrary.id, isouter=True)
+            .where(SlaActivityMapping.sla_id == sla_id)
+            .order_by(SlaActivityMapping.effective_from.desc())
+        )
+        return [(r[0], r[1], r[2]) for r in self.db.execute(stmt).all()]

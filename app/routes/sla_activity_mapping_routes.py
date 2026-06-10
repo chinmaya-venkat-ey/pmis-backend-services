@@ -86,6 +86,34 @@ def list_mappings(
     )
 
 
+@router.get(
+    "/sla-activity-mappings",
+    summary="List SLA mappings, optionally filtered by SLA",
+)
+def list_all_mappings(
+    sla_id: Optional[str] = None,
+    ctrl: SlaActivityMappingController = Depends(get_sla_activity_mapping_controller),
+):
+    # The FE's SLA-detail view fetches `/sla-activity-mappings?sla_id=…` to
+    # show "Mapped Activities" for the template being viewed.
+    if sla_id:
+        items = ctrl.list_for_sla(sla_id)
+    else:
+        items = []
+    elements = [
+        hal_resource(
+            "SlaActivityMapping",
+            r.model_dump(),
+            self_link=f"/api/v3/sla-activity-mappings/{r.id}",
+        )
+        for r in items
+    ]
+    return api_response(
+        data=hal_collection(elements, total=len(elements), page_size=len(elements) or 1),
+        status=200,
+    )
+
+
 @router.patch(
     "/sla-activity-mappings/{mapping_id}",
     summary="Update mapping overrides, status, or effective_until",

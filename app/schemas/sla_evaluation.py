@@ -2,7 +2,9 @@
 
 Evaluation is rooted at an SLA-Activity mapping. The mapping carries instance-
 specific overrides (t_anchor_date, actual_start_date, actual_end_date,
-ld_base_amount, ...) which take precedence over SLA-master defaults.
+ld_base_amount, ...) which take precedence over SLA-master defaults. The SLA
+template declares which override keys are required via its ``placeholders``
+array — the mapping form renders one input per entry.
 
 Observation shapes are form-friendly: frontend collects values via widgets
 (picklist + number field per metric) and posts a typed payload — no DSL.

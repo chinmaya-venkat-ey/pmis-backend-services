@@ -57,6 +57,11 @@ class SlaActivityMappingController:
     ) -> List[SlaActivityMappingResponse]:
         return self.service.list_for_activity(activity_id, active_only=active_only)
 
+    def list_for_sla(
+        self, sla_id: str
+    ) -> List[SlaActivityMappingResponse]:
+        return self.service.list_for_sla(sla_id)
+
     # ------------------------------------------------------------------ evaluate
 
     def evaluate_mapping(

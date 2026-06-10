@@ -2,7 +2,9 @@
 
 Activity is owned by PMIS-Project-management. We store only `activity_id`
 (soft FK). The `overrides` JSONB carries instance-specific values that take
-precedence over the SLA master at evaluation time. Well-known keys:
+precedence over the SLA master at evaluation time. Well-known keys are
+declared on the SLA template's ``placeholders`` array (see
+`sla_definitions.placeholders` added in migration 0016). Examples:
 
   - t_anchor_date         (concrete date for the SLA's symbolic T anchor)
   - actual_start_date     (real period start; overrides effective_from)

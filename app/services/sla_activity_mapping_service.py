@@ -35,6 +35,7 @@ class SlaActivityMappingService:
         sla_title: str,
         contract_type: Optional[str],
         formula_type: Optional[str],
+        category: Optional[str] = None,
     ) -> SlaActivityMappingResponse:
         return SlaActivityMappingResponse(
             id=mapping.id,
@@ -44,6 +45,7 @@ class SlaActivityMappingService:
             sla_title=sla_title,
             contract_type=contract_type,
             formula_type=formula_type,
+            category=category,
             overrides=mapping.overrides or {},
             status=mapping.status,
             effective_from=mapping.effective_from,
@@ -98,7 +100,10 @@ class SlaActivityMappingService:
 
         formula_obj = self.db.get(FormulaLibrary, sla.formula_id) if sla.formula_id else None
         formula_type = formula_obj.formula_type if formula_obj else None
-        return self._to_response(row, sla.sla_ref, sla.title, sla.contract_type, formula_type)
+        return self._to_response(
+            row, sla.sla_ref, sla.title, sla.contract_type, formula_type,
+            category=sla.category,
+        )
 
     # ---------------------------------------------------------------- update / delete
 
@@ -126,7 +131,10 @@ class SlaActivityMappingService:
         if updates:
             mapping = self.repo.update(mapping, **updates)
 
-        return self._to_response(mapping, sla.sla_ref, sla.title, sla.contract_type, formula_type)
+        return self._to_response(
+            mapping, sla.sla_ref, sla.title, sla.contract_type, formula_type,
+            category=sla.category,
+        )
 
     def unmap(self, mapping_id: str) -> SlaActivityMappingResponse:
         loaded = self.repo.load_with_sla(mapping_id)
@@ -136,7 +144,10 @@ class SlaActivityMappingService:
         if mapping.status == "RETIRED":
             raise ConflictError("Mapping is already retired", code="already_retired")
         mapping = self.repo.update(mapping, status="RETIRED")
-        return self._to_response(mapping, sla.sla_ref, sla.title, sla.contract_type, formula_type)
+        return self._to_response(
+            mapping, sla.sla_ref, sla.title, sla.contract_type, formula_type,
+            category=sla.category,
+        )
 
     # ---------------------------------------------------------------- read
 
@@ -145,6 +156,18 @@ class SlaActivityMappingService:
     ) -> List[SlaActivityMappingResponse]:
         rows = self.repo.list_for_activity(activity_id, active_only=active_only)
         return [
-            self._to_response(m, sla.sla_ref, sla.title, sla.contract_type, ft)
+            self._to_response(m, sla.sla_ref, sla.title, sla.contract_type, ft,
+                              category=sla.category)
+            for (m, sla, ft) in rows
+        ]
+
+    def list_for_sla(
+        self, sla_id: str
+    ) -> List[SlaActivityMappingResponse]:
+        """Used by the SLA detail view to show 'Mapped Activities'."""
+        rows = self.repo.list_by_sla(sla_id)
+        return [
+            self._to_response(m, sla.sla_ref, sla.title, sla.contract_type, ft,
+                              category=sla.category)
             for (m, sla, ft) in rows
         ]

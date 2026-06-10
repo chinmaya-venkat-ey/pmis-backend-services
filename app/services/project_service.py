@@ -495,6 +495,9 @@ class ProjectService:
             )
         # Doc-27 publishability gate.
         self._assert_publishable(project_id)
+        # Finance gate: every live milestone must be added on the Finance page
+        # (bound to a Fixed cost row) before the project can be published.
+        self._assert_milestones_in_finance(project_id)
         before = row.status
         self.repo.update(row, status="published", updated_by=caller_user_id)
         self.audit.write(
@@ -847,6 +850,55 @@ class ProjectService:
                 code="invalid_publish",
                 details={
                     "errorIdentifier": "milestone_without_activity",
+                    "milestoneIds": [mid for mid, _ in missing],
+                    "milestoneNames": [name for _mid, name in missing],
+                },
+            )
+
+    def _assert_milestones_in_finance(self, project_id: str) -> None:
+        """Finance publishability gate — every live (non-meeting) milestone must
+        be added on the Finance page, i.e. bound to a LIVE FIXED cost row (which
+        is what gives the milestone its payment term). A milestone left out of
+        all cost rows blocks publish. Same ``invalid_publish`` envelope as
+        :meth:`_assert_publishable`; errorIdentifier ``milestone_not_in_finance``.
+
+        Meeting milestones (``is_meeting=True``) are excluded — they're
+        auto-created post-publish and never appear on the Finance page.
+        """
+        from app.models.cost_item_milestone import CostItemMilestone
+        from app.models.project_cost_item import ProjectCostItem
+
+        live_milestones = self.db.execute(
+            select(Milestone.id, Milestone.name)
+            .where(Milestone.project_id == project_id)
+            .where(Milestone.deleted_at.is_(None))
+            .where(Milestone.is_meeting.is_(False))
+        ).all()
+        if not live_milestones:
+            # No milestones at all is already rejected by _assert_publishable.
+            return
+
+        bound_ids = {
+            r[0] for r in self.db.execute(
+                select(CostItemMilestone.milestone_id)
+                .join(ProjectCostItem, ProjectCostItem.id == CostItemMilestone.cost_item_id)
+                .where(ProjectCostItem.project_id == project_id)
+                .where(ProjectCostItem.deleted_at.is_(None))
+                .where(ProjectCostItem.cost_type_code == "fixed")
+                .distinct()
+            ).all()
+        }
+        missing = [(mid, name) for mid, name in live_milestones if mid not in bound_ids]
+        if missing:
+            # Monolith parity: each name is wrapped in single quotes.
+            names = ", ".join(f"'{name}'" for _mid, name in missing)
+            raise ValidationError(
+                f"Cannot publish: the following milestone(s) are not added on "
+                f"the Finance page: {names}. Add each milestone to a cost row in "
+                f"Finance before publishing.",
+                code="invalid_publish",
+                details={
+                    "errorIdentifier": "milestone_not_in_finance",
                     "milestoneIds": [mid for mid, _ in missing],
                     "milestoneNames": [name for _mid, name in missing],
                 },

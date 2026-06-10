@@ -18,6 +18,21 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query
 
 from app.controllers.master_controller import MasterController
+from app.core.openapi_examples import (
+    RESP_CONTRACT_TYPE_DETAIL,
+    RESP_CONTRACT_TYPE_LIST,
+    RESP_DATA_FIELD_DETAIL,
+    RESP_DATA_FIELD_LIST,
+    RESP_FORMULA_LIBRARY,
+    RESP_LD_BANDS,
+    RESP_NOT_FOUND,
+    RESP_SEED_DEFAULTS,
+    RESP_SEVERITY_MASTER,
+    RESP_SLA_CATEGORIES,
+    RESP_SLA_ENUMS,
+    RESP_VALIDATION_FAIL,
+    with_examples,
+)
 from app.core.response import api_response, hal_collection, hal_resource
 from app.dependencies import get_master_controller
 from app.schemas.master import (
@@ -39,7 +54,15 @@ router = APIRouter(tags=["Masters"])
 # Contract types — system-wide read-only
 # ---------------------------------------------------------------------------
 
-@router.post("/contract-types", status_code=201, summary="Create a new contract type")
+@router.post(
+    "/contract-types",
+    status_code=201,
+    summary="Create a new contract type",
+    responses=with_examples(
+        (201, "Contract type created.", RESP_CONTRACT_TYPE_DETAIL),
+        (422, "Schema validation failed.", RESP_VALIDATION_FAIL),
+    ),
+)
 def create_contract_type(
     payload: ContractTypeCreateRequest,
     ctrl: MasterController = Depends(get_master_controller),
@@ -55,7 +78,14 @@ def create_contract_type(
     )
 
 
-@router.patch("/contract-types/{code}", summary="Update display name or description")
+@router.patch(
+    "/contract-types/{code}",
+    summary="Update display name or description",
+    responses=with_examples(
+        (200, "Contract type updated.", RESP_CONTRACT_TYPE_DETAIL),
+        (404, "Contract type not found.", RESP_NOT_FOUND),
+    ),
+)
 def update_contract_type(
     code: str,
     payload: ContractTypeUpdateRequest,
@@ -72,7 +102,14 @@ def update_contract_type(
     )
 
 
-@router.delete("/contract-types/{code}", summary="Soft-delete a contract type (sets is_active=false)")
+@router.delete(
+    "/contract-types/{code}",
+    summary="Soft-delete a contract type (sets is_active=false)",
+    responses=with_examples(
+        (200, "Contract type deactivated.", RESP_CONTRACT_TYPE_DETAIL),
+        (404, "Contract type not found.", RESP_NOT_FOUND),
+    ),
+)
 def delete_contract_type(
     code: str,
     ctrl: MasterController = Depends(get_master_controller),
@@ -88,7 +125,13 @@ def delete_contract_type(
     )
 
 
-@router.get("/contract-types", summary="List all contract types")
+@router.get(
+    "/contract-types",
+    summary="List all contract types",
+    responses=with_examples(
+        (200, "All contract types (active and soft-deleted).", RESP_CONTRACT_TYPE_LIST),
+    ),
+)
 def list_contract_types(ctrl: MasterController = Depends(get_master_controller)):
     items = ctrl.list_contract_types()
     elements = [
@@ -108,7 +151,13 @@ def list_contract_types(ctrl: MasterController = Depends(get_master_controller))
 # SLA enum catalog — all dropdown values for SLA onboarding form
 # ---------------------------------------------------------------------------
 
-@router.get("/sla-enums", summary="All allowed enum values for SLA onboarding dropdowns")
+@router.get(
+    "/sla-enums",
+    summary="All allowed enum values for SLA onboarding dropdowns",
+    responses=with_examples(
+        (200, "Dictionary of enum buckets the FE picker uses.", RESP_SLA_ENUMS),
+    ),
+)
 def list_sla_enums():
     return api_response(
         data=hal_resource(
@@ -127,7 +176,14 @@ def list_sla_enums():
 # yet, but the table follows the same pattern as contract_type_master).
 # ---------------------------------------------------------------------------
 
-@router.get("/sla-categories", summary="List active SLA categories (FE picker)")
+@router.get(
+    "/sla-categories",
+    summary="List active SLA categories (FE picker)",
+    responses=with_examples(
+        (200, "All active categories with display_name and formula_type.",
+         RESP_SLA_CATEGORIES),
+    ),
+)
 def list_sla_categories(ctrl: MasterController = Depends(get_master_controller)):
     items = ctrl.list_sla_categories()
     elements = [
@@ -147,7 +203,13 @@ def list_sla_categories(ctrl: MasterController = Depends(get_master_controller))
 # Formula library — SLA formula catalogue (read-only, seeded at migration)
 # ---------------------------------------------------------------------------
 
-@router.get("/formula-library", summary="List all SLA formula types with parameter schemas")
+@router.get(
+    "/formula-library",
+    summary="List all SLA formula types with parameter schemas",
+    responses=with_examples(
+        (200, "All formula types this evaluator can dispatch to.", RESP_FORMULA_LIBRARY),
+    ),
+)
 def list_formula_library(ctrl: MasterController = Depends(get_master_controller)):
     items = ctrl.list_formula_library()
     elements = [
@@ -167,7 +229,15 @@ def list_formula_library(ctrl: MasterController = Depends(get_master_controller)
 # Data fields — observable variable catalog (SLA condition builder)
 # ---------------------------------------------------------------------------
 
-@router.post("/data-fields", status_code=201, summary="Add a new observable data field")
+@router.post(
+    "/data-fields",
+    status_code=201,
+    summary="Add a new observable data field",
+    responses=with_examples(
+        (201, "Data field created.", RESP_DATA_FIELD_DETAIL),
+        (422, "Schema validation failed.", RESP_VALIDATION_FAIL),
+    ),
+)
 def create_data_field(
     payload: DataFieldCreateRequest,
     ctrl: MasterController = Depends(get_master_controller),
@@ -186,6 +256,10 @@ def create_data_field(
 @router.get(
     "/data-fields",
     summary="List observable data fields for the SLA condition builder",
+    responses=with_examples(
+        (200, "Active data fields, optionally filtered by contract_type.",
+         RESP_DATA_FIELD_LIST),
+    ),
 )
 def list_data_fields(
     contract_type: Optional[str] = Query(
@@ -209,7 +283,14 @@ def list_data_fields(
     )
 
 
-@router.patch("/data-fields/{field_name}", summary="Update a data field")
+@router.patch(
+    "/data-fields/{field_name}",
+    summary="Update a data field",
+    responses=with_examples(
+        (200, "Data field updated.", RESP_DATA_FIELD_DETAIL),
+        (404, "Data field not found.", RESP_NOT_FOUND),
+    ),
+)
 def update_data_field(
     field_name: str,
     payload: DataFieldUpdateRequest,
@@ -226,7 +307,14 @@ def update_data_field(
     )
 
 
-@router.delete("/data-fields/{field_name}", summary="Soft-delete a data field (sets is_active=false)")
+@router.delete(
+    "/data-fields/{field_name}",
+    summary="Soft-delete a data field (sets is_active=false)",
+    responses=with_examples(
+        (200, "Data field deactivated.", RESP_DATA_FIELD_DETAIL),
+        (404, "Data field not found.", RESP_NOT_FOUND),
+    ),
+)
 def delete_data_field(
     field_name: str,
     ctrl: MasterController = Depends(get_master_controller),
@@ -250,6 +338,10 @@ def delete_data_field(
     "/projects/{project_id}/severity-master",
     status_code=201,
     summary="Set severity levels for a project (replaces existing)",
+    responses=with_examples(
+        (201, "Levels saved and returned.", RESP_SEVERITY_MASTER),
+        (422, "Schema validation failed.", RESP_VALIDATION_FAIL),
+    ),
 )
 def set_severity_levels(
     project_id: str,
@@ -274,6 +366,9 @@ def set_severity_levels(
 @router.get(
     "/projects/{project_id}/severity-master",
     summary="List severity levels (0-4) for a project",
+    responses=with_examples(
+        (200, "Project's severity_master rows.", RESP_SEVERITY_MASTER),
+    ),
 )
 def list_severity_levels(
     project_id: str,
@@ -299,6 +394,10 @@ def list_severity_levels(
         "If the row already exists, supply only the fields you want to change. "
         "If the row doesn't exist yet, supply BOTH `points` and `label` to "
         "create it — the endpoint refuses to persist a half-populated row."
+    ),
+    responses=with_examples(
+        (200, "Severity level upserted.", RESP_SEVERITY_MASTER),
+        (422, "Schema validation failed.", RESP_VALIDATION_FAIL),
     ),
 )
 def update_severity_level(
@@ -329,6 +428,10 @@ def update_severity_level(
     "/projects/{project_id}/ld-bands",
     status_code=201,
     summary="Set LD bands for a project (replaces existing)",
+    responses=with_examples(
+        (201, "Bands saved.", RESP_LD_BANDS),
+        (422, "Schema validation failed.", RESP_VALIDATION_FAIL),
+    ),
 )
 def set_ld_bands(
     project_id: str,
@@ -353,6 +456,9 @@ def set_ld_bands(
 @router.get(
     "/projects/{project_id}/ld-bands",
     summary="List LD bands for a project (sorted by points_threshold)",
+    responses=with_examples(
+        (200, "Project's LD band table, ascending by threshold.", RESP_LD_BANDS),
+    ),
 )
 def list_ld_bands(
     project_id: str,
@@ -373,6 +479,11 @@ def list_ld_bands(
 @router.patch(
     "/projects/{project_id}/ld-bands/{band_id}",
     summary="Update points_threshold, ld_percent or label for a single LD band",
+    responses=with_examples(
+        (200, "Band updated.", RESP_LD_BANDS),
+        (404, "Band not found.", RESP_NOT_FOUND),
+        (422, "Schema validation failed.", RESP_VALIDATION_FAIL),
+    ),
 )
 def update_ld_band(
     project_id: str,
@@ -402,6 +513,9 @@ def update_ld_band(
     "/projects/{project_id}/seed-master-defaults",
     status_code=201,
     summary="Seed both severity_master and ld_bands with RFP defaults (idempotent)",
+    responses=with_examples(
+        (201, "Seed summary across both tables.", RESP_SEED_DEFAULTS),
+    ),
 )
 def seed_master_defaults(
     project_id: str,

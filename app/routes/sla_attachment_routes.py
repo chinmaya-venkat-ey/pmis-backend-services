@@ -19,6 +19,16 @@ from fastapi import APIRouter, Depends, File, Form, UploadFile, status
 from app.clients import FileStoreUnavailable
 from app.controllers.sla_attachment_controller import SlaAttachmentController
 from app.core.errors import ServiceUnavailableError
+from app.core.openapi_examples import (
+    RESP_ATTACHMENT_DELETED,
+    RESP_ATTACHMENT_DETAIL,
+    RESP_ATTACHMENT_LIST,
+    RESP_ATTACHMENT_REFRESH,
+    RESP_NOT_FOUND,
+    RESP_SERVICE_DOWN,
+    RESP_VALIDATION_FAIL,
+    with_examples,
+)
 from app.core.response import api_response, hal_collection, hal_resource
 from app.dependencies import (
     get_bearer_token,
@@ -54,6 +64,13 @@ def _hal(result) -> dict:
         "Optional form field `caption` (max 500 chars). Forwards the bytes "
         "to pmis-file-store; persists the file_id + cached download URL on "
         "contract.sla_attachments."
+    ),
+    responses=with_examples(
+        (201, "Attachment created; FE renders the gallery from these fields.",
+         RESP_ATTACHMENT_DETAIL),
+        (404, "SLA not found.", RESP_NOT_FOUND),
+        (422, "Unsupported file type or oversized payload.", RESP_VALIDATION_FAIL),
+        (503, "file-store backend is unreachable.", RESP_SERVICE_DOWN),
     ),
 )
 async def upload_attachment(
@@ -104,6 +121,9 @@ async def upload_attachment(
 @router.get(
     "/sla-masters/{sla_id}/attachments",
     summary="List image attachments on an SLA",
+    responses=with_examples(
+        (200, "Live attachments for the SLA, oldest-first.", RESP_ATTACHMENT_LIST),
+    ),
 )
 def list_attachments(
     sla_id: str,
@@ -124,6 +144,10 @@ def list_attachments(
 @router.get(
     "/sla-masters/{sla_id}/attachments/{attachment_id}",
     summary="Get a single attachment",
+    responses=with_examples(
+        (200, "Attachment metadata + cached file_url.", RESP_ATTACHMENT_DETAIL),
+        (404, "Attachment not found (or soft-deleted).", RESP_NOT_FOUND),
+    ),
 )
 def get_attachment(
     sla_id: str,  # noqa: ARG001 — path param for symmetry / RBAC
@@ -141,6 +165,10 @@ def get_attachment(
 @router.patch(
     "/sla-masters/{sla_id}/attachments/{attachment_id}",
     summary="Update an attachment's caption",
+    responses=with_examples(
+        (200, "Caption updated.", RESP_ATTACHMENT_DETAIL),
+        (404, "Attachment not found.", RESP_NOT_FOUND),
+    ),
 )
 def patch_attachment(
     sla_id: str,  # noqa: ARG001
@@ -155,6 +183,11 @@ def patch_attachment(
 @router.post(
     "/sla-masters/{sla_id}/attachments/{attachment_id}/refresh-url",
     summary="Refresh the cached download URL (call when an image fails to load)",
+    responses=with_examples(
+        (200, "Fresh presigned URL + new expiry.", RESP_ATTACHMENT_REFRESH),
+        (404, "Attachment not found.", RESP_NOT_FOUND),
+        (503, "file-store backend is unreachable.", RESP_SERVICE_DOWN),
+    ),
 )
 def refresh_url(
     sla_id: str,  # noqa: ARG001
@@ -182,6 +215,12 @@ def refresh_url(
 @router.delete(
     "/sla-masters/{sla_id}/attachments/{attachment_id}",
     summary="Soft-delete an attachment (and best-effort soft-delete the filestore object)",
+    responses=with_examples(
+        (200, "Attachment removed. filestore_removed=false means our row is "
+              "gone but the upstream delete failed (best-effort).",
+         RESP_ATTACHMENT_DELETED),
+        (404, "Attachment not found.", RESP_NOT_FOUND),
+    ),
 )
 def delete_attachment(
     sla_id: str,  # noqa: ARG001

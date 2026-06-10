@@ -134,6 +134,11 @@ class SeverityLevelResponse(BaseModel):
 
 
 class SeverityLevelUpdateRequest(BaseModel):
+    model_config = {
+        "json_schema_extra": {
+            "example": {"points": 6, "label": "Sev 3 — major breach (revised)"}
+        }
+    }
     points: Optional[int] = Field(None, ge=-100, le=100)
     label: Optional[str] = Field(None, min_length=1, max_length=100)
 
@@ -148,6 +153,19 @@ class SeverityLevelInput(BaseModel):
 
 
 class SeverityMasterSetRequest(BaseModel):
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "levels": [
+                    {"level": 0, "points": -2, "label": "Sev 0 — on target / better than target"},
+                    {"level": 1, "points":  2, "label": "Sev 1 — minor breach"},
+                    {"level": 2, "points":  4, "label": "Sev 2 — moderate breach"},
+                    {"level": 3, "points":  6, "label": "Sev 3 — major breach"},
+                    {"level": 4, "points":  8, "label": "Sev 4 — significant breach"},
+                ]
+            }
+        }
+    }
     levels: List[SeverityLevelInput] = Field(
         ...,
         min_length=1,
@@ -185,12 +203,31 @@ class LdBandInput(BaseModel):
 
 
 class LdBandUpdateRequest(BaseModel):
+    model_config = {
+        "json_schema_extra": {
+            "example": {"points_threshold": 5, "ld_percent": "2.5",
+                        "label": "5 points — 2.5% LD"}
+        }
+    }
     points_threshold: Optional[_Decimal] = None
     ld_percent: Optional[_Decimal] = Field(None, ge=0, le=100)
     label: Optional[str] = Field(None, max_length=100)
 
 
 class LdBandSetRequest(BaseModel):
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "bands": [
+                    {"points_threshold": 0, "ld_percent": 0,  "label": "0 points — no LD"},
+                    {"points_threshold": 2, "ld_percent": 1,  "label": "2 points — 1% LD"},
+                    {"points_threshold": 4, "ld_percent": 2,  "label": "4 points — 2% LD"},
+                    {"points_threshold": 6, "ld_percent": 3,  "label": "6 points — 3% LD"},
+                    {"points_threshold": 8, "ld_percent": 4,  "label": "8+ points — 4% LD"},
+                ]
+            }
+        }
+    }
     bands: List[LdBandInput] = Field(
         ...,
         min_length=1,

@@ -23,6 +23,17 @@ from app.clients import FileStoreUnavailable
 from app.controllers.sla_attachment_controller import SlaAttachmentController
 from app.controllers.sla_controller import SlaController
 from app.core.errors import ValidationError
+from app.core.openapi_examples import (
+    RESP_CONFLICT,
+    RESP_NOT_FOUND,
+    RESP_SEED_DEFAULTS,
+    RESP_SLA_DELETED,
+    RESP_SLA_DETAIL,
+    RESP_SLA_DSL,
+    RESP_SLA_LIST,
+    RESP_VALIDATION_FAIL,
+    with_examples,
+)
 from app.core.response import api_response, hal_collection, hal_resource
 from app.dependencies import (
     get_bearer_token,
@@ -36,16 +47,21 @@ from app.schemas.sla import SlaFromRfpRequest, SlaOnboardRequest, SlaUpdateReque
 class SlaSeedRequest(BaseModel):
     """Body for ``POST /sla-masters/seed-defaults``.
 
-    The body is optional. Three equivalent ways to seed everything:
-
-      * Omit the body / send ``{}``
-      * Send ``{"contract_types": ["all"]}`` (or ``["ALL"]`` / ``["*"]``)
-      * Send ``{"contract_types": ["BSP","MSAP","MSIP","PMU"]}``
-
-    To seed a subset, list just those codes. Pass ``overwrite: true`` to refresh
-    the basic RFP-presentation fields on SLAs that were seeded under an older
-    version of the seed bundle.
+    Idempotent bulk seed. The body is optional — omit it to seed every
+    supported contract type, or list a subset under ``contract_types``.
+    Pass ``overwrite: true`` to refresh basic RFP-presentation fields on
+    SLAs that were seeded under an older version of the bundle.
     """
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "contract_types": ["PMU"],
+                "overwrite": True,
+                "project_id": "31eefb48-c2d3-4a4a-8fc7-a23b84d08e45",
+            }
+        }
+    }
+
     contract_types: Optional[List[str]] = Field(
         default=None,
         description="Contract codes to seed. Allowed values: BSP, MSAP, MSIP, PMU, "
@@ -88,7 +104,16 @@ def _sla_links(sla_id: str) -> dict:
 # POST /sla-masters
 # ---------------------------------------------------------------------------
 
-@router.post("/sla-masters", status_code=201, summary="Onboard a new SLA master")
+@router.post(
+    "/sla-masters",
+    status_code=201,
+    summary="Onboard a new SLA master (JSON, full technical schema)",
+    responses=with_examples(
+        (201, "SLA created.", RESP_SLA_DETAIL),
+        (409, "Duplicate sla_ref for this project.", RESP_CONFLICT),
+        (422, "Schema validation failed.", RESP_VALIDATION_FAIL),
+    ),
+)
 def onboard_sla(
     payload: SlaOnboardRequest,
     ctrl: SlaController = Depends(get_sla_controller),
@@ -110,7 +135,13 @@ def onboard_sla(
 # GET /sla-masters
 # ---------------------------------------------------------------------------
 
-@router.get("/sla-masters", summary="List SLA masters")
+@router.get(
+    "/sla-masters",
+    summary="List SLA masters",
+    responses=with_examples(
+        (200, "Paginated list of SLAs.", RESP_SLA_LIST),
+    ),
+)
 def list_slas(
     project_id: Optional[str] = Query(
         None,
@@ -162,7 +193,14 @@ def list_slas(
 # GET /sla-masters/{id}
 # ---------------------------------------------------------------------------
 
-@router.get("/sla-masters/{sla_id}", summary="Get full SLA master detail")
+@router.get(
+    "/sla-masters/{sla_id}",
+    summary="Get full SLA master detail",
+    responses=with_examples(
+        (200, "SLA detail with metrics / bands / placeholders.", RESP_SLA_DETAIL),
+        (404, "SLA not found.", RESP_NOT_FOUND),
+    ),
+)
 def get_sla(
     sla_id: str,
     ctrl: SlaController = Depends(get_sla_controller),
@@ -183,7 +221,14 @@ def get_sla(
 # GET /sla-masters/{id}/dsl
 # ---------------------------------------------------------------------------
 
-@router.get("/sla-masters/{sla_id}/dsl", summary="Get auto-generated YAML DSL for an SLA master")
+@router.get(
+    "/sla-masters/{sla_id}/dsl",
+    summary="Get auto-generated YAML DSL for an SLA master",
+    responses=with_examples(
+        (200, "DSL source + version.", RESP_SLA_DSL),
+        (404, "SLA not found.", RESP_NOT_FOUND),
+    ),
+)
 def get_sla_dsl(
     sla_id: str,
     ctrl: SlaController = Depends(get_sla_controller),
@@ -203,7 +248,15 @@ def get_sla_dsl(
 # PATCH /sla-masters/{id}
 # ---------------------------------------------------------------------------
 
-@router.patch("/sla-masters/{sla_id}", summary="Update basic SLA master fields (regenerates DSL)")
+@router.patch(
+    "/sla-masters/{sla_id}",
+    summary="Update basic SLA master fields (regenerates DSL)",
+    responses=with_examples(
+        (200, "SLA updated.", RESP_SLA_DETAIL),
+        (404, "SLA not found.", RESP_NOT_FOUND),
+        (422, "Schema validation failed.", RESP_VALIDATION_FAIL),
+    ),
+)
 def update_sla(
     sla_id: str,
     payload: SlaUpdateRequest,
@@ -226,7 +279,14 @@ def update_sla(
 # DELETE /sla-masters/{id}
 # ---------------------------------------------------------------------------
 
-@router.delete("/sla-masters/{sla_id}", summary="Soft-delete an SLA master (sets status=DELETED)")
+@router.delete(
+    "/sla-masters/{sla_id}",
+    summary="Soft-delete an SLA master (sets status=DELETED)",
+    responses=with_examples(
+        (200, "SLA soft-deleted.", RESP_SLA_DELETED),
+        (404, "SLA not found.", RESP_NOT_FOUND),
+    ),
+)
 def delete_sla(
     sla_id: str,
     ctrl: SlaController = Depends(get_sla_controller),
@@ -265,12 +325,48 @@ def delete_sla(
     "/sla-masters/from-rfp",
     status_code=201,
     summary="Onboard an SLA using the RFP-shape payload + optional image attachments",
+    responses=with_examples(
+        (201, "SLA created. attachments_uploaded carries one row per file with ok/error.",
+         RESP_SLA_DETAIL),
+        (409, "Duplicate sla_ref for this project.", RESP_CONFLICT),
+        (422, "Payload JSON failed schema validation.", RESP_VALIDATION_FAIL),
+    ),
 )
 async def onboard_sla_from_rfp(
     payload: str = Form(
         ...,
         description="JSON-encoded SlaFromRfpRequest body. See the schema at the "
-                    "bottom of this docs page for the exact shape.",
+                    "bottom of this docs page for the exact shape. Use the "
+                    "example below as a template — copy, edit, paste.",
+        examples=[json.dumps({
+            "sla_ref": "PMU-SLA001",
+            "title": "Non-submission of deliverable",
+            "project_id": "31eefb48-c2d3-4a4a-8fc7-a23b84d08e45",
+            "contract_type": "PMU",
+            "category_code": "DELIVERABLE_SUBMISSION",
+            "definition": "Failure to submit the deliverable on or before the agreed date.",
+            "scope": "Applies to all Phase-1 deliverables D1 through D8.",
+            "data_source": "Project Tracker — deliverable submission timestamps.",
+            "calculation": "LD = 0.5% of deliverable cost per week of delay.",
+            "reports_submitted_to": "Concerned UIDAI Stakeholders",
+            "measurement_interval": "ONE_TIME",
+            "reporting_interval": "QUARTERLY",
+            "applied_on": "FIXED_AMOUNT",
+            "effective_from": "2024-04-01",
+            "measurement": {"display_name": "Weeks delayed", "unit": "weeks"},
+            "target_rows": [],
+            "linear_escalation": {
+                "rate_percent": "0.5", "unit": "week",
+                "grace_units": 0, "max_units": 20,
+            },
+            "placeholders": [
+                {"key": "ld_base_amount",
+                 "label": "Cost of this deliverable (₹)",
+                 "type": "money", "required": True,
+                 "default_from": None,
+                 "help": "Used as the LD% base. RFP §5.28.2.b."},
+            ],
+        }, indent=2)],
     ),
     files: list[UploadFile] = File(
         default=[],
@@ -368,6 +464,10 @@ async def onboard_sla_from_rfp(
     "/sla-masters/seed-defaults",
     status_code=201,
     summary="Seed RFP-default SLAs for one or more contract types (idempotent)",
+    responses=with_examples(
+        (201, "Seed summary: how many were seeded / overwritten / skipped / failed.",
+         RESP_SEED_DEFAULTS),
+    ),
 )
 def seed_sla_defaults(
     payload: SlaSeedRequest = Body(default_factory=SlaSeedRequest),

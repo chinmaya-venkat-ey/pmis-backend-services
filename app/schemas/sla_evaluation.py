@@ -66,6 +66,21 @@ class MappingEvaluationRequest(BaseModel):
     NOTE: no ld_base_amount field. LD calculation has its own API; this
     one is purely about classifying the breach severity.
     """
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "period_start": "2026-04-01",
+                "period_end": "2026-06-30",
+                "metric_observations": [
+                    {
+                        "metric_key": "replacements_per_quarter",
+                        "shape": "SINGLE_VALUE",
+                        "single_value": "2",
+                    }
+                ],
+            }
+        }
+    }
     period_start: Optional[date] = None
     period_end: Optional[date] = None
     metric_observations: List[MetricObservation] = Field(default_factory=list)
@@ -77,6 +92,24 @@ class ActivityEvaluationRequest(BaseModel):
     `observations_by_sla_ref` lets the caller pass fresh observations for some
     SLAs while leaving others to fall back on stored observations (stubbed).
     """
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "period_start": "2026-04-01",
+                "period_end": "2026-06-30",
+                "observations_by_sla_ref": {
+                    "PMU-SLA005": [
+                        {"metric_key": "replacements_per_quarter",
+                         "shape": "SINGLE_VALUE", "single_value": "2"}
+                    ],
+                    "PMU-SLA006": [
+                        {"metric_key": "kt_overlap_days",
+                         "shape": "SINGLE_VALUE", "single_value": "15"}
+                    ],
+                },
+            }
+        }
+    }
     period_start: Optional[date] = None
     period_end: Optional[date] = None
     observations_by_sla_ref: Dict[str, List[MetricObservation]] = Field(

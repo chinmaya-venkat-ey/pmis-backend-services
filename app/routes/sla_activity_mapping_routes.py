@@ -18,6 +18,17 @@ from fastapi import APIRouter, Depends
 from app.controllers.sla_activity_mapping_controller import (
     SlaActivityMappingController,
 )
+from app.core.openapi_examples import (
+    RESP_ACTIVITY_EVALUATE,
+    RESP_CONFLICT,
+    RESP_MAPPING_DETAIL,
+    RESP_MAPPING_EVALUATE,
+    RESP_MAPPING_LIST,
+    RESP_MAPPING_RETIRED,
+    RESP_NOT_FOUND,
+    RESP_VALIDATION_FAIL,
+    with_examples,
+)
 from app.core.response import api_response, hal_collection, hal_resource
 from app.dependencies import (
     get_bearer_token,
@@ -44,6 +55,12 @@ router = APIRouter(tags=["SLA Activity Mappings"])
     "/sla-activity-mappings",
     status_code=201,
     summary="Map an SLA master to an activity (with optional overrides)",
+    responses=with_examples(
+        (201, "Mapping created.", RESP_MAPPING_DETAIL),
+        (404, "SLA not found.", RESP_NOT_FOUND),
+        (409, "Same SLA already mapped to this activity for that effective_from.", RESP_CONFLICT),
+        (422, "Schema validation failed.", RESP_VALIDATION_FAIL),
+    ),
 )
 def create_mapping(
     payload: SlaActivityMappingCreateRequest,
@@ -65,6 +82,9 @@ def create_mapping(
 @router.get(
     "/activities/{activity_id}/sla-mappings",
     summary="List SLA mappings on an activity",
+    responses=with_examples(
+        (200, "List of mappings (oldest-first).", RESP_MAPPING_LIST),
+    ),
 )
 def list_mappings(
     activity_id: str,
@@ -89,6 +109,9 @@ def list_mappings(
 @router.get(
     "/sla-activity-mappings",
     summary="List SLA mappings, optionally filtered by SLA",
+    responses=with_examples(
+        (200, "All live mappings for the SLA, newest first.", RESP_MAPPING_LIST),
+    ),
 )
 def list_all_mappings(
     sla_id: Optional[str] = None,
@@ -117,6 +140,11 @@ def list_all_mappings(
 @router.patch(
     "/sla-activity-mappings/{mapping_id}",
     summary="Update mapping overrides, status, or effective_until",
+    responses=with_examples(
+        (200, "Mapping updated.", RESP_MAPPING_DETAIL),
+        (404, "Mapping not found.", RESP_NOT_FOUND),
+        (422, "Schema validation failed.", RESP_VALIDATION_FAIL),
+    ),
 )
 def update_mapping(
     mapping_id: str,
@@ -138,6 +166,10 @@ def update_mapping(
 @router.delete(
     "/sla-activity-mappings/{mapping_id}",
     summary="Soft-unmap (sets status=RETIRED)",
+    responses=with_examples(
+        (200, "Mapping retired.", RESP_MAPPING_RETIRED),
+        (404, "Mapping not found.", RESP_NOT_FOUND),
+    ),
 )
 def unmap(
     mapping_id: str,
@@ -161,7 +193,12 @@ def unmap(
 
 @router.post(
     "/sla-activity-mappings/{mapping_id}/evaluate",
-    summary="Evaluate a single SLA mapping with the supplied observations",
+    summary="Evaluate the severity of a single SLA mapping",
+    responses=with_examples(
+        (200, "Severity result. No LD% — see the separate LD API.", RESP_MAPPING_EVALUATE),
+        (404, "Mapping not found.", RESP_NOT_FOUND),
+        (422, "Observation shape doesn't match the SLA's formula type.", RESP_VALIDATION_FAIL),
+    ),
 )
 def evaluate_mapping(
     mapping_id: str,
@@ -184,7 +221,11 @@ def evaluate_mapping(
 
 @router.post(
     "/activities/{activity_id}/evaluate",
-    summary="Evaluate every active SLA mapping on an activity",
+    summary="Evaluate severity across every active SLA mapping on an activity",
+    responses=with_examples(
+        (200, "Per-mapping results + severity_breakdown summary.", RESP_ACTIVITY_EVALUATE),
+        (422, "Schema validation failed.", RESP_VALIDATION_FAIL),
+    ),
 )
 def evaluate_activity(
     activity_id: str,

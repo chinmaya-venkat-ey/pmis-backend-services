@@ -41,6 +41,14 @@ class SlaAttachmentResponse(BaseModel):
 class SlaAttachmentCaptionUpdate(BaseModel):
     """PATCH body for editing a caption."""
 
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "caption": "RFP §5.28.2.b — deliverable submission rule",
+            }
+        }
+    }
+
     caption: Optional[str] = Field(None, max_length=500)
 
 

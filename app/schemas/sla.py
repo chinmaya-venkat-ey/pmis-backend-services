@@ -96,6 +96,43 @@ class SlaPlaceholderInput(BaseModel):
 # ---------------------------------------------------------------------------
 
 class SlaOnboardRequest(BaseModel):
+    # JSON-shape onboarding payload. Power-user / programmatic path —
+    # caller already knows the metric/band structure exactly and wants
+    # full control. The example below mirrors the seed for PMU-SLA005.
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "project_id": "31eefb48-c2d3-4a4a-8fc7-a23b84d08e45",
+                "contract_type": "PMU",
+                "formula_type": "point_accumulation",
+                "sla_ref": "PMU-SLA005",
+                "title": "Resource Replacements per quarter",
+                "description": "Number of contracted resources replaced during the quarter.",
+                "category": "Resource Management",
+                "measurement_interval": "QUARTERLY",
+                "reporting_interval": "QUARTERLY",
+                "ld_computation_base": "QUARTERLY_PAYMENT",
+                "effective_from": "2024-04-01",
+                "metrics": [{
+                    "metric_key": "replacements_per_quarter",
+                    "display_name": "Replacements / quarter",
+                    "unit": "count", "target_numeric": "1",
+                    "direction": "LOWER_BETTER", "is_primary": True,
+                }],
+                "condition_bands": [
+                    {"metric_key": "replacements_per_quarter",
+                     "band_label": "Sev 0 (within target)",
+                     "range_max": "1", "range_unit": "count",
+                     "severity_level": 0, "sort_order": 1},
+                    {"metric_key": "replacements_per_quarter",
+                     "band_label": "Sev 4 (exceeded target)",
+                     "range_min": "1", "range_unit": "count",
+                     "severity_level": 4, "sort_order": 2},
+                ],
+                "placeholders": [],
+            }
+        }
+    }
     # Project the SLA belongs to. Per the PMC-contract model (one RFP =
     # one project = one SLA bundle), this is the primary scoping field.
     # Optional for backward compatibility with the catalog-template flow,
@@ -177,6 +214,23 @@ class SlaOnboardRequest(BaseModel):
 
 
 class SlaUpdateRequest(BaseModel):
+    # Partial-update body — send only the fields you want to change. The
+    # example below sunsets an SLA (effective_until + status) and
+    # tweaks the placeholder list at the same time.
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "title": "Resource Replacements per quarter (FY26 revision)",
+                "effective_until": "2026-12-31",
+                "status": "ACTIVE",
+                "placeholders": [
+                    {"key": "approval_date_K", "label": "K — UIDAI approval date",
+                     "type": "date", "required": True, "default_from": None,
+                     "help": "RFP §5.28.3.f"},
+                ],
+            }
+        }
+    }
     title: Optional[str] = Field(None, max_length=500)
     description: Optional[str] = None
     measurement_interval: Optional[str] = Field(
@@ -409,7 +463,41 @@ class SlaFromRfpRequest(BaseModel):
     Fill order matches the rows the user reads in the contract PDF. Every
     technical concept (metric_key, sort_order, condition_band shape, lookup
     rows) is derived by the backend.
+
+    Sent as the ``payload`` form field on POST /sla-masters/from-rfp.
     """
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "sla_ref": "PMU-SLA001",
+                "title": "Non-submission of deliverable",
+                "project_id": "31eefb48-c2d3-4a4a-8fc7-a23b84d08e45",
+                "contract_type": "PMU",
+                "category_code": "DELIVERABLE_SUBMISSION",
+                "definition": "Failure to submit the deliverable on or before the agreed date.",
+                "scope": "Applies to all Phase-1 deliverables D1 through D8.",
+                "data_source": "Project Tracker — deliverable submission timestamps.",
+                "calculation": "LD = 0.5% of deliverable cost per week of delay; part-weeks count as full weeks.",
+                "reports_submitted_to": "Concerned UIDAI Stakeholders",
+                "measurement_interval": "ONE_TIME",
+                "reporting_interval": "QUARTERLY",
+                "applied_on": "FIXED_AMOUNT",
+                "effective_from": "2024-04-01",
+                "measurement": {"display_name": "Weeks delayed", "unit": "weeks"},
+                "target_rows": [],
+                "linear_escalation": {
+                    "rate_percent": "0.5", "unit": "week", "grace_units": 0, "max_units": 20,
+                },
+                "placeholders": [
+                    {"key": "ld_base_amount",
+                     "label": "Cost of this deliverable (₹)",
+                     "type": "money", "required": True,
+                     "default_from": None,
+                     "help": "Used as the LD% base for this deliverable. RFP §5.28.2.b."},
+                ],
+            }
+        }
+    }
     # ── 1. Identification ──
     sla_ref: str = Field(..., max_length=50, pattern=r"^[A-Z0-9_-]+$",
                          description='RFP "SLA number", e.g. "PMU-SLA004".')

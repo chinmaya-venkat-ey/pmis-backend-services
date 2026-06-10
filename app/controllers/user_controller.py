@@ -17,6 +17,7 @@ from app.schemas.user import (
     UserCheckLoginResponse,
     UserCreateRequest,
     UserPasswordUpdateRequest,
+    UserProjectSummary,
     UserResponse,
     UserUpdateRequest,
 )
@@ -106,6 +107,16 @@ class UserController:
         # user holds — auto-discovered from the DB, no hand-maintained
         # priority tuple.
         data["org_role"] = self._derive_org_roles(user.id)
+
+        # Projects the user has any role-assignment path into — same source the
+        # dedicated GET /users/{id}/projects endpoint uses. Previously the
+        # detail/create/list responses left this at [] (the dedicated endpoint
+        # was the only way to see it), so a project_admin/member looked like it
+        # had no projects inline.
+        data["projects"] = [
+            UserProjectSummary.model_validate(p)
+            for p in self.assignments.list_projects_for_user(user.id)
+        ]
 
         # full_name is a real column now — already present in ``data`` above.
         # No first/last concat and NO login fallback (that fallback was the

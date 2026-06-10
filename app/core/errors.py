@@ -34,3 +34,9 @@ class UnauthorizedError(DomainError):
 class ValidationError(DomainError):
     status_code = 422
     default_code = "validation_error"
+
+class ServiceUnavailableError(DomainError):
+    # Raised when a downstream service (e.g. pmis-file-store) is down,
+    # mis-configured, or returns 5xx. The error handler maps this to 503.
+    status_code = 503
+    default_code = "service_unavailable"

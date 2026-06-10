@@ -7,11 +7,13 @@ from typing import Optional
 from fastapi import Depends, Request
 from sqlalchemy.orm import Session
 
-from app.clients import ProjectManagementClient
+from app.clients import FileStoreClient, ProjectManagementClient
+from app.config import settings
 from app.controllers.master_controller import MasterController
 from app.controllers.sla_activity_mapping_controller import (
     SlaActivityMappingController,
 )
+from app.controllers.sla_attachment_controller import SlaAttachmentController
 from app.controllers.sla_controller import SlaController
 from app.core.errors import UnauthorizedError
 from app.core.rbac import AUTH_REQUIRED_MESSAGE
@@ -57,6 +59,24 @@ def get_project_management_client() -> ProjectManagementClient:
     return _project_management_client_singleton()
 
 
+@lru_cache(maxsize=1)
+def _file_store_client_singleton() -> Optional[FileStoreClient]:
+    # When FILE_STORE_SERVICE_URL is unset the attachments routes return
+    # 503 instead of crashing — this keeps the rest of the API usable in
+    # dev environments without a filestore deployed.
+    if not settings.file_store_service_url:
+        return None
+    return FileStoreClient(
+        base_url=settings.file_store_service_url,
+        token=settings.file_store_service_token or "",
+        default_folder=settings.file_store_default_folder,
+    )
+
+
+def get_file_store_client() -> Optional[FileStoreClient]:
+    return _file_store_client_singleton()
+
+
 # ---------------------------------------------------------------- controllers
 
 def get_master_controller(db: Session = Depends(get_db)) -> MasterController:
@@ -72,3 +92,10 @@ def get_sla_activity_mapping_controller(
     project_mgmt_client: ProjectManagementClient = Depends(get_project_management_client),
 ) -> SlaActivityMappingController:
     return SlaActivityMappingController(db, project_mgmt_client=project_mgmt_client)
+
+
+def get_sla_attachment_controller(
+    db: Session = Depends(get_db),
+    file_store_client: Optional[FileStoreClient] = Depends(get_file_store_client),
+) -> SlaAttachmentController:
+    return SlaAttachmentController(db, file_store_client=file_store_client)

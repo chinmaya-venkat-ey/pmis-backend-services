@@ -6,7 +6,7 @@ from typing import Any, BinaryIO, List, Optional
 
 from sqlalchemy.orm import Session
 
-from app.clients import FileStoreClient
+from app.clients import AnyFileClient
 from app.schemas.sla_attachment import (
     SlaAttachmentRefreshResponse,
     SlaAttachmentResponse,
@@ -18,7 +18,7 @@ class SlaAttachmentController:
     def __init__(
         self,
         db: Session,
-        file_store_client: Optional[FileStoreClient] = None,
+        file_store_client: Optional[AnyFileClient] = None,
     ):
         self.service = SlaAttachmentService(
             db, file_store_client=file_store_client,

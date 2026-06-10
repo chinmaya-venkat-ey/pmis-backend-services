@@ -13,7 +13,7 @@ from uuid import uuid4
 from sqlalchemy.orm import Session
 
 from app.clients import (
-    FileStoreClient,
+    AnyFileClient,
     FileStoreUnavailable,
     RefreshedUrl,
 )
@@ -42,7 +42,7 @@ class SlaAttachmentService:
     def __init__(
         self,
         db: Session,
-        file_store_client: Optional[FileStoreClient] = None,
+        file_store_client: Optional[AnyFileClient] = None,
     ):
         self.db = db
         self.repo = SlaAttachmentRepository(db)

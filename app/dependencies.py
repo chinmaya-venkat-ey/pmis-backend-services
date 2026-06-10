@@ -7,7 +7,12 @@ from typing import Optional
 from fastapi import Depends, Request
 from sqlalchemy.orm import Session
 
-from app.clients import FileStoreClient, ProjectManagementClient
+from app.clients import (
+    AnyFileClient,
+    FileStoreClient,
+    LocalFileClient,
+    ProjectManagementClient,
+)
 from app.config import settings
 from app.controllers.master_controller import MasterController
 from app.controllers.sla_activity_mapping_controller import (
@@ -60,20 +65,33 @@ def get_project_management_client() -> ProjectManagementClient:
 
 
 @lru_cache(maxsize=1)
-def _file_store_client_singleton() -> Optional[FileStoreClient]:
-    # When FILE_STORE_SERVICE_URL is unset the attachments routes return
-    # 503 instead of crashing — this keeps the rest of the API usable in
-    # dev environments without a filestore deployed.
-    if not settings.file_store_service_url:
-        return None
-    return FileStoreClient(
-        base_url=settings.file_store_service_url,
-        token=settings.file_store_service_token or "",
-        default_folder=settings.file_store_default_folder,
-    )
+def _file_store_client_singleton() -> Optional[AnyFileClient]:
+    """Resolve which file backend handles SLA attachments.
+
+    Resolution order — matches pmis-project-management's get_file_client():
+      1. FILE_STORE_SERVICE_URL set → S3 microservice (preferred).
+      2. FILE_SERVER_LOCAL_FALLBACK_ENABLED true → local-disk / NFS client.
+      3. Neither → None, and the attachment routes return 503.
+
+    The singleton is cached for the process lifetime; restart the
+    container to pick up an .env change.
+    """
+    if settings.file_store_service_url:
+        return FileStoreClient(
+            base_url=settings.file_store_service_url,
+            token=settings.file_store_service_token or "",
+            default_folder=settings.file_store_default_folder,
+        )
+    if settings.file_server_local_fallback_enabled:
+        return LocalFileClient(
+            local_dir=settings.file_server_local_dir,
+            public_base_url=settings.file_server_public_base_url,
+            default_folder=settings.file_store_default_folder,
+        )
+    return None
 
 
-def get_file_store_client() -> Optional[FileStoreClient]:
+def get_file_store_client() -> Optional[AnyFileClient]:
     return _file_store_client_singleton()
 
 
@@ -96,6 +114,6 @@ def get_sla_activity_mapping_controller(
 
 def get_sla_attachment_controller(
     db: Session = Depends(get_db),
-    file_store_client: Optional[FileStoreClient] = Depends(get_file_store_client),
+    file_store_client: Optional[AnyFileClient] = Depends(get_file_store_client),
 ) -> SlaAttachmentController:
     return SlaAttachmentController(db, file_store_client=file_store_client)

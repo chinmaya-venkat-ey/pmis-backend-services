@@ -13,12 +13,23 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from fastapi import APIRouter, Body, Depends, Query
-from pydantic import BaseModel, Field
+import io
+import json
 
+from fastapi import APIRouter, Body, Depends, File, Form, Query, UploadFile
+from pydantic import BaseModel, Field, ValidationError as PydanticValidationError
+
+from app.clients import FileStoreUnavailable
+from app.controllers.sla_attachment_controller import SlaAttachmentController
 from app.controllers.sla_controller import SlaController
+from app.core.errors import ValidationError
 from app.core.response import api_response, hal_collection, hal_resource
-from app.dependencies import get_sla_controller
+from app.dependencies import (
+    get_bearer_token,
+    get_optional_current_user_id,
+    get_sla_attachment_controller,
+    get_sla_controller,
+)
 from app.schemas.sla import SlaFromRfpRequest, SlaOnboardRequest, SlaUpdateRequest
 
 
@@ -239,26 +250,112 @@ def delete_sla(
 # wizard so users can fill the form by copying directly from the contract
 # PDF without ever seeing metric_key, sort_order, range_min, etc. Backend
 # derives those from the friendly fields the user provides.
+#
+# The endpoint accepts *multipart/form-data* so the same request can carry
+# both the SLA payload AND any image attachments — the FE onboarding
+# wizard sends them together so users only ever have to click "Save"
+# once. Fields:
+#
+#   payload (required, form-text)  JSON-encoded SlaFromRfpRequest body.
+#   files   (optional, form-file)  Zero or more image files
+#                                  (PNG / JPEG / WebP / GIF, max 10 MB each).
 # ---------------------------------------------------------------------------
 
 @router.post(
     "/sla-masters/from-rfp",
     status_code=201,
-    summary="Onboard an SLA using the RFP-shape payload (non-technical form)",
+    summary="Onboard an SLA using the RFP-shape payload + optional image attachments",
 )
-def onboard_sla_from_rfp(
-    payload: SlaFromRfpRequest,
+async def onboard_sla_from_rfp(
+    payload: str = Form(
+        ...,
+        description="JSON-encoded SlaFromRfpRequest body. See the schema at the "
+                    "bottom of this docs page for the exact shape.",
+    ),
+    files: list[UploadFile] = File(
+        default=[],
+        description="Optional image attachments (image/png|jpeg|webp|gif).",
+    ),
     ctrl: SlaController = Depends(get_sla_controller),
+    attachment_ctrl: SlaAttachmentController = Depends(get_sla_attachment_controller),
+    user_id: Optional[str] = Depends(get_optional_current_user_id),
+    bearer_token: Optional[str] = Depends(get_bearer_token),
 ):
-    result = ctrl.onboard_from_rfp(payload)
+    # 1. Parse the JSON-encoded payload. We do this manually so the route
+    # signature stays multipart-shaped instead of relying on FastAPI's
+    # auto-JSON-body coercion (which would force a separate endpoint).
+    try:
+        parsed_dict = json.loads(payload)
+    except json.JSONDecodeError as exc:
+        raise ValidationError(
+            f"`payload` is not valid JSON: {exc}",
+            code="payload_invalid_json",
+        ) from exc
+    try:
+        parsed = SlaFromRfpRequest.model_validate(parsed_dict)
+    except PydanticValidationError as exc:
+        raise ValidationError(
+            f"`payload` failed schema validation: {exc.errors()}",
+            code="payload_schema_invalid",
+        ) from exc
+
+    # 2. Create the SLA first so attachments can FK back to its id.
+    result = ctrl.onboard_from_rfp(parsed, created_by=user_id)
+
+    # 3. Upload each attachment, in order, to whichever backend
+    # FILE_STORE_SERVICE_URL / FILE_SERVER_LOCAL_FALLBACK_ENABLED resolves
+    # to. Failures are collected and reported so the FE can show partial-
+    # success — the SLA itself is already saved, so we don't roll back.
+    upload_summary: list[dict] = []
+    for f in files or []:
+        if not f or not f.filename:
+            continue
+        content = await f.read()
+        bio = io.BytesIO(content)
+        try:
+            att = attachment_ctrl.upload(
+                result.id,
+                file_obj=bio,
+                filename=f.filename,
+                mime_type=f.content_type or "",
+                size_bytes=len(content),
+                uploaded_by=user_id,
+                bearer_token=bearer_token,
+            )
+            upload_summary.append({
+                "filename": f.filename,
+                "ok": True,
+                "attachment_id": att.id,
+            })
+        except FileStoreUnavailable as exc:
+            upload_summary.append({
+                "filename": f.filename, "ok": False,
+                "error": f"file-store unavailable: {exc}",
+            })
+        except Exception as exc:  # noqa: BLE001
+            upload_summary.append({
+                "filename": f.filename, "ok": False,
+                "error": str(exc)[:200],
+            })
+
+    body = result.model_dump()
+    # Expose the per-file outcomes so the FE can toast any individual
+    # upload that failed without throwing away the successful SLA save.
+    if upload_summary:
+        body["attachments_uploaded"] = upload_summary
+
     return api_response(
         data=hal_resource(
             "SlaMaster",
-            result.model_dump(),
+            body,
             self_link=f"{_BASE}/{result.id}",
             extra_links=_sla_links(result.id),
         ),
-        message=f"SLA '{result.sla_ref}' onboarded from RFP form",
+        message=(
+            f"SLA '{result.sla_ref}' onboarded with {len(upload_summary)} attachment(s)"
+            if upload_summary
+            else f"SLA '{result.sla_ref}' onboarded from RFP form"
+        ),
         status=201,
     )
 

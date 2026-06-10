@@ -37,6 +37,7 @@ class SlaController:
         contract_type: Optional[str] = None,
         formula_type: Optional[str] = None,
         status: Optional[str] = None,
+        project_id: Optional[str] = None,
         skip: int = 0,
         limit: int = 50,
     ) -> Tuple[List[SlaDefinitionResponse], int]:
@@ -44,6 +45,7 @@ class SlaController:
             contract_type=contract_type,
             formula_type=formula_type,
             status=status,
+            project_id=project_id,
             skip=skip,
             limit=limit,
         )
@@ -65,7 +67,9 @@ class SlaController:
         contract_types: Optional[List[str]] = None,
         created_by: Optional[str] = None,
         overwrite: bool = False,
+        project_id: Optional[str] = None,
     ) -> dict:
         return self.service.seed_default_slas(
             contract_types, created_by=created_by, overwrite=overwrite,
+            project_id=project_id,
         )

@@ -46,6 +46,8 @@ def _sla(
     data_source: Optional[str] = None,
     calculation_method: Optional[str] = None,
     reports_submitted_to: Optional[str] = None,
+    # ── Per-mapping variables (placeholders the operator fills at attach time) ──
+    placeholders: Optional[List[Dict]] = None,
 ) -> Dict[str, Any]:
     """Helper mirroring tests/test_sla_onboard_all_contracts._sla.
 
@@ -75,6 +77,7 @@ def _sla(
         "condition_bands": condition_bands or [],
         "lookup_table": lookup_table or [],
         "guard_conditions": guard_conditions or [],
+        "placeholders": placeholders or [],
     }
 
 
@@ -571,6 +574,15 @@ PMU_SEEDS: List[Dict[str, Any]] = [
              {"lookup_key": f"week_{i}", "lookup_value": f"{i * 0.5:.2f}",
               "sort_order": i + 1}
              for i in range(0, 21)  # 0..20 weeks → 0%..10%
+         ],
+         # Cost of the specific deliverable — varies by activity.
+         placeholders=[
+             {"key": "ld_base_amount",
+              "label": "Cost of this deliverable (₹)",
+              "type": "money",
+              "required": True,
+              "default_from": None,
+              "help": "Used as the LD% base for this deliverable. RFP §5.28.2.b."},
          ]),
 
     # RFP §5.28.2.c
@@ -602,6 +614,14 @@ PMU_SEEDS: List[Dict[str, Any]] = [
              {"lookup_key": f"week_{i}", "lookup_value": f"{i * 1.0:.2f}",
               "sort_order": i + 1}
              for i in range(0, 11)  # 0..10 weeks → 0%..10%
+         ],
+         placeholders=[
+             {"key": "ld_base_amount",
+              "label": "Cost of this deliverable (₹)",
+              "type": "money",
+              "required": True,
+              "default_from": None,
+              "help": "Used as the LD% base for the rectification penalty. RFP §5.28.2.c."},
          ]),
 
     # ── Phase 2 & 3 — D9, D10 ────────────────────────────────────────────
@@ -834,6 +854,15 @@ PMU_SEEDS: List[Dict[str, Any]] = [
               "band_label": "L4 >K+28",
               "range_min": "28", "range_max": None,
               "range_unit": "days", "severity_level": 4, "sort_order": 3},
+         ],
+         placeholders=[
+             {"key": "approval_date_K",
+              "label": "K — date UIDAI approved the additional resource",
+              "type": "date",
+              "required": True,
+              "default_from": None,
+              "help": "RFP §5.28.3.f — variance is measured as "
+                      "(actual onboarding date L) − K."},
          ]),
 
     # RFP §5.28.3.g
@@ -867,6 +896,14 @@ PMU_SEEDS: List[Dict[str, Any]] = [
               "band_label": "L2 >21 days",
               "range_min": "21", "range_max": None,
               "range_unit": "days", "severity_level": 2, "sort_order": 2},
+         ],
+         placeholders=[
+             {"key": "notification_date",
+              "label": "Date UIDAI was notified of the replacement",
+              "type": "date",
+              "required": True,
+              "default_from": None,
+              "help": "RFP §5.28.3.g — variance is measured from this date."},
          ]),
 
     # ── D11 — Governance Tool ────────────────────────────────────────────
@@ -916,6 +953,15 @@ PMU_SEEDS: List[Dict[str, Any]] = [
               "band_label": "L4 >P+21d",
               "range_min": "21", "range_max": None,
               "range_unit": "days", "severity_level": 4, "sort_order": 5},
+         ],
+         placeholders=[
+             {"key": "t_anchor_date",
+              "label": "T₀ — project go-live / start of the 6-month deployment window",
+              "type": "date",
+              "required": True,
+              "default_from": "activity.start_date",
+              "help": "RFP §5.28.4.a — Governance tool must be deployed by T₀ + 6 months. "
+                      "Defaults to the activity's planned start date."},
          ]),
 
     # RFP §5.28.4.b

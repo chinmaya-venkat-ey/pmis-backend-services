@@ -39,6 +39,24 @@ def _decimal_str(v: Optional[Decimal]) -> Optional[str]:
     return str(v) if v is not None else None
 
 
+def _drop_nulls_and_defaults(d: dict, defaults: dict) -> dict:
+    """Compact dict for DSL emission.
+
+    Removes keys whose value is None / empty string / empty list, and
+    removes keys that equal their declared default. The DSL stays minimal
+    so a reader's eye lands on what's *unique* about this SLA, not on
+    boilerplate like "baseline_type: STATIC".
+    """
+    out = {}
+    for k, v in d.items():
+        if v is None or v == "" or v == []:
+            continue
+        if k in defaults and v == defaults[k]:
+            continue
+        out[k] = v
+    return out
+
+
 def _generate_dsl(
     defn: SlaDefinition,
     formula_type: str,
@@ -48,81 +66,130 @@ def _generate_dsl(
     lookup_rows: List[SlaLookupRow],
     guards: List[SlaGuardCondition],
 ) -> str:
-    data = {
+    """Emit the SLA as a readable YAML grouped by RFP-style sections.
+
+    The output is optimised for human eyes — fields that are at their
+    framework default ("STATIC", "INDEPENDENT", "SUM", "QUARTERLY",
+    "QUARTERLY_PAYMENT") are dropped, as are nulls and empty lists. The
+    result reads like the RFP table with the technical bits underneath.
+    """
+    # ── Section 1: identification ──
+    identification = _drop_nulls_and_defaults({
         "sla_ref": defn.sla_ref,
         "title": defn.title,
-        "description": defn.description,
-        # RFP-native presentation fields (UIDAI RFP §5.28 row headers). Emitted
-        # in the DSL so a round-trip through the YAML preserves the full SLA
-        # exactly as the contract document describes it.
         "category": defn.category,
-        "scope_text": defn.scope_text,
-        "data_source": defn.data_source,
-        "calculation_method": defn.calculation_method,
-        "reports_submitted_to": defn.reports_submitted_to,
         "contract_type": defn.contract_type,
-        "formula_type": formula_type,
+        "project_id": defn.project_id,
+        "status": defn.status if defn.status != "ACTIVE" else None,
+    }, defaults={})
+
+    # ── Section 2: RFP text rows ──
+    rfp_text = _drop_nulls_and_defaults({
+        "definition": defn.description,
+        "scope": defn.scope_text,
+        "source_of_data": defn.data_source,
+        "calculation": defn.calculation_method,
+        "reports_submitted_to": defn.reports_submitted_to,
+    }, defaults={})
+
+    # ── Section 3: cadence + LD base ──
+    cadence = _drop_nulls_and_defaults({
         "measurement_interval": defn.measurement_interval,
         "reporting_interval": defn.reporting_interval,
+        "applied_on": defn.ld_computation_base,
+    }, defaults={
+        "measurement_interval": "QUARTERLY",
+        "reporting_interval": "QUARTERLY",
+        "applied_on": "QUARTERLY_PAYMENT",
+    })
+
+    # ── Section 4: lifetime ──
+    lifetime = _drop_nulls_and_defaults({
+        "effective_from": str(defn.effective_from),
+        "effective_until": str(defn.effective_until) if defn.effective_until else None,
+    }, defaults={})
+
+    # ── Section 5: mapping-time variables ──
+    # The placeholder list is the spec for the mapping form. Empty = the
+    # SLA plugs straight onto an activity with no extra input.
+    mapping_inputs = list(defn.placeholders or [])
+
+    # ── Section 6: what is measured ──
+    measurements = []
+    for m in sorted(metrics, key=lambda x: (not x.is_primary, x.metric_key)):
+        measurements.append(_drop_nulls_and_defaults({
+            "key": m.metric_key,
+            "name": m.display_name,
+            "unit": m.unit,
+            "target": _decimal_str(m.target_numeric) or (
+                str(m.target_date) if m.target_date else None
+            ),
+            "direction": m.direction,
+            "primary": m.is_primary if m.is_primary else None,
+        }, defaults={"direction": "LOWER_BETTER"}))
+
+    # ── Section 7: target table (severity bands OR linear tiers) ──
+    target = []
+    for b in sorted(bands, key=lambda x: x.sort_order or 0):
+        target.append(_drop_nulls_and_defaults({
+            "severity": b.severity_level,
+            "rate_percent": _decimal_str(b.rate_percent),
+            "points": _decimal_str(b.points_contribution),
+            "from": _decimal_str(b.range_min),
+            "to": _decimal_str(b.range_max),
+            "unit": b.range_unit,
+            "label": b.band_label,
+            "metric": b.metric_key,
+        }, defaults={}))
+    linear_tiers = []
+    for r in sorted(lookup_rows, key=lambda x: x.sort_order or 0):
+        linear_tiers.append(_drop_nulls_and_defaults({
+            "tier": r.lookup_key,
+            "ld_percent": _decimal_str(r.lookup_value),
+        }, defaults={}))
+
+    # ── Section 8: advanced (only if non-trivial) ──
+    advanced = _drop_nulls_and_defaults({
+        "formula_type": formula_type,
         "baseline_type": defn.baseline_type,
         "compound_metric_rule": defn.compound_metric_rule,
         "ld_aggregation_method": defn.ld_aggregation_method,
-        "ld_computation_base": defn.ld_computation_base,
-        "effective_from": str(defn.effective_from),
-        "effective_until": str(defn.effective_until) if defn.effective_until else None,
-        "metrics": [
-            {
-                "metric_key": m.metric_key,
-                "display_name": m.display_name,
-                "unit": m.unit,
-                "target_numeric": _decimal_str(m.target_numeric),
-                "target_date": str(m.target_date) if m.target_date else None,
-                "direction": m.direction,
-                "is_primary": m.is_primary,
-            }
-            for m in metrics
-        ],
         "parameters": [
-            {"param_key": p.param_key, "param_value": p.param_value}
-            for p in parameters
-        ],
-        "condition_bands": [
-            {
-                "metric_key": b.metric_key,
-                "band_label": b.band_label,
-                "range_min": _decimal_str(b.range_min),
-                "range_max": _decimal_str(b.range_max),
-                "range_unit": b.range_unit,
-                "severity_level": b.severity_level,
-                "rate_percent": _decimal_str(b.rate_percent),
-                "points_contribution": _decimal_str(b.points_contribution),
-                "fixed_amount": _decimal_str(b.fixed_amount),
-                "band_group_id": b.band_group_id,
-                "sort_order": b.sort_order,
-            }
-            for b in bands
-        ],
-        "lookup_table": [
-            {
-                "lookup_key": r.lookup_key,
-                "lookup_value": _decimal_str(r.lookup_value),
-                "sort_order": r.sort_order,
-            }
-            for r in lookup_rows
-        ],
-        "guard_conditions": [
-            {
-                "metric_key": g.metric_key,
-                "operator": g.operator,
-                "threshold_value": _decimal_str(g.threshold_value),
-                "threshold_unit": g.threshold_unit,
+            {"key": p.param_key, "value": p.param_value} for p in parameters
+        ] or None,
+        "guards": [
+            _drop_nulls_and_defaults({
+                "metric": g.metric_key,
+                "op": g.operator,
+                "threshold": _decimal_str(g.threshold_value),
+                "unit": g.threshold_unit,
                 "action": g.action,
-                "action_description": g.action_description,
-                "guard_group_id": g.guard_group_id,
-            }
-            for g in guards
-        ],
-    }
+                "description": g.action_description,
+                "group": g.guard_group_id,
+            }, defaults={}) for g in guards
+        ] or None,
+    }, defaults={
+        "baseline_type": "STATIC",
+        "compound_metric_rule": "INDEPENDENT",
+        "ld_aggregation_method": "SUM",
+    })
+
+    # Stitch the top-level sections together, skipping any that are empty.
+    data = {}
+    for label, block in (
+        ("identification",  identification),
+        ("rfp",             rfp_text),
+        ("cadence",         cadence),
+        ("lifetime",        lifetime),
+        ("mapping_inputs",  mapping_inputs),
+        ("measurements",    measurements),
+        ("target",          target),
+        ("linear_tiers",    linear_tiers),
+        ("advanced",        advanced),
+    ):
+        if block:
+            data[label] = block
+
     return yaml.dump(data, default_flow_style=False, allow_unicode=True, sort_keys=False)
 
 
@@ -209,6 +276,8 @@ class SlaService:
             status=defn.status,
             effective_from=defn.effective_from,
             effective_until=defn.effective_until,
+            project_id=defn.project_id,
+            placeholders=defn.placeholders or [],
             dsl_version=defn.dsl_version,
             metadata=defn.metadata_ or {},
             created_at=defn.created_at,
@@ -243,6 +312,8 @@ class SlaService:
             status=defn.status,
             effective_from=defn.effective_from,
             effective_until=defn.effective_until,
+            project_id=defn.project_id,
+            placeholders=defn.placeholders or [],
             dsl_version=defn.dsl_version,
             created_at=defn.created_at,
             updated_at=defn.updated_at,
@@ -367,6 +438,7 @@ class SlaService:
         contract_types: Optional[List[str]] = None,
         created_by: Optional[str] = None,
         overwrite: bool = False,
+        project_id: Optional[str] = None,
     ) -> dict:
         """Fan-out onboarding of RFP-default SLAs.
 
@@ -421,6 +493,9 @@ class SlaService:
             "calculation_method", "reports_submitted_to",
             "measurement_interval", "reporting_interval", "ld_computation_base",
             "effective_from", "effective_until",
+            # The new attributes also get refreshed so existing seeds pick up
+            # the project binding and the per-mapping variable list.
+            "project_id", "placeholders",
         )
 
         seeded = 0
@@ -429,6 +504,12 @@ class SlaService:
         failed: List[dict] = []
         for raw in payloads:
             sla_ref = raw.get("sla_ref")
+            # Stamp every seeded SLA with the caller's project_id so the
+            # bundle becomes "this project's SLA catalogue". Without a
+            # project_id the SLAs stay catalog templates (the legacy
+            # behaviour for seeds run before the project-binding work).
+            if project_id:
+                raw = {**raw, "project_id": project_id}
             try:
                 req = SlaOnboardRequest(**raw)
             except Exception as exc:  # pragma: no cover — defensive
@@ -519,9 +600,11 @@ class SlaService:
         if len(param_keys) != len(set(param_keys)):
             raise ValidationError("Duplicate param_key values in parameters", code="duplicate_param_key")
 
-        # Create definition
+        # Create definition. project_id is now first-class — when the
+        # caller supplies it the SLA belongs to that project, otherwise it
+        # remains a catalog template (legacy behaviour).
         defn = SlaDefinition(
-            project_id=None,
+            project_id=payload.project_id,
             contract_type=payload.contract_type,
             formula_id=formula.id,
             sla_ref=payload.sla_ref,
@@ -540,6 +623,10 @@ class SlaService:
             ld_aggregation_method=payload.ld_aggregation_method,
             ld_computation_base=payload.ld_computation_base,
             metadata_=payload.metadata,
+            # Per-mapping variables (typed list). The mapping form renders
+            # one input per entry; empty list means "no placeholders, just
+            # attach the template to an activity".
+            placeholders=[p.model_dump() for p in payload.placeholders] if payload.placeholders else [],
             status="ACTIVE",
             effective_from=payload.effective_from,
             effective_until=payload.effective_until,
@@ -636,6 +723,7 @@ class SlaService:
         contract_type: Optional[str] = None,
         formula_type: Optional[str] = None,
         status: Optional[str] = None,
+        project_id: Optional[str] = None,
         skip: int = 0,
         limit: int = 50,
     ) -> tuple[List[SlaDefinitionResponse], int]:
@@ -643,6 +731,7 @@ class SlaService:
             contract_type=contract_type,
             formula_type=formula_type,
             status=status,
+            project_id=project_id,
             skip=skip,
             limit=limit,
         )
@@ -650,6 +739,7 @@ class SlaService:
             contract_type=contract_type,
             formula_type=formula_type,
             status=status,
+            project_id=project_id,
         )
         items = [self._build_flat(defn, ft) for defn, ft in rows]
         return items, total

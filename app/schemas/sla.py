@@ -53,6 +53,40 @@ class SlaGuardConditionInput(BaseModel):
     threshold_value: Decimal
     threshold_unit: Optional[str] = Field(None, max_length=30)
     action: str = Field(..., pattern=r"^(EXCLUDE|SUSPEND|PROBATION)$")
+    action_description: Optional[str] = Field(None, max_length=500)
+    guard_group_id: Optional[int] = Field(None, ge=0)
+
+
+class SlaPlaceholderInput(BaseModel):
+    """One mapping-time variable an SLA template requires.
+
+    Declared on the template; rendered on the mapping form so the operator
+    knows exactly what to fill in. Example::
+
+        {"key": "T_anchor", "label": "T₀ — start of the deployment window",
+         "type": "date", "required": true,
+         "default_from": "activity.start_date",
+         "help": "RFP §5.28.4.a — Governance tool deployment within T₀+6 months."}
+    """
+    key: str = Field(..., min_length=1, max_length=100,
+                     pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*$",
+                     description="Machine name. Stored on mapping.overrides under this key.")
+    label: str = Field(..., min_length=1, max_length=200,
+                       description="What the operator sees on the mapping form.")
+    type: str = Field(..., pattern=r"^(money|date|number|text)$",
+                      description="Drives the input widget on the mapping form.")
+    required: bool = Field(default=True,
+                           description="When true the mapping form blocks submit until this is filled.")
+    default_from: Optional[str] = Field(
+        None, max_length=100,
+        description='Activity field to autofill from, e.g. "activity.start_date", '
+                    '"activity.actual_start_date", "activity.end_date". Leave null '
+                    'for no autofill.',
+    )
+    help: Optional[str] = Field(
+        None, max_length=500,
+        description="Inline help shown under the input, usually an RFP reference.",
+    )
     action_description: Optional[str] = None
     guard_group_id: Optional[int] = None
 
@@ -62,6 +96,15 @@ class SlaGuardConditionInput(BaseModel):
 # ---------------------------------------------------------------------------
 
 class SlaOnboardRequest(BaseModel):
+    # Project the SLA belongs to. Per the PMC-contract model (one RFP =
+    # one project = one SLA bundle), this is the primary scoping field.
+    # Optional for backward compatibility with the catalog-template flow,
+    # but new SLAs should always carry it so they can be filtered by
+    # project on the list page.
+    project_id: Optional[str] = Field(
+        None, max_length=36,
+        description="UUID of the project that owns this SLA. Empty = catalog template.",
+    )
     contract_type: str = Field(..., max_length=20, pattern=r"^(BSP|MSAP|MSIP|PMU)$")
     formula_type: str = Field(
         ...,
@@ -70,8 +113,11 @@ class SlaOnboardRequest(BaseModel):
     sla_ref: str = Field(..., max_length=50, pattern=r"^[A-Z0-9_-]+$")
     title: str = Field(..., min_length=1, max_length=500)
     description: Optional[str] = None
+    # Cadence + LD base default to "QUARTERLY / QUARTERLY / NPQP" — what
+    # PMU RFP §5.27.6 spells out for every SLA that doesn't say otherwise.
+    # Required only if the RFP explicitly states a different value.
     measurement_interval: str = Field(
-        "MONTHLY", pattern=r"^(DAILY|WEEKLY|MONTHLY|QUARTERLY|ONE_TIME)$"
+        "QUARTERLY", pattern=r"^(DAILY|WEEKLY|MONTHLY|QUARTERLY|ONE_TIME)$",
     )
     reporting_interval: str = Field(
         "QUARTERLY", pattern=r"^(WEEKLY|MONTHLY|QUARTERLY|ANNUAL)$"
@@ -85,9 +131,20 @@ class SlaOnboardRequest(BaseModel):
         "QUARTERLY_PAYMENT",
         pattern=r"^(QUARTERLY_PAYMENT|ANNUAL_PAYMENT|FIXED_AMOUNT)$",
     )
-    effective_from: date
+    # effective_from is required on new SLAs (the only date the RFP
+    # implicitly requires). effective_until stays optional — empty
+    # means "open-ended", the most common case.
+    effective_from: date = Field(
+        default_factory=lambda: date(2024, 4, 1),
+        description="When the template becomes valid. Default 2024-04-01 = FY24 start.",
+    )
     effective_until: Optional[date] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
+    # Per-mapping variables operators must fill in when attaching this SLA
+    # to an activity. See SlaPlaceholderInput. Default = empty (no
+    # placeholders) — SLAs that plug straight onto an activity, e.g.
+    # PMU-SLA005 "Resource replacements per quarter".
+    placeholders: List[SlaPlaceholderInput] = Field(default_factory=list)
     # ── RFP-native presentation fields (UIDAI RFP §5.28 row headers) ──
     # All optional for backward compatibility. category replaces
     # formula_type for the user-facing form; formula_type still drives
@@ -145,6 +202,11 @@ class SlaUpdateRequest(BaseModel):
     data_source: Optional[str] = Field(None, max_length=255)
     calculation_method: Optional[str] = None
     reports_submitted_to: Optional[str] = Field(None, max_length=255)
+    project_id: Optional[str] = Field(None, max_length=36)
+    placeholders: Optional[List[SlaPlaceholderInput]] = Field(
+        None,
+        description="Replaces the placeholder list when supplied (null = leave unchanged).",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -242,6 +304,8 @@ class SlaDefinitionResponse(BaseModel):
     status: str
     effective_from: date
     effective_until: Optional[date] = None
+    project_id: Optional[str] = None
+    placeholders: List[SlaPlaceholderInput] = Field(default_factory=list)
     dsl_version: int
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
@@ -351,6 +415,10 @@ class SlaFromRfpRequest(BaseModel):
                          description='RFP "SLA number", e.g. "PMU-SLA004".')
     title: str = Field(..., min_length=1, max_length=500,
                        description='Title shown above the RFP table.')
+    project_id: Optional[str] = Field(
+        None, max_length=36,
+        description='UUID of the project (PMC contract) that owns this SLA.',
+    )
     contract_type: str = Field(..., max_length=20, pattern=r"^(BSP|MSAP|MSIP|PMU)$")
     category_code: str = Field(..., max_length=50,
                                description='Code from sla_category_master (decides the engine).')
@@ -414,3 +482,11 @@ class SlaFromRfpRequest(BaseModel):
         description='Alternative to target_rows for Deliverable Submission and Query '
                     'Resolution categories. Backend expands into a lookup table.',
     )
+
+    # ── 6. Per-mapping variables operators must fill in ──
+    # Empty = the SLA plugs straight onto an activity without any extra
+    # input. Most PMU SLAs land here. SLA 010 needs T_anchor, SLA 008
+    # needs an approval date, SLA 001/002 need a deliverable cost — those
+    # rows declare it once on the template; the mapping form renders the
+    # right input automatically.
+    placeholders: List[SlaPlaceholderInput] = Field(default_factory=list)

@@ -37,6 +37,7 @@ class SlaRepository:
         contract_type: Optional[str] = None,
         formula_type: Optional[str] = None,
         status: Optional[str] = None,
+        project_id: Optional[str] = None,
         skip: int = 0,
         limit: int = 50,
     ) -> List[Tuple[SlaDefinition, str]]:
@@ -51,6 +52,8 @@ class SlaRepository:
             stmt = stmt.where(FormulaLibrary.formula_type == formula_type)
         if status:
             stmt = stmt.where(SlaDefinition.status == status)
+        if project_id:
+            stmt = stmt.where(SlaDefinition.project_id == project_id)
         stmt = stmt.order_by(SlaDefinition.sla_ref).offset(skip).limit(limit)
         rows = self.db.execute(stmt).all()
         return [(row[0], row[1]) for row in rows]
@@ -110,6 +113,7 @@ class SlaRepository:
         contract_type: Optional[str] = None,
         formula_type: Optional[str] = None,
         status: Optional[str] = None,
+        project_id: Optional[str] = None,
     ) -> int:
         from sqlalchemy import func
         stmt = (
@@ -122,6 +126,8 @@ class SlaRepository:
             stmt = stmt.where(SlaDefinition.contract_type == contract_type)
         if formula_type:
             stmt = stmt.where(FormulaLibrary.formula_type == formula_type)
+        if project_id:
+            stmt = stmt.where(SlaDefinition.project_id == project_id)
         if status:
             stmt = stmt.where(SlaDefinition.status == status)
         return self.db.execute(stmt).scalar_one()

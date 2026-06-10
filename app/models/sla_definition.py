@@ -40,6 +40,13 @@ class SlaDefinition(Base):
     ld_aggregation_method: Mapped[str] = mapped_column(String(20), nullable=False, server_default="SUM")
     ld_computation_base: Mapped[str] = mapped_column(String(30), nullable=False, server_default="QUARTERLY_PAYMENT")
     metadata_: Mapped[dict] = mapped_column("metadata", JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    # Per-mapping variables the operator must fill in when attaching this
+    # SLA to an activity. List of dicts with keys: key / label / type /
+    # required / default_from / help. Empty list (default) means the SLA
+    # plugs straight onto an activity without any per-mapping inputs.
+    placeholders: Mapped[list] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb"),
+    )
     # ── RFP-native presentation fields (UIDAI RFP §5.28 row headers) ──
     # category replaces formula_type for user-facing display; formula_type
     # stays on the row as the evaluator-dispatch key.

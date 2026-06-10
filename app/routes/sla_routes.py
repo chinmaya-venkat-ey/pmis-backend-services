@@ -48,9 +48,17 @@ class SlaSeedRequest(BaseModel):
         description="When true, SLAs that already exist are refreshed in place with "
                     "the latest seed values for the basic RFP fields (description, "
                     "category, scope_text, data_source, calculation_method, "
-                    "reports_submitted_to, cadence, ld_computation_base, dates). "
-                    "Sub-tables (metrics / bands / lookup / parameters / guards) are "
-                    "NOT touched; delete then re-seed if you need a full reset.",
+                    "reports_submitted_to, cadence, ld_computation_base, dates, "
+                    "project_id, placeholders). Sub-tables (metrics / bands / "
+                    "lookup / parameters / guards) are NOT touched; delete then "
+                    "re-seed if you need a full reset.",
+    )
+    project_id: Optional[str] = Field(
+        default=None,
+        max_length=36,
+        description="When supplied, every seeded SLA is stamped with this project_id "
+                    "so the bundle becomes 'this project's SLA catalogue'. Leave "
+                    "empty to seed as catalog templates (the legacy behaviour).",
     )
 
 router = APIRouter(tags=["SLA Masters"])
@@ -93,6 +101,12 @@ def onboard_sla(
 
 @router.get("/sla-masters", summary="List SLA masters")
 def list_slas(
+    project_id: Optional[str] = Query(
+        None,
+        description="Filter by the project (PMC contract) that owns the SLA. "
+                    "Preferred over contract_type when the FE knows which project the user "
+                    "is working in.",
+    ),
     contract_type: Optional[str] = Query(None, description="Filter by contract type (BSP|MSAP|MSIP|PMU)"),
     formula_type: Optional[str] = Query(
         None,
@@ -108,6 +122,7 @@ def list_slas(
         contract_type=contract_type,
         formula_type=formula_type,
         status=status,
+        project_id=project_id,
         skip=skip,
         limit=page_size,
     )
@@ -268,7 +283,11 @@ def seed_sla_defaults(
     populate a fresh contract DB with the 36 RFP-default SLAs across BSP,
     MSAP, MSIP and PMU.
     """
-    summary = ctrl.seed_defaults(payload.contract_types, overwrite=payload.overwrite)
+    summary = ctrl.seed_defaults(
+        payload.contract_types,
+        overwrite=payload.overwrite,
+        project_id=payload.project_id,
+    )
     parts = [f"seeded {summary['seeded']} new"]
     if summary.get("overwritten"):
         parts.append(f"refreshed {summary['overwritten']} existing")

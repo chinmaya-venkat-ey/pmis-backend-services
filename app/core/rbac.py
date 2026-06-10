@@ -64,6 +64,37 @@ def require_permission(permission_code: Union[str, object]) -> Callable:
     return _checker
 
 
+def require_permission_or_scoped(permission_code: Union[str, object]) -> Callable:
+    """Like ``require_permission`` but also admits a caller who holds ``code``
+    in ANY scope (not just globally).
+
+    For self-scoping LIST endpoints — e.g. ``GET /projects``, which already
+    narrows its results to the caller's accessible ``project_ids`` — a
+    project-scoped grant must satisfy the gate. Otherwise a project_admin who
+    holds ``projects:read`` only on their own project (no global grant) is
+    rejected with 403 before ever reaching the per-project scoping the route
+    was built for (#232). This loosens only the read gate; it does not bypass
+    the route's own scoping, so the caller still sees only their projects.
+    """
+    code: str = getattr(permission_code, "value", permission_code)  # type: ignore[assignment]
+
+    def _checker(request: Request) -> str:
+        uid = _user_id(request)
+        if not uid:
+            raise UnauthorizedError(AUTH_REQUIRED_MESSAGE, code="auth_required")
+        if code in _user_permissions(request) or any(
+            code in codes for codes in _scoped_permissions(request).values()
+        ):
+            return uid
+        raise ForbiddenError(
+            f"Permission denied: {code} required",
+            code="permission_denied",
+            details={"required": code},
+        )
+
+    return _checker
+
+
 def require_any_permission(*permission_codes: Union[str, object]) -> Callable:
     if not permission_codes:
         raise ValueError("require_any_permission needs at least one code")

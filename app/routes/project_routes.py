@@ -38,6 +38,7 @@ from app.core.permissions import (
 from app.core.rbac import (
     require_authenticated,
     require_permission,
+    require_permission_or_scoped,
     require_project_permission,
 )
 from app.dependencies import (
@@ -219,7 +220,7 @@ def upsert_project(
         "results are newest-first. For the admin view that includes "
         "deleted rows, see ``GET /project/projects/all``."
     ),
-    dependencies=[Depends(require_permission(PROJECTS_READ))],
+    dependencies=[Depends(require_permission_or_scoped(PROJECTS_READ))],
 )
 def list_projects(
     request: Request,
@@ -248,7 +249,7 @@ def list_projects(
 @router.get(
     "/all",
     summary="List all projects including soft-deleted (admin / audit)",
-    dependencies=[Depends(require_permission(PROJECTS_READ))],
+    dependencies=[Depends(require_permission_or_scoped(PROJECTS_READ))],
 )
 def list_all_projects(
     request: Request,

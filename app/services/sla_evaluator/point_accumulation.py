@@ -1,11 +1,15 @@
 """point_accumulation evaluator — MSAP/PMU-style severity points.
 
-Per measurement, find the severity band that matches the observed value, look
-up its points contribution, sum across the period, and map points to LD%
-using the project's severity_master (or the fallback table from RFP).
+Per measurement, find the severity band that matches the observed value,
+look up its points contribution, and sum across the period. The result
+is the highest band hit + the accumulated points.
 
 Default severity points (RFP Annexure-3E): 0=-2, 1=2, 2=4, 3=6, 4=8.
-Default points-to-LD: <=0 -> 0%, 2 -> 1%, 4 -> 2%, 6 -> 3%, >=8 -> 4%.
+These are used when the project's severity_master is empty.
+
+This evaluator does NOT compute LD%. The LD API consumes
+``accumulated_points`` + the project's project_ld_bands chart to derive
+the penalty separately.
 
 Observation shape: SINGLE_VALUE (one measurement for the period), or
 BAND_COUNTS (number of measurements that fell into each band, e.g. months).
@@ -33,16 +37,6 @@ DEFAULT_LEVEL_POINTS: Dict[int, Decimal] = {
     4: Decimal("8"),
 }
 
-# Fallback points -> LD% map (RFP default).
-# Keys are inclusive thresholds; we walk them sorted ascending.
-DEFAULT_POINTS_TO_LD: List[tuple[Decimal, Decimal]] = [
-    (Decimal("0"), Decimal("0")),
-    (Decimal("2"), Decimal("1")),
-    (Decimal("4"), Decimal("2")),
-    (Decimal("6"), Decimal("3")),
-    (Decimal("8"), Decimal("4")),
-]
-
 
 def _points_for_level(level: Optional[int], ctx: Optional["EvaluationContext"] = None) -> Decimal:
     """Resolve points for a severity level.
@@ -59,28 +53,6 @@ def _points_for_level(level: Optional[int], ctx: Optional["EvaluationContext"] =
     if ctx is not None and ctx.level_points_map and level in ctx.level_points_map:
         return ctx.level_points_map[level]
     return DEFAULT_LEVEL_POINTS.get(level, Decimal(level * 2))
-
-
-def _ld_percent_for_points(
-    points: Decimal, ctx: Optional["EvaluationContext"] = None
-) -> Decimal:
-    """Map accumulated points to LD percent.
-
-    Priority:
-      1. ``ctx.points_to_ld_map`` — populated from contract.project_ld_bands
-         for the resolved project. Already sorted ascending by threshold.
-      2. ``DEFAULT_POINTS_TO_LD`` — RFP fallback.
-
-    Treat sub-zero / fractional points conservatively: floor to the nearest
-    table threshold that the points meet or exceed.
-    """
-    table = (ctx.points_to_ld_map if ctx is not None and ctx.points_to_ld_map
-             else DEFAULT_POINTS_TO_LD)
-    result = Decimal("0")
-    for threshold, ld in table:
-        if points >= threshold:
-            result = ld
-    return result
 
 
 class PointAccumulationEvaluator(FormulaEvaluator):
@@ -151,9 +123,6 @@ class PointAccumulationEvaluator(FormulaEvaluator):
 
         result.accumulated_points = accumulated
         result.severity_level = highest_level
-        result.ld_percent = _ld_percent_for_points(accumulated, ctx)
-        if ctx.ld_base_amount is not None:
-            result.ld_amount = (ctx.ld_base_amount * result.ld_percent) / Decimal("100")
         return result
 
     @staticmethod

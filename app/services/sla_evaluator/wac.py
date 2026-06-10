@@ -1,11 +1,13 @@
-"""wac evaluator — Weighted Average defect Count with rolling baseline.
+"""wac evaluator — Weighted Average defect Count severity classifier.
 
 WAC = (w1*blocker + w2*critical + w3*major + w4*minor) / (total_defects * apps)
 
 Variance is computed against the previous_wac (or `baseline` from the
-observation). Each variance_step_percent (parameter, default 5%) shifts the
-severity by 1. Final severity drives LD% using the standard points-to-LD
-table (same as point_accumulation).
+observation). Each variance_step_percent (parameter, default 5%) shifts
+the severity by 1.
+
+The evaluator reports the final severity and the points it carries;
+LD% computation lives in the dedicated LD API.
 
 Observation shape: WAC_BREAKDOWN with keys:
   blocker, critical, major, minor, applications, baseline (optional),
@@ -14,7 +16,7 @@ Observation shape: WAC_BREAKDOWN with keys:
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Dict, Optional
+from typing import Dict
 
 from app.schemas.sla_evaluation import BreachDetail
 from app.services.sla_evaluator.base import (
@@ -22,7 +24,6 @@ from app.services.sla_evaluator.base import (
     EvaluationContext,
     FormulaEvaluator,
 )
-from app.services.sla_evaluator.point_accumulation import _ld_percent_for_points
 
 
 DEFAULT_WEIGHTS = {"blocker": Decimal("8"), "critical": Decimal("4"), "major": Decimal("2"), "minor": Decimal("1")}
@@ -61,8 +62,7 @@ class WacEvaluator(FormulaEvaluator):
 
         total_defects = blocker + critical + major + minor
         if total_defects == 0 or applications == 0:
-            result.notes.append("Zero total defects or zero applications; LD = 0%.")
-            result.ld_percent = Decimal("0")
+            result.notes.append("Zero total defects or zero applications; severity = 0.")
             result.severity_level = 0
             result.accumulated_points = Decimal("0")
             return result
@@ -86,17 +86,13 @@ class WacEvaluator(FormulaEvaluator):
         severity = max(0, min(4, steps))
 
         # Points for severity, accumulated for the period (single measurement).
-        # Both lookups consult the project's master tables before falling back
-        # to the RFP defaults baked into point_accumulation.
+        # The severity_master lookup consults the project's chart before
+        # falling back to the RFP defaults baked into point_accumulation.
         from app.services.sla_evaluator.point_accumulation import _points_for_level
         points = _points_for_level(severity, ctx)
-        ld_percent = _ld_percent_for_points(points, ctx)
 
         result.accumulated_points = points
         result.severity_level = severity
-        result.ld_percent = ld_percent
-        if ctx.ld_base_amount is not None:
-            result.ld_amount = (ctx.ld_base_amount * ld_percent) / Decimal("100")
 
         result.breaches.append(
             BreachDetail(
@@ -105,7 +101,6 @@ class WacEvaluator(FormulaEvaluator):
                 observed_value=wac,
                 severity_level=severity,
                 points_contribution=points,
-                rate_percent=ld_percent,
                 note=(
                     f"variance_step={variance_step}%, steps={steps}, "
                     f"weights={ {k: str(v) for k, v in weights.items()} }"

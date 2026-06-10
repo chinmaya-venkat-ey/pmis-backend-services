@@ -1,14 +1,13 @@
-"""fixed_escalation evaluator — milestone / delay-based tiered LD%.
+"""fixed_escalation evaluator — milestone / delay-tier classification.
 
-Looks up an observed value (e.g. days_of_delay, percent_complete) against the
-SLA's `sla_lookup_rows`. Each row has a `lookup_key` (label like "on_time",
-"delay_1_7", "delay_8_plus") and a `lookup_value` (LD percent). Until we wire
-explicit range semantics on lookup rows, this evaluator treats them as
-ordered tiers and selects the *last row whose sort_order is <= the observed
-tier index* — works for the common case where the form fills tiers in order
-and the user supplies the tier label as the observation. When the observation
-is SINGLE_VALUE, we fall back to picking the row with the highest
-lookup_value <= observed.
+Looks up an observed value (e.g. days_of_delay, percent_complete) against
+the SLA's `sla_lookup_rows`. Each row has a `lookup_key` (label like
+"on_time", "delay_1_7", "delay_8_plus") and a `lookup_value` (the
+rate-per-unit the LD API will later multiply against the base).
+
+The evaluator reports which tier the metric fell into and the rate that
+tier carries — it does NOT compute LD%. The LD API will turn
+``rate_percent`` × delay-units × ``ld_base_amount`` into rupees.
 """
 from __future__ import annotations
 
@@ -66,18 +65,17 @@ class FixedEscalationEvaluator(FormulaEvaluator):
             result.notes.append("No lookup tier matched the observation.")
             return result
 
-        ld = Decimal(chosen.lookup_value or 0)
-        result.ld_percent = ld
-        if ctx.ld_base_amount is not None:
-            result.ld_amount = (ctx.ld_base_amount * ld) / Decimal("100")
+        # rate_percent here is the *per-unit rate* the tier carries
+        # (e.g. "0.5% per week delayed"). The LD calculator will combine
+        # it with the unit count + LD base.
+        tier_rate = Decimal(chosen.lookup_value or 0)
 
         result.breaches.append(
             BreachDetail(
                 metric_key=primary.metric_key,
                 band_label=chosen.lookup_key,
                 observed_value=observed_value,
-                rate_percent=ld,
-                contribution_percent=ld,
+                rate_percent=tier_rate,
                 note="fixed_escalation tier matched",
             )
         )

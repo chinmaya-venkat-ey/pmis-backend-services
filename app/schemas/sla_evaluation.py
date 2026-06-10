@@ -1,10 +1,16 @@
-"""Pydantic schemas for SLA evaluation.
+"""Pydantic schemas for SLA *severity* evaluation.
 
-Evaluation is rooted at an SLA-Activity mapping. The mapping carries instance-
-specific overrides (t_anchor_date, actual_start_date, actual_end_date,
-ld_base_amount, ...) which take precedence over SLA-master defaults. The SLA
-template declares which override keys are required via its ``placeholders``
-array — the mapping form renders one input per entry.
+This module covers the severity-classification API only. LD (Liquidated
+Damages) computation is intentionally not exposed here — it depends on
+the project's quarterly payment, deliverable cost, contract base, etc.,
+and lives in its own (future) API. Severity says "how bad is the breach";
+LD says "what does that cost in rupees".
+
+Evaluation is rooted at an SLA-Activity mapping. The mapping carries
+instance-specific overrides (t_anchor_date, actual_start_date,
+actual_end_date, ...) which take precedence over SLA-master defaults.
+The SLA template declares which override keys are required via its
+``placeholders`` array — the mapping form renders one input per entry.
 
 Observation shapes are form-friendly: frontend collects values via widgets
 (picklist + number field per metric) and posts a typed payload — no DSL.
@@ -50,32 +56,29 @@ class MetricObservation(BaseModel):
 
 
 class MappingEvaluationRequest(BaseModel):
-    """Evaluate a single SLA-Activity mapping.
+    """Evaluate the severity of a single SLA-Activity mapping.
 
     period_start/period_end fall back to the mapping's overrides
     (actual_start_date / actual_end_date) when omitted.
-    ld_base_amount falls back to overrides.ld_base_amount.
     metric_observations can be omitted to trigger option (b) lookup from
     activity-stored observations (stubbed in this phase).
+
+    NOTE: no ld_base_amount field. LD calculation has its own API; this
+    one is purely about classifying the breach severity.
     """
     period_start: Optional[date] = None
     period_end: Optional[date] = None
-    ld_base_amount: Optional[Decimal] = None
     metric_observations: List[MetricObservation] = Field(default_factory=list)
 
 
 class ActivityEvaluationRequest(BaseModel):
-    """Evaluate every active SLA mapping on an activity.
+    """Evaluate severity across every active SLA mapping on an activity.
 
     `observations_by_sla_ref` lets the caller pass fresh observations for some
     SLAs while leaving others to fall back on stored observations (stubbed).
     """
     period_start: Optional[date] = None
     period_end: Optional[date] = None
-    ld_base_amount_overrides: Dict[str, Decimal] = Field(
-        default_factory=dict,
-        description="sla_ref -> ld_base_amount override for this run.",
-    )
     observations_by_sla_ref: Dict[str, List[MetricObservation]] = Field(
         default_factory=dict,
         description="sla_ref -> observations. Missing keys fall back to stored.",
@@ -87,6 +90,13 @@ class ActivityEvaluationRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 class BreachDetail(BaseModel):
+    """How the metric fell into one of the SLA's severity bands.
+
+    Strictly severity information — no LD contribution here. `rate_percent`
+    is kept because it's a band attribute (the rate the contract assigns
+    to that band), not a computed LD value; readers can use it later when
+    the LD API multiplies it by base × duration.
+    """
     metric_key: str
     band_label: Optional[str] = None
     observed_value: Optional[Decimal] = None
@@ -94,9 +104,6 @@ class BreachDetail(BaseModel):
     severity_level: Optional[int] = None
     points_contribution: Optional[Decimal] = None
     rate_percent: Optional[Decimal] = None
-    contribution_percent: Optional[Decimal] = Field(
-        None, description="This band's contribution to the SLA's LD percent for the period."
-    )
     note: Optional[str] = None
 
 
@@ -126,19 +133,16 @@ class MappingEvaluationResponse(BaseModel):
 
     severity_level: Optional[int] = None
     accumulated_points: Optional[Decimal] = None
-    ld_percent: Optional[Decimal] = None
-    ld_amount: Optional[Decimal] = None
 
     # Project resolved from activity (via pmis-project-management). None when
     # project-management is unreachable or doesn't know this activity.
     project_id: Optional[str] = None
 
     # Which scoring chart was actually applied. ``project`` = read from the
-    # project's master tables. ``default`` = no project chart configured so the
-    # RFP defaults were used. ``unavailable`` = project-management was down or
-    # the activity is unknown — also fell back to defaults.
+    # project's severity_master. ``default`` = no project chart configured so
+    # the RFP defaults were used. ``unavailable`` = project-management was
+    # down or the activity is unknown — also fell back to defaults.
     severity_master_source: ScoringSource = "default"
-    ld_band_source: ScoringSource = "default"
 
     breaches: List[BreachDetail] = Field(default_factory=list)
     guards: List[GuardResult] = Field(default_factory=list)
@@ -157,5 +161,6 @@ class ActivityEvaluationResponse(BaseModel):
     mapping_results: List[MappingEvaluationResponse] = Field(default_factory=list)
     summary: Dict[str, Any] = Field(
         default_factory=dict,
-        description="Aggregate counts: mappings_evaluated, mappings_skipped, total_ld_percent, etc.",
+        description="Aggregate counts: mappings_evaluated, mappings_skipped, "
+                    "and per-severity-level breakdown. No LD aggregation here.",
     )

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
@@ -98,7 +98,6 @@ class SlaEvaluatorService:
             formula_type=formula_type,
             period_start=payload.period_start,
             period_end=payload.period_end,
-            ld_base_amount=payload.ld_base_amount,
             observations=payload.metric_observations,
             scoring=scoring,
         )
@@ -113,19 +112,20 @@ class SlaEvaluatorService:
         period_start, period_end = self._resolve_period_for_activity(payload, rows)
 
         # Resolve project scoring ONCE for the activity — all its mappings
-        # share the same activity_id → same project_id → same charts. Avoids
-        # N round-trips to project-management for a fan-out evaluate.
+        # share the same activity_id → same project_id → same severity_master.
+        # Avoids N round-trips to project-management for a fan-out evaluate.
         scoring = self._resolve_project_scoring(activity_id, bearer_token)
 
         mapping_results: List[MappingEvaluationResponse] = []
-        total_ld_pct = Decimal("0")
         skipped = 0
+        # Roll up severity counts so the FE can show "L4 × 2, L2 × 1" at a
+        # glance without iterating mapping_results client-side.
+        severity_breakdown: Dict[str, int] = {}
         for mapping, sla, formula_type in rows:
             if formula_type is None:
                 skipped += 1
                 continue
             observations = payload.observations_by_sla_ref.get(sla.sla_ref, [])
-            ld_base_override = payload.ld_base_amount_overrides.get(sla.sla_ref)
             try:
                 single = self._evaluate(
                     mapping=mapping,
@@ -133,7 +133,6 @@ class SlaEvaluatorService:
                     formula_type=formula_type,
                     period_start=payload.period_start,
                     period_end=payload.period_end,
-                    ld_base_amount=ld_base_override,
                     observations=observations,
                     scoring=scoring,
                 )
@@ -141,8 +140,9 @@ class SlaEvaluatorService:
                 skipped += 1
                 continue
             mapping_results.append(single)
-            if single.ld_percent is not None:
-                total_ld_pct += single.ld_percent
+            if single.severity_level is not None:
+                key = f"L{single.severity_level}"
+                severity_breakdown[key] = severity_breakdown.get(key, 0) + 1
 
         return ActivityEvaluationResponse(
             activity_id=activity_id,
@@ -152,10 +152,9 @@ class SlaEvaluatorService:
             summary={
                 "mappings_evaluated": len(mapping_results),
                 "mappings_skipped": skipped,
-                "total_ld_percent": str(total_ld_pct),
+                "severity_breakdown": severity_breakdown,
                 "project_id": scoring["project_id"],
                 "severity_master_source": scoring["severity_master_source"],
-                "ld_band_source": scoring["ld_band_source"],
             },
         )
 
@@ -164,16 +163,14 @@ class SlaEvaluatorService:
     def _resolve_project_scoring(
         self, activity_id: str, bearer_token: Optional[str]
     ) -> Dict[str, Any]:
-        """Resolve project_id for an activity and load its severity/LD charts.
+        """Resolve project_id for an activity and load its severity_master.
 
         Returns a dict ready to splice into EvaluationContext and the response::
 
             {
                 "project_id": Optional[str],
                 "level_points_map": Optional[Dict[int, Decimal]],
-                "points_to_ld_map": Optional[List[Tuple[Decimal, Decimal]]],
                 "severity_master_source": "project" | "default" | "unavailable",
-                "ld_band_source":         "project" | "default" | "unavailable",
             }
 
         The three sources mean:
@@ -182,13 +179,14 @@ class SlaEvaluatorService:
           * ``unavailable``  — project-management was down or the activity is
                                unknown there; we don't know the project so we
                                also fall back to RFP defaults.
+
+        project_ld_bands is intentionally not loaded here — LD computation
+        lives in the dedicated LD API.
         """
         result: Dict[str, Any] = {
             "project_id": None,
             "level_points_map": None,
-            "points_to_ld_map": None,
             "severity_master_source": "default",
-            "ld_band_source": "default",
         }
 
         if self.project_mgmt_client is None:
@@ -200,25 +198,19 @@ class SlaEvaluatorService:
             )
         except ProjectManagementUnavailable:
             result["severity_master_source"] = "unavailable"
-            result["ld_band_source"] = "unavailable"
             return result
 
         if not project_id:
             # Activity unknown to project-management. Same outcome as upstream
             # being down: defaults, but flagged so the FE can show it.
             result["severity_master_source"] = "unavailable"
-            result["ld_band_source"] = "unavailable"
             return result
 
         result["project_id"] = project_id
         level_map = self._build_level_points_map(project_id)
-        ld_map = self._build_points_to_ld_map(project_id)
         if level_map:
             result["level_points_map"] = level_map
             result["severity_master_source"] = "project"
-        if ld_map:
-            result["points_to_ld_map"] = ld_map
-            result["ld_band_source"] = "project"
         return result
 
     def _build_level_points_map(
@@ -228,22 +220,6 @@ class SlaEvaluatorService:
         if not rows:
             return None
         return {row.level: Decimal(row.points) for row in rows}
-
-    def _build_points_to_ld_map(
-        self, project_id: str
-    ) -> Optional[List[Tuple[Decimal, Decimal]]]:
-        # Phase B will add this. Until the project_ld_bands table exists,
-        # MasterRepository raises AttributeError — swallow it and fall back.
-        list_fn = getattr(self.master_repo, "list_ld_bands_for_project", None)
-        if list_fn is None:
-            return None
-        rows = list_fn(project_id)
-        if not rows:
-            return None
-        return sorted(
-            [(Decimal(row.points_threshold), Decimal(row.ld_percent)) for row in rows],
-            key=lambda x: x[0],
-        )
 
     # ------------------------------------------------------------------ internal
 
@@ -255,11 +231,11 @@ class SlaEvaluatorService:
         formula_type: str,
         period_start: Optional[date],
         period_end: Optional[date],
-        ld_base_amount: Optional[Decimal],
         observations: List[MetricObservation],
         scoring: Dict[str, Any],
     ) -> MappingEvaluationResponse:
-        # Resolve period + ld_base with overrides falling back to mapping/SLA defaults.
+        # Resolve the reporting period from request → overrides → mapping
+        # defaults. ld_base_amount is NOT read here — it's an LD concern.
         overrides: Dict[str, Any] = mapping.overrides or {}
         applied: Dict[str, Any] = {}
 
@@ -280,14 +256,6 @@ class SlaEvaluatorService:
             applied["resolved_end_default"] = str(resolved_end)
         elif period_end is None and overrides.get("actual_end_date"):
             applied["actual_end_date"] = str(resolved_end)
-
-        resolved_ld_base = ld_base_amount
-        if resolved_ld_base is None and overrides.get("ld_base_amount") is not None:
-            try:
-                resolved_ld_base = Decimal(str(overrides["ld_base_amount"]))
-                applied["ld_base_amount"] = str(resolved_ld_base)
-            except (ValueError, ArithmeticError):
-                pass
 
         if "t_anchor_date" in overrides:
             applied["t_anchor_date"] = overrides["t_anchor_date"]
@@ -310,12 +278,10 @@ class SlaEvaluatorService:
             guards=guards,
             period_start=resolved_start,
             period_end=resolved_end,
-            ld_base_amount=resolved_ld_base,
             observations=observations,
             overrides_applied=applied,
             project_id=scoring["project_id"],
             level_points_map=scoring["level_points_map"],
-            points_to_ld_map=scoring["points_to_ld_map"],
         )
 
         evaluator = _EVALUATORS.get(formula_type)
@@ -328,7 +294,6 @@ class SlaEvaluatorService:
         result: EvaluatedResult = evaluator.evaluate(ctx)
 
         sev_source: ScoringSource = scoring["severity_master_source"]
-        ld_source: ScoringSource = scoring["ld_band_source"]
 
         return MappingEvaluationResponse(
             mapping_id=mapping.id,
@@ -341,11 +306,8 @@ class SlaEvaluatorService:
             period_end=resolved_end,
             severity_level=result.severity_level,
             accumulated_points=result.accumulated_points,
-            ld_percent=result.ld_percent,
-            ld_amount=result.ld_amount,
             project_id=scoring["project_id"],
             severity_master_source=sev_source,
-            ld_band_source=ld_source,
             breaches=result.breaches,
             guards=result.guards,
             notes=result.notes,

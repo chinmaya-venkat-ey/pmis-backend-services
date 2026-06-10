@@ -1,13 +1,19 @@
-"""band_accumulation evaluator — BSP-style daily band accumulation.
+"""band_accumulation evaluator — daily band classification.
 
-LD% for the period = sum_over_bands(days_in_band * rate_percent) / total_days_in_period
+For each day in the reporting period the metric's value picks a band;
+the evaluator tallies the days per band and reports the breakdown.
 
 Observation shape: DAILY_VALUES (one value per day) or BAND_COUNTS
 (pre-aggregated days_in_band per band_label).
 
-severity_level returned is the highest severity_level among bands that had
-non-zero days_in_band, when bands carry severity_level. May be None if bands
-only carry rate_percent.
+severity_level returned is the highest severity_level among bands that
+had non-zero days_in_band, when bands carry severity_level. May be None
+if bands only carry rate_percent — in that case the LD API will use
+``rate_percent`` per band to compute the penalty.
+
+This evaluator does NOT compute ld_percent / ld_amount — that's the LD
+API's job. We surface days_in_band + rate_percent per band so the LD
+calculator can apply ``sum(days × rate) / period_days × base``.
 """
 from __future__ import annotations
 
@@ -65,20 +71,20 @@ class BandAccumulationEvaluator(FormulaEvaluator):
             )
             return result
 
-        total_contribution = Decimal("0")
         highest_severity = None
         for band in bands:
             count = days_in_band.get(band.band_label, 0)
             if count == 0:
                 continue
             rate = band.rate_percent or Decimal("0")
-            contribution = (Decimal(count) * rate) / Decimal(total_days)
-            total_contribution += contribution
 
             if band.severity_level is not None:
                 if highest_severity is None or band.severity_level > highest_severity:
                     highest_severity = band.severity_level
 
+            # rate_percent is preserved on the breach so the LD API can
+            # compute (sum(days × rate) / total_days × base) later. We
+            # don't compute the contribution here — that's an LD concern.
             result.breaches.append(
                 BreachDetail(
                     metric_key=primary.metric_key,
@@ -86,14 +92,10 @@ class BandAccumulationEvaluator(FormulaEvaluator):
                     days_in_band=count,
                     severity_level=band.severity_level,
                     rate_percent=rate,
-                    contribution_percent=contribution,
                 )
             )
 
-        result.ld_percent = total_contribution
         result.severity_level = highest_severity
-        if ctx.ld_base_amount is not None and result.ld_percent is not None:
-            result.ld_amount = (ctx.ld_base_amount * result.ld_percent) / Decimal("100")
         return result
 
     @staticmethod

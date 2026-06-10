@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from app.models.sla_activity_mapping import SlaActivityMapping
 from app.models.sla_condition_band import SlaConditionBand
@@ -27,6 +27,12 @@ from app.schemas.sla_evaluation import (
 
 @dataclass
 class EvaluationContext:
+    """Read-only inputs for a single severity evaluation.
+
+    LD-related fields (ld_base_amount, points_to_ld_map) were removed when
+    severity and LD were split into separate APIs. The LD calculator owns
+    that data — see the dedicated LD endpoints (TBD).
+    """
     mapping: SlaActivityMapping
     sla: SlaDefinition
     formula_type: str
@@ -37,24 +43,26 @@ class EvaluationContext:
     guards: List[SlaGuardCondition]
     period_start: date
     period_end: date
-    ld_base_amount: Optional[Decimal]
     observations: List[MetricObservation]
     overrides_applied: Dict[str, Any] = field(default_factory=dict)
 
-    # Project-scoped scoring resolved at request time. None means "no project
-    # chart configured" → evaluator must use its baked-in RFP defaults.
+    # Project-scoped severity_master resolved at request time. None means
+    # "no project chart configured" → evaluator must use its baked-in
+    # RFP defaults.
     project_id: Optional[str] = None
-    level_points_map: Optional[Dict[int, Decimal]] = None       # severity_master
-    points_to_ld_map: Optional[List[Tuple[Decimal, Decimal]]] = None  # project_ld_bands
-    # sorted ascending: [(points_threshold, ld_percent), ...]
+    level_points_map: Optional[Dict[int, Decimal]] = None  # severity_master
 
 
 @dataclass
 class EvaluatedResult:
+    """Severity-only output of a formula evaluation.
+
+    No ld_percent / ld_amount — those live in the LD API. Each evaluator
+    returns the band/level the metric fell into and the breakdown that
+    explains it.
+    """
     severity_level: Optional[int] = None
     accumulated_points: Optional[Decimal] = None
-    ld_percent: Optional[Decimal] = None
-    ld_amount: Optional[Decimal] = None
     breaches: List[BreachDetail] = field(default_factory=list)
     guards: List[GuardResult] = field(default_factory=list)
     notes: List[str] = field(default_factory=list)

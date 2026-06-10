@@ -39,17 +39,13 @@ class Settings(BaseSettings):
     # === Attachments ===
     attachments_storage_base_path: str = Field(default="/var/lib/pmis/attachments")
     attachments_max_bytes: int = Field(default=26214400, description="25 MB per Q22")
+    # Single allow-list for EVERY attachment surface (project / milestone /
+    # activity / task / subtask / comments / meeting). Legacy Office formats
+    # (.doc/.xls/.ppt) sit alongside the OOXML ones (.docx/.xlsx/.pptx);
+    # magic-byte verification recognises all of them (see
+    # utilities/file_signature.py).
     attachments_allowed_extensions: str = Field(
-        default="pdf,docx,xlsx,txt,csv,jpg,jpeg,png,heic,mp4,webm,mov"
-    )
-    # Meeting-activity attachments accept a wider document set than the
-    # global allow-list (meeting decks / minutes are often .ppt/.pptx/.doc/
-    # .xls). Applied ONLY on the meeting-milestone activity-create path
-    # (see ActivityService.create); every other attachment surface keeps
-    # ``attachments_allowed_extensions``. Magic-byte verification already
-    # recognises these office types (see utilities/file_signature.py).
-    meeting_attachments_allowed_extensions: str = Field(
-        default="pdf,doc,docx,xls,xlsx,ppt,pptx,txt,csv,jpg,jpeg,png,heic"
+        default="pdf,doc,docx,xls,xlsx,ppt,pptx,txt,csv,jpg,jpeg,png,heic,mp4,webm,mov"
     )
     attachments_subdir_strategy: str = Field(default="year_month")
     attachments_retention_days: int = Field(default=90)

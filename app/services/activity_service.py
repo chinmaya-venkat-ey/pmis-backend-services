@@ -17,7 +17,6 @@ from starlette.datastructures import Headers, UploadFile
 
 from decimal import Decimal
 
-from app.config import settings
 from app.core.errors import (
     ActivityNotFoundError,
     ConflictError,
@@ -249,11 +248,10 @@ class ActivityService:
         Only permitted when ``milestone.is_meeting`` is True — the meeting
         (governance/mom) service is the sole caller that sends inline
         attachments, and they belong exclusively to meeting-type
-        activities. The extension allow-list is widened to the meeting
-        document set (``MEETING_ATTACHMENTS_ALLOWED_EXTENSIONS``); the size
-        and magic-byte checks are identical to every other upload, and the
-        files are written to storage through the same client + envelope
-        shape as the multipart path.
+        activities. Validation (size / extension / magic-byte) and storage
+        reuse the exact same helpers + ``ATTACHMENTS_ALLOWED_EXTENSIONS``
+        allow-list as every other attachment surface, so the behaviour and
+        envelope shape are identical to the multipart path.
 
         Raises ``ValidationError`` (HTTP 422) when attachments are supplied
         for a non-meeting milestone, or when any ``content`` is not valid
@@ -295,14 +293,7 @@ class ActivityService:
                     ),
                 )
             )
-        allowed = {
-            e.strip().lower().lstrip(".")
-            for e in (
-                settings.meeting_attachments_allowed_extensions or ""
-            ).split(",")
-            if e.strip()
-        }
-        pre_validate_files(uploads, allowed=allowed)
+        pre_validate_files(uploads)
         return upload_files_via_client(uploads)
 
     def update(  # NOSONAR(S3776): sequential validation gates with order-sensitive side effects (validate -> mutate -> audit -> commit -> depends_on cycle-check) -- refactor deferred to a sprint with FE regression coverage

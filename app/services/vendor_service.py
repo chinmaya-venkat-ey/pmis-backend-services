@@ -67,6 +67,21 @@ class VendorService:
             raise CatalogEntryNotFoundError(f"Vendor {vendor_id!r} not found")
         return row
 
+    def _get_editable(self, vendor_id: str) -> Vendor:
+        """Bug #242: resolve a vendor for EDIT/DELETE. A soft-deleted vendor is
+        not editable in place — tell the caller to restore it first, distinct
+        from a genuine 'not found'."""
+        row = self.repo.get_by_id_any(vendor_id)
+        if row is None:
+            raise CatalogEntryNotFoundError(f"Vendor {vendor_id!r} not found")
+        if row.deleted_at is not None:
+            raise CatalogEntryConflictError(
+                "This vendor is deleted and cannot be edited. "
+                "Restore it first to make changes.",
+                details={"vendor_id": vendor_id, "deleted": True},
+            )
+        return row
+
     def create(self, payload: VendorCreateRequest) -> Vendor:
         if self.repo.get_by_name(payload.name) is not None:
             raise CatalogEntryConflictError(
@@ -90,7 +105,7 @@ class VendorService:
         return row
 
     def update(self, vendor_id: str, payload: VendorUpdateRequest) -> Vendor:
-        row = self.get_by_id(vendor_id)
+        row = self._get_editable(vendor_id)
         updates = payload.model_dump(exclude_unset=True, exclude={"project_ids"})
         if updates.get("name") and updates["name"] != row.name:
             clash = self.repo.get_by_name(updates["name"])
@@ -116,13 +131,16 @@ class VendorService:
         return row
 
     def delete(self, vendor_id: str, *, deleted_by_user_id: str) -> Vendor:
-        row = self.get_by_id(vendor_id)
+        row = self._get_editable(vendor_id)
         self.repo.soft_delete(row, deleted_by_user_id=deleted_by_user_id)
         self.db.commit()
         return row
 
     def restore(self, vendor_id: str) -> Vendor:
-        row = self.get_by_id(vendor_id)
+        # Restore must see the soft-deleted row (the only path that may).
+        row = self.repo.get_by_id_any(vendor_id)
+        if row is None:
+            raise CatalogEntryNotFoundError(f"Vendor {vendor_id!r} not found")
         self.repo.restore(row)
         self.db.commit()
         return row

@@ -22,6 +22,16 @@ class VendorRepository:
         self.db = db
 
     def get_by_id(self, vendor_id: str) -> Optional[Vendor]:
+        """Active (non-deleted) lookup — backs GET. A soft-deleted vendor must
+        not be readable here (Bug #242)."""
+        stmt = select(Vendor).where(
+            Vendor.id == vendor_id, Vendor.deleted_at.is_(None),
+        )
+        return self.db.execute(stmt).scalars().first()
+
+    def get_by_id_any(self, vendor_id: str) -> Optional[Vendor]:
+        """Includes soft-deleted rows. Only edit-guard (#242) and restore use
+        this — so we can tell 'deleted, restore first' apart from 'not found'."""
         return self.db.get(Vendor, vendor_id)
 
     def get_by_name(self, name: str) -> Optional[Vendor]:

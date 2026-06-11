@@ -325,3 +325,38 @@ def evaluate_activity_bulk(
         ),
         status=200,
     )
+
+
+# ---------------------------------------------------------------------------
+# Form-schema endpoint — drives the FE's evaluate modal
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/activities/{activity_id}/sla-evaluate/{sla_ref}/form-schema",
+    summary="Get the form spec the FE renders for evaluating this SLA on this activity",
+    description=(
+        "Returns a renderer-friendly form description: the inputs to "
+        "ask the user, the RFP severity bands to show alongside, the "
+        "period defaults, and the URL to POST when the user clicks Run. "
+        "The shape of ``inputs[]`` is driven by the SLA's stored config "
+        "(metric, bands, lookup_table) — when the SLA is updated the form "
+        "automatically reflects the change with no FE deploy."
+    ),
+)
+def get_eval_form_schema(
+    activity_id: str,
+    sla_ref: str,
+    ctrl: SlaActivityMappingController = Depends(get_sla_activity_mapping_controller),
+    bearer_token: Optional[str] = Depends(get_bearer_token),
+):
+    result = ctrl.get_evaluation_form_schema(
+        activity_id, sla_ref, bearer_token=bearer_token,
+    )
+    return api_response(
+        data=hal_resource(
+            "EvalFormSchema",
+            result.model_dump(),
+            self_link=f"/api/v3/activities/{activity_id}/sla-evaluate/{sla_ref}/form-schema",
+        ),
+        status=200,
+    )

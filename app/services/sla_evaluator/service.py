@@ -30,6 +30,11 @@ from app.schemas.sla_evaluation import (
     ActivityEvaluationRequest,
     ActivityEvaluationResponse,
     BulkEvaluationRequest,
+    EvalFormBand,
+    EvalFormInput,
+    EvalFormPeriod,
+    EvalFormSchema,
+    EvalFormSubmit,
     SimpleEvaluationRequest,
     MappingEvaluationRequest,
     MappingEvaluationResponse,
@@ -324,6 +329,175 @@ class SlaEvaluatorService:
         return MetricObservation(
             metric_key=primary, shape="SINGLE_VALUE", single_value=single,
         )
+
+    # ------------------------------------------------------------------ form schema
+
+    def get_evaluation_form_schema(
+        self,
+        activity_id: str,
+        sla_ref: str,
+        bearer_token: Optional[str] = None,
+    ) -> EvalFormSchema:
+        """Build the FE-renderable form spec for evaluating one SLA.
+
+        Introspects the SLA's stored config (metric, bands, lookup table)
+        and the active mapping, returns ``inputs`` / ``bands`` / period
+        defaults so the FE can render the modal generically without
+        hardcoded per-formula logic.
+        """
+        loaded = self.mapping_repo.find_by_activity_and_sla_ref(
+            activity_id, sla_ref, active_only=True,
+        )
+        if loaded is None:
+            raise NotFoundError(
+                f"No active mapping for SLA '{sla_ref}' on activity "
+                f"'{activity_id}'. Attach the SLA first.",
+                code="mapping_not_found",
+            )
+        mapping, sla, formula_type = loaded
+        if formula_type is None:
+            raise ValidationError(
+                f"SLA '{sla.sla_ref}' has no formula_type resolved.",
+                code="formula_missing",
+            )
+
+        # Pull the sub-tables we need for the form.
+        metrics = self.sla_repo.list_metrics(sla.id)
+        bands = self.sla_repo.list_bands(sla.id)
+        lookups = self.sla_repo.list_lookup_rows(sla.id)
+        primary = next((m for m in metrics if m.is_primary), None) or (metrics[0] if metrics else None)
+
+        # ── Inputs — formula-type-driven ────────────────────────────
+        inputs = self._build_form_inputs(formula_type, primary)
+
+        # ── Bands — the RFP rule reference card ─────────────────────
+        band_list = self._build_form_bands(bands, lookups)
+
+        # ── Period defaults — try the activity's planned dates from
+        # project-mgmt; fall back to the mapping's effective range.
+        period_start = mapping.effective_from
+        period_end = mapping.effective_until
+        if self.project_mgmt_client is not None:
+            try:
+                act = self.project_mgmt_client.get_activity(
+                    activity_id, bearer_token=bearer_token,
+                )
+                if isinstance(act, dict):
+                    sd = act.get("startDate") or act.get("start_date")
+                    ed = act.get("endDate") or act.get("end_date")
+                    if sd:
+                        period_start = _parse_date(sd) or period_start
+                    if ed:
+                        period_end = _parse_date(ed) or period_end
+            except Exception:  # noqa: BLE001 — project-mgmt is best-effort
+                pass
+
+        period = EvalFormPeriod(
+            start_default=period_start, end_default=period_end,
+        )
+
+        # ── Question + explanation — human-friendly intro on the form ─
+        measure_label = (primary.display_name if primary else "value") or "value"
+        question = "What did you measure?"
+        explanation = (
+            f"Enter the actual {measure_label.lower()} you observed during "
+            "this reporting period."
+        )
+
+        # ── Submit target — the simple eval endpoint ────────────────
+        submit = EvalFormSubmit(
+            method="POST",
+            url=f"/api/v3/activities/{activity_id}/sla-evaluate/{sla_ref}",
+            body_template={
+                "period_start": str(period_start) if period_start else None,
+                "period_end": str(period_end) if period_end else None,
+                "value": None,
+            },
+        )
+
+        return EvalFormSchema(
+            sla_ref=sla.sla_ref,
+            sla_title=sla.title,
+            activity_id=activity_id,
+            mapping_id=mapping.id,
+            formula_type=formula_type,
+            category=sla.category,
+            question=question,
+            explanation=explanation,
+            period=period,
+            inputs=inputs,
+            bands=band_list,
+            submit=submit,
+        )
+
+    @staticmethod
+    def _build_form_inputs(
+        formula_type: str,
+        primary,  # SlaMetric or None
+    ) -> List[EvalFormInput]:
+        """Translate (formula_type, primary metric) into the FE's input spec."""
+        unit = (primary.unit if primary else "") or None
+        label = (primary.display_name if primary else "Value") or "Value"
+        help_one = "Just type the number you observed for this period."
+
+        if formula_type == "wac":
+            # Defect breakdown — 7 numeric fields under a single 'value' object.
+            return [EvalFormInput(
+                name="value", type="object", label="Defect breakdown",
+                help="Enter the defect counts you observed during the period.",
+                fields=[
+                    EvalFormInput(name="blocker",      type="integer", label="Blocker defects",   placeholder="0", minimum=0),
+                    EvalFormInput(name="critical",     type="integer", label="Critical defects",  placeholder="0", minimum=0),
+                    EvalFormInput(name="major",        type="integer", label="Major defects",     placeholder="0", minimum=0),
+                    EvalFormInput(name="minor",        type="integer", label="Minor defects",     placeholder="0", minimum=0),
+                    EvalFormInput(name="applications", type="integer", label="Applications",      placeholder="1", minimum=1),
+                    EvalFormInput(name="baseline",     type="number",  label="Baseline WAC",      placeholder="0.40"),
+                    EvalFormInput(name="previous_wac", type="number",  label="Previous WAC",      placeholder="0.40"),
+                ],
+            )]
+
+        if formula_type == "band_accumulation":
+            # Daily readings — list of numbers.
+            return [EvalFormInput(
+                name="value", type="list", label=f"Daily readings of {label}",
+                unit=unit, item_type="number",
+                help="Comma- or newline-separated. Roughly 90 entries for a quarter.",
+            )]
+
+        # point_accumulation, fixed_escalation, and any unknown shape:
+        # one number with the SLA's friendly label + unit.
+        return [EvalFormInput(
+            name="value", type="number", label=label,
+            unit=unit, placeholder="0", help=help_one,
+            minimum=0,
+        )]
+
+    @staticmethod
+    def _build_form_bands(
+        bands,        # list of SlaConditionBand
+        lookups,      # list of SlaLookupRow
+    ) -> List[EvalFormBand]:
+        """RFP rule reference rows for the form's band card."""
+        out: List[EvalFormBand] = []
+        if bands:
+            for b in sorted(bands, key=lambda x: (x.severity_level or 0, x.sort_order or 0)):
+                out.append(EvalFormBand(
+                    severity=b.severity_level,
+                    label=b.band_label or "",
+                    range_min=b.range_min,
+                    range_max=b.range_max,
+                    unit=b.range_unit,
+                ))
+            return out
+        if lookups:
+            # Linear escalation — no severity, just a rate per tier.
+            for r in sorted(lookups, key=lambda x: x.sort_order or 0):
+                out.append(EvalFormBand(
+                    severity=None,
+                    label=r.lookup_key or "",
+                    rate_percent=r.lookup_value,
+                ))
+        return out
 
     def _primary_metric_key(self, sla: SlaDefinition) -> Optional[str]:
         """Look up the SLA's primary metric_key via the repo.

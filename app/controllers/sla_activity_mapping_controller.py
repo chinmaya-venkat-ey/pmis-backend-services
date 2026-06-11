@@ -15,6 +15,7 @@ from app.schemas.sla_evaluation import (
     ActivityEvaluationRequest,
     ActivityEvaluationResponse,
     BulkEvaluationRequest,
+    EvalFormSchema,
     MappingEvaluationRequest,
     MappingEvaluationResponse,
     SimpleEvaluationRequest,
@@ -107,4 +108,14 @@ class SlaActivityMappingController:
     ) -> ActivityEvaluationResponse:
         return self.evaluator.evaluate_activity_bulk(
             activity_id, payload, bearer_token=bearer_token,
+        )
+
+    def get_evaluation_form_schema(
+        self,
+        activity_id: str,
+        sla_ref: str,
+        bearer_token: Optional[str] = None,
+    ) -> EvalFormSchema:
+        return self.evaluator.get_evaluation_form_schema(
+            activity_id, sla_ref, bearer_token=bearer_token,
         )

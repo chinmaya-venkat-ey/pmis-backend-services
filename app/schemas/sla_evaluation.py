@@ -86,6 +86,84 @@ class MappingEvaluationRequest(BaseModel):
     metric_observations: List[MetricObservation] = Field(default_factory=list)
 
 
+class EvalFormInput(BaseModel):
+    """One input field on the evaluation form, driven by the SLA's DSL.
+
+    Recursive: ``fields`` carries child inputs for nested objects (WAC
+    breakdown, BD+hours combos, etc.). For most SLAs there's just one
+    top-level entry with ``type='number'``.
+    """
+    name: str = Field(..., description='Body key the FE writes the value under (usually "value").')
+    type: str = Field(..., pattern=r"^(number|integer|text|list|object)$",
+                      description='Widget type. "object" expects nested ``fields``.')
+    label: str
+    unit: Optional[str] = None
+    placeholder: Optional[str] = None
+    help: Optional[str] = None
+    required: bool = True
+    minimum: Optional[Decimal] = None
+    maximum: Optional[Decimal] = None
+    item_type: Optional[str] = Field(
+        None, description='For ``type=list``: type of each item ("number", "integer").',
+    )
+    fields: Optional[List["EvalFormInput"]] = Field(
+        None, description='For ``type=object``: sub-inputs.',
+    )
+
+
+class EvalFormPeriod(BaseModel):
+    """Period defaults for the evaluate form — typically the activity's planned dates."""
+    start_default: Optional[date] = None
+    end_default: Optional[date] = None
+    label_start: str = "Period Start"
+    label_end: str = "Period End"
+
+
+class EvalFormBand(BaseModel):
+    """One row in the "RFP rule" reference card on the evaluate form."""
+    severity: Optional[int] = None
+    label: str
+    range_min: Optional[Decimal] = None
+    range_max: Optional[Decimal] = None
+    unit: Optional[str] = None
+    # For fixed-escalation SLAs that have no severity bands, just a
+    # per-tier rate. Either ``severity`` or ``rate_percent`` is populated.
+    rate_percent: Optional[Decimal] = None
+
+
+class EvalFormSubmit(BaseModel):
+    """Where the FE should POST when the user clicks Run."""
+    method: str = "POST"
+    url: str
+    body_template: Dict[str, Any] = Field(default_factory=dict)
+
+
+class EvalFormSchema(BaseModel):
+    """Caller-friendly description of the evaluate form.
+
+    The FE fetches this once per modal-open and renders inputs / bands /
+    period defaults purely from the response — no per-formula JS, no
+    hardcoded shape switching. When an SLA is updated (e.g. a new band
+    added), the form automatically reflects it on the next open.
+    """
+    sla_ref: str
+    sla_title: str
+    activity_id: str
+    mapping_id: str
+    formula_type: str
+    category: Optional[str] = None
+    question: str
+    explanation: str
+    period: EvalFormPeriod
+    inputs: List[EvalFormInput] = Field(default_factory=list)
+    bands: List[EvalFormBand] = Field(default_factory=list)
+    submit: EvalFormSubmit
+
+
+# Resolve the forward reference (EvalFormInput nested in itself).
+EvalFormInput.model_rebuild()
+
+
 class SimpleEvaluationRequest(BaseModel):
     """Caller-friendly single-SLA evaluation body.
 

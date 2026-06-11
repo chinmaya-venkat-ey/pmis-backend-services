@@ -164,6 +164,48 @@ class EvalFormSchema(BaseModel):
 EvalFormInput.model_rebuild()
 
 
+# ---------------------------------------------------------------------------
+# Mapping form-schema — symmetric to EvalFormSchema, drives the *mapping*
+# form (the screen where the operator attaches an SLA to an activity).
+# Stage 2 of the user-facing flow:
+#     onboard → MAPPING FORM ← here → map → evaluate-form → evaluate
+# ---------------------------------------------------------------------------
+
+class MappingFormSchema(BaseModel):
+    """What the FE renders on the "Attach an SLA to this activity" modal.
+
+    Driven by the SLA's stored ``placeholders`` JSONB. When the SLA's
+    placeholders list is updated (e.g. a new "T_anchor_date" is added)
+    the mapping form automatically reflects it on the next open — no
+    FE deploy needed. Same design principle as the EvalFormSchema we
+    introduced for stage 4.
+    """
+    sla_ref: str
+    sla_title: str
+    project_id: Optional[str] = None
+    contract_type: Optional[str] = None
+    category: Optional[str] = None
+    formula_type: str
+    # The friendly intro text + what the operator has to fill in.
+    question: str = "Attach this SLA to an activity"
+    explanation: str
+    # ``effective_from`` always required; ``effective_until`` is
+    # intentionally not asked anymore (mappings run open-ended until
+    # retired). We surface both for parity.
+    effective_from_default: Optional[date] = None
+    # Placeholders from the SLA's DSL. The FE renders one input per row
+    # — same EvalFormInput shape (recursive type) — and the values land
+    # in ``overrides`` on the mapping create body.
+    inputs: List[EvalFormInput] = Field(default_factory=list)
+    # Submit target: POST /sla-activity-mappings with the body the FE
+    # populates from inputs + effective_from.
+    submit: "EvalFormSubmit"
+    # Useful to surface so the operator can decide whether to use this
+    # SLA at all on this activity.
+    applied_on: Optional[str] = None
+    applied_on_label: Optional[str] = None  # Human-readable expansion
+
+
 class SimpleEvaluationRequest(BaseModel):
     """Caller-friendly single-SLA evaluation body.
 

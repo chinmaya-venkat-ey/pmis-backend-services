@@ -93,6 +93,29 @@ router = APIRouter(tags=["SLA Masters"])
 _BASE = "/api/v3/sla-masters"
 
 
+def _lazy_mapping_controller():
+    """Resolve the mapping controller lazily.
+
+    Avoids importing ``sla_activity_mapping_controller`` at module load
+    time (which would create a circular when both route modules need
+    each other's helpers). FastAPI calls this Depends() at request time,
+    so the cost is one function call per /mapping-form-schema hit.
+    """
+    from app.controllers.sla_activity_mapping_controller import (
+        SlaActivityMappingController,
+    )
+    from app.clients import ProjectManagementClient
+    from app.db import SessionLocal
+    db = SessionLocal()
+    try:
+        ctrl = SlaActivityMappingController(
+            db, project_mgmt_client=ProjectManagementClient(),
+        )
+        yield ctrl
+    finally:
+        db.close()
+
+
 def _sla_links(sla_id: str) -> dict:
     return {
         "detail": {"href": f"{_BASE}/{sla_id}"},
@@ -107,7 +130,10 @@ def _sla_links(sla_id: str) -> dict:
 @router.post(
     "/sla-masters",
     status_code=201,
-    summary="Onboard a new SLA master (JSON, full technical schema)",
+    deprecated=True,
+    summary="DEPRECATED — onboard via the technical JSON schema. "
+            "Use POST /sla-masters/from-rfp instead, which mirrors the "
+            "RFP table 1:1 and derives all technical fields for you.",
     responses=with_examples(
         (201, "SLA created.", RESP_SLA_DETAIL),
         (409, "Duplicate sla_ref for this project.", RESP_CONFLICT),
@@ -280,6 +306,46 @@ def get_sla_dsl(
             "SlaDsl",
             result.model_dump(),
             self_link=f"{_BASE}/{sla_id}/dsl",
+        ),
+        status=200,
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /sla-masters/{id}/mapping-form-schema
+#
+# Stage 2 of the user flow. The FE calls this when it opens the
+# "Attach an SLA to this activity" modal — the response tells it what
+# inputs to render (driven by the SLA's stored placeholders DSL) and
+# where to POST when the user clicks Attach.
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/sla-masters/{sla_id}/mapping-form-schema",
+    summary="Get the form spec for attaching this SLA to an activity",
+    description=(
+        "Returns ``inputs[]`` (one per declared placeholder), the "
+        "submit target, and the default ``effective_from`` derived from "
+        "the activity's planned start when ``activity_id`` is supplied. "
+        "Symmetric to the per-activity evaluation form-schema, but for "
+        "the *mapping* stage."
+    ),
+)
+def get_mapping_form_schema(
+    sla_id: str,
+    activity_id: Optional[str] = Query(
+        None,
+        description="Optional. When provided, the response includes the "
+                    "activity's planned start date as effective_from_default.",
+    ),
+    mctrl=Depends(_lazy_mapping_controller),
+):
+    result = mctrl.get_mapping_form_schema(sla_id, activity_id=activity_id)
+    return api_response(
+        data=hal_resource(
+            "MappingFormSchema",
+            result.model_dump(),
+            self_link=f"{_BASE}/{sla_id}/mapping-form-schema",
         ),
         status=200,
     )

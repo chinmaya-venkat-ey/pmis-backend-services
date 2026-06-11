@@ -792,6 +792,16 @@ PMU_SEEDS: List[Dict[str, Any]] = [
               "unit": "hours", "target_numeric": "144",
               "direction": "HIGHER_BETTER", "is_primary": False},
          ],
+         # RFP §5.28.3.e — both BD and hours must meet target for L0:
+         #   L0  >=16 BD AND >=144 hrs
+         #   L2  12-15 BD AND 108-135 hrs
+         #   L4  <12 BD AND <108 hrs
+         # We seed bands for BOTH metrics so the point_accumulation
+         # evaluator (compound_metric_rule=COMBINED in a future phase)
+         # can verify both conditions. Today the evaluator picks the
+         # highest severity seen across either metric — which is the
+         # right answer when both metrics drift together (BD drops →
+         # hours drop). The guard catches the drift-apart case.
          condition_bands=[
              {"metric_key": "resource_business_days",
               "band_label": "L0 >=16 BD",
@@ -805,16 +815,28 @@ PMU_SEEDS: List[Dict[str, Any]] = [
               "band_label": "L4 <12 BD",
               "range_min": None, "range_max": "12",
               "range_unit": "days", "severity_level": 4, "sort_order": 3},
+             {"metric_key": "resource_logged_hours",
+              "band_label": "L0 >=144 hrs",
+              "range_min": "144", "range_max": None,
+              "range_unit": "hours", "severity_level": 0, "sort_order": 4},
+             {"metric_key": "resource_logged_hours",
+              "band_label": "L2 108-135 hrs",
+              "range_min": "108", "range_max": "144",
+              "range_unit": "hours", "severity_level": 2, "sort_order": 5},
+             {"metric_key": "resource_logged_hours",
+              "band_label": "L4 <108 hrs",
+              "range_min": None, "range_max": "108",
+              "range_unit": "hours", "severity_level": 4, "sort_order": 6},
          ],
          guard_conditions=[
-             # Informational guard: if hours don't meet the AND-threshold,
-             # this flags the period for manual review. Evaluator picks up
-             # the guard result and surfaces it in the response.
+             # Guard against the drift-apart case: if BD looks OK but
+             # hours don't (e.g. someone logged 16 days but only 100
+             # hrs), the guard fires and the evaluator records it.
              {"metric_key": "resource_logged_hours",
               "operator": "LT", "threshold_value": "144",
               "action": "EXCLUDE",
               "action_description":
-                  "Hours below 144 — verify business-day severity with manual review (Phase 2 will replace this with per-band AND-conditions)."}
+                  "Hours below 144 — verify business-day severity with manual review."}
          ]),
 
     # RFP §5.28.3.f — onboarding variance L-K (K = approval date, L = actual)

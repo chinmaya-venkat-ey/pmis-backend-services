@@ -35,6 +35,7 @@ from app.schemas.sla_evaluation import (
     EvalFormPeriod,
     EvalFormSchema,
     EvalFormSubmit,
+    MappingFormSchema,
     SimpleEvaluationRequest,
     MappingEvaluationRequest,
     MappingEvaluationResponse,
@@ -328,6 +329,130 @@ class SlaEvaluatorService:
             ) from exc
         return MetricObservation(
             metric_key=primary, shape="SINGLE_VALUE", single_value=single,
+        )
+
+    # ------------------------------------------------------------------ mapping form schema
+
+    _APPLIED_ON_LABEL = {
+        "QUARTERLY_PAYMENT": "Net Planned Quarterly Payment (NPQP)",
+        "ANNUAL_PAYMENT":    "Annual Contract Value",
+        "FIXED_AMOUNT":      "Deliverable Cost (set per mapping)",
+    }
+
+    # Maps placeholder.type → EvalFormInput.type. The placeholder schema
+    # uses "money" / "date" / "number" / "text"; the form schema uses
+    # the EvalFormInput vocabulary (number / integer / text / list / object).
+    _PLACEHOLDER_INPUT_TYPE = {
+        "money":  "number",
+        "number": "number",
+        "date":   "text",   # FE renders a date picker on type=text + name hint
+        "text":   "text",
+    }
+
+    def get_mapping_form_schema(
+        self,
+        sla_id: str,
+        activity_id: Optional[str] = None,
+        bearer_token: Optional[str] = None,
+    ) -> MappingFormSchema:
+        """Build the FE-renderable form spec for *attaching* this SLA to an activity.
+
+        Same design as ``get_evaluation_form_schema`` but for stage 2 of
+        the flow. Reads the SLA's ``placeholders`` JSONB and turns each
+        entry into an EvalFormInput so the FE renders the mapping modal
+        purely from the response.
+        """
+        sla = self.sla_repo.get_by_id(sla_id)
+        if sla is None:
+            raise NotFoundError(f"SLA '{sla_id}' not found", code="sla_not_found")
+        formula = self.master_repo.get_formula_by_id(sla.formula_id)
+        formula_type = formula.formula_type if formula else "unknown"
+
+        # ── Translate placeholders → EvalFormInput rows ───────────────
+        inputs: List[EvalFormInput] = []
+        placeholders = sla.placeholders or []
+        for ph in placeholders:
+            if not isinstance(ph, dict):
+                continue
+            key = ph.get("key")
+            if not key:
+                continue
+            ph_type = ph.get("type") or "text"
+            input_type = self._PLACEHOLDER_INPUT_TYPE.get(ph_type, "text")
+            inputs.append(EvalFormInput(
+                name=key,
+                type=input_type,
+                label=ph.get("label") or key,
+                unit=("date" if ph_type == "date" else
+                      "₹" if ph_type == "money" else None),
+                placeholder="YYYY-MM-DD" if ph_type == "date" else (
+                    "e.g. 1000000" if ph_type == "money" else "value"),
+                help=ph.get("help"),
+                required=bool(ph.get("required", True)),
+            ))
+
+        # ── effective_from default — try the activity's planned start ─
+        effective_from_default = None
+        if activity_id and self.project_mgmt_client is not None:
+            try:
+                act = self.project_mgmt_client.get_activity(
+                    activity_id, bearer_token=bearer_token,
+                )
+                if isinstance(act, dict):
+                    sd = act.get("startDate") or act.get("start_date")
+                    if sd:
+                        effective_from_default = _parse_date(sd)
+            except Exception:  # noqa: BLE001
+                pass
+        if effective_from_default is None:
+            effective_from_default = sla.effective_from
+
+        # ── Explanation — surface "Applied On" so the operator can see
+        # whether this SLA needs an ld_base_amount placeholder filled. ─
+        applied_on = sla.ld_computation_base
+        applied_on_label = self._APPLIED_ON_LABEL.get(applied_on, applied_on or "")
+        explanation_parts = [
+            f"Attaching this SLA scopes it to one activity. "
+            f"Applied On: {applied_on_label}.",
+        ]
+        if inputs:
+            explanation_parts.append(
+                "Fill in the values below — they go into the mapping's "
+                "``overrides`` and are used by the evaluator later."
+            )
+        else:
+            explanation_parts.append(
+                "This SLA needs no per-attachment inputs — plugs straight "
+                "onto the activity."
+            )
+        explanation = " ".join(explanation_parts)
+
+        # ── Submit target ─────────────────────────────────────────────
+        body_template: Dict[str, Any] = {
+            "sla_id": sla.id,
+            "activity_id": activity_id,
+            "effective_from": str(effective_from_default) if effective_from_default else None,
+            "overrides": {ph.get("key"): None for ph in placeholders if isinstance(ph, dict) and ph.get("key")},
+        }
+        submit = EvalFormSubmit(
+            method="POST",
+            url="/api/v3/sla-activity-mappings",
+            body_template=body_template,
+        )
+
+        return MappingFormSchema(
+            sla_ref=sla.sla_ref,
+            sla_title=sla.title,
+            project_id=sla.project_id,
+            contract_type=sla.contract_type,
+            category=sla.category,
+            formula_type=formula_type,
+            explanation=explanation,
+            effective_from_default=effective_from_default,
+            inputs=inputs,
+            submit=submit,
+            applied_on=applied_on,
+            applied_on_label=applied_on_label,
         )
 
     # ------------------------------------------------------------------ form schema

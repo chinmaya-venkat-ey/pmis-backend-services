@@ -195,7 +195,11 @@ def unmap(
 
 @router.post(
     "/sla-activity-mappings/{mapping_id}/evaluate",
-    summary="Evaluate the severity of a single SLA mapping",
+    deprecated=True,
+    summary="DEPRECATED — evaluate via mapping_id + verbose observation array. "
+            "Use POST /activities/{activity_id}/sla-evaluate/{sla_ref} which "
+            "takes one `value` field and derives metric_key / shape / mapping_id "
+            "automatically.",
     responses=with_examples(
         (200, "Severity result. No LD% — see the separate LD API.", RESP_MAPPING_EVALUATE),
         (404, "Mapping not found.", RESP_NOT_FOUND),
@@ -223,7 +227,11 @@ def evaluate_mapping(
 
 @router.post(
     "/activities/{activity_id}/evaluate",
-    summary="Evaluate severity across every active SLA mapping on an activity",
+    deprecated=True,
+    summary="DEPRECATED — verbose-shape bulk evaluation. Use "
+            "POST /activities/{activity_id}/sla-evaluate which takes "
+            "{observations: {sla_ref: value}} and lets the backend "
+            "translate the values per SLA.",
     responses=with_examples(
         (200, "Per-mapping results + severity_breakdown summary.", RESP_ACTIVITY_EVALUATE),
         (422, "Schema validation failed.", RESP_VALIDATION_FAIL),

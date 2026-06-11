@@ -18,6 +18,7 @@ from app.schemas.sla_evaluation import (
     EvalFormSchema,
     MappingEvaluationRequest,
     MappingEvaluationResponse,
+    MappingFormSchema,
     SimpleEvaluationRequest,
 )
 from app.services.sla_activity_mapping_service import SlaActivityMappingService
@@ -118,4 +119,14 @@ class SlaActivityMappingController:
     ) -> EvalFormSchema:
         return self.evaluator.get_evaluation_form_schema(
             activity_id, sla_ref, bearer_token=bearer_token,
+        )
+
+    def get_mapping_form_schema(
+        self,
+        sla_id: str,
+        activity_id: Optional[str] = None,
+        bearer_token: Optional[str] = None,
+    ) -> MappingFormSchema:
+        return self.evaluator.get_mapping_form_schema(
+            sla_id, activity_id=activity_id, bearer_token=bearer_token,
         )

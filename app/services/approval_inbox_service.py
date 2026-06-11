@@ -152,17 +152,78 @@ class ApprovalInboxService:
         state it just refreshes the cached state and returns. Safe to call
         at any point; idempotent. Authorisation matches the detail read
         (reviewer / owner / approvals-moderator).
+
+        Self-seed: when no tracker row exists yet (the workflow was driven
+        directly through the Java service, so PMIS's SUBMIT proxy never ran),
+        the routing metadata is reconstructed from the activity itself and a
+        tracker row is created on the fly. This keeps _sync working in the
+        Java-direct flow without changing any other path. Still a no-op
+        unless Java reports the workflow terminal.
         """
         ctx = self._caller_context(request)
         tracker = self.tracker_repo.get(business_id)
+        seeded_placeholder = None
         if tracker is None:
+            # No PMIS tracker row — reconstruct an UN-persisted placeholder
+            # from the activity's own routing metadata and authorize against
+            # it FIRST, so an unauthorized caller never triggers a write.
+            # Raises NotFoundError only if the ACTIVITY itself is missing.
+            seeded_placeholder = self._placeholder_tracker_for_activity(business_id)
+            tracker = seeded_placeholder
+        effective_role = self._derive_role_for_target(ctx, tracker)
+        self._authorize_detail(ctx, tracker, effective_role)
+        if seeded_placeholder is not None:
+            # Authorized → persist the seed via the same idempotent upsert
+            # the SUBMIT proxy uses. _build_detail then resolves the real
+            # state from Java and finalizes iff terminal — identical to the
+            # normal path from here on.
+            tracker = self._persist_seeded_tracker(seeded_placeholder, ctx)
+        return self._build_detail(ctx, tracker, effective_role)
+
+    def _placeholder_tracker_for_activity(
+        self, business_id: str,
+    ) -> ActivityWorkflowTracker:
+        """Build an UN-persisted tracker from the activity's own routing
+        metadata (owner / consent divisions, vendor, project). Used by
+        ``sync`` to reconcile an activity whose workflow ran entirely through
+        the Java service, so PMIS has no tracker row yet. Raises
+        NotFoundError when the activity itself is missing/deleted (so a bogus
+        id still 404s)."""
+        activity = self.db.get(Activity, business_id)
+        if activity is None or activity.deleted_at is not None:
             raise NotFoundError(
                 f"Approval inbox item {business_id} not found",
                 code="not_found",
             )
-        effective_role = self._derive_role_for_target(ctx, tracker)
-        self._authorize_detail(ctx, tracker, effective_role)
-        return self._build_detail(ctx, tracker, effective_role)
+        return ActivityWorkflowTracker(
+            business_id=business_id,
+            activity_id=activity.id,
+            project_id=activity.project_id,
+            current_state=wfs.STATE_READY,
+            consent_divisions=list(activity.concerned_divisions or []),
+            owner_division=activity.owner_division,
+            vendor_id=activity.vendor_id,
+        )
+
+    def _persist_seeded_tracker(
+        self, placeholder: ActivityWorkflowTracker, ctx: CallerContext,
+    ) -> ActivityWorkflowTracker:
+        """Persist a self-seeded tracker row via the same idempotent
+        ``upsert_on_submit`` path the SUBMIT proxy uses. The initial state is
+        left at READYFORAPPROVAL; ``_build_detail`` immediately resolves the
+        true state from Java's history and finalizes iff terminal, so the
+        seeded READY value is never observed outside this transaction."""
+        return self.tracker_repo.upsert_on_submit(
+            business_id=placeholder.business_id,
+            activity_id=placeholder.activity_id,
+            project_id=placeholder.project_id,
+            process_instance_id=None,
+            current_state=placeholder.current_state,
+            consent_divisions=list(placeholder.consent_divisions or []),
+            owner_division=placeholder.owner_division,
+            vendor_id=placeholder.vendor_id,
+            actor_user_id=ctx.user_id,
+        )
 
     def transition(
         self, request: Request, business_id: str, payload: TransitionRequest,

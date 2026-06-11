@@ -217,6 +217,109 @@ def list_sla_categories(ctrl: MasterController = Depends(get_master_controller))
 # time the SLA is onboarded.
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# /sla-rfp-fields — catalog of every RFP table row type
+#
+# Drives the dynamic-row SLA-onboarding page. Each entry describes ONE
+# row that can appear in the form (Definition of SLA, Scope of SLA,
+# SLA Calculation, Severity threshold table, Linear LD escalation, …)
+# plus how the FE should render the value column.
+#
+# Why hardcoded? The RFP §5.28 row set is contractual — adding a new
+# row means code-path support for its data anyway. Promotion to a
+# master table can wait for the second contract template.
+# ---------------------------------------------------------------------------
+
+_SLA_RFP_FIELDS: List[Dict[str, Any]] = [
+    {"key": "sla_ref", "label": "SLA Number", "section": "Identification",
+     "input_type": "text", "required": True, "placeholder": "PMU-SLA001",
+     "help": "RFP table header. e.g. PMU-SLA001."},
+    {"key": "title", "label": "Title", "section": "Identification",
+     "input_type": "text", "required": True, "placeholder": "Non-submission of deliverable"},
+    {"key": "project_id", "label": "Project (PMC contract)", "section": "Identification",
+     "input_type": "project_picker", "required": True,
+     "help": "The PMC contract this SLA belongs to."},
+    {"key": "category_code", "label": "SLA Category", "section": "Identification",
+     "input_type": "category_picker", "required": True,
+     "help": "Category picks the calculation engine."},
+    {"key": "description", "label": "Definition of SLA", "section": "Definition",
+     "input_type": "textarea",
+     "help": "RFP \"Definition of SLA\" row."},
+    {"key": "scope_text", "label": "Scope of SLA", "section": "Definition",
+     "input_type": "textarea",
+     "help": "RFP \"Scope of SLA\" row."},
+    {"key": "data_source", "label": "Source of Data / Tool used for SLA monitoring",
+     "section": "Source & Calculation", "input_type": "text",
+     "placeholder": "Manual — UIDAI biometric attendance system"},
+    {"key": "calculation_method", "label": "SLA Calculation", "section": "Source & Calculation",
+     "input_type": "textarea"},
+    {"key": "reports_submitted_to", "label": "Reports submitted to", "section": "Source & Calculation",
+     "input_type": "text", "placeholder": "Technology Management Division, UIDAI HO"},
+    {"key": "measurement_interval", "label": "Measurement Interval", "section": "Cadence",
+     "input_type": "select",
+     "options": ["DAILY", "WEEKLY", "MONTHLY", "QUARTERLY", "ONE_TIME"], "default": "MONTHLY"},
+    {"key": "reporting_interval", "label": "Reporting Interval", "section": "Cadence",
+     "input_type": "select",
+     "options": ["WEEKLY", "MONTHLY", "QUARTERLY", "ANNUAL"], "default": "QUARTERLY"},
+    {"key": "ld_computation_base", "label": "Applied On", "section": "Cadence",
+     "input_type": "select",
+     "options": [
+         {"value": "QUARTERLY_PAYMENT", "label": "Net Planned Quarterly Payment (NPQP)"},
+         {"value": "ANNUAL_PAYMENT", "label": "Annual Contract Value"},
+         {"value": "FIXED_AMOUNT", "label": "Deliverable Cost (set per mapping)"},
+     ], "default": "QUARTERLY_PAYMENT"},
+    {"key": "effective_from", "label": "Active From", "section": "Cadence",
+     "input_type": "date", "required": True, "default": "2024-04-01"},
+    {"key": "effective_until", "label": "Active Until", "section": "Cadence",
+     "input_type": "date",
+     "help": "Leave blank for \"no end date\"."},
+    {"key": "measurement", "label": "What is measured (primary)", "section": "Measurement",
+     "input_type": "measurement_set", "required": True},
+    {"key": "secondary_measurement", "label": "What is measured (secondary)", "section": "Measurement",
+     "input_type": "measurement_set",
+     "help": "Compound SLAs only (e.g. PMU-SLA007 with BD AND hours)."},
+    {"key": "target_rows", "label": "Target / Applied Severity level",
+     "section": "Target", "input_type": "severity_table",
+     "help": "Copy the RFP \"Target\" sub-table — one row per severity level."},
+    {"key": "linear_escalation", "label": "Linear LD escalation",
+     "section": "Target", "input_type": "linear_form",
+     "help": "For SLAs whose RFP states LD as a per-unit rate (\"0.5% per week\")."},
+    {"key": "placeholders", "label": "Mapping inputs (filled at attach time)",
+     "section": "Mapping", "input_type": "placeholder_table",
+     "help": "Per-attachment variables: deliverable cost, T₀ date, K date, etc."},
+    {"key": "attachments", "label": "Image attachments", "section": "Evidence",
+     "input_type": "file_picker"},
+]
+
+
+@router.get(
+    "/sla-rfp-fields",
+    summary="Catalog of every RFP row type the dynamic onboarding form can render",
+    description=(
+        "Returns the master list of fields that the SLA-Onboarding page "
+        "renders as picker options on each row. Each entry tells the FE: "
+        "what label to show in the row-type dropdown, what input widget "
+        "to render in the value cell (text / textarea / date / select / "
+        "project_picker / category_picker / measurement_set / "
+        "severity_table / linear_form / placeholder_table / file_picker), "
+        "and where to surface helper text. The FE doesn't hardcode any "
+        "RFP field — adding a new row type means adding an entry here."
+    ),
+)
+def list_sla_rfp_fields():
+    elements = [
+        hal_resource(
+            "SlaRfpField", field,
+            self_link=f"/api/v3/sla-rfp-fields/{field['key']}",
+        )
+        for field in _SLA_RFP_FIELDS
+    ]
+    return api_response(
+        data=hal_collection(elements, total=len(elements), page_size=len(elements) or 1),
+        status=200,
+    )
+
+
 @router.get(
     "/sla-input-variables",
     summary="Catalog of input variables (metric_keys) for the SLA onboarding form",

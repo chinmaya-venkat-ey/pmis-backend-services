@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, Query, status
 
 from app.controllers.division_controller import DivisionController
 from app.core.permissions import DIVISIONS_MANAGE, DIVISIONS_READ
-from app.core.rbac import require_permission
+from app.core.rbac import require_permission, require_permission_any_scope
 from app.dependencies import get_division_controller
 from app.schemas.division import (
     DivisionCreateRequest,
@@ -32,7 +32,7 @@ router = APIRouter(prefix="/divisions", tags=["divisions"])
         "`include_inactive=true` to see deactivated entries (used by admin "
         "screens). Requires divisions:read."
     ),
-    dependencies=[Depends(require_permission(DIVISIONS_READ))],
+    dependencies=[Depends(require_permission_any_scope(DIVISIONS_READ))],
 )
 def list_divisions(
     controller: Annotated[DivisionController, Depends(get_division_controller)],
@@ -46,7 +46,7 @@ def list_divisions(
     response_model_by_alias=True,
     summary="Get division details",
     description="Returns one division by code. 404 if not found. Requires divisions:read.",
-    dependencies=[Depends(require_permission(DIVISIONS_READ))],
+    dependencies=[Depends(require_permission_any_scope(DIVISIONS_READ))],
     responses={404: {"description": "Division code not found"}},
 )
 def get_division_details(

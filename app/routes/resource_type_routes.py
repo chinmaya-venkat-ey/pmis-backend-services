@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Query, status
 
 from app.controllers.resource_type_controller import ResourceTypeController
 from app.core.permissions import RESOURCE_TYPES_MANAGE, RESOURCE_TYPES_READ
-from app.core.rbac import require_permission
+from app.core.rbac import require_permission, require_permission_any_scope
 from app.dependencies import get_resource_type_controller
 from app.schemas.resource_type import (
     ResourceTypeCreateRequest,
@@ -23,7 +23,7 @@ router = APIRouter(prefix="/resource_types", tags=["resource_types"])
     "",
     summary="List resource types",
     description="Returns active resource types (e.g. used by activity-resource picker). Requires resource_types:read.",
-    dependencies=[Depends(require_permission(RESOURCE_TYPES_READ))],
+    dependencies=[Depends(require_permission_any_scope(RESOURCE_TYPES_READ))],
 )
 def list_resource_types(
     controller: Annotated[ResourceTypeController, Depends(get_resource_type_controller)],
@@ -35,7 +35,7 @@ def list_resource_types(
 @router.get(
     "/{rt_id}",
     summary="Get resource type details",
-    dependencies=[Depends(require_permission(RESOURCE_TYPES_READ))],
+    dependencies=[Depends(require_permission_any_scope(RESOURCE_TYPES_READ))],
     responses={404: {"description": "ResourceType not found"}},
 )
 def get_resource_type_details(

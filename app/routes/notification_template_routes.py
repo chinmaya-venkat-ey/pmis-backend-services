@@ -18,7 +18,7 @@ from app.core.permissions import (
     NOTIFICATION_TEMPLATES_MANAGE,
     NOTIFICATION_TEMPLATES_READ,
 )
-from app.core.rbac import require_permission
+from app.core.rbac import require_permission, require_permission_any_scope
 from app.dependencies import get_notification_template_controller
 from app.schemas.notification_template import (
     NotificationTemplateCreateRequest,
@@ -33,7 +33,7 @@ router = APIRouter(prefix="/notification_templates", tags=["notification_templat
 @router.get(
     "",
     summary="List notification templates",
-    dependencies=[Depends(require_permission(NOTIFICATION_TEMPLATES_READ))],
+    dependencies=[Depends(require_permission_any_scope(NOTIFICATION_TEMPLATES_READ))],
 )
 def list_notification_templates(
     controller: Annotated[NotificationTemplateController, Depends(get_notification_template_controller)],
@@ -45,7 +45,7 @@ def list_notification_templates(
 @router.get(
     "/{template_id}",
     summary="Get notification template details",
-    dependencies=[Depends(require_permission(NOTIFICATION_TEMPLATES_READ))],
+    dependencies=[Depends(require_permission_any_scope(NOTIFICATION_TEMPLATES_READ))],
     responses={404: {"description": "NotificationTemplate not found"}},
 )
 def get_notification_template_details(

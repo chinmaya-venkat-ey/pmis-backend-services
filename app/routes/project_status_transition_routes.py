@@ -16,7 +16,7 @@ from app.core.permissions import (
     PROJECT_STATUS_TRANSITIONS_MANAGE,
     PROJECT_STATUS_TRANSITIONS_READ,
 )
-from app.core.rbac import require_permission
+from app.core.rbac import require_permission, require_permission_any_scope
 from app.dependencies import get_project_status_transition_controller
 from app.schemas.project_status_transition import (
     ProjectStatusTransitionCreateRequest,
@@ -37,7 +37,7 @@ router = APIRouter(
         "Returns the legal state-machine edges. project-svc reads these to "
         "validate PATCH /project/projects/{uuid}/update status changes."
     ),
-    dependencies=[Depends(require_permission(PROJECT_STATUS_TRANSITIONS_READ))],
+    dependencies=[Depends(require_permission_any_scope(PROJECT_STATUS_TRANSITIONS_READ))],
 )
 def list_project_status_transitions(
     controller: Annotated[ProjectStatusTransitionController, Depends(get_project_status_transition_controller)],
@@ -49,7 +49,7 @@ def list_project_status_transitions(
 @router.get(
     "/{row_id}",
     summary="Get project status transition details",
-    dependencies=[Depends(require_permission(PROJECT_STATUS_TRANSITIONS_READ))],
+    dependencies=[Depends(require_permission_any_scope(PROJECT_STATUS_TRANSITIONS_READ))],
     responses={404: {"description": "ProjectStatusTransition not found"}},
 )
 def get_project_status_transition_details(

@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Query, status
 
 from app.controllers.frequency_controller import FrequencyController
 from app.core.permissions import FREQUENCIES_MANAGE, FREQUENCIES_READ
-from app.core.rbac import require_permission
+from app.core.rbac import require_permission, require_permission_any_scope
 from app.dependencies import get_frequency_controller
 from app.schemas.frequency import (
     FrequencyCreateRequest,
@@ -23,7 +23,7 @@ router = APIRouter(prefix="/frequencies", tags=["frequencies"])
     "",
     summary="List frequencies",
     description="Returns frequencies ordered by position. Requires frequencies:read.",
-    dependencies=[Depends(require_permission(FREQUENCIES_READ))],
+    dependencies=[Depends(require_permission_any_scope(FREQUENCIES_READ))],
 )
 def list_frequencies(
     controller: Annotated[FrequencyController, Depends(get_frequency_controller)],
@@ -35,7 +35,7 @@ def list_frequencies(
 @router.get(
     "/{code}",
     summary="Get frequency details",
-    dependencies=[Depends(require_permission(FREQUENCIES_READ))],
+    dependencies=[Depends(require_permission_any_scope(FREQUENCIES_READ))],
     responses={404: {"description": "Frequency not found"}},
 )
 def get_frequency_details(

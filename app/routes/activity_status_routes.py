@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Query, status
 
 from app.controllers.activity_status_controller import ActivityStatusController
 from app.core.permissions import ACTIVITY_STATUSES_MANAGE, ACTIVITY_STATUSES_READ
-from app.core.rbac import require_permission
+from app.core.rbac import require_permission, require_permission_any_scope
 from app.dependencies import get_activity_status_controller
 from app.schemas.activity_status import (
     ActivityStatusCreateRequest,
@@ -23,7 +23,7 @@ router = APIRouter(prefix="/activity_statuses", tags=["activity_statuses"])
     "",
     summary="List activity statuses",
     description="Returns activity status options. `is_terminal=true` rows are 'done' states.",
-    dependencies=[Depends(require_permission(ACTIVITY_STATUSES_READ))],
+    dependencies=[Depends(require_permission_any_scope(ACTIVITY_STATUSES_READ))],
 )
 def list_activity_statuses(
     controller: Annotated[ActivityStatusController, Depends(get_activity_status_controller)],
@@ -35,7 +35,7 @@ def list_activity_statuses(
 @router.get(
     "/{code}",
     summary="Get activity status details",
-    dependencies=[Depends(require_permission(ACTIVITY_STATUSES_READ))],
+    dependencies=[Depends(require_permission_any_scope(ACTIVITY_STATUSES_READ))],
     responses={404: {"description": "ActivityStatus not found"}},
 )
 def get_activity_status_details(

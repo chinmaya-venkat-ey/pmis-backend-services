@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Query, status
 
 from app.controllers.cost_type_controller import CostTypeController
 from app.core.permissions import COST_TYPES_MANAGE, COST_TYPES_READ
-from app.core.rbac import require_permission
+from app.core.rbac import require_permission, require_permission_any_scope
 from app.dependencies import get_cost_type_controller
 from app.schemas.cost_type import (
     CostTypeCreateRequest,
@@ -23,7 +23,7 @@ router = APIRouter(prefix="/cost-types", tags=["cost-types"])
     "",
     summary="List cost types",
     description="Returns cost types ordered by position. Requires cost_types:read.",
-    dependencies=[Depends(require_permission(COST_TYPES_READ))],
+    dependencies=[Depends(require_permission_any_scope(COST_TYPES_READ))],
 )
 def list_cost_types(
     controller: Annotated[CostTypeController, Depends(get_cost_type_controller)],
@@ -35,7 +35,7 @@ def list_cost_types(
 @router.get(
     "/{code}",
     summary="Get cost type details",
-    dependencies=[Depends(require_permission(COST_TYPES_READ))],
+    dependencies=[Depends(require_permission_any_scope(COST_TYPES_READ))],
     responses={404: {"description": "Cost type not found"}},
 )
 def get_cost_type_details(

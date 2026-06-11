@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Query, status
 
 from app.controllers.activity_type_controller import ActivityTypeController
 from app.core.permissions import ACTIVITY_TYPES_MANAGE, ACTIVITY_TYPES_READ
-from app.core.rbac import require_permission
+from app.core.rbac import require_permission, require_permission_any_scope
 from app.dependencies import get_activity_type_controller
 from app.schemas.activity_type import (
     ActivityTypeCreateRequest,
@@ -22,7 +22,7 @@ router = APIRouter(prefix="/activity_types", tags=["activity_types"])
 @router.get(
     "",
     summary="List activity types",
-    dependencies=[Depends(require_permission(ACTIVITY_TYPES_READ))],
+    dependencies=[Depends(require_permission_any_scope(ACTIVITY_TYPES_READ))],
 )
 def list_activity_types(
     controller: Annotated[ActivityTypeController, Depends(get_activity_type_controller)],
@@ -34,7 +34,7 @@ def list_activity_types(
 @router.get(
     "/{code}",
     summary="Get activity type details",
-    dependencies=[Depends(require_permission(ACTIVITY_TYPES_READ))],
+    dependencies=[Depends(require_permission_any_scope(ACTIVITY_TYPES_READ))],
     responses={404: {"description": "ActivityType not found"}},
 )
 def get_activity_type_details(

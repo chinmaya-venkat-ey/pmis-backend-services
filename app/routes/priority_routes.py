@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Query, status
 
 from app.controllers.priority_controller import PriorityController
 from app.core.permissions import PRIORITIES_MANAGE, PRIORITIES_READ
-from app.core.rbac import require_permission
+from app.core.rbac import require_permission, require_permission_any_scope
 from app.dependencies import get_priority_controller
 from app.schemas.priority import (
     PriorityCreateRequest,
@@ -23,7 +23,7 @@ router = APIRouter(prefix="/priorities", tags=["priorities"])
     "",
     summary="List priorities",
     description="Returns priorities ordered by position. Requires priorities:read.",
-    dependencies=[Depends(require_permission(PRIORITIES_READ))],
+    dependencies=[Depends(require_permission_any_scope(PRIORITIES_READ))],
 )
 def list_priorities(
     controller: Annotated[PriorityController, Depends(get_priority_controller)],
@@ -35,7 +35,7 @@ def list_priorities(
 @router.get(
     "/{code}",
     summary="Get priority details",
-    dependencies=[Depends(require_permission(PRIORITIES_READ))],
+    dependencies=[Depends(require_permission_any_scope(PRIORITIES_READ))],
     responses={404: {"description": "Priority not found"}},
 )
 def get_priority_details(

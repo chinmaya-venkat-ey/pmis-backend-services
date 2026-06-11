@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Query, status
 
 from app.controllers.milestone_status_controller import MilestoneStatusController
 from app.core.permissions import MILESTONE_STATUSES_MANAGE, MILESTONE_STATUSES_READ
-from app.core.rbac import require_permission
+from app.core.rbac import require_permission, require_permission_any_scope
 from app.dependencies import get_milestone_status_controller
 from app.schemas.milestone_status import (
     MilestoneStatusCreateRequest,
@@ -23,7 +23,7 @@ router = APIRouter(prefix="/milestone_statuses", tags=["milestone_statuses"])
     "",
     summary="List milestone statuses",
     description="Returns milestone status options. `is_terminal=true` rows are 'done' states.",
-    dependencies=[Depends(require_permission(MILESTONE_STATUSES_READ))],
+    dependencies=[Depends(require_permission_any_scope(MILESTONE_STATUSES_READ))],
 )
 def list_milestone_statuses(
     controller: Annotated[MilestoneStatusController, Depends(get_milestone_status_controller)],
@@ -35,7 +35,7 @@ def list_milestone_statuses(
 @router.get(
     "/{code}",
     summary="Get milestone status details",
-    dependencies=[Depends(require_permission(MILESTONE_STATUSES_READ))],
+    dependencies=[Depends(require_permission_any_scope(MILESTONE_STATUSES_READ))],
     responses={404: {"description": "MilestoneStatus not found"}},
 )
 def get_milestone_status_details(

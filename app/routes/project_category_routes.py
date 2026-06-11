@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Query, status
 
 from app.controllers.project_category_controller import ProjectCategoryController
 from app.core.permissions import PROJECT_CATEGORIES_MANAGE, PROJECT_CATEGORIES_READ
-from app.core.rbac import require_permission
+from app.core.rbac import require_permission, require_permission_any_scope
 from app.dependencies import get_project_category_controller
 from app.schemas.project_category import (
     ProjectCategoryCreateRequest,
@@ -23,7 +23,7 @@ router = APIRouter(prefix="/project_categories", tags=["project_categories"])
     "",
     summary="List project categories",
     description="Returns project categories used by the project-create form. Requires project_categories:read.",
-    dependencies=[Depends(require_permission(PROJECT_CATEGORIES_READ))],
+    dependencies=[Depends(require_permission_any_scope(PROJECT_CATEGORIES_READ))],
 )
 def list_project_categories(
     controller: Annotated[ProjectCategoryController, Depends(get_project_category_controller)],
@@ -35,7 +35,7 @@ def list_project_categories(
 @router.get(
     "/{code}",
     summary="Get project category details",
-    dependencies=[Depends(require_permission(PROJECT_CATEGORIES_READ))],
+    dependencies=[Depends(require_permission_any_scope(PROJECT_CATEGORIES_READ))],
     responses={404: {"description": "ProjectCategory not found"}},
 )
 def get_project_category_details(

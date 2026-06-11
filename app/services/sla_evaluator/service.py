@@ -367,11 +367,17 @@ class SlaEvaluatorService:
         lookups = self.sla_repo.list_lookup_rows(sla.id)
         primary = next((m for m in metrics if m.is_primary), None) or (metrics[0] if metrics else None)
 
-        # ── Inputs — formula-type-driven ────────────────────────────
-        inputs = self._build_form_inputs(formula_type, primary)
+        # ── Inputs — DSL-introspection-driven ────────────────────────
+        # Multi-metric SLAs (PMU-SLA007 has BD + hrs) get one object
+        # input with a sub-field per metric. Single-metric SLAs get one
+        # scalar input as before.
+        inputs = self._build_form_inputs(formula_type, metrics, primary)
 
         # ── Bands — the RFP rule reference card ─────────────────────
-        band_list = self._build_form_bands(bands, lookups)
+        # Multi-metric: bands grouped by metric_key. Linear escalation
+        # with many lookup rows: summarised "0.5% per week" instead of
+        # dumping every tier.
+        band_list = self._build_form_bands(bands, lookups, metrics)
 
         # ── Period defaults — try the activity's planned dates from
         # project-mgmt; fall back to the mapping's effective range.
@@ -399,10 +405,33 @@ class SlaEvaluatorService:
         # ── Question + explanation — human-friendly intro on the form ─
         measure_label = (primary.display_name if primary else "value") or "value"
         question = "What did you measure?"
-        explanation = (
-            f"Enter the actual {measure_label.lower()} you observed during "
-            "this reporting period."
-        )
+        explanation_parts = [
+            f"Enter the actual {measure_label.lower()} you observed during this reporting period."
+        ]
+        # Surface date-type placeholders so the caller knows the mapping
+        # already locked them in (e.g. T₀, K=approval_date). This is the
+        # bit that makes "variance from K" comprehensible.
+        date_placeholders = [
+            p for p in (sla.placeholders or [])
+            if isinstance(p, dict) and p.get("type") == "date"
+        ]
+        overrides = mapping.overrides or {}
+        for ph in date_placeholders:
+            key = ph.get("key")
+            label = ph.get("label") or key
+            stamped = overrides.get(key) if key else None
+            if stamped:
+                explanation_parts.append(
+                    f"Note — “{label}” is set to {stamped} on this mapping; "
+                    "the value you enter is measured relative to that date."
+                )
+            else:
+                explanation_parts.append(
+                    f"Heads-up — this SLA expects “{label}” to be set on the "
+                    "mapping (currently empty). Patch the mapping's overrides "
+                    "before evaluating."
+                )
+        explanation = " ".join(explanation_parts)
 
         # ── Submit target — the simple eval endpoint ────────────────
         submit = EvalFormSubmit(
@@ -433,15 +462,21 @@ class SlaEvaluatorService:
     @staticmethod
     def _build_form_inputs(
         formula_type: str,
-        primary,  # SlaMetric or None
+        all_metrics,    # list[SlaMetric]
+        primary,        # SlaMetric or None
     ) -> List[EvalFormInput]:
-        """Translate (formula_type, primary metric) into the FE's input spec."""
-        unit = (primary.unit if primary else "") or None
-        label = (primary.display_name if primary else "Value") or "Value"
-        help_one = "Just type the number you observed for this period."
+        """Build the FE form-input spec from the SLA's metrics + formula.
 
+        Three branches:
+          * ``wac`` — fixed 7-field defect breakdown.
+          * ``band_accumulation`` — one list field (daily readings of
+            the primary metric).
+          * Everything else — one input per declared metric. Most SLAs
+            have a single metric and get a plain scalar input; SLA-007
+            and friends have BD + hrs and get one object with two
+            sub-fields so the operator enters both at once.
+        """
         if formula_type == "wac":
-            # Defect breakdown — 7 numeric fields under a single 'value' object.
             return [EvalFormInput(
                 name="value", type="object", label="Defect breakdown",
                 help="Enter the defect counts you observed during the period.",
@@ -457,47 +492,141 @@ class SlaEvaluatorService:
             )]
 
         if formula_type == "band_accumulation":
-            # Daily readings — list of numbers.
+            label = (primary.display_name if primary else "Value") or "Value"
+            unit = (primary.unit if primary else "") or None
             return [EvalFormInput(
                 name="value", type="list", label=f"Daily readings of {label}",
                 unit=unit, item_type="number",
                 help="Comma- or newline-separated. Roughly 90 entries for a quarter.",
             )]
 
-        # point_accumulation, fixed_escalation, and any unknown shape:
-        # one number with the SLA's friendly label + unit.
+        # point_accumulation / fixed_escalation:
+        # Multi-metric SLAs (e.g. PMU-SLA007 with BD + hrs) get an
+        # object input so the operator types both numbers in one form.
+        metric_list = list(all_metrics or [])
+        if len(metric_list) > 1:
+            # Sort primary first so the FE renders it on top.
+            metric_list.sort(key=lambda m: 0 if m.is_primary else 1)
+            return [EvalFormInput(
+                name="value", type="object",
+                label="Measurements for this period",
+                help="The contract requires all of these values together.",
+                fields=[
+                    EvalFormInput(
+                        name=m.metric_key or f"metric_{i}",
+                        type="number",
+                        label=m.display_name or m.metric_key or "Value",
+                        unit=(m.unit or None),
+                        placeholder="0",
+                        minimum=0,
+                    )
+                    for i, m in enumerate(metric_list)
+                ],
+            )]
+
+        # Single metric — one scalar input.
+        label = (primary.display_name if primary else "Value") or "Value"
+        unit = (primary.unit if primary else "") or None
         return [EvalFormInput(
-            name="value", type="number", label=label,
-            unit=unit, placeholder="0", help=help_one,
+            name="value", type="number", label=label, unit=unit,
+            placeholder="0", help="Just type the number you observed for this period.",
             minimum=0,
         )]
 
-    @staticmethod
+    # Threshold above which a lookup-table SLA's bands card is collapsed
+    # to a "Linear LD" summary plus the first / last tier. Below the
+    # threshold (the default-ish lookup tables) we keep showing every
+    # row so the operator can scan it.
+    _LOOKUP_BAND_DUMP_LIMIT = 8
+
+    @classmethod
     def _build_form_bands(
-        bands,        # list of SlaConditionBand
-        lookups,      # list of SlaLookupRow
+        cls,
+        bands,        # list[SlaConditionBand]
+        lookups,      # list[SlaLookupRow]
+        metrics,      # list[SlaMetric] — used to group multi-metric SLAs
     ) -> List[EvalFormBand]:
-        """RFP rule reference rows for the form's band card."""
-        out: List[EvalFormBand] = []
+        """RFP rule reference rows. Grouped by metric for multi-metric SLAs
+        and summarised for long lookup tables.
+        """
+        # ── Multi-metric → group bands by metric_key so the FE shows
+        # one section per metric. The grouping is conveyed via the
+        # ``unit`` field (we prefix it with the metric's display name)
+        # because the schema doesn't have a "group" field; the FE renders
+        # by sorting on this — clear enough for the demo, structured
+        # bands can come later.
         if bands:
-            for b in sorted(bands, key=lambda x: (x.severity_level or 0, x.sort_order or 0)):
+            metric_label_by_key = {
+                (m.metric_key or ""): (m.display_name or m.metric_key or "")
+                for m in (metrics or [])
+            }
+            out: List[EvalFormBand] = []
+            for b in sorted(
+                bands,
+                key=lambda x: (x.metric_key or "", x.severity_level or 0, x.sort_order or 0),
+            ):
+                # Stamp the metric label into the unit field when there's
+                # more than one metric — clear for the operator without a
+                # schema bump.
+                unit = b.range_unit
+                if len(metric_label_by_key) > 1 and b.metric_key:
+                    mlabel = metric_label_by_key.get(b.metric_key)
+                    if mlabel:
+                        unit = f"{unit or ''} · {mlabel}".strip(" ·")
                 out.append(EvalFormBand(
                     severity=b.severity_level,
                     label=b.band_label or "",
                     range_min=b.range_min,
                     range_max=b.range_max,
-                    unit=b.range_unit,
+                    unit=unit,
                 ))
             return out
-        if lookups:
-            # Linear escalation — no severity, just a rate per tier.
-            for r in sorted(lookups, key=lambda x: x.sort_order or 0):
-                out.append(EvalFormBand(
-                    severity=None,
-                    label=r.lookup_key or "",
-                    rate_percent=r.lookup_value,
-                ))
-        return out
+
+        if not lookups:
+            return []
+
+        # ── Linear escalation. Short tables stay as-is; long ones get
+        # summarised with a synthesized "Linear LD: X% per unit" row
+        # followed by the first and last tier so the operator sees the
+        # shape without scrolling through 100+ rows.
+        sorted_rows = sorted(lookups, key=lambda x: x.sort_order or 0)
+        if len(sorted_rows) <= cls._LOOKUP_BAND_DUMP_LIMIT:
+            return [EvalFormBand(
+                severity=None,
+                label=r.lookup_key or "",
+                rate_percent=r.lookup_value,
+            ) for r in sorted_rows]
+
+        # Infer the rate from the first non-zero tier delta.
+        rate = None
+        for idx, r in enumerate(sorted_rows):
+            if r.lookup_value and r.lookup_value > 0:
+                if idx == 0:
+                    rate = r.lookup_value
+                else:
+                    rate = r.lookup_value - (sorted_rows[idx - 1].lookup_value or 0)
+                break
+
+        summary_rows: List[EvalFormBand] = []
+        if rate is not None:
+            summary_rows.append(EvalFormBand(
+                severity=None,
+                label=f"Linear LD: {rate}% per unit  ({len(sorted_rows)} tiers, "
+                      f"max {sorted_rows[-1].lookup_value}%)",
+                rate_percent=rate,
+            ))
+        # Append the first and last tier so the band card stays useful.
+        summary_rows.append(EvalFormBand(
+            severity=None,
+            label=f"first tier: {sorted_rows[0].lookup_key}",
+            rate_percent=sorted_rows[0].lookup_value,
+        ))
+        summary_rows.append(EvalFormBand(
+            severity=None,
+            label=f"last tier: {sorted_rows[-1].lookup_key}",
+            rate_percent=sorted_rows[-1].lookup_value,
+        ))
+        return summary_rows
 
     def _primary_metric_key(self, sla: SlaDefinition) -> Optional[str]:
         """Look up the SLA's primary metric_key via the repo.

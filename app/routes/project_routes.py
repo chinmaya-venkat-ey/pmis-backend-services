@@ -285,7 +285,7 @@ def list_all_projects(
         "the monolith's pre-publish visibility hide so the FE can't "
         "distinguish 'not yet published' from 'doesn't exist'."
     ),
-    dependencies=[Depends(require_permission(PROJECTS_READ))],
+    dependencies=[Depends(require_project_permission(PROJECTS_READ))],
     responses={404: {"description": "Project not found"}},
 )
 def get_project(
@@ -423,7 +423,7 @@ def reopen_project(
         "division_member). Read-only mirror of user-mgmt's same-path "
         "endpoint so the FE can avoid a cross-service hop."
     ),
-    dependencies=[Depends(require_permission(PROJECT_MEMBERS_READ))],
+    dependencies=[Depends(require_project_permission(PROJECT_MEMBERS_READ))],
 )
 def list_project_role_assignments(
     project_uuid: str,
@@ -442,7 +442,7 @@ def list_project_role_assignments(
         "filtered out. Each entry carries ``id`` / ``login`` / "
         "``fullName`` / ``email`` / ``orgRole``."
     ),
-    dependencies=[Depends(require_permission(PROJECT_MEMBERS_READ))],
+    dependencies=[Depends(require_project_permission(PROJECT_MEMBERS_READ))],
 )
 def list_project_assignable_users(
     project_uuid: str,
@@ -490,7 +490,7 @@ def list_project_audit_logs(
         "``targetKind`` / ``targetId`` / ``targetName`` so the FE knows "
         "which entity in the tree the row belongs to."
     ),
-    dependencies=[Depends(require_permission(PROJECTS_READ))],
+    dependencies=[Depends(require_project_permission(PROJECTS_READ))],
 )
 def list_project_discussion_feed(
     project_uuid: str,

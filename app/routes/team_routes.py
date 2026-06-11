@@ -34,7 +34,7 @@ from typing import List
 from fastapi import APIRouter, Depends, Query, Request
 
 from app.core.permissions import PROJECT_MEMBERS_READ, PROJECT_MEMBERS_UPDATE
-from app.core.rbac import require_authenticated, require_permission
+from app.core.rbac import require_authenticated, require_permission, require_project_permission
 from app.dependencies import get_current_user_id, get_team_controller
 from app.schemas.team import (
     ActivityAssignmentsRead,
@@ -76,7 +76,7 @@ associated_users_router = APIRouter(tags=["team"])
         "and the assignable-user picker list. Powers the Manage-Team page "
         "initial load."
     ),
-    dependencies=[Depends(require_permission(PROJECT_MEMBERS_READ))],
+    dependencies=[Depends(require_project_permission(PROJECT_MEMBERS_READ))],
     openapi_extra={
         "responses": {
             "200": {
@@ -171,7 +171,7 @@ def get_team(
         "deleted before new ones are inserted). Sections omitted from the "
         "request are left unchanged."
     ),
-    dependencies=[Depends(require_permission(PROJECT_MEMBERS_UPDATE))],
+    dependencies=[Depends(require_project_permission(PROJECT_MEMBERS_UPDATE))],
     openapi_extra={
         "requestBody": {
             "content": {
@@ -257,7 +257,7 @@ def save_team(
     "/{project_id}/ownership",
     response_model=OwnershipRead,
     summary="Get project owner and approver",
-    dependencies=[Depends(require_permission(PROJECT_MEMBERS_READ))],
+    dependencies=[Depends(require_project_permission(PROJECT_MEMBERS_READ))],
     openapi_extra={
         "responses": {
             "200": {
@@ -300,7 +300,7 @@ def get_ownership(
         "Replaces all project_owner and approver assignments for the project. "
         "approver is single-select — only the first user_id in the list is stored."
     ),
-    dependencies=[Depends(require_permission(PROJECT_MEMBERS_UPDATE))],
+    dependencies=[Depends(require_project_permission(PROJECT_MEMBERS_UPDATE))],
     openapi_extra={
         "requestBody": {
             "content": {
@@ -364,7 +364,7 @@ def save_ownership(
         "Returns owner, owner_approver, division_users, and division_approvers "
         "for the specified activity."
     ),
-    dependencies=[Depends(require_permission(PROJECT_MEMBERS_READ))],
+    dependencies=[Depends(require_project_permission(PROJECT_MEMBERS_READ))],
     openapi_extra={
         "responses": {
             "200": {
@@ -422,7 +422,7 @@ def get_activity_assignments(
         "— only the first user_id in each list is stored. "
         "Maps to the activity-configuration modal Save button."
     ),
-    dependencies=[Depends(require_permission(PROJECT_MEMBERS_UPDATE))],
+    dependencies=[Depends(require_project_permission(PROJECT_MEMBERS_UPDATE))],
     openapi_extra={
         "requestBody": {
             "content": {
@@ -509,7 +509,7 @@ def save_activity_assignments(
         "`orgUser` rows come from user-role-assignments (read-only). "
         "`projectOwner` and `activities` reflect saved ownership and assignments."
     ),
-    dependencies=[Depends(require_permission(PROJECT_MEMBERS_READ))],
+    dependencies=[Depends(require_project_permission(PROJECT_MEMBERS_READ))],
 )
 def get_team_page(
     project_id: str,
@@ -531,7 +531,7 @@ def get_team_page(
     response_model=List[TeamUserChip],
     summary="Candidate users for the Project Owner dropdown (Bug #226)",
     description="division_owner holders in the project's owner division, within UIDAI.",
-    dependencies=[Depends(require_permission(PROJECT_MEMBERS_READ))],
+    dependencies=[Depends(require_project_permission(PROJECT_MEMBERS_READ))],
 )
 def candidates_project_owners(
     project_id: str,
@@ -547,7 +547,7 @@ def candidates_project_owners(
     response_model=List[TeamUserChip],
     summary="Candidate users for the Project Owner Approver dropdown (Bug #226)",
     description="division_approver holders in the project's owner division, within UIDAI.",
-    dependencies=[Depends(require_permission(PROJECT_MEMBERS_READ))],
+    dependencies=[Depends(require_project_permission(PROJECT_MEMBERS_READ))],
 )
 def candidates_project_owner_approvers(
     project_id: str,
@@ -563,7 +563,7 @@ def candidates_project_owner_approvers(
     response_model=List[TeamUserChip],
     summary="Candidate users for an Activity Member dropdown (Bug #226)",
     description="division_member holders in `divisionCode` (the activity's concerned division), within UIDAI.",
-    dependencies=[Depends(require_permission(PROJECT_MEMBERS_READ))],
+    dependencies=[Depends(require_project_permission(PROJECT_MEMBERS_READ))],
 )
 def candidates_activity_members(
     project_id: str,
@@ -582,7 +582,7 @@ def candidates_activity_members(
     response_model=List[TeamUserChip],
     summary="Candidate users for an Activity Approver dropdown (Bug #226)",
     description="division_approver holders in `divisionCode` (the activity's concerned division), within UIDAI.",
-    dependencies=[Depends(require_permission(PROJECT_MEMBERS_READ))],
+    dependencies=[Depends(require_project_permission(PROJECT_MEMBERS_READ))],
 )
 def candidates_activity_approvers(
     project_id: str,
@@ -609,7 +609,7 @@ def candidates_activity_approvers(
         "aborted (502 Bad Gateway) so partial state is never persisted. "
         "Returns the refreshed page state identical to GET team-page."
     ),
-    dependencies=[Depends(require_permission(PROJECT_MEMBERS_UPDATE))],
+    dependencies=[Depends(require_project_permission(PROJECT_MEMBERS_UPDATE))],
 )
 def save_team_page(
     project_id: str,

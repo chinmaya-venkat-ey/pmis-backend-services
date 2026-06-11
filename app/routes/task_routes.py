@@ -133,7 +133,7 @@ async def create_task(
 @activity_scoped_router.get(
     "/{activity_id}/tasks",
     summary="List tasks under an activity",
-    dependencies=[Depends(require_permission(TASKS_READ))],
+    dependencies=[Depends(require_project_permission(TASKS_READ))],
 )
 def list_activity_tasks(
     activity_id: str,
@@ -156,7 +156,7 @@ router = APIRouter(prefix="/tasks", tags=["tasks"])
     "/{task_id}",
     response_model=TaskResponse,
     summary="Get task by id",
-    dependencies=[Depends(require_permission(TASKS_READ))],
+    dependencies=[Depends(require_project_permission(TASKS_READ))],
 )
 def get_task(
     task_id: str,

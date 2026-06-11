@@ -145,7 +145,7 @@ async def create_milestone(
 @project_scoped_router.get(
     "/{project_uuid}/milestones",
     summary="List milestones under a project",
-    dependencies=[Depends(require_permission(MILESTONES_READ))],
+    dependencies=[Depends(require_project_permission(MILESTONES_READ))],
 )
 def list_project_milestones(
     project_uuid: str,
@@ -168,7 +168,7 @@ router = APIRouter(prefix="/milestones", tags=["milestones"])
     "/{milestone_id}",
     response_model=MilestoneResponse,
     summary="Get milestone by id",
-    dependencies=[Depends(require_permission(MILESTONES_READ))],
+    dependencies=[Depends(require_project_permission(MILESTONES_READ))],
 )
 def get_milestone(
     milestone_id: str,

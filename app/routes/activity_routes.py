@@ -140,7 +140,7 @@ async def create_activity(
 @milestone_scoped_router.get(
     "/{milestone_id}/activities",
     summary="List activities under a milestone",
-    dependencies=[Depends(require_permission(ACTIVITIES_READ))],
+    dependencies=[Depends(require_project_permission(ACTIVITIES_READ))],
 )
 def list_milestone_activities(
     milestone_id: str,
@@ -163,7 +163,7 @@ router = APIRouter(prefix="/activities", tags=["activities"])
     "/{activity_id}",
     response_model=ActivityResponse,
     summary="Get activity by id",
-    dependencies=[Depends(require_permission(ACTIVITIES_READ))],
+    dependencies=[Depends(require_project_permission(ACTIVITIES_READ))],
 )
 def get_activity(
     activity_id: str,

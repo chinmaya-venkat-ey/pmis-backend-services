@@ -22,7 +22,7 @@ from fastapi import APIRouter, Depends
 
 from app.controllers.critical_path_controller import CriticalPathController
 from app.core.permissions import PROJECTS_READ
-from app.core.rbac import require_permission
+from app.core.rbac import require_permission, require_project_permission
 from app.dependencies import get_critical_path_controller
 from app.schemas.critical_path import CpaAnalysisRequest
 
@@ -30,7 +30,7 @@ from app.schemas.critical_path import CpaAnalysisRequest
 router = APIRouter(
     prefix="/projects",
     tags=["critical-path"],
-    dependencies=[Depends(require_permission(PROJECTS_READ))],
+    dependencies=[Depends(require_project_permission(PROJECTS_READ))],
 )
 
 

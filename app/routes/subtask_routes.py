@@ -155,7 +155,7 @@ async def create_subtask_under_task(
 @task_scoped_router.get(
     "/{task_id}/subtasks",
     summary="List subtasks under a task",
-    dependencies=[Depends(require_permission(SUBTASKS_READ))],
+    dependencies=[Depends(require_project_permission(SUBTASKS_READ))],
 )
 def list_task_subtasks(
     task_id: str,
@@ -236,7 +236,7 @@ async def create_nested_subtask(
     "/{subtask_id}",
     response_model=SubtaskResponse,
     summary="Get subtask by id",
-    dependencies=[Depends(require_permission(SUBTASKS_READ))],
+    dependencies=[Depends(require_project_permission(SUBTASKS_READ))],
 )
 def get_subtask(
     subtask_id: str,

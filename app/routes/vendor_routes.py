@@ -26,7 +26,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.permissions import VENDORS_MANAGE, VENDORS_READ
-from app.core.rbac import require_permission
+from app.core.rbac import require_permission, require_permission_or_scoped
 from app.core.response import api_response
 
 _VENDOR_NOT_FOUND = "Vendor not found."
@@ -253,7 +253,7 @@ def _apply_user_assignments(
         "Pass active_only=true (picker dropdowns) to show only active. "
         "Requires vendors:read."
     ),
-    dependencies=[Depends(require_permission(VENDORS_READ))],
+    dependencies=[Depends(require_permission_or_scoped(VENDORS_READ))],
 )
 def list_vendors(
     request: Request,
@@ -324,7 +324,7 @@ def create_vendor(
     "/{vendor_id}",
     summary="Get vendor details",
     description="Returns one vendor by UUID with embedded projects. 404 if not found. Requires vendors:read.",
-    dependencies=[Depends(require_permission(VENDORS_READ))],
+    dependencies=[Depends(require_permission_or_scoped(VENDORS_READ))],
     responses={404: {"description": _VENDOR_NOT_FOUND}},
 )
 def get_vendor(
@@ -452,7 +452,7 @@ def restore_vendor(
         "vendor UUID or who have an organization_id role assignment for this vendor. "
         "Requires vendors:read."
     ),
-    dependencies=[Depends(require_permission(VENDORS_READ))],
+    dependencies=[Depends(require_permission_or_scoped(VENDORS_READ))],
     responses={404: {"description": _VENDOR_NOT_FOUND}},
 )
 def list_vendor_users(

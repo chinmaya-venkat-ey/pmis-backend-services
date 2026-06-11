@@ -289,6 +289,31 @@ _SLA_RFP_FIELDS: List[Dict[str, Any]] = [
      "help": "Per-attachment variables: deliverable cost, T₀ date, K date, etc."},
     {"key": "attachments", "label": "Image attachments", "section": "Evidence",
      "input_type": "file_picker"},
+
+    # ── Additional rows from the cross-RFP analysis (PMU / MSAP / BSP / MSIP).
+    # Present in some but not all contracts, so they're offered as optional
+    # dynamic rows rather than promoted to the mandatory static section.
+    {"key": "data_capture_process",
+     "label": "Process to capture raw data for SLA calculations",
+     "section": "Source & Calculation", "input_type": "textarea",
+     "help": "Appears in all 4 RFPs (PMU, MSAP, BSP, MSIP). Describes how the "
+             "raw measurement is captured before the SLA calculation runs."},
+    {"key": "monitoring_tool",
+     "label": "Tool used for SLA monitoring",
+     "section": "Source & Calculation", "input_type": "text",
+     "help": "Appears in MSAP, MSIP. e.g. 'EMS tools', 'biometric attendance system', 'N/A'."},
+    {"key": "ld_calculation",
+     "label": "LD calculation (separate from SLA calculation)",
+     "section": "Source & Calculation", "input_type": "textarea",
+     "help": "MSAP separates the SLA-value calculation from the LD-value calculation."},
+    {"key": "assumptions",
+     "label": "Assumptions / Remarks",
+     "section": "Source & Calculation", "input_type": "textarea",
+     "help": "MSAP 'Assumptions' / 'Remarks' row — definitions of T, planned dates, etc."},
+    {"key": "metric_type",
+     "label": "Metric Type",
+     "section": "Identification", "input_type": "text",
+     "help": "BSP per-metric category — 'Accuracy', 'Throughput', 'Availability'."},
 ]
 
 

@@ -135,14 +135,20 @@ class SlaOnboardRequest(BaseModel):
     }
     # Project the SLA belongs to. Per the PMC-contract model (one RFP =
     # one project = one SLA bundle), this is the primary scoping field.
-    # Optional for backward compatibility with the catalog-template flow,
-    # but new SLAs should always carry it so they can be filtered by
-    # project on the list page.
-    project_id: Optional[str] = Field(
-        None, max_length=36,
-        description="UUID of the project that owns this SLA. Empty = catalog template.",
+    # SLAs are owned by a project from pmis-project-management — no longer
+    # by a free-floating contract type. Required on every new SLA.
+    project_id: str = Field(
+        ..., max_length=36,
+        description="UUID of the project (from pmis-project-management) that "
+                    "owns this SLA. Required.",
     )
-    contract_type: str = Field(..., max_length=20, pattern=r"^(BSP|MSAP|MSIP|PMU)$")
+    # contract_type is now optional. When unset the service tries to derive
+    # it from the project; when that fails the column stays NULL on the row.
+    # Old rows (pre-project-scoping) keep their stamped value.
+    contract_type: Optional[str] = Field(
+        None, max_length=20, pattern=r"^(BSP|MSAP|MSIP|PMU)$",
+        description="Optional. Derived from the project when omitted.",
+    )
     formula_type: str = Field(
         ...,
         pattern=r"^(band_accumulation|point_accumulation|fixed_escalation|wac)$",
@@ -503,11 +509,16 @@ class SlaFromRfpRequest(BaseModel):
                          description='RFP "SLA number", e.g. "PMU-SLA004".')
     title: str = Field(..., min_length=1, max_length=500,
                        description='Title shown above the RFP table.')
-    project_id: Optional[str] = Field(
-        None, max_length=36,
-        description='UUID of the project (PMC contract) that owns this SLA.',
+    project_id: str = Field(
+        ..., max_length=36,
+        description='UUID of the project (from pmis-project-management) that '
+                    'owns this SLA. Required.',
     )
-    contract_type: str = Field(..., max_length=20, pattern=r"^(BSP|MSAP|MSIP|PMU)$")
+    # contract_type is now optional. Derived from the project when omitted.
+    contract_type: Optional[str] = Field(
+        None, max_length=20, pattern=r"^(BSP|MSAP|MSIP|PMU)$",
+        description="Optional. Derived from the project when omitted.",
+    )
     category_code: str = Field(..., max_length=50,
                                description='Code from sla_category_master (decides the engine).')
 

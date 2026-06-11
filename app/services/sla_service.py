@@ -409,9 +409,13 @@ class SlaService:
                 ))
 
         # 4. Hand the translated payload to the existing onboarding path.
+        # contract_type is now optional on the wire — if the caller omitted
+        # it, pass None and let the row store NULL. (Future: derive from
+        # the project via pmis-project-management.)
         full = SlaOnboardRequest(
             sla_ref=payload.sla_ref,
             title=payload.title,
+            project_id=payload.project_id,
             contract_type=payload.contract_type,
             formula_type=formula_type,
             description=payload.definition,
@@ -571,8 +575,12 @@ class SlaService:
                 code="duplicate_sla_ref",
             )
 
-        # Duplicate check 1 — same title in same contract_type
-        if self.repo.find_by_title_and_contract_type(payload.contract_type, payload.title) is not None:
+        # Duplicate check 1 — same title in same contract_type. Skipped
+        # when contract_type is None (project-scoped flow); duplicate
+        # protection there comes from the sla_ref uniqueness check above.
+        if payload.contract_type and self.repo.find_by_title_and_contract_type(
+            payload.contract_type, payload.title,
+        ) is not None:
             raise ConflictError(
                 f"An SLA with title '{payload.title}' already exists for contract_type '{payload.contract_type}'",
                 code="duplicate_sla_title",

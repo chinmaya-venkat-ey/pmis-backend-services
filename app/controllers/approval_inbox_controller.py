@@ -33,6 +33,9 @@ class ApprovalInboxController:
     def get_detail(self, request: Request, business_id: str) -> InboxDetailResponse:
         return self.service.get_detail(request, business_id)
 
+    def sync(self, request: Request, business_id: str) -> InboxDetailResponse:
+        return self.service.sync(request, business_id)
+
     def transition(
         self,
         request: Request,

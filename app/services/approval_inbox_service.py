@@ -138,6 +138,32 @@ class ApprovalInboxService:
         self._authorize_detail(ctx, tracker, effective_role)
         return self._build_detail(ctx, tracker, effective_role)
 
+    def sync(
+        self, request: Request, business_id: str,
+    ) -> InboxDetailResponse:
+        """Reconcile PMIS with the Java workflow's authoritative state for a
+        single activity and return the refreshed detail view.
+
+        This is the endpoint the FE calls right after it drives a workflow
+        action in the Java service — notably the owner's final APPROVE. It
+        finalizes (completes the activity, then rolls the milestone up when
+        all its activities are done) when, and ONLY when, the workflow has
+        reached its terminal (owner-approved) state. On any non-terminal
+        state it just refreshes the cached state and returns. Safe to call
+        at any point; idempotent. Authorisation matches the detail read
+        (reviewer / owner / approvals-moderator).
+        """
+        ctx = self._caller_context(request)
+        tracker = self.tracker_repo.get(business_id)
+        if tracker is None:
+            raise NotFoundError(
+                f"Approval inbox item {business_id} not found",
+                code="not_found",
+            )
+        effective_role = self._derive_role_for_target(ctx, tracker)
+        self._authorize_detail(ctx, tracker, effective_role)
+        return self._build_detail(ctx, tracker, effective_role)
+
     def transition(
         self, request: Request, business_id: str, payload: TransitionRequest,
     ) -> InboxDetailResponse:
@@ -226,12 +252,11 @@ class ApprovalInboxService:
                 process_instance_id=process_instance_id,
                 actor_user_id=ctx.user_id,
             )
-        # Mirror final-stage owner APPROVE onto the activity row so its
-        # status reflects the workflow outcome (idempotent — the rollup
-        # cascade may already have set it).
+        # Final-stage owner APPROVE → complete the activity AND roll the
+        # milestone up (idempotent — the read/sync path may also finalize).
         if (action == wfs.ACTION_APPROVE
                 and prev_state == wfs.STATE_PENDING_OWNER):
-            self._mark_activity_completed(tracker.activity_id, ctx.user_id)
+            self._finalize_completion(tracker, actor_user_id=ctx.user_id)
         self.db.commit()
 
         # ── notification dispatch (best-effort, post-commit) ──
@@ -252,18 +277,14 @@ class ApprovalInboxService:
     ) -> InboxDetailResponse:
         activity, milestone, project, vendor = self._hydrate_pmis_context(tracker)
         history = self._fetch_history_safe(tracker.business_id)
-        # In real mode, re-sync the local cache from Java's history. In
-        # mock mode the local tracker is authoritative (the synthetic
-        # history is stale relative to whatever the test wrote directly).
-        if self.client.mode == "real":
-            current_state = self._resolve_current_state(
-                history, tracker.current_state,
-            )
-            if current_state and current_state != tracker.current_state:
-                self.tracker_repo.update_state(tracker, current_state=current_state)
-                self.db.commit()
-        else:
-            current_state = tracker.current_state
+        # Re-sync the local cache from Java's authoritative history and,
+        # when the workflow has reached its terminal (owner-approved) state,
+        # finalize the activity + roll the milestone up. Idempotent — a
+        # no-op when nothing changed or the activity is already completed.
+        current_state = self._sync_state_from_java(
+            tracker, history, actor_user_id=ctx.user_id,
+        )
+        self.db.commit()
         submission = self._build_submission(history)
         division_decisions = self._build_division_decisions(tracker, history)
         owner_decision = self._build_owner_decision(history)
@@ -521,6 +542,38 @@ class ApprovalInboxService:
         action = (last.get("action") or "").upper()
         resolved = wfs.next_state(prev, action)
         return resolved or fallback
+
+    def _sync_state_from_java(
+        self,
+        tracker: ActivityWorkflowTracker,
+        history: List[dict],
+        *,
+        actor_user_id: Optional[str] = None,
+    ) -> str:
+        """Reconcile the local tracker with Java's authoritative state and,
+        when the workflow has reached its terminal (owner-approved) state,
+        finalize the activity + milestone roll-up.
+
+        Does NOT commit — the caller owns the transaction boundary.
+
+        In real mode the resolved state comes from Java's ``_search``
+        history; in mock mode the local tracker stays authoritative (the
+        synthetic history would otherwise clobber test-/proxy-written
+        state). The finalize gate (``is_terminal_workflow_state``) is applied
+        in BOTH modes so the transition-proxy path and the explicit sync
+        path behave identically. Returns the resolved current state.
+        """
+        if self.client.mode == "real":
+            current_state = self._resolve_current_state(
+                history, tracker.current_state,
+            )
+            if current_state and current_state != tracker.current_state:
+                self.tracker_repo.update_state(tracker, current_state=current_state)
+        else:
+            current_state = tracker.current_state
+        if wfs.is_terminal_workflow_state(current_state):
+            self._finalize_completion(tracker, actor_user_id=actor_user_id)
+        return current_state
 
     @staticmethod
     def _build_submission(history: List[dict]) -> _Submission:
@@ -865,15 +918,26 @@ class ApprovalInboxService:
             return None
         return instances[0].get("id") or None
 
-    def _mark_activity_completed(
-        self, activity_id: str, actor_user_id: Optional[str],
+    def _finalize_completion(
+        self, tracker: ActivityWorkflowTracker,
+        *, actor_user_id: Optional[str] = None,
     ) -> None:
-        activity = self.db.get(Activity, activity_id)
+        """Complete the PMIS activity + roll the milestone up when the
+        approval workflow has reached its terminal (owner-approved) state.
+
+        Delegates to ``ActivityService.complete_from_workflow`` so the
+        status flip, audit row, and milestone/project roll-up all reuse the
+        canonical cascade rather than being re-implemented here. Idempotent
+        and best-effort — a no-op when the activity is already completed,
+        deleted, or missing.
+        """
+        from app.services.activity_service import ActivityService
+        activity = self.db.get(Activity, tracker.activity_id)
         if activity is None or activity.deleted_at is not None:
             return
-        if not is_terminal_status(activity.status):
-            activity.status = "completed"
-            activity.updated_by = actor_user_id
+        ActivityService(self.db).complete_from_workflow(
+            activity, caller_user_id=actor_user_id,
+        )
 
     # ── notification dispatch ────────────────────────────────────────────
 

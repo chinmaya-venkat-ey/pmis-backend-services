@@ -33,7 +33,30 @@ STATE_PENDING_CONCERNED = "PENDINGATCONCERNEDDIVISION"
 STATE_PENDING_OWNER = "PENDINGATOWNERDIVISION"
 STATE_APPROVED = "APPROVED"
 STATE_COMPLETED = "COMPLETED"  # alias some DIGIT installs use
+# Terminal state the live Java service actually emits once the owner gives
+# the final approval (verified in the Java source — its terminate state is
+# ``ACTIVITYCOMPLETED``). Treated as a synonym of STATE_APPROVED everywhere
+# the workflow is considered "done".
+STATE_ACTIVITY_COMPLETED = "ACTIVITYCOMPLETED"
 STATE_REJECTED = "REJECTED"
+
+
+# Workflow states that mean "the approval is finished and the activity is
+# approved" — i.e. the owner gave the final APPROVE. ``is_terminal_workflow_state``
+# is the single gate the inbox service uses to decide when to mark the PMIS
+# activity completed and roll the milestone up. Keep REJECTED OUT of this set:
+# a rejection is terminal-for-this-round but must NOT complete the activity.
+_TERMINAL_WORKFLOW_STATES: frozenset = frozenset({
+    STATE_APPROVED, STATE_COMPLETED, STATE_ACTIVITY_COMPLETED,
+})
+
+
+def is_terminal_workflow_state(state: str) -> bool:
+    """True when ``state`` is a workflow state that represents a fully
+    approved (owner-approved) activity. This is the ONLY signal the inbox
+    finalize path keys off — concerned-division approval lands at
+    ``PENDINGATOWNERDIVISION`` (not in this set), so it never finalizes."""
+    return (state or "").upper() in _TERMINAL_WORKFLOW_STATES
 
 
 # ── Action verbs ───────────────────────────────────────────────────────────
@@ -54,6 +77,7 @@ _STATE_TO_PILL: Dict[str, str] = {
     STATE_PENDING_OWNER: "pending",
     STATE_APPROVED: "approved",
     STATE_COMPLETED: "approved",
+    STATE_ACTIVITY_COMPLETED: "approved",
     STATE_REJECTED: "rejected",
 }
 

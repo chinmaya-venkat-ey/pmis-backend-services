@@ -102,6 +102,36 @@ def get_inbox_detail(
 
 
 @router.post(
+    "/{business_id}/_sync",
+    response_model=InboxDetailResponse,
+    summary="Reconcile the activity's workflow state from the Java service",
+    description=(
+        "Pulls the authoritative workflow state for ``business_id`` (the "
+        "activity UUID) from the Activity Workflow Java service and "
+        "refreshes the local tracker. When — and only when — the workflow "
+        "has reached its terminal **owner-approved** state "
+        "(``ACTIVITYCOMPLETED``), this finalizes the PMIS side: the "
+        "activity is marked completed and, if every activity under its "
+        "milestone is now completed, the milestone auto-completes (and "
+        "cascades to the project).\n\n"
+        "On any non-terminal state it simply refreshes the cached state. "
+        "Safe to call after any workflow action; idempotent. Intended to be "
+        "called by the FE right after the owner's final approval succeeds "
+        "in the Java service. Returns the same shape as the detail GET."
+    ),
+    dependencies=[Depends(require_authenticated())],
+)
+def sync_inbox(
+    request: Request,
+    business_id: str,
+    controller: Annotated[
+        ApprovalInboxController, Depends(get_approval_inbox_controller),
+    ],
+):
+    return controller.sync(request, business_id)
+
+
+@router.post(
     "/{business_id}/_transition",
     response_model=InboxDetailResponse,
     summary="Move the activity through the approval workflow",

@@ -745,6 +745,48 @@ class ActivityService:
                 triggering_child_id=row.id,
             )
 
+    def complete_from_workflow(
+        self, row, *, caller_user_id: Optional[str],
+    ) -> bool:
+        """Mark this activity completed because its *approval workflow*
+        reached the terminal (owner-approved) state, then cascade the
+        completion up to the milestone (and project) via the canonical
+        roll-up.
+
+        Distinct from ``_attempt_auto_complete``: that path is driven by a
+        child task finishing and therefore gates on "every live task is
+        terminal" (and no-ops when the activity has no tasks). Workflow
+        completion is driven by the owner's approval instead — the
+        workflow's own SUBMIT pre-check (``approval_inbox_service.
+        _assert_activity_ready_for_submit``) already enforced that tasks
+        were done, and an activity with zero tasks must still complete. So
+        this marks the activity completed regardless of task presence, then
+        reuses ``_cascade_to_parent`` so the milestone auto-completes when
+        all its live activities are now terminal.
+
+        Idempotent and best-effort. Returns True when it flipped the status,
+        False when the activity was already terminal / deleted / missing.
+        """
+        if row is None or getattr(row, "deleted_at", None) is not None:
+            return False
+        if is_terminal_status(row.status):
+            return False
+        before = row.status
+        self.repo.update(row, status="completed", updated_by=caller_user_id)
+        self.audit.write(
+            project_id=row.project_id,
+            target_kind="activity", target_id=row.id,
+            action="auto_complete", actor_user_id=caller_user_id,
+            changes={
+                "status": {"before": before, "after": "completed"},
+                # Distinguishes a workflow-driven completion from a
+                # child-task-driven one (which records ``by_child``).
+                "by_workflow": True,
+            },
+        )
+        self._cascade_to_parent(row, caller_user_id=caller_user_id)
+        return True
+
     # --------------------------------------- reverse cascade (Q9) ---------
 
     def _cascade_revert_from_new_child(

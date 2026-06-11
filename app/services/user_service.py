@@ -363,6 +363,21 @@ class UserService:
                              "allowed": allowed},
                 )
 
+        # #246/#254: org-tier roles (org_admin) bind to the user's VENDOR, not
+        # globally. Resolve the org scope once; admin/super_admin stay global
+        # (scope_org_id stays None). A vendor-scoped role on a vendor-less user
+        # is rejected — there is nothing to scope it to.
+        from app.core.permissions import ORG_SCOPED_ROLE_NAMES
+        scope_org_id = None
+        if normalized in ORG_SCOPED_ROLE_NAMES:
+            scope_org_id = getattr(target, "vendor_id", None)
+            if not scope_org_id:
+                raise ValidationError(
+                    f"Role {normalized!r} is vendor-scoped; the user must have a "
+                    f"vendor_id. Set vendor_id before assigning {normalized!r}.",
+                    details={"field": "org_role", "value": normalized},
+                )
+
         # Last-super-admin lockout: target currently is super_admin (via any
         # path) and the new value isn't super_admin → refuse.
         if normalized != SUPER_ADMIN_ROLE and self._is_only_super_admin(target.id):
@@ -377,26 +392,29 @@ class UserService:
             ra_service = RoleAssignmentService(self.db)
             ra_service._assert_caller_can_grant(
                 role_name=normalized,
-                organization_id=None,
+                organization_id=scope_org_id,
                 project_id=None,
                 caller_user_id=caller_user_id,
                 caller_is_admin=caller_is_admin,
             )
 
-        # Delete every globally-scoped builtin-role assignment the target
-        # currently holds. Scoped assignments (org_id / project_id set) are
-        # NOT touched — those represent per-project membership and live
-        # independently. Non-builtin (custom) roles are also untouched so
-        # things like `test_role` aren't accidentally swept.
+        # Delete the target's current ORG-TIER builtin assignment before
+        # writing the new one. The org tier is identified by project_id IS NULL
+        # — either GLOBAL (admin/super_admin, organization_id NULL) or
+        # VENDOR-scoped (org_admin, organization_id set). Project-scoped rows
+        # (project_id set) are per-project membership and are left untouched.
+        # Non-builtin (custom) roles are also untouched so things like
+        # `test_role` aren't accidentally swept.
         ra_repo = UserRoleAssignmentRepository(self.db)
         existing_pairs = ra_repo.list_by_user(target.id)
         for assignment, role in existing_pairs:
-            is_global = assignment.organization_id is None and assignment.project_id is None
-            if is_global and getattr(role, "builtin", False):
+            is_org_tier = assignment.project_id is None and getattr(role, "builtin", False)
+            if is_org_tier:
                 ra_repo.delete(assignment)
 
-        # Insert the new globally-scoped assignment for the requested tier
-        # (skip when clearing).
+        # Insert the new org-tier assignment for the requested tier — GLOBAL
+        # for admin/super_admin (scope_org_id is None), VENDOR-scoped for
+        # org_admin (scope_org_id = the user's vendor). Skip when clearing.
         if normalized is not None:
             new_role = self.rbac.get_role_by_name(normalized)
             if new_role is None:
@@ -411,7 +429,7 @@ class UserService:
             ra_repo.create(
                 user_id=target.id,
                 role_id=new_role.id,
-                organization_id=None,
+                organization_id=scope_org_id,
                 project_id=None,
                 created_by_user_id=caller_user_id,
             )

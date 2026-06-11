@@ -580,6 +580,17 @@ PROJECT_ONLY_ROLE_NAMES: Final[frozenset[str]] = frozenset({
 })
 
 
+# #246/#254 (org_admin scoping): org-tier roles bind to the user's VENDOR
+# (organization_id = the user's vendor_id), not globally. This moves their
+# permissions into the ("org", vendor) scope bucket so the Round-7
+# vendor->project projection scopes them to that vendor's projects, and
+# /authz/users can discover them by vendor. admin / super_admin remain GLOBAL
+# (they are in LOCKED_ROLE_NAMES and must never be vendor-scoped).
+ORG_SCOPED_ROLE_NAMES: Final[frozenset[str]] = frozenset({
+    ORG_ADMIN_ROLE,
+})
+
+
 # 2026-06-02: ORG_TIER_ROLES tuple removed. Validation of valid org_role
 # names is now DB-driven: `_sync_org_role_assignment` checks the target
 # value against `SELECT name FROM users.roles WHERE builtin = TRUE` so

@@ -366,6 +366,12 @@ class SlaDefinitionResponse(BaseModel):
     effective_until: Optional[date] = None
     project_id: Optional[str] = None
     placeholders: List[SlaPlaceholderInput] = Field(default_factory=list)
+    # Image attachments are eagerly embedded so the list / detail responses
+    # carry everything the FE needs to render the gallery in one
+    # round-trip. Cached download URLs may expire — call the per-attachment
+    # refresh-url endpoint to mint a new one. Forward reference avoids a
+    # circular import with the attachment schemas.
+    attachments: List["SlaAttachmentResponse"] = Field(default_factory=list)
     dsl_version: int
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
@@ -436,6 +442,11 @@ class SlaRfpViewResponse(BaseModel):
 
     # Mapping-time variables
     placeholders: List[SlaPlaceholderInput] = Field(default_factory=list)
+
+    # Image attachments — eagerly embedded so the View modal can render
+    # the gallery without a second round-trip. Cached URLs may expire;
+    # call the per-attachment refresh-url endpoint to mint a new one.
+    attachments: List["SlaAttachmentResponse"] = Field(default_factory=list)
 
     # Audit
     created_at: Optional[datetime] = None
@@ -651,3 +662,18 @@ class SlaFromRfpRequest(BaseModel):
     # rows declare it once on the template; the mapping form renders the
     # right input automatically.
     placeholders: List[SlaPlaceholderInput] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Forward-reference resolution
+# ---------------------------------------------------------------------------
+# SlaAttachmentResponse lives in a sibling module to avoid a top-level
+# circular import. Pull it in here and rebuild the response models that
+# reference it via string so Pydantic can finalise their schemas.
+
+from app.schemas.sla_attachment import SlaAttachmentResponse  # noqa: E402
+
+SlaDefinitionResponse.model_rebuild()
+SlaRfpViewResponse.model_rebuild()
+SlaDetailResponse.model_rebuild()
+SlaOnboardResponse.model_rebuild()

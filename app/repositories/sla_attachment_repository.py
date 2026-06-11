@@ -78,3 +78,30 @@ class SlaAttachmentRepository:
             )
         )
         return int(self.db.execute(stmt).scalar() or 0)
+
+    def list_grouped_by_sla(
+        self, sla_ids: List[str],
+    ) -> dict[str, List[SlaAttachment]]:
+        """Batch-fetch live attachments for many SLAs in one round-trip.
+
+        Used by the list endpoint to embed attachments without firing a
+        per-row SELECT. Returns a dict mapping ``sla_id`` to its list of
+        attachments (oldest-first so the FE renders left-to-right in the
+        order the user uploaded). SLAs with zero attachments aren't in
+        the dict — the caller defaults to an empty list.
+        """
+        if not sla_ids:
+            return {}
+        stmt = (
+            select(SlaAttachment)
+            .where(
+                SlaAttachment.sla_id.in_(sla_ids),
+                SlaAttachment.deleted_at.is_(None),
+            )
+            .order_by(SlaAttachment.sla_id, SlaAttachment.uploaded_at)
+        )
+        rows = list(self.db.execute(stmt).scalars().all())
+        out: dict[str, List[SlaAttachment]] = {}
+        for row in rows:
+            out.setdefault(row.sla_id, []).append(row)
+        return out

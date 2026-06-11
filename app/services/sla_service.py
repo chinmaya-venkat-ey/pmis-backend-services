@@ -240,8 +240,50 @@ class SlaService:
         self.db = db
         self.repo = SlaRepository(db)
         self.master_repo = MasterRepository(db)
+        # Lazy-init the attachment repo so the import only happens when
+        # the service is instantiated (keeps the top-of-file import block
+        # small and side-effect-free).
+        from app.repositories.sla_attachment_repository import (
+            SlaAttachmentRepository,
+        )
+        self.attachment_repo = SlaAttachmentRepository(db)
 
     # ---------------------------------------------------------------- helpers
+
+    def _attachments_for_one(self, sla_id: str) -> list:
+        """Pull live attachments for a single SLA and convert to response shape."""
+        from app.schemas.sla_attachment import SlaAttachmentResponse
+        rows = self.attachment_repo.list_for_sla(sla_id)
+        return [
+            SlaAttachmentResponse(
+                id=r.id, sla_id=r.sla_id, file_id=r.file_id, file_url=r.file_url,
+                original_filename=r.original_filename, mime_type=r.mime_type,
+                size_bytes=r.size_bytes, caption=r.caption,
+                uploaded_by=r.uploaded_by, uploaded_at=r.uploaded_at,
+            )
+            for r in rows
+        ]
+
+    def _attachments_for_many(self, sla_ids: List[str]) -> dict:
+        """Batch-fetch attachments for many SLAs in one DB round-trip.
+
+        Returns a dict keyed by sla_id with values already in response shape;
+        SLAs with no live attachments aren't in the dict.
+        """
+        from app.schemas.sla_attachment import SlaAttachmentResponse
+        grouped = self.attachment_repo.list_grouped_by_sla(sla_ids)
+        return {
+            sid: [
+                SlaAttachmentResponse(
+                    id=r.id, sla_id=r.sla_id, file_id=r.file_id, file_url=r.file_url,
+                    original_filename=r.original_filename, mime_type=r.mime_type,
+                    size_bytes=r.size_bytes, caption=r.caption,
+                    uploaded_by=r.uploaded_by, uploaded_at=r.uploaded_at,
+                )
+                for r in rows
+            ]
+            for sid, rows in grouped.items()
+        }
 
     def _build_detail(
         self,
@@ -758,6 +800,12 @@ class SlaService:
             project_id=project_id,
         )
         items = [self._build_flat(defn, ft) for defn, ft in rows]
+        # Embed live attachments in one batch query so the FE list / gallery
+        # renders straight from this response (no N+1 follow-ups).
+        if items:
+            atts = self._attachments_for_many([i.id for i in items])
+            for it in items:
+                it.attachments = atts.get(it.id, [])
         return items, total
 
     # ---------------------------------------------------------------- get detail
@@ -773,7 +821,9 @@ class SlaService:
         lookup_rows = self.repo.list_lookup_rows(sla_id)
         guards = self.repo.list_guards(sla_id)
         ft = formula.formula_type if formula else ""
-        return self._build_detail(defn, ft, metrics, params, bands, lookup_rows, guards)
+        resp = self._build_detail(defn, ft, metrics, params, bands, lookup_rows, guards)
+        resp.attachments = self._attachments_for_one(sla_id)
+        return resp
 
     # ---------------------------------------------------------------- RFP-friendly view
 
@@ -896,6 +946,7 @@ class SlaService:
             target_rows=target_rows,
             linear_escalation=linear_escalation,
             placeholders=placeholders,
+            attachments=self._attachments_for_one(sla_id),
             created_at=defn.created_at,
             updated_at=defn.updated_at,
         )

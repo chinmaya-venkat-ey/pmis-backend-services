@@ -892,11 +892,21 @@ class SlaService:
         # Stash gives us the exact rate / unit / grace the user typed.
         # Reverse-engineering from the expanded lookup_table is lossy
         # (we lose the "unit" choice), so we only do it when there's no
-        # stash.
+        # stash. Tolerate two stash shapes: the canonical one with
+        # ``rate_per_unit_percent`` (post-fix) and the legacy
+        # ``rate_percent`` field name (pre-fix). The latter rides on a
+        # handful of SLAs onboarded before this method existed.
         linear_escalation = None
         if stash.get("linear_escalation"):
-            linear_escalation = SlaSimpleLinearEscalation(**stash["linear_escalation"])
-        elif lookup_rows:
+            le = dict(stash["linear_escalation"])
+            if "rate_percent" in le and "rate_per_unit_percent" not in le:
+                le["rate_per_unit_percent"] = le.pop("rate_percent")
+            try:
+                linear_escalation = SlaSimpleLinearEscalation(**le)
+            except Exception:
+                # Legacy / malformed stash — fall back to lookup-table derivation.
+                linear_escalation = None
+        if linear_escalation is None and lookup_rows:
             sorted_rows = sorted(lookup_rows, key=lambda x: x.sort_order or 0)
             # Find first non-zero row → tells us grace count + the rate.
             rate = None
@@ -909,9 +919,14 @@ class SlaService:
                         rate = r.lookup_value - (sorted_rows[idx - 1].lookup_value or 0)
                         grace = idx - (1 if (sorted_rows[idx - 1].lookup_value or 0) == 0 else 0)
                     break
-            if rate is not None:
+            # The SlaSimpleLinearEscalation schema constrains rate to
+            # (0, 10] %. Real PMU rates are 0.1–1%, so any reverse-engineered
+            # value outside that band means we can't faithfully express the
+            # SLA as "linear escalation" — return None and let the FE fall
+            # back to showing the verbose lookup table instead.
+            if rate is not None and 0 < rate <= 10:
                 linear_escalation = SlaSimpleLinearEscalation(
-                    rate_percent=rate, unit="week", grace_units=grace,
+                    rate_per_unit_percent=rate, unit="week", grace_units=grace,
                     max_units=max(len(sorted_rows) - 1, 1),
                 )
 

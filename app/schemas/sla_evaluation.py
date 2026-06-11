@@ -86,6 +86,80 @@ class MappingEvaluationRequest(BaseModel):
     metric_observations: List[MetricObservation] = Field(default_factory=list)
 
 
+class SimpleEvaluationRequest(BaseModel):
+    """Caller-friendly single-SLA evaluation body.
+
+    No metric_key, no observation `shape` field, no mapping_id. The backend
+    looks up the active mapping by ``(activity_id, sla_ref)``, reads the
+    SLA's primary metric, and translates ``value`` to the right internal
+    observation shape:
+
+      * number   → SINGLE_VALUE
+      * list     → DAILY_VALUES
+      * dict     → BAND_COUNTS (for severity-banded SLAs) or
+                   WAC_BREAKDOWN (for wac SLAs)
+
+    Most callers fill in only ``value``; period defaults to the activity's
+    own date range when omitted.
+    """
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "period_start": "2026-04-01",
+                "period_end": "2026-06-30",
+                "value": 2,
+            }
+        }
+    }
+    period_start: Optional[date] = Field(
+        None, description="Defaults to the activity's planned start date.",
+    )
+    period_end: Optional[date] = Field(
+        None, description="Defaults to the activity's planned end date.",
+    )
+    value: Any = Field(
+        ...,
+        description="Observation value. Pass a number for one-shot SLAs "
+                    "(e.g. 'replacements_per_quarter'), a list of numbers "
+                    "for daily-reading SLAs, or a dict for band-counts / "
+                    "wac SLAs.",
+    )
+
+
+class BulkEvaluationRequest(BaseModel):
+    """Evaluate every SLA attached to an activity in one request.
+
+    ``observations`` is a flat map keyed by SLA ref (e.g. ``PMU-SLA005``).
+    Each value follows the same simple-shape rules as
+    ``SimpleEvaluationRequest.value`` — number, list, or dict — and the
+    backend translates each one into the right internal observation shape.
+
+    SLAs that are mapped to the activity but absent from ``observations``
+    are evaluated against stored observations (stubbed in this phase) and
+    skipped if none exist.
+    """
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "period_start": "2026-04-01",
+                "period_end": "2026-06-30",
+                "observations": {
+                    "PMU-SLA005": 2,
+                    "PMU-SLA006": 22,
+                    "PMU-SLA007": {"bd_per_month": 16, "hrs_per_month": 144},
+                },
+            }
+        }
+    }
+    period_start: Optional[date] = None
+    period_end: Optional[date] = None
+    observations: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Map of sla_ref → observation value. See "
+                    "SimpleEvaluationRequest.value for the per-SLA shape.",
+    )
+
+
 class ActivityEvaluationRequest(BaseModel):
     """Evaluate severity across every active SLA mapping on an activity.
 

@@ -41,7 +41,9 @@ from app.schemas.sla_activity_mapping import (
 )
 from app.schemas.sla_evaluation import (
     ActivityEvaluationRequest,
+    BulkEvaluationRequest,
     MappingEvaluationRequest,
+    SimpleEvaluationRequest,
 )
 
 router = APIRouter(tags=["SLA Activity Mappings"])
@@ -239,6 +241,87 @@ def evaluate_activity(
             "ActivityEvaluation",
             result.model_dump(),
             self_link=f"/api/v3/activities/{activity_id}/evaluate",
+        ),
+        status=200,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Caller-friendly evaluation: keyed by sla_ref instead of mapping_id, with
+# a one-field observation body that the backend infers the shape from.
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/activities/{activity_id}/sla-evaluate/{sla_ref}",
+    summary="Evaluate the severity of one SLA on this activity (sla_ref keyed)",
+    description=(
+        "The non-technical companion to "
+        "POST /sla-activity-mappings/{mapping_id}/evaluate. The caller "
+        "supplies the human-readable SLA ref (e.g. ``PMU-SLA005``) and a "
+        "single ``value`` (number, list, or dict). The backend looks up "
+        "the active mapping, reads the SLA's primary metric, and picks "
+        "the right observation shape automatically — so the caller "
+        "never has to think about metric_key / shape / "
+        "single_value-vs-daily_values."
+    ),
+    responses=with_examples(
+        (200, "Severity result.", RESP_MAPPING_EVALUATE),
+        (404, "No active mapping for that sla_ref on this activity.", RESP_NOT_FOUND),
+        (422, "Value shape doesn't match the SLA's formula.", RESP_VALIDATION_FAIL),
+    ),
+)
+def evaluate_by_sla_ref(
+    activity_id: str,
+    sla_ref: str,
+    payload: SimpleEvaluationRequest,
+    ctrl: SlaActivityMappingController = Depends(get_sla_activity_mapping_controller),
+    bearer_token: Optional[str] = Depends(get_bearer_token),
+):
+    result = ctrl.evaluate_by_sla_ref(
+        activity_id, sla_ref, payload, bearer_token=bearer_token,
+    )
+    return api_response(
+        data=hal_resource(
+            "MappingEvaluation",
+            result.model_dump(),
+            self_link=f"/api/v3/activities/{activity_id}/sla-evaluate/{sla_ref}",
+        ),
+        status=200,
+    )
+
+
+@router.post(
+    "/activities/{activity_id}/sla-evaluate",
+    summary="Evaluate every SLA on this activity (sla_ref-keyed observations)",
+    description=(
+        "Bulk evaluation. The body's ``observations`` is a flat map "
+        "``{sla_ref: value}`` where each ``value`` is a number, list, or "
+        "dict (same rules as the single-SLA endpoint). SLAs that are "
+        "attached to the activity but missing from ``observations`` are "
+        "evaluated against stored observations (stubbed in this phase) "
+        "and skipped if none exist. Use this when you want one round-trip "
+        "to score everything attached to an activity at quarter-close time."
+    ),
+    responses=with_examples(
+        (200, "Per-mapping severity results + severity_breakdown summary.",
+         RESP_ACTIVITY_EVALUATE),
+        (422, "Value shape doesn't match the SLA's formula.", RESP_VALIDATION_FAIL),
+    ),
+)
+def evaluate_activity_bulk(
+    activity_id: str,
+    payload: BulkEvaluationRequest,
+    ctrl: SlaActivityMappingController = Depends(get_sla_activity_mapping_controller),
+    bearer_token: Optional[str] = Depends(get_bearer_token),
+):
+    result = ctrl.evaluate_activity_bulk(
+        activity_id, payload, bearer_token=bearer_token,
+    )
+    return api_response(
+        data=hal_resource(
+            "ActivityEvaluation",
+            result.model_dump(),
+            self_link=f"/api/v3/activities/{activity_id}/sla-evaluate",
         ),
         status=200,
     )

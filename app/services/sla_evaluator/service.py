@@ -29,6 +29,8 @@ from app.repositories.sla_repository import SlaRepository
 from app.schemas.sla_evaluation import (
     ActivityEvaluationRequest,
     ActivityEvaluationResponse,
+    BulkEvaluationRequest,
+    SimpleEvaluationRequest,
     MappingEvaluationRequest,
     MappingEvaluationResponse,
     MetricObservation,
@@ -157,6 +159,183 @@ class SlaEvaluatorService:
                 "severity_master_source": scoring["severity_master_source"],
             },
         )
+
+    # ------------------------------------------------------------------ simple evaluation
+
+    def evaluate_by_sla_ref(
+        self,
+        activity_id: str,
+        sla_ref: str,
+        payload: SimpleEvaluationRequest,
+        bearer_token: Optional[str] = None,
+    ) -> MappingEvaluationResponse:
+        """Single-SLA evaluation keyed by ``(activity_id, sla_ref)``.
+
+        Looks up the mapping, infers the observation shape from the SLA's
+        primary metric + formula, then delegates to the existing engine.
+        """
+        loaded = self.mapping_repo.find_by_activity_and_sla_ref(
+            activity_id, sla_ref, active_only=True,
+        )
+        if loaded is None:
+            raise NotFoundError(
+                f"No active mapping for SLA '{sla_ref}' on activity "
+                f"'{activity_id}'. Attach the SLA to the activity first.",
+                code="mapping_not_found",
+            )
+        mapping, sla, formula_type = loaded
+        if formula_type is None:
+            raise ValidationError(
+                f"SLA '{sla.sla_ref}' has no formula_type resolved.",
+                code="formula_missing",
+            )
+
+        # Build a one-item list of MetricObservation so the existing engine
+        # can be reused without changes. The translator pulls the SLA's
+        # primary metric_key + formula_type and picks the right shape.
+        observations = [self._translate_simple_value(sla, formula_type, payload.value)]
+
+        scoring = self._resolve_project_scoring(mapping.activity_id, bearer_token)
+        return self._evaluate(
+            mapping=mapping,
+            sla=sla,
+            formula_type=formula_type,
+            period_start=payload.period_start,
+            period_end=payload.period_end,
+            observations=observations,
+            scoring=scoring,
+        )
+
+    def evaluate_activity_bulk(
+        self,
+        activity_id: str,
+        payload: BulkEvaluationRequest,
+        bearer_token: Optional[str] = None,
+    ) -> ActivityEvaluationResponse:
+        """Multi-SLA evaluation keyed by ``sla_ref`` instead of metric_key/shape.
+
+        The simple body (``{"PMU-SLA005": 2, "PMU-SLA007": {...}}``) is
+        translated per-SLA into a list of MetricObservation and the
+        existing per-activity engine runs unchanged.
+        """
+        # Reuse the full-fan-out path; we just translate the simple
+        # observations dict into the engine-shaped one first.
+        translated: Dict[str, List[MetricObservation]] = {}
+        rows = self.mapping_repo.list_for_activity(activity_id, active_only=True)
+        sla_by_ref = {sla.sla_ref: (sla, ft) for (_m, sla, ft) in rows}
+        for sla_ref, value in (payload.observations or {}).items():
+            entry = sla_by_ref.get(sla_ref)
+            if entry is None:
+                # Unknown sla_ref — silently skip; the engine will record a
+                # "no observations" note when it hits the mapping.
+                continue
+            sla, ft = entry
+            translated[sla_ref] = [self._translate_simple_value(sla, ft, value)]
+
+        engine_payload = ActivityEvaluationRequest(
+            period_start=payload.period_start,
+            period_end=payload.period_end,
+            observations_by_sla_ref=translated,
+        )
+        return self.evaluate_activity(
+            activity_id, engine_payload, bearer_token=bearer_token,
+        )
+
+    # Maps formula_type → the natural MetricObservation.shape when the
+    # caller hands us a plain number. The bulk path uses the same map.
+    _SHAPE_FOR_NUMBER = {
+        "point_accumulation": "SINGLE_VALUE",
+        "band_accumulation":  "DAILY_VALUES",  # caller almost never passes 1 number here
+        "fixed_escalation":   "SINGLE_VALUE",
+        "wac":                "SINGLE_VALUE",  # caller should send a dict
+    }
+
+    def _translate_simple_value(
+        self,
+        sla: SlaDefinition,
+        formula_type: str,
+        value: Any,
+    ) -> MetricObservation:
+        """Pick the right MetricObservation shape from the value's Python type.
+
+        Rules
+        -----
+        * number (int/float/str-number)  → SINGLE_VALUE
+        * list of numbers                → DAILY_VALUES
+        * dict                           → BAND_COUNTS (default) or
+                                           WAC_BREAKDOWN (when formula_type='wac')
+
+        The metric_key is resolved from the SLA's primary metric so the
+        caller never has to know it.
+        """
+        primary = self._primary_metric_key(sla)
+        if primary is None:
+            raise ValidationError(
+                f"SLA '{sla.sla_ref}' has no primary metric defined.",
+                code="primary_metric_missing",
+            )
+
+        if isinstance(value, list):
+            try:
+                daily = [Decimal(str(v)) for v in value]
+            except (ValueError, ArithmeticError) as exc:
+                raise ValidationError(
+                    f"Daily values for '{sla.sla_ref}' must be numbers: {exc}",
+                    code="invalid_daily_values",
+                ) from exc
+            return MetricObservation(
+                metric_key=primary, shape="DAILY_VALUES", daily_values=daily,
+            )
+
+        if isinstance(value, dict):
+            shape = "WAC_BREAKDOWN" if formula_type == "wac" else "BAND_COUNTS"
+            if shape == "WAC_BREAKDOWN":
+                try:
+                    wac = {k: Decimal(str(v)) for k, v in value.items()}
+                except (ValueError, ArithmeticError) as exc:
+                    raise ValidationError(
+                        f"WAC breakdown values must be numbers: {exc}",
+                        code="invalid_wac_breakdown",
+                    ) from exc
+                return MetricObservation(
+                    metric_key=primary, shape="WAC_BREAKDOWN", wac_breakdown=wac,
+                )
+            try:
+                counts = {k: int(v) for k, v in value.items()}
+            except (ValueError, TypeError) as exc:
+                raise ValidationError(
+                    f"Band counts must be integer values: {exc}",
+                    code="invalid_band_counts",
+                ) from exc
+            return MetricObservation(
+                metric_key=primary, shape="BAND_COUNTS", band_counts=counts,
+            )
+
+        # Scalar: number-ish. Numbers, numeric strings, even True/False
+        # (which we treat as 1/0 since that's what the engine expects).
+        try:
+            single = Decimal(str(value))
+        except (ValueError, ArithmeticError) as exc:
+            raise ValidationError(
+                f"Expected number / list / dict for SLA '{sla.sla_ref}', "
+                f"got {type(value).__name__}: {exc}",
+                code="invalid_observation_value",
+            ) from exc
+        return MetricObservation(
+            metric_key=primary, shape="SINGLE_VALUE", single_value=single,
+        )
+
+    def _primary_metric_key(self, sla: SlaDefinition) -> Optional[str]:
+        """Look up the SLA's primary metric_key via the repo.
+
+        Falls back to the first metric if none is flagged is_primary —
+        most PMU SLAs only have one metric anyway.
+        """
+        metrics = self.sla_repo.list_metrics(sla.id)
+        if not metrics:
+            return None
+        primary = next((m for m in metrics if m.is_primary), None) or metrics[0]
+        return primary.metric_key
 
     # ------------------------------------------------------------------ project scoring
 

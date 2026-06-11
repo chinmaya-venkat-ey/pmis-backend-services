@@ -14,8 +14,10 @@ from app.schemas.sla_activity_mapping import (
 from app.schemas.sla_evaluation import (
     ActivityEvaluationRequest,
     ActivityEvaluationResponse,
+    BulkEvaluationRequest,
     MappingEvaluationRequest,
     MappingEvaluationResponse,
+    SimpleEvaluationRequest,
 )
 from app.services.sla_activity_mapping_service import SlaActivityMappingService
 from app.services.sla_evaluator import SlaEvaluatorService
@@ -81,5 +83,28 @@ class SlaActivityMappingController:
         bearer_token: Optional[str] = None,
     ) -> ActivityEvaluationResponse:
         return self.evaluator.evaluate_activity(
+            activity_id, payload, bearer_token=bearer_token,
+        )
+
+    # ----------------------------------------------- simple (sla_ref-keyed) evaluation
+
+    def evaluate_by_sla_ref(
+        self,
+        activity_id: str,
+        sla_ref: str,
+        payload: SimpleEvaluationRequest,
+        bearer_token: Optional[str] = None,
+    ) -> MappingEvaluationResponse:
+        return self.evaluator.evaluate_by_sla_ref(
+            activity_id, sla_ref, payload, bearer_token=bearer_token,
+        )
+
+    def evaluate_activity_bulk(
+        self,
+        activity_id: str,
+        payload: BulkEvaluationRequest,
+        bearer_token: Optional[str] = None,
+    ) -> ActivityEvaluationResponse:
+        return self.evaluator.evaluate_activity_bulk(
             activity_id, payload, bearer_token=bearer_token,
         )

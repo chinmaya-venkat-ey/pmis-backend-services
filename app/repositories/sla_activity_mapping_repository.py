@@ -51,6 +51,40 @@ class SlaActivityMappingRepository:
             )
         ).scalar_one_or_none()
 
+    def find_by_activity_and_sla_ref(
+        self,
+        activity_id: str,
+        sla_ref: str,
+        *,
+        active_only: bool = True,
+    ) -> Optional[Tuple[SlaActivityMapping, SlaDefinition, Optional[str]]]:
+        """Look up a single (activity, SLA) mapping by the human-readable
+        ``sla_ref`` instead of the internal ``mapping_id``.
+
+        Used by the simple-evaluation endpoints so callers can say
+        "PMU-SLA005" instead of remembering an opaque UUID. When more
+        than one ACTIVE mapping exists for the same (activity, SLA) —
+        which shouldn't happen given the unique constraint but is
+        possible across effective_from dates — the most-recently
+        effective row wins.
+        """
+        stmt = (
+            select(SlaActivityMapping, SlaDefinition, FormulaLibrary.formula_type)
+            .join(SlaDefinition, SlaActivityMapping.sla_id == SlaDefinition.id)
+            .join(FormulaLibrary, SlaDefinition.formula_id == FormulaLibrary.id, isouter=True)
+            .where(
+                SlaActivityMapping.activity_id == activity_id,
+                SlaDefinition.sla_ref == sla_ref,
+                SlaDefinition.status != "DELETED",
+            )
+            .order_by(SlaActivityMapping.effective_from.desc())
+            .limit(1)
+        )
+        if active_only:
+            stmt = stmt.where(SlaActivityMapping.status == "ACTIVE")
+        row = self.db.execute(stmt).first()
+        return None if row is None else (row[0], row[1], row[2])
+
     def list_for_activity(
         self,
         activity_id: str,

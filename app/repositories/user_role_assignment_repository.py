@@ -185,6 +185,36 @@ class UserRoleAssignmentRepository:
             out[p.id] = p
         return sorted(out.values(), key=lambda p: (p.name or ""))
 
+    def list_projects_for_users(self, user_ids: List[str]) -> dict:
+        """Per-page batch of :meth:`list_projects_for_user` — one query per
+        source (direct + vendor-projection) for ALL ``user_ids``, grouped by
+        user_id, each list deduped + sorted identically. Avoids the N+1 in the
+        user-list response."""
+        out: dict = {uid: {} for uid in user_ids}
+        if not user_ids:
+            return out
+        # (a) direct project grants
+        for uid, p in self.db.execute(
+            select(UserRoleAssignment.user_id, Project)
+            .select_from(Project)
+            .join(UserRoleAssignment, UserRoleAssignment.project_id == Project.id)
+            .where(UserRoleAssignment.user_id.in_(user_ids))
+            .where(Project.deleted_at.is_(None))
+        ).all():
+            out[uid][p.id] = p
+        # (b) vendor-scope projection (any role at vendor scope)
+        for uid, p in self.db.execute(
+            select(UserRoleAssignment.user_id, Project)
+            .select_from(Project)
+            .join(ProjectVendor, ProjectVendor.project_id == Project.id)
+            .join(UserRoleAssignment, UserRoleAssignment.organization_id == ProjectVendor.vendor_id)
+            .where(UserRoleAssignment.user_id.in_(user_ids))
+            .where(UserRoleAssignment.project_id.is_(None))
+            .where(Project.deleted_at.is_(None))
+        ).all():
+            out[uid][p.id] = p
+        return {uid: sorted(d.values(), key=lambda p: (p.name or "")) for uid, d in out.items()}
+
     def list_projects_for_vendor(self, vendor_id: str) -> List[Project]:
         """Mirror of masters-svc's same-named query, scoped here for the
         /user/vendors/{vid}/projects/list endpoint."""

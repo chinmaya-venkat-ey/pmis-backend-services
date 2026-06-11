@@ -123,6 +123,50 @@ class UserController:
         # bug: name-less users showed their login as the full name).
         return UserResponse.model_validate(data)
 
+    def _build_user_responses(self, users) -> List[UserResponse]:
+        """Per-PAGE batched build for the list endpoint. Produces output
+        IDENTICAL to ``_build_user_response`` per user, but loads admin-flags,
+        org_roles, projects, and vendor/division labels ONCE for the whole
+        page (keyed by user_id) instead of per-row — killing the GET /users
+        N+1 (~6 queries/user -> ~8 queries/page). Single-user paths keep using
+        ``_build_user_response``.
+        """
+        if not users:
+            return []
+        db = self.user_service.db
+        uids = [u.id for u in users]
+        admin_ids = self.rbac.users_with_admin_role(uids)
+        super_ids = self.rbac.super_admin_user_ids(uids)
+        vids = {u.vendor_id for u in users if getattr(u, "vendor_id", None)}
+        vendor_names = dict(db.execute(
+            select(Vendor.id, Vendor.name).where(Vendor.id.in_(vids))
+        ).all()) if vids else {}
+        dcodes = {u.division for u in users if getattr(u, "division", None)}
+        div_labels = dict(db.execute(
+            select(Division.code, Division.label).where(Division.code.in_(dcodes))
+        ).all()) if dcodes else {}
+        org_roles = self.rbac.builtin_role_assignments_for_users(uids)
+        projects_by_user = self.assignments.list_projects_for_users(uids)
+
+        out: List[UserResponse] = []
+        for user in users:
+            data = {
+                col: getattr(user, col)
+                for col in user.__class__.__table__.columns.keys()
+                if hasattr(user, col)
+            }
+            data["is_admin"] = user.id in admin_ids
+            data["is_super_admin"] = user.id in super_ids
+            data["vendor_name"] = vendor_names.get(user.vendor_id) if data.get("vendor_id") else None
+            data["division_label"] = div_labels.get(user.division) if data.get("division") else None
+            data["org_role"] = org_roles.get(user.id, [])
+            data["projects"] = [
+                UserProjectSummary.model_validate(p)
+                for p in projects_by_user.get(user.id, [])
+            ]
+            out.append(UserResponse.model_validate(data))
+        return out
+
     # ------------------------------------------------------------------ list / get
 
     def list_(self, *, offset, page_size, status, include_deleted, caller_vendor_id, caller_is_admin, caller_can_see_all=False):
@@ -133,7 +177,7 @@ class UserController:
             caller_can_see_all=caller_can_see_all,
         )
         return {
-            "items": [self._build_user_response(r) for r in rows],
+            "items": self._build_user_responses(rows),
             "total": total,
             "offset": offset,
             "pageSize": page_size,

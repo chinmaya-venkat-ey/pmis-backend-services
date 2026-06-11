@@ -579,6 +579,140 @@ class RbacRepository:
         )
         return self.db.execute(stmt_scoped).first() is not None
 
+    # ------------------------------------------------------------------ batched (per-page) variants for the user LIST (kill the N+1)
+
+    def builtin_role_assignments_for_users(
+        self, user_ids: List[str],
+    ) -> Dict[str, List[Dict[str, Optional[object]]]]:
+        """Per-page batch of :meth:`builtin_role_assignments_for_user`.
+
+        One scoped query + one legacy query for ALL ``user_ids``, one
+        project_code resolution, grouped by user_id. Each user's list is
+        deduped and sorted identically to the single-user method, so the list
+        response matches the detail response exactly.
+        """
+        out: Dict[str, List[Dict[str, Optional[object]]]] = {uid: [] for uid in user_ids}
+        if not user_ids:
+            return out
+        seen: Dict[str, set] = {uid: set() for uid in user_ids}
+
+        # scoped tier FIRST (wins on collisions; carries assignment_id)
+        for uid, role_name, role_id, org_id, project_id, ass_id, created_at, created_by in self.db.execute(
+            select(
+                UserRoleAssignment.user_id,
+                Role.name, Role.id,
+                UserRoleAssignment.organization_id, UserRoleAssignment.project_id,
+                UserRoleAssignment.id, UserRoleAssignment.created_at, UserRoleAssignment.created_by,
+            )
+            .join(UserRoleAssignment, UserRoleAssignment.role_id == Role.id)
+            .where(UserRoleAssignment.user_id.in_(user_ids))
+            .where(Role.builtin.is_(True))
+        ).all():
+            if org_id is None and project_id is None:
+                scope = "global"
+            elif org_id is not None:
+                scope = "org"
+            else:
+                scope = "project"
+            key = (role_name, scope, org_id, project_id)
+            if key in seen[uid]:
+                continue
+            seen[uid].add(key)
+            out[uid].append({
+                "role_name": role_name, "role_id": role_id, "scope": scope,
+                "organization_id": org_id, "project_id": project_id,
+                "project_code": None, "assignment_id": ass_id,
+                "created_at": created_at, "created_by": created_by,
+            })
+
+        # legacy global tier
+        for uid, role_name, role_id, created_at, created_by in self.db.execute(
+            select(UserRole.user_id, Role.name, Role.id, UserRole.created_at, UserRole.created_by)
+            .join(UserRole, UserRole.role_id == Role.id)
+            .where(UserRole.user_id.in_(user_ids))
+            .where(Role.builtin.is_(True))
+        ).all():
+            key = (role_name, "global", None, None)
+            if key in seen[uid]:
+                continue
+            seen[uid].add(key)
+            out[uid].append({
+                "role_name": role_name, "role_id": role_id, "scope": "global",
+                "organization_id": None, "project_id": None, "project_code": None,
+                "assignment_id": None, "created_at": created_at, "created_by": created_by,
+            })
+
+        # resolve project_code for every project-scoped row in ONE query
+        project_ids = {
+            o["project_id"] for lst in out.values() for o in lst
+            if o["scope"] == "project" and o["project_id"]
+        }
+        if project_ids:
+            from app.models._cross_schema import Project as ProjectMirror
+            code_by_id = dict(self.db.execute(
+                select(ProjectMirror.id, ProjectMirror.project_code)
+                .where(ProjectMirror.id.in_(project_ids))
+            ).all())
+            for lst in out.values():
+                for entry in lst:
+                    if entry["scope"] == "project" and entry["project_id"]:
+                        entry["project_code"] = code_by_id.get(entry["project_id"])
+
+        for lst in out.values():
+            lst.sort(key=lambda e: (
+                e["role_name"], e["scope"],
+                e["organization_id"] or "", e["project_id"] or "",
+            ))
+        return out
+
+    def users_with_admin_role(self, user_ids: List[str]) -> set:
+        """Subset of ``user_ids`` holding admin/super_admin GLOBALLY — batched
+        :meth:`user_has_admin_role` (legacy any-scope; scoped global-only)."""
+        result: set = set()
+        if not user_ids:
+            return result
+        for (uid,) in self.db.execute(
+            select(UserRole.user_id)
+            .join(Role, Role.id == UserRole.role_id)
+            .where(UserRole.user_id.in_(user_ids))
+            .where(Role.name.in_(_ADMIN_ROLE_NAMES))
+        ).all():
+            result.add(uid)
+        for (uid,) in self.db.execute(
+            select(UserRoleAssignment.user_id)
+            .join(Role, Role.id == UserRoleAssignment.role_id)
+            .where(UserRoleAssignment.user_id.in_(user_ids))
+            .where(Role.name.in_(_ADMIN_ROLE_NAMES))
+            .where(UserRoleAssignment.organization_id.is_(None))
+            .where(UserRoleAssignment.project_id.is_(None))
+        ).all():
+            result.add(uid)
+        return result
+
+    def super_admin_user_ids(self, user_ids: List[str]) -> set:
+        """Subset of ``user_ids`` holding super_admin via either tier (any
+        scope) — batched of the controller's ``_is_super_admin``."""
+        from app.core.permissions import SUPER_ADMIN_ROLE
+        result: set = set()
+        if not user_ids:
+            return result
+        role = self.get_role_by_name(SUPER_ADMIN_ROLE)
+        if role is None:
+            return result
+        for (uid,) in self.db.execute(
+            select(UserRole.user_id)
+            .where(UserRole.user_id.in_(user_ids))
+            .where(UserRole.role_id == role.id)
+        ).all():
+            result.add(uid)
+        for (uid,) in self.db.execute(
+            select(UserRoleAssignment.user_id)
+            .where(UserRoleAssignment.user_id.in_(user_ids))
+            .where(UserRoleAssignment.role_id == role.id)
+        ).all():
+            result.add(uid)
+        return result
+
     # ------------------------------------------------------------------ revoked tokens
 
     def is_revoked(self, jti: str) -> bool:

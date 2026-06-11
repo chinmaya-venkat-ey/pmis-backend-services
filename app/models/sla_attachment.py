@@ -46,8 +46,11 @@ class SlaAttachment(Base):
         ),
         nullable=False,
     )
-    # Canonical handle from pmis-file-store. Used for refresh-url + delete.
-    file_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    # Canonical handle for the file. With pmis-file-store this is a bare
+    # UUID; with the NFS / local-disk fallback it's the storage key
+    # ``sla-attachments/{uuid}-{filename}`` which can easily exceed 36
+    # chars. Migration 0018 widened the column to 500 to fit both.
+    file_id: Mapped[str] = mapped_column(String(500), nullable=False)
     # Cached download URL. Returned as-is on list; refreshed via the
     # POST /attachments/{id}/refresh-url endpoint when it expires.
     file_url: Mapped[str] = mapped_column(Text, nullable=False)

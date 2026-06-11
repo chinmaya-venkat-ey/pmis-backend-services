@@ -13,7 +13,7 @@ Endpoints:
 """
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, Query
 
@@ -192,6 +192,101 @@ def list_sla_categories(ctrl: MasterController = Depends(get_master_controller))
             self_link=f"/api/v3/sla-categories/{r.code}",
         )
         for r in items
+    ]
+    return api_response(
+        data=hal_collection(elements, total=len(elements), page_size=len(elements) or 1),
+        status=200,
+    )
+
+
+# ---------------------------------------------------------------------------
+# /sla-input-variables — catalog of measurement keys (metric_keys + data fields)
+# used by the onboarding form to populate the "input variable" dropdown
+# on each severity-threshold row.
+#
+# Sources:
+#   1. Every primary/secondary metric_key on any non-deleted SLA in
+#      contract.sla_definitions (this is the "what we've actually used
+#      so far" set — grows as new SLAs onboard).
+#   2. contract.data_field_master rows (the curated catalog — extend
+#      via PATCH /data-fields/{name} or direct SQL).
+#
+# Returns a deduped list. The FE shows it as a dropdown plus a free-
+# text input for "+ new variable" so unfamiliar measurements can be
+# typed directly; they get added to source #1 automatically the next
+# time the SLA is onboarded.
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/sla-input-variables",
+    summary="Catalog of input variables (metric_keys) for the SLA onboarding form",
+    description=(
+        "Returns every distinct measurement key seen across the SLA "
+        "catalogue plus every active data-field in the masters table. "
+        "The FE renders this as the per-row 'input variable' dropdown "
+        "on the SLA-onboarding modal's Target sub-table. New variables "
+        "appear automatically as soon as the first SLA using them is "
+        "onboarded — no admin step needed."
+    ),
+)
+def list_sla_input_variables(
+    ctrl: MasterController = Depends(get_master_controller),
+):
+    from sqlalchemy import select
+    from app.models.sla_definition import SlaDefinition
+    from app.models.sla_metric import SlaMetric
+
+    seen: Dict[str, Dict[str, Any]] = {}
+
+    # Source 1 — every metric on every live SLA. Joined to get the
+    # SLA's category + sla_ref so the FE can show "Used by: PMU-SLA005,
+    # PMU-SLA007" next to each entry.
+    metric_rows = ctrl.db.execute(
+        select(
+            SlaMetric.metric_key, SlaMetric.display_name, SlaMetric.unit,
+            SlaMetric.is_primary, SlaDefinition.sla_ref, SlaDefinition.category,
+        )
+        .join(SlaDefinition, SlaMetric.sla_id == SlaDefinition.id)
+        .where(SlaDefinition.status != "DELETED")
+        .order_by(SlaMetric.metric_key)
+    ).all()
+    for mkey, display, unit, primary, sla_ref, category in metric_rows:
+        if not mkey:
+            continue
+        entry = seen.setdefault(mkey, {
+            "key": mkey,
+            "label": display or mkey,
+            "unit": unit or None,
+            "source": "sla",
+            "used_by": [],
+            "categories": [],
+        })
+        if sla_ref and sla_ref not in entry["used_by"]:
+            entry["used_by"].append(sla_ref)
+        if category and category not in entry["categories"]:
+            entry["categories"].append(category)
+
+    # Source 2 — curated master entries (extends the catalog with
+    # variables we haven't onboarded an SLA for yet).
+    for df in ctrl.list_data_fields():
+        if df.field_name in seen:
+            continue
+        seen[df.field_name] = {
+            "key": df.field_name,
+            "label": df.display_name or df.field_name,
+            "unit": df.unit or None,
+            "source": "data_field",
+            "used_by": [],
+            "categories": [],
+        }
+
+    items = sorted(seen.values(), key=lambda x: x["label"].lower())
+    elements = [
+        hal_resource(
+            "SlaInputVariable", item,
+            self_link=f"/api/v3/sla-input-variables/{item['key']}",
+        )
+        for item in items
     ]
     return api_response(
         data=hal_collection(elements, total=len(elements), page_size=len(elements) or 1),

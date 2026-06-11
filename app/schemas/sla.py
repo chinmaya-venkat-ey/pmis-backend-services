@@ -499,6 +499,11 @@ class SlaSimpleTargetRow(BaseModel):
     The user fills in the RFP's exact wording in ``threshold_label`` (e.g.
     "1 occurrence", ">= 16 business days") and the numeric bounds the
     evaluator should use to decide which row a measurement lands in.
+
+    For multi-metric SLAs (PMU-SLA007's BD + hours) each row carries its
+    own ``input_variable`` — the metric_key it guards. When omitted the
+    row falls back to the SLA's primary measurement, which is the
+    correct default for single-metric SLAs (PMU-SLA005 et al).
     """
     severity: int = Field(..., ge=0, le=4,
                           description='Severity level the row corresponds to (RFP §5.28.1.a).')
@@ -511,6 +516,12 @@ class SlaSimpleTargetRow(BaseModel):
     )
     to_value: Optional[Decimal] = Field(
         None, description='Upper bound (inclusive). Leave null for "no upper bound".',
+    )
+    input_variable: Optional[str] = Field(
+        None, max_length=100,
+        description='metric_key this row guards. Omit to use the SLA\'s primary '
+                    'measurement (the common case). Set per-row for multi-metric '
+                    'SLAs where different bands check different variables.',
     )
 
 

@@ -27,6 +27,9 @@ from app.services.master_service import MasterService
 class MasterController:
     def __init__(self, db: Session):
         self.service = MasterService(db)
+        # Exposed for direct SQL access from a small number of "join across
+        # several tables to build a catalog" endpoints (sla-input-variables).
+        self.db = db
 
     def list_contract_types(self) -> List[ContractTypeResponse]:
         return [ContractTypeResponse.model_validate(r) for r in self.service.list_contract_types()]

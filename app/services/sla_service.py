@@ -425,14 +425,27 @@ class SlaService:
         condition_bands: List = []
         lookup_table: List = []
         if payload.target_rows:
+            # Build metric_key → unit map so each band gets the right unit.
+            # Primary measurement covers the single-metric case; secondary
+            # covers PMU-SLA007-style BD + hours.
+            unit_by_metric = {primary_key: payload.measurement.unit or None}
+            if payload.secondary_measurement:
+                # _slug is the nested helper defined a few lines above.
+                unit_by_metric[_slug(payload.secondary_measurement.display_name)] = (
+                    payload.secondary_measurement.unit or None
+                )
             for idx, row in enumerate(payload.target_rows):
+                # Per-row input_variable lets multi-metric SLAs assign each
+                # band to its own metric. When omitted we use the SLA's
+                # primary measurement (the common case).
+                row_metric = row.input_variable or primary_key
                 condition_bands.append(SlaConditionBandInput(
-                    metric_key=primary_key,
+                    metric_key=row_metric,
                     band_label=row.threshold_label
                         or f"L{row.severity} {_band_default_label(row)}",
                     range_min=row.from_value,
                     range_max=row.to_value,
-                    range_unit=payload.measurement.unit or None,
+                    range_unit=unit_by_metric.get(row_metric) or payload.measurement.unit or None,
                     severity_level=row.severity,
                     sort_order=idx + 1,
                 ))

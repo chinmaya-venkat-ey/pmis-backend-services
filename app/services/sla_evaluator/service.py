@@ -196,10 +196,11 @@ class SlaEvaluatorService:
                 code="formula_missing",
             )
 
-        # Build a one-item list of MetricObservation so the existing engine
-        # can be reused without changes. The translator pulls the SLA's
-        # primary metric_key + formula_type and picks the right shape.
-        observations = [self._translate_simple_value(sla, formula_type, payload.value)]
+        # The translator returns a *list* — one MetricObservation for
+        # single-metric SLAs, N for multi-metric SLAs (e.g. PMU-SLA007
+        # where the dict {bd:16, hrs:144} yields one SINGLE_VALUE per
+        # metric so the engine evaluates both metrics' bands).
+        observations = self._translate_simple_value(sla, formula_type, payload.value)
 
         scoring = self._resolve_project_scoring(mapping.activity_id, bearer_token)
         return self._evaluate(
@@ -236,7 +237,9 @@ class SlaEvaluatorService:
                 # "no observations" note when it hits the mapping.
                 continue
             sla, ft = entry
-            translated[sla_ref] = [self._translate_simple_value(sla, ft, value)]
+            # Translator returns a list — spread it directly. Multi-metric
+            # SLAs produce one observation per metric.
+            translated[sla_ref] = self._translate_simple_value(sla, ft, value)
 
         engine_payload = ActivityEvaluationRequest(
             period_start=payload.period_start,
@@ -261,19 +264,24 @@ class SlaEvaluatorService:
         sla: SlaDefinition,
         formula_type: str,
         value: Any,
-    ) -> MetricObservation:
-        """Pick the right MetricObservation shape from the value's Python type.
+    ) -> List[MetricObservation]:
+        """Translate a caller-friendly value into 1+ MetricObservations.
 
-        Rules
-        -----
-        * number (int/float/str-number)  → SINGLE_VALUE
-        * list of numbers                → DAILY_VALUES
-        * dict                           → BAND_COUNTS (default) or
-                                           WAC_BREAKDOWN (when formula_type='wac')
+        Rules:
+          * number (int/float/str-number)  → 1 × SINGLE_VALUE on the primary metric
+          * list of numbers                → 1 × DAILY_VALUES on the primary metric
+          * dict with WAC keys (wac SLAs)  → 1 × WAC_BREAKDOWN on the primary metric
+          * dict whose keys match metric_keys (multi-metric SLAs)
+                                           → N × SINGLE_VALUE, one per metric
+          * dict otherwise                 → 1 × BAND_COUNTS on the primary metric
+                                             (legacy "days per band label" path)
 
-        The metric_key is resolved from the SLA's primary metric so the
-        caller never has to know it.
+        Returns a list so the multi-metric case can produce one observation
+        per metric — required for SLAs like PMU-SLA007 that gate Sev 0 on
+        BD AND hours both meeting target.
         """
+        metrics = self.sla_repo.list_metrics(sla.id)
+        metric_keys = {m.metric_key for m in metrics if m.metric_key}
         primary = self._primary_metric_key(sla)
         if primary is None:
             raise ValidationError(
@@ -289,13 +297,12 @@ class SlaEvaluatorService:
                     f"Daily values for '{sla.sla_ref}' must be numbers: {exc}",
                     code="invalid_daily_values",
                 ) from exc
-            return MetricObservation(
+            return [MetricObservation(
                 metric_key=primary, shape="DAILY_VALUES", daily_values=daily,
-            )
+            )]
 
         if isinstance(value, dict):
-            shape = "WAC_BREAKDOWN" if formula_type == "wac" else "BAND_COUNTS"
-            if shape == "WAC_BREAKDOWN":
+            if formula_type == "wac":
                 try:
                     wac = {k: Decimal(str(v)) for k, v in value.items()}
                 except (ValueError, ArithmeticError) as exc:
@@ -303,9 +310,30 @@ class SlaEvaluatorService:
                         f"WAC breakdown values must be numbers: {exc}",
                         code="invalid_wac_breakdown",
                     ) from exc
-                return MetricObservation(
+                return [MetricObservation(
                     metric_key=primary, shape="WAC_BREAKDOWN", wac_breakdown=wac,
-                )
+                )]
+
+            # Multi-metric case: every dict key is a known metric_key on
+            # this SLA. Emit one SINGLE_VALUE observation per metric so
+            # the engine evaluates the bands declared on each one.
+            if metric_keys and set(value.keys()).issubset(metric_keys):
+                obs_list: List[MetricObservation] = []
+                for mkey, mval in value.items():
+                    try:
+                        n = Decimal(str(mval))
+                    except (ValueError, ArithmeticError) as exc:
+                        raise ValidationError(
+                            f"Value for metric '{mkey}' on SLA "
+                            f"'{sla.sla_ref}' must be a number: {exc}",
+                            code="invalid_metric_value",
+                        ) from exc
+                    obs_list.append(MetricObservation(
+                        metric_key=mkey, shape="SINGLE_VALUE", single_value=n,
+                    ))
+                return obs_list
+
+            # Legacy "days per band label" dict — counts integer per band.
             try:
                 counts = {k: int(v) for k, v in value.items()}
             except (ValueError, TypeError) as exc:
@@ -313,12 +341,11 @@ class SlaEvaluatorService:
                     f"Band counts must be integer values: {exc}",
                     code="invalid_band_counts",
                 ) from exc
-            return MetricObservation(
+            return [MetricObservation(
                 metric_key=primary, shape="BAND_COUNTS", band_counts=counts,
-            )
+            )]
 
-        # Scalar: number-ish. Numbers, numeric strings, even True/False
-        # (which we treat as 1/0 since that's what the engine expects).
+        # Scalar: number-ish.
         try:
             single = Decimal(str(value))
         except (ValueError, ArithmeticError) as exc:
@@ -327,9 +354,9 @@ class SlaEvaluatorService:
                 f"got {type(value).__name__}: {exc}",
                 code="invalid_observation_value",
             ) from exc
-        return MetricObservation(
+        return [MetricObservation(
             metric_key=primary, shape="SINGLE_VALUE", single_value=single,
-        )
+        )]
 
     # ------------------------------------------------------------------ mapping form schema
 

@@ -380,6 +380,68 @@ class SlaDetailResponse(SlaDefinitionResponse):
     guard_conditions: List[SlaGuardConditionResponse] = Field(default_factory=list)
 
 
+class SlaRfpViewResponse(BaseModel):
+    """RFP-friendly view of a stored SLA.
+
+    What the operator sees on ``GET /sla-masters/{id}`` is the same
+    shape they originally filled in on the onboarding form — no
+    metric_key / sort_order / range_min / formula_type. Technical
+    fields used by the severity engine live on the separate
+    ``GET /sla-masters/{id}/parsed`` endpoint.
+
+    Legacy field names (``description``, ``scope_text``,
+    ``calculation_method``, ``ld_computation_base``) are preserved so the
+    existing FE renderers continue to work; the RFP-friendly aliases
+    (``definition``, ``scope``, ``calculation``, ``applied_on``) ride
+    alongside them.
+    """
+    # Identification
+    id: str
+    sla_ref: str
+    title: str
+    project_id: Optional[str] = None
+    contract_type: Optional[str] = None
+    category: Optional[str] = None
+    status: str
+
+    # RFP text rows — legacy names kept for FE compat + RFP-friendly aliases
+    description: Optional[str] = None    # original onboarding name
+    definition: Optional[str] = None     # RFP "Definition of SLA"
+    scope_text: Optional[str] = None
+    scope: Optional[str] = None
+    data_source: Optional[str] = None
+    calculation_method: Optional[str] = None
+    calculation: Optional[str] = None
+    reports_submitted_to: Optional[str] = None
+
+    # Cadence (both names)
+    measurement_interval: str
+    reporting_interval: str
+    ld_computation_base: str
+    applied_on: str
+
+    # Lifetime
+    effective_from: date
+    effective_until: Optional[date] = None
+
+    # What is measured — derived from primary / secondary metric
+    measurement: Optional[SlaSimpleMeasurement] = None
+    secondary_measurement: Optional[SlaSimpleMeasurement] = None
+
+    # Severity threshold table — derived from condition_bands
+    target_rows: List[SlaSimpleTargetRow] = Field(default_factory=list)
+
+    # Linear LD escalation — derived from lookup_table or stashed onboarding metadata
+    linear_escalation: Optional[SlaSimpleLinearEscalation] = None
+
+    # Mapping-time variables
+    placeholders: List[SlaPlaceholderInput] = Field(default_factory=list)
+
+    # Audit
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
 class SlaOnboardResponse(SlaDetailResponse):
     """Returned only from POST /sla-masters — includes similar_slas warning list."""
     similar_slas: List[SlaDefinitionResponse] = Field(

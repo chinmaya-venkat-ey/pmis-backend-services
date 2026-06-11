@@ -51,7 +51,15 @@ class SlaController:
         )
 
     def get(self, sla_id: str) -> SlaDetailResponse:
+        # Power-user / debug path — full parsed sub-tables. Reachable via
+        # GET /sla-masters/{id}/parsed.
         return self.service.get_detail(sla_id)
+
+    def get_rfp_view(self, sla_id: str):
+        # Default user-facing path — RFP-friendly shape (no metric_key,
+        # no sort_order, no formula_type). Reachable via
+        # GET /sla-masters/{id}.
+        return self.service.get_rfp_view(sla_id)
 
     def get_dsl(self, sla_id: str) -> SlaDslResponse:
         return self.service.get_dsl(sla_id)

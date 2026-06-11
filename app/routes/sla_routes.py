@@ -195,9 +195,16 @@ def list_slas(
 
 @router.get(
     "/sla-masters/{sla_id}",
-    summary="Get full SLA master detail",
+    summary="Get the SLA in the RFP-friendly shape it was onboarded with",
+    description=(
+        "Returns the operator-facing view: identification, RFP text rows, "
+        "cadence, target rows, measurement, placeholders. **No** "
+        "metric_key / sort_order / formula_type / range_min — those live "
+        "on the dedicated `GET /sla-masters/{id}/parsed` endpoint, which is "
+        "what the severity evaluator consumes."
+    ),
     responses=with_examples(
-        (200, "SLA detail with metrics / bands / placeholders.", RESP_SLA_DETAIL),
+        (200, "RFP-friendly SLA view.", RESP_SLA_DETAIL),
         (404, "SLA not found.", RESP_NOT_FOUND),
     ),
 )
@@ -205,12 +212,46 @@ def get_sla(
     sla_id: str,
     ctrl: SlaController = Depends(get_sla_controller),
 ):
-    result = ctrl.get(sla_id)
+    result = ctrl.get_rfp_view(sla_id)
     return api_response(
         data=hal_resource(
             "SlaMaster",
             result.model_dump(),
             self_link=f"{_BASE}/{sla_id}",
+            extra_links=_sla_links(sla_id),
+        ),
+        status=200,
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /sla-masters/{id}/parsed
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/sla-masters/{sla_id}/parsed",
+    summary="Get the technical (severity-engine) parsed view of an SLA",
+    description=(
+        "Returns the SLA with every internal sub-table the severity "
+        "evaluator consumes: metrics, parameters, condition_bands, "
+        "lookup_table, guard_conditions. **Not for end users** — they "
+        "should call `GET /sla-masters/{id}` for the RFP-friendly view."
+    ),
+    responses=with_examples(
+        (200, "Full technical SLA detail (severity-engine shape).", RESP_SLA_DETAIL),
+        (404, "SLA not found.", RESP_NOT_FOUND),
+    ),
+)
+def get_sla_parsed(
+    sla_id: str,
+    ctrl: SlaController = Depends(get_sla_controller),
+):
+    result = ctrl.get(sla_id)
+    return api_response(
+        data=hal_resource(
+            "SlaMasterParsed",
+            result.model_dump(),
+            self_link=f"{_BASE}/{sla_id}/parsed",
             extra_links=_sla_links(sla_id),
         ),
         status=200,

@@ -412,6 +412,12 @@ class SlaService:
         # contract_type is now optional on the wire — if the caller omitted
         # it, pass None and let the row store NULL. (Future: derive from
         # the project via pmis-project-management.)
+        #
+        # We also stash the lossless RFP-form snapshot in metadata so the
+        # ``GET /sla-masters/{id}`` endpoint can return exactly what the
+        # operator typed in instead of reverse-engineering it from the
+        # technical sub-tables.
+        rfp_snapshot = payload.model_dump(mode="json")
         full = SlaOnboardRequest(
             sla_ref=payload.sla_ref,
             title=payload.title,
@@ -432,6 +438,8 @@ class SlaService:
             metrics=metrics,
             condition_bands=condition_bands,
             lookup_table=lookup_table,
+            placeholders=payload.placeholders,
+            metadata={"rfp_form": rfp_snapshot},
         )
         return self.create_from_form(full, created_by=created_by)
 
@@ -766,6 +774,131 @@ class SlaService:
         guards = self.repo.list_guards(sla_id)
         ft = formula.formula_type if formula else ""
         return self._build_detail(defn, ft, metrics, params, bands, lookup_rows, guards)
+
+    # ---------------------------------------------------------------- RFP-friendly view
+
+    def get_rfp_view(self, sla_id: str):
+        """Build the operator-facing view of an SLA.
+
+        Pulls the RFP-form snapshot stashed at onboarding when available,
+        otherwise reverse-engineers the same shape from the technical
+        sub-tables. Either way the response carries no metric_key /
+        sort_order / range_min — those live on GET /{id}/parsed.
+        """
+        from app.schemas.sla import (
+            SlaRfpViewResponse,
+            SlaSimpleLinearEscalation,
+            SlaSimpleMeasurement,
+            SlaSimpleTargetRow,
+        )
+
+        defn = self.repo.get_by_id(sla_id)
+        if defn is None:
+            raise NotFoundError(f"SLA '{sla_id}' not found")
+
+        metrics = self.repo.list_metrics(sla_id)
+        bands = self.repo.list_bands(sla_id)
+        lookup_rows = self.repo.list_lookup_rows(sla_id)
+        stash = (defn.metadata_ or {}).get("rfp_form") or {}
+
+        # ── measurement / secondary_measurement ──
+        # Stash wins if present (it carries the exact strings the user
+        # typed); otherwise pluck from the primary / secondary metric.
+        measurement = None
+        if stash.get("measurement"):
+            measurement = SlaSimpleMeasurement(**stash["measurement"])
+        else:
+            primary = next((m for m in metrics if m.is_primary), None) or (metrics[0] if metrics else None)
+            if primary:
+                measurement = SlaSimpleMeasurement(
+                    display_name=primary.display_name or primary.metric_key,
+                    unit=primary.unit,
+                )
+        secondary_measurement = None
+        if stash.get("secondary_measurement"):
+            secondary_measurement = SlaSimpleMeasurement(**stash["secondary_measurement"])
+        else:
+            secondaries = [m for m in metrics if not m.is_primary]
+            if secondaries:
+                secondary_measurement = SlaSimpleMeasurement(
+                    display_name=secondaries[0].display_name or secondaries[0].metric_key,
+                    unit=secondaries[0].unit,
+                )
+
+        # ── target_rows ──
+        target_rows: List = []
+        if stash.get("target_rows"):
+            target_rows = [SlaSimpleTargetRow(**r) for r in stash["target_rows"]]
+        elif bands:
+            for b in sorted(bands, key=lambda x: x.sort_order or 0):
+                target_rows.append(SlaSimpleTargetRow(
+                    severity=b.severity_level,
+                    threshold_label=b.band_label or "",
+                    from_value=str(b.range_min) if b.range_min is not None else None,
+                    to_value=str(b.range_max) if b.range_max is not None else None,
+                ))
+
+        # ── linear_escalation ──
+        # Stash gives us the exact rate / unit / grace the user typed.
+        # Reverse-engineering from the expanded lookup_table is lossy
+        # (we lose the "unit" choice), so we only do it when there's no
+        # stash.
+        linear_escalation = None
+        if stash.get("linear_escalation"):
+            linear_escalation = SlaSimpleLinearEscalation(**stash["linear_escalation"])
+        elif lookup_rows:
+            sorted_rows = sorted(lookup_rows, key=lambda x: x.sort_order or 0)
+            # Find first non-zero row → tells us grace count + the rate.
+            rate = None
+            grace = 0
+            for idx, r in enumerate(sorted_rows):
+                if r.lookup_value and r.lookup_value > 0:
+                    if idx == 0:
+                        rate = r.lookup_value
+                    else:
+                        rate = r.lookup_value - (sorted_rows[idx - 1].lookup_value or 0)
+                        grace = idx - (1 if (sorted_rows[idx - 1].lookup_value or 0) == 0 else 0)
+                    break
+            if rate is not None:
+                linear_escalation = SlaSimpleLinearEscalation(
+                    rate_percent=rate, unit="week", grace_units=grace,
+                    max_units=max(len(sorted_rows) - 1, 1),
+                )
+
+        # placeholders — the row itself is canonical (JSONB column).
+        placeholders = defn.placeholders or []
+
+        return SlaRfpViewResponse(
+            id=defn.id,
+            sla_ref=defn.sla_ref,
+            title=defn.title,
+            project_id=defn.project_id,
+            contract_type=defn.contract_type,
+            category=defn.category,
+            status=defn.status,
+            # Both naming conventions ride along so old + new FE code keep working.
+            description=defn.description,
+            definition=stash.get("definition") or defn.description,
+            scope_text=defn.scope_text,
+            scope=stash.get("scope") or defn.scope_text,
+            data_source=defn.data_source,
+            calculation_method=defn.calculation_method,
+            calculation=stash.get("calculation") or defn.calculation_method,
+            reports_submitted_to=defn.reports_submitted_to,
+            measurement_interval=defn.measurement_interval,
+            reporting_interval=defn.reporting_interval,
+            ld_computation_base=defn.ld_computation_base,
+            applied_on=defn.ld_computation_base,
+            effective_from=defn.effective_from,
+            effective_until=defn.effective_until,
+            measurement=measurement,
+            secondary_measurement=secondary_measurement,
+            target_rows=target_rows,
+            linear_escalation=linear_escalation,
+            placeholders=placeholders,
+            created_at=defn.created_at,
+            updated_at=defn.updated_at,
+        )
 
     # ---------------------------------------------------------------- get DSL
 

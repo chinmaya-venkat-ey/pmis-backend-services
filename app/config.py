@@ -55,40 +55,41 @@ class Settings(BaseSettings):
     user_management_service_url: Optional[str] = Field(default=None)
     user_management_service_timeout_seconds: float = Field(default=5.0)
 
-    # === Cross-service: pmis-file-store (S3 microservice, preferred) ===
-    # Mirrors the env-var names used by pmis-project-management so a single
-    # .env line can flip storage for both services. Resolution order in
-    # ``dependencies.get_file_store_client``:
-    #   1. file_store_service_url  → HttpFileStoreClient   (S3 microservice)
-    #   2. file_server_local_fallback_enabled → LocalFileClient (NFS / disk)
-    #   3. neither set            → attachment routes return 503
+    # === SLA image attachments — NFS-first, S3 microservice optional ===
     #
-    # Default for file_store_service_url points at the VM's nginx exposure
-    # (http://10.1.131.199/files) so prod Just Works; override in .env for
-    # local dev to force the NFS fallback.
+    # The contract module mirrors pmis-project-management's storage setup
+    # so a single NFS mount holds attachments for the whole platform.
+    # Resolution order in dependencies.get_file_store_client():
+    #   1. file_store_service_url      → HttpFileStoreClient (S3 svc)
+    #   2. file_server_local_fallback_enabled → LocalFileClient (NFS)
+    #   3. neither                       → attachment routes return 503.
+    #
+    # Defaults below match what project-mgmt uses on the VM
+    # (/mnt/pmis_files, nginx exposes /projects/files at the public URL).
+    # The contract module writes to the same mount under a
+    # ``sla-attachments/`` sub-folder so projects + SLAs share NFS
+    # cleanly without filename collisions.
     file_store_service_url: Optional[str] = Field(
-        default="http://10.1.131.199/files",
+        default=None,
+        description="Set ONLY when pmis-file-store (S3 microservice) is deployed. "
+                    "Leave empty to use the NFS fallback that project-mgmt also uses.",
     )
     file_store_service_token: Optional[str] = Field(default=None)
     file_store_default_folder: str = Field(default="sla-attachments")
     file_store_timeout_seconds: float = Field(default=30.0)
 
-    # === NFS / local-disk fallback (matches project-mgmt naming) ===
-    # Used when file_store_service_url is unset. Files are written under
-    # file_server_local_dir and exposed as
-    # ``{file_server_public_base_url}/{storage_key}``. If the base is empty
-    # the URL is just the relative storage key — fine for dev where you
-    # only care about the file_id round-trip.
+    # === NFS / local-disk fallback (same mount as project-mgmt) ===
     file_server_local_fallback_enabled: bool = Field(default=True)
     file_server_local_dir: str = Field(
-        default="./uploads/sla-attachments",
-        description="Local directory the NFS-fallback client writes bytes to.",
+        default="/mnt/pmis_files",
+        description="NFS mount point inside the container. Same path project-mgmt uses. "
+                    "Set to a local dir (./uploads) for local dev.",
     )
     file_server_public_base_url: Optional[str] = Field(
-        default=None,
-        description="Public URL prefix served by nginx/CDN over the local dir. "
-                    "Empty in dev — the URL stored on the row is then a "
-                    "relative path.",
+        default="http://10.1.131.199/projects/files",
+        description="Public URL prefix served by nginx over the NFS mount. "
+                    "We reuse project-mgmt's /projects/files location so the "
+                    "same nginx block serves both. Empty in dev = relative URLs.",
     )
 
 

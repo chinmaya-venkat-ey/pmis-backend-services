@@ -33,7 +33,12 @@ import sqlalchemy as sa
 from alembic import op
 
 
-revision = "0019_data_field_direction_and_full_seed"
+# The alembic_version_contract.version_num column is VARCHAR(32). Keep
+# revision IDs to ≤ 32 characters (counted including the digits + underscores)
+# or the UPDATE that records "this migration ran" will fail with
+# StringDataRightTruncation AFTER the migration body has run — leaving the
+# DB in an inconsistent state. ``0019_dsl_seed`` = 13 chars — well under.
+revision = "0019_dsl_seed"
 down_revision = "0018_widen_attachment_file_id"
 branch_labels = None
 depends_on = None
@@ -258,16 +263,19 @@ _SEED_ROWS = [
 
 
 def upgrade() -> None:
-    # 1. New structural columns.
-    op.add_column(
-        "data_field_master",
-        sa.Column("direction", sa.String(20), nullable=True),
-        schema="contract",
+    # 1. New structural columns. ADD COLUMN IF NOT EXISTS handles the case
+    # where the previous failed deploy (revision-name-too-long bug) did
+    # apply the schema changes before the version_num UPDATE failed and
+    # rolled the transaction back — by the time the operator retries the
+    # DB may already have these columns. PostgreSQL is transactional for
+    # DDL so this should be belt-and-braces, but cheap insurance.
+    op.execute(
+        "ALTER TABLE contract.data_field_master "
+        "ADD COLUMN IF NOT EXISTS direction VARCHAR(20)"
     )
-    op.add_column(
-        "data_field_master",
-        sa.Column("description", sa.Text(), nullable=True),
-        schema="contract",
+    op.execute(
+        "ALTER TABLE contract.data_field_master "
+        "ADD COLUMN IF NOT EXISTS description TEXT"
     )
 
     # 2. Seed every row. ON CONFLICT (field_name) DO UPDATE so reruns

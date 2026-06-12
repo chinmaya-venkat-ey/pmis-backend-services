@@ -514,8 +514,13 @@ class SlaSimpleTargetRow(BaseModel):
     row falls back to the SLA's primary measurement, which is the
     correct default for single-metric SLAs (PMU-SLA005 et al).
     """
-    severity: int = Field(..., ge=0, le=4,
-                          description='Severity level the row corresponds to (RFP §5.28.1.a).')
+    severity: int = Field(
+        ..., ge=0, le=10,
+        description='Severity level the row corresponds to. The PMU / MSAP / '
+                    'BSP / MSIP RFPs use 0-4, but the schema permits up to 10 '
+                    'so future contracts with finer-grained severity grids '
+                    '(e.g. L0..L7) can onboard without a schema bump.',
+    )
     threshold_label: Optional[str] = Field(
         None, max_length=100,
         description='Human-readable threshold copied from the RFP, e.g. "1 occurrence".',

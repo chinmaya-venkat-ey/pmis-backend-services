@@ -11,11 +11,12 @@ raises so the middleware can fail closed.
 """
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import httpx
 
 from app.config import settings
+from app.core.errors import ForbiddenError, UnauthorizedError, ValidationError
 from app.utilities.logger import get_logger
 
 
@@ -100,3 +101,73 @@ class UserMgmtClient:
         else:
             elements = []
         return [u["id"] for u in elements if isinstance(u, dict) and u.get("id")]
+
+    def replace_project_role_assignments(
+        self, *, project_uuid: str, assignments_by_role: Dict[str, List[str]],
+        authorization: str,
+    ) -> None:
+        """#128/#254: forward Org-Management's per-project role assignments to
+        user-management's bulk-replace endpoint
+        (``PUT /api/v3/projects/{id}/role-assignments``) — it owns
+        ``users.user_role_assignments``.
+
+        ``assignments_by_role``: ``{role_name: [user_id, ...]}``. Each listed
+        role is fully REPLACED upstream; roles not present are left unchanged.
+        The caller's token is forwarded verbatim so user-management enforces
+        ``rbac:assign`` + the grant matrix. Raises (mapping the upstream
+        status) on any non-2xx so the vendor PATCH surfaces the failure.
+        """
+        if not self.base_url:
+            raise ValidationError(
+                "user-management service URL not configured; cannot persist role "
+                "assignments",
+            )
+        if not authorization:
+            raise UnauthorizedError(
+                "Missing caller Authorization for role-assignment forward",
+            )
+        url = f"{self.base_url}/api/v3/projects/{project_uuid}/role-assignments"
+        headers = {
+            "Authorization": authorization,
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        }
+        try:
+            with httpx.Client(timeout=self.timeout) as client:
+                resp = client.put(
+                    url, json={"assignments": assignments_by_role}, headers=headers,
+                )
+        except httpx.HTTPError as exc:
+            logger.warning(
+                "role-assignment forward connection error project=%s err=%s",
+                project_uuid, exc,
+            )
+            raise ValidationError(
+                f"Failed to persist role assignments for project {project_uuid} "
+                f"(user-management unreachable)",
+                details={"project_id": project_uuid, "upstream_status": None},
+            )
+        if resp.status_code >= 400:
+            try:
+                detail = resp.json()
+            except Exception:
+                detail = {"message": resp.text[:200]}
+            upstream_msg = (
+                (detail.get("error") or {}).get("message")
+                if isinstance(detail, dict) else None
+            )
+            base = (
+                f"Role assignment rejected for project {project_uuid} "
+                f"(user-management returned {resp.status_code})"
+            )
+            full = f"{base}: {upstream_msg}" if upstream_msg else base
+            d = {
+                "project_id": project_uuid,
+                "upstream_status": resp.status_code,
+                "upstream": detail,
+            }
+            if resp.status_code == 401:
+                raise UnauthorizedError(full, details=d)
+            if resp.status_code == 403:
+                raise ForbiddenError(full, details=d)
+            raise ValidationError(full, details=d)

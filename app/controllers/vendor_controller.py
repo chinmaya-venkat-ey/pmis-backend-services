@@ -98,8 +98,25 @@ class VendorController:
         projects = self.service.repo.list_projects_for_vendor(vendor.id)
         return _vendor_dict(vendor, projects)
 
-    def update(self, vendor_id: str, payload: VendorUpdateRequest) -> Dict[str, Any]:
+    def update(
+        self, vendor_id: str, payload: VendorUpdateRequest, *, authorization: str = "",
+    ) -> Dict[str, Any]:
         vendor = self.service.update(vendor_id, payload)
+        # #128/#254: project role assignments live in user-management. Group the
+        # incoming user_assignments by project and bulk-replace each there —
+        # AFTER service.update has committed the vendor + project mapping, so
+        # user-management's grant check sees the mapping. Per-project so a bad
+        # one surfaces with its project_id (raises → the whole PATCH 4xx/5xx).
+        if payload.user_assignments:
+            by_project: Dict[str, Dict[str, List[str]]] = {}
+            for ua in payload.user_assignments:
+                by_project.setdefault(ua.project_id, {})[ua.role] = list(ua.user_ids or [])
+            for pid, assignments_by_role in by_project.items():
+                self.user_mgmt_client.replace_project_role_assignments(
+                    project_uuid=pid,
+                    assignments_by_role=assignments_by_role,
+                    authorization=authorization,
+                )
         projects = self.service.repo.list_projects_for_vendor(vendor_id)
         return _vendor_dict(vendor, projects)
 

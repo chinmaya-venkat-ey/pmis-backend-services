@@ -144,9 +144,11 @@ def create_vendor(
 def update_vendor(
     vendor_id: str,
     payload: VendorUpdateRequest,
+    request: Request,
     controller: Annotated[VendorController, Depends(get_vendor_controller)],
 ) -> Dict[str, Any]:
-    return controller.update(vendor_id, payload)
+    authorization = request.headers.get("authorization") or ""
+    return controller.update(vendor_id, payload, authorization=authorization)
 
 
 @router.delete(

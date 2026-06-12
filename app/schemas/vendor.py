@@ -35,6 +35,23 @@ class VendorCreateRequest(BaseModel):
     )]
 
 
+class VendorUserAssignmentInput(BaseModel):
+    """One ``{project, role, users}`` entry in a vendor PATCH's
+    ``user_assignments``.
+
+    Org Management edits project role assignments alongside the vendor; the
+    master-svc forwards each to user-management's bulk-replace endpoint
+    (it owns ``users.user_role_assignments``). Accepts snake_case (the FE
+    payload) and camelCase.
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore", populate_by_name=True)
+
+    project_id: Annotated[str, Field(alias="projectId")]
+    role: Annotated[str, Field(min_length=1, max_length=64)]
+    user_ids: Annotated[List[str], Field(default_factory=list, alias="userIds")]
+
+
 class VendorUpdateRequest(BaseModel):
     """Body of PATCH /masters/vendors/{vendor_id} — partial, all fields optional."""
 
@@ -53,6 +70,13 @@ class VendorUpdateRequest(BaseModel):
     # None = leave existing mappings unchanged; [] = clear all; non-empty = replace.
     project_ids: Annotated[Optional[List[str]], Field(
         default=None, alias="projectIds"
+    )]
+    # Org Management edits project role assignments alongside the vendor. Each
+    # entry is forwarded to user-management's bulk-replace endpoint
+    # (PUT /projects/{id}/role-assignments) — #128/#254. None/absent = no role
+    # changes. The user-svc owns users.user_role_assignments.
+    user_assignments: Annotated[Optional[List[VendorUserAssignmentInput]], Field(
+        default=None, alias="userAssignments"
     )]
 
 

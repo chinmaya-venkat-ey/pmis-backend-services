@@ -272,6 +272,10 @@ def upgrade() -> None:
 
     # 2. Seed every row. ON CONFLICT (field_name) DO UPDATE so reruns
     # refresh the catalog if descriptions are tweaked.
+    # NOTE on naming: avoid bindparam names that collide with internal
+    # SQLAlchemy decorator kwargs. ``fn`` is consumed by the
+    # ``_generative`` decorator on ``TextClause.bindparams`` and ``dir``
+    # shadows a Python builtin — both raise TypeError at runtime.
     for (
         field_name, display_name, data_type, unit, example_value,
         applicable_to, direction, description,
@@ -282,8 +286,8 @@ def upgrade() -> None:
                 (field_name, display_name, data_type, unit, example_value,
                  applicable_to, direction, description, is_active)
             VALUES
-                (:fn, :dn, :dt, :u, :ev,
-                 """ + contracts_array + """, :dir, :desc, TRUE)
+                (:p_field_name, :p_display_name, :p_data_type, :p_unit, :p_example_value,
+                 """ + contracts_array + """, :p_direction, :p_description, TRUE)
             ON CONFLICT (field_name) DO UPDATE
               SET display_name = EXCLUDED.display_name,
                   data_type    = EXCLUDED.data_type,
@@ -293,8 +297,13 @@ def upgrade() -> None:
                   description  = EXCLUDED.description,
                   is_active    = TRUE
         """).bindparams(
-            fn=field_name, dn=display_name, dt=data_type, u=unit,
-            ev=example_value, dir=direction, desc=description,
+            p_field_name=field_name,
+            p_display_name=display_name,
+            p_data_type=data_type,
+            p_unit=unit,
+            p_example_value=example_value,
+            p_direction=direction,
+            p_description=description,
         ))
 
 

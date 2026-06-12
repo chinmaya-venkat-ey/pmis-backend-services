@@ -396,7 +396,12 @@ class SlaService:
                 slug = slug.replace("__", "_")
             return slug or "value"
 
-        primary_key = _slug(payload.measurement.display_name)
+        # Prefer the explicit metric_key from the FE catalog picker over
+        # slugifying display_name — keeps the same variable consistent
+        # across multiple SLAs that reuse it (e.g. "weeks_delayed" used
+        # by both PMU-SLA001 and PMU-SLA002 instead of one being
+        # "weeks_delayed" and the other "weeks_delayed_in_rectification").
+        primary_key = payload.measurement.metric_key or _slug(payload.measurement.display_name)
         metrics = [
             SlaMetricInput(
                 metric_key=primary_key,
@@ -408,7 +413,10 @@ class SlaService:
             )
         ]
         if payload.secondary_measurement:
-            secondary_key = _slug(payload.secondary_measurement.display_name)
+            secondary_key = (
+                payload.secondary_measurement.metric_key
+                or _slug(payload.secondary_measurement.display_name)
+            )
             if secondary_key == primary_key:
                 secondary_key += "_2"
             metrics.append(SlaMetricInput(

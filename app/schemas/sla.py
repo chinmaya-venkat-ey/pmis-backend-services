@@ -481,9 +481,18 @@ class SlaDslResponse(BaseModel):
 class SlaSimpleMeasurement(BaseModel):
     """The single thing the SLA observes (e.g. "days delayed").
 
-    The user types a display name and unit; backend slugifies the display
-    name into the technical ``metric_key`` so the form never asks for it.
+    Preferred usage: the FE picks from the catalog at
+    ``/api/v3/sla-input-variables`` and sends the picked entry's ``key``
+    as ``metric_key``. Backend uses that key directly. When omitted (free-
+    text fallback), backend slugifies ``display_name`` into the
+    metric_key — preserved for backwards compat.
     """
+    metric_key: Optional[str] = Field(
+        None, max_length=100,
+        description='Catalog metric_key when picked from /sla-input-variables. '
+                    'Preferred over slugifying display_name so the same variable '
+                    'used across multiple SLAs maps to the same metric_key.',
+    )
     display_name: str = Field(..., max_length=255,
                               description='User-facing name of the measurement, e.g. "Days delayed".')
     unit: str = Field("", max_length=50,

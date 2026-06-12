@@ -15,7 +15,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import List, Optional
 
-from sqlalchemy import Boolean, DateTime, String, text
+from sqlalchemy import Boolean, DateTime, String, Text, text
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -32,6 +32,13 @@ class DataFieldMaster(Base):
     unit: Mapped[str] = mapped_column(String(50), nullable=False)
     example_value: Mapped[Optional[str]] = mapped_column(String(50))
     applicable_to: Mapped[Optional[List[str]]] = mapped_column(ARRAY(String(20)))
+    # Direction the metric trends in: HIGHER_BETTER (uptime, throughput, …)
+    # or LOWER_BETTER (delay, failures, defect rate, …). Drives severity
+    # interpretation in the evaluator and tooltips in the FE picker.
+    direction: Mapped[Optional[str]] = mapped_column(String(20))
+    # One-line natural-language definition (from the RFP). Surfaced as a
+    # tooltip on the FE measurement picker.
+    description: Mapped[Optional[str]] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default=text("true")
     )

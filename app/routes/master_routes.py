@@ -395,17 +395,32 @@ def list_sla_input_variables(
             entry["categories"].append(category)
 
     # Source 2 — curated master entries (extends the catalog with
-    # variables we haven't onboarded an SLA for yet).
+    # variables we haven't onboarded an SLA for yet). The master rows
+    # carry the structural metadata (direction, description, data_type,
+    # applicable_to) that the FE picker surfaces as a tooltip / hint.
     for df in ctrl.list_data_fields():
         if df.field_name in seen:
+            # Live SLA already covers this key — enrich with master metadata.
+            seen[df.field_name].update({
+                "data_type":   df.data_type,
+                "direction":   getattr(df, "direction", None),
+                "description": getattr(df, "description", None),
+                "applicable_to": df.applicable_to or [],
+                "example_value": df.example_value,
+            })
             continue
         seen[df.field_name] = {
-            "key": df.field_name,
-            "label": df.display_name or df.field_name,
-            "unit": df.unit or None,
-            "source": "data_field",
-            "used_by": [],
-            "categories": [],
+            "key":           df.field_name,
+            "label":         df.display_name or df.field_name,
+            "unit":          df.unit or None,
+            "data_type":     df.data_type,
+            "direction":     getattr(df, "direction", None),
+            "description":   getattr(df, "description", None),
+            "applicable_to": df.applicable_to or [],
+            "example_value": df.example_value,
+            "source":        "data_field",
+            "used_by":       [],
+            "categories":    [],
         }
 
     items = sorted(seen.values(), key=lambda x: x["label"].lower())

@@ -580,6 +580,32 @@ PROJECT_ONLY_ROLE_NAMES: Final[frozenset[str]] = frozenset({
 })
 
 
+# Project roles fuse capability WITH project scope: a (project_admin|project_member,
+# project_id) row only grants its codes ON that project, so a holder with NO project
+# would hold the role's CROSS-CUTTING reads NOWHERE — they could not read the reference
+# catalogs or the (vendor-filtered) user list, and the app shell breaks for a
+# project_admin/member who simply has no project yet.
+#
+# PROJECT_ROLE_BASE_CODES is the curated set of cross-cutting, read-only codes — a strict
+# subset of BOTH project roles — that the permission resolver surfaces at GLOBAL scope
+# when the user's ``org_role`` column is a project role (see
+# RbacRepository.effective_permissions_*). The no-project case is only reachable via
+# user create/update (which sets the column); team-management assignment always names a
+# project, so a project holder always has these reads — globally here, or via any-scope
+# on their project rows. The set is ADDITIVE and read-only: every PROJECT-nature code
+# (projects/milestones/tasks/...) is deliberately EXCLUDED, so nothing leaks into the
+# global held tier and require_project_permission still gates per assigned project.
+# Broad reads (users:read_all, users:list_all_orgs) are EXCLUDED — admin / super_admin only.
+PROJECT_ROLE_BASE_CODES: Final[frozenset[str]] = frozenset({
+    "users:read",
+    "divisions:read", "vendors:read",
+    "resource_types:read", "priorities:read", "project_categories:read",
+    "activity_types:read", "activity_statuses:read", "milestone_statuses:read",
+    "cost_types:read", "frequencies:read", "notification_templates:read",
+    "project_status_transitions:read",
+})
+
+
 # #246/#254 (org_admin scoping): org-tier roles bind to the user's VENDOR
 # (organization_id = the user's vendor_id), not globally. This moves their
 # permissions into the ("org", vendor) scope bucket so the Round-7

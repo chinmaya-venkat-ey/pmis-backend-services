@@ -25,6 +25,7 @@ from app.models.permission import Permission
 from app.models.revoked_token import RevokedToken
 from app.models.role import Role
 from app.models.role_permission import RolePermission
+from app.models.user import User
 from app.models.user_permission import UserPermission
 from app.models.user_role import UserRole
 from app.models.user_role_assignment import UserRoleAssignment
@@ -235,6 +236,29 @@ class RbacRepository:
 
     # ------------------------------------------------------------------ effective permission queries
 
+    def _project_base_reads(self, user_id: str) -> Set[str]:
+        """Curated cross-cutting reads surfaced at GLOBAL scope when the user's
+        ``org_role`` column is a project role (``PROJECT_ROLE_BASE_CODES``).
+
+        project_admin / project_member fuse capability WITH project scope, so a
+        holder with NO project would otherwise hold these reads nowhere. The
+        no-project case is only reachable via user create/update (which sets the
+        column); team-management assignment always names a project. ADDITIVE and
+        read-only — no project-nature code is included, so nothing leaks into the
+        global tier and ``require_project_permission`` still gates per project.
+        """
+        from app.core.permissions import (
+            PROJECT_ONLY_ROLE_NAMES,
+            PROJECT_ROLE_BASE_CODES,
+        )
+
+        col = self.db.execute(
+            select(User.org_role).where(User.id == user_id)
+        ).scalar()
+        if (col or "").strip().lower() in PROJECT_ONLY_ROLE_NAMES:
+            return set(PROJECT_ROLE_BASE_CODES)
+        return set()
+
     def effective_permissions_for_user(self, user_id: str) -> Set[str]:
         """Flat union of GLOBAL role-derived + direct-grant codes.
 
@@ -292,6 +316,10 @@ class RbacRepository:
         # Direct user grants (always global — user_permissions has no scope).
         for code in self.list_user_permissions(user_id):
             perms.add(code)
+
+        # project_role_base: cross-cutting reads for a project_admin/member whose
+        # role is otherwise project-scoped (so a no-project holder still has them).
+        perms |= self._project_base_reads(user_id)
 
         return perms
 
@@ -353,6 +381,9 @@ class RbacRepository:
             global_perms.add(code)
         for code in self.list_user_permissions(user_id):
             global_perms.add(code)
+        # project_role_base: same curated global reads as the flat set, so
+        # /authz/context's `scoped.global` stays consistent with `permissions`.
+        global_perms |= self._project_base_reads(user_id)
         if global_perms:
             out[("global", None)] = global_perms
 
@@ -416,6 +447,57 @@ class RbacRepository:
                 out.setdefault(("project", pid), set()).update(org_perms)
 
         return out
+
+    def _project_role_ids_by_name(self) -> Dict[str, int]:
+        """{name: id} for the builtin project roles (project_admin/member)."""
+        from app.core.permissions import PROJECT_ONLY_ROLE_NAMES
+
+        return dict(self.db.execute(
+            select(Role.name, Role.id)
+            .where(Role.name.in_(PROJECT_ONLY_ROLE_NAMES))
+            .where(Role.builtin.is_(True))
+        ).all())
+
+    @staticmethod
+    def _column_role_fallback_entry(
+        org_role_col: Optional[str],
+        existing: List[Dict[str, Optional[object]]],
+        role_ids: Dict[str, int],
+    ) -> Optional[Dict[str, Optional[object]]]:
+        """Synthetic orgRole entry derived from the ``users.org_role`` COLUMN.
+
+        project_admin / project_member fuse capability with project scope, so a
+        holder with NO project has no assignment row — the row-derived orgRole
+        list above would then be empty and the user would display with no role
+        even though the column designates them a project_admin/member. Surface
+        that designation here so the user-facing orgRole reflects it (the FE
+        relies on orgRole for display). Returns the entry or None.
+
+        Fires ONLY when the column is a project role AND no assignment-derived
+        entry for that role already exists — so a holder WITH projects (who has
+        project-scoped entries) is untouched and never duplicated. ``scope`` is
+        "global" (an existing FE-handled value), mirroring where the resolver
+        surfaces this user's active capabilities (the global cross-cutting
+        reads); ``assignment_id`` is None — there is no row to revoke.
+        """
+        from app.core.permissions import PROJECT_ONLY_ROLE_NAMES
+
+        col = (org_role_col or "").strip().lower()
+        if col not in PROJECT_ONLY_ROLE_NAMES or col not in role_ids:
+            return None
+        if any(e["role_name"] == col for e in existing):
+            return None
+        return {
+            "role_name": col,
+            "role_id": role_ids[col],
+            "scope": "global",
+            "organization_id": None,
+            "project_id": None,
+            "project_code": None,
+            "assignment_id": None,
+            "created_at": None,
+            "created_by": None,
+        }
 
     def builtin_role_assignments_for_user(self, user_id: str) -> List[Dict[str, Optional[object]]]:
         """Return every BUILTIN role assignment the user currently holds,
@@ -532,6 +614,16 @@ class RbacRepository:
             for entry in out:
                 if entry["scope"] == "project" and entry["project_id"]:
                     entry["project_code"] = code_by_id.get(entry["project_id"])
+
+        # Fallback: a no-project project_admin/member designated only via the
+        # org_role column has no assignment row — surface it so orgRole reflects
+        # the role (FE display).
+        col = self.db.execute(
+            select(User.org_role).where(User.id == user_id)
+        ).scalar()
+        entry = self._column_role_fallback_entry(col, out, self._project_role_ids_by_name())
+        if entry is not None:
+            out.append(entry)
 
         out.sort(key=lambda e: (
             e["role_name"], e["scope"],
@@ -657,6 +749,17 @@ class RbacRepository:
                 for entry in lst:
                     if entry["scope"] == "project" and entry["project_id"]:
                         entry["project_code"] = code_by_id.get(entry["project_id"])
+
+        # Fallback (same as the single-user method): surface a no-project
+        # project_admin/member from the org_role column so orgRole is non-empty.
+        role_ids = self._project_role_ids_by_name()
+        cols = dict(self.db.execute(
+            select(User.id, User.org_role).where(User.id.in_(user_ids))
+        ).all())
+        for uid in user_ids:
+            entry = self._column_role_fallback_entry(cols.get(uid), out[uid], role_ids)
+            if entry is not None:
+                out[uid].append(entry)
 
         for lst in out.values():
             lst.sort(key=lambda e: (

@@ -181,6 +181,28 @@ class TeamService:
             },
         )
 
+    def _hydrate_division_refs(self, assignments: ActivityAssignmentsRead) -> None:
+        """Populate ``assignments.division_refs`` with id/code/name for every
+        division code keyed in division_users / division_approvers, resolved
+        against masters.divisions. Codes that don't resolve to a live row carry
+        null id/name (same contract as DivisionRef). Mirrors the team-page
+        ``_to_ref`` hydration. Mutates ``assignments`` in place."""
+        codes = sorted(
+            set(assignments.division_users) | set(assignments.division_approvers)
+        )
+        if not codes:
+            return
+        division_rows = self.associated_repo.get_divisions_by_codes(codes)
+        refs: List[DivisionRef] = []
+        for code in codes:
+            d = division_rows.get(code)
+            refs.append(DivisionRef(
+                id=d.id if d else None,
+                code=code,
+                name=d.label if d else None,
+            ))
+        assignments.division_refs = refs
+
     def _write_activity_assignments(
         self,
         activity_id: str,
@@ -347,7 +369,9 @@ class TeamService:
 
     def get_activity_assignments(self, activity_id: str) -> ActivityAssignmentsRead:
         self._get_activity_or_404(activity_id)
-        return self._read_activity_assignments(activity_id)
+        assignments = self._read_activity_assignments(activity_id)
+        self._hydrate_division_refs(assignments)
+        return assignments
 
     def save_activity_assignments(
         self,
@@ -364,7 +388,9 @@ class TeamService:
         )
         self._write_activity_assignments(activity_id, act.project_id, entry, caller_id)
         self.db.commit()
-        return self._read_activity_assignments(activity_id)
+        assignments = self._read_activity_assignments(activity_id)
+        self._hydrate_division_refs(assignments)
+        return assignments
 
     # ── associated users (POST /associated-users) ────────────────────────────
 

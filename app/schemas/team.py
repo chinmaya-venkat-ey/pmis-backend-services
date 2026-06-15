@@ -108,6 +108,10 @@ class ActivityAssignmentsRead(BaseModel):
                 "IT_DIV":    [_EX_USER4],
                 "LEGAL_DIV": [_EX_USER2],
             },
+            "division_refs": [
+                {"id": 7,  "code": "IT_DIV",    "name": "Information Technology"},
+                {"id": 12, "code": "LEGAL_DIV", "name": "Legal"},
+            ],
         }
     })
     owner: List[TeamUserChip] = Field(default_factory=list)
@@ -119,6 +123,14 @@ class ActivityAssignmentsRead(BaseModel):
     division_approvers: Dict[str, List[TeamUserChip]] = Field(
         default_factory=dict,
         description="division_code → single approver (list for consistency)",
+    )
+    division_refs: List["DivisionRef"] = Field(
+        default_factory=list,
+        description="Hydrated id/code/name for every division code keyed in "
+                    "division_users / division_approvers, resolved against "
+                    "masters.divisions. Lets the FE resolve the bare division-code "
+                    "keys to human labels (same pattern as the team-page response). "
+                    "wire: divisionRefs",
     )
 
 

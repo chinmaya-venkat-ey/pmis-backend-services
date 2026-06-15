@@ -50,3 +50,38 @@ def test_authz_users_returns_collection(client, app):
         assert data["_embedded"]["elements"][0]["roles"] == ["project_admin"]
     finally:
         app.dependency_overrides.pop(get_authz_controller, None)
+
+
+# -- Manage-Team candidate picker: /authz/projects/{id}/assignable-users/{role} --
+
+def test_assignable_users_anonymous_401(anonymous_client):
+    resp = anonymous_client.get(
+        "/api/v3/authz/projects/P1/assignable-users/project_admin"
+    )
+    assert resp.status_code == 401
+
+
+def test_assignable_users_returns_collection(client, app):
+    from app.controllers.authz_controller import AuthzController
+    from app.dependencies import get_authz_controller
+    from app.schemas.authz import AuthzUserSummary
+
+    fake = MagicMock(spec=AuthzController)
+    fake.list_assignable_users.return_value = [
+        AuthzUserSummary(id="u1", login="alice", roles=["org_admin"]),
+    ]
+
+    app.dependency_overrides[get_authz_controller] = lambda: fake
+    try:
+        resp = client.get(
+            "/api/v3/authz/projects/P1/assignable-users/project_admin"
+        )
+        assert resp.status_code == 200
+        data = resp.json()["data"]
+        assert data["_type"] == "Collection"
+        assert data["_embedded"]["elements"][0]["login"] == "alice"
+        fake.list_assignable_users.assert_called_once_with(
+            project_id="P1", role="project_admin",
+        )
+    finally:
+        app.dependency_overrides.pop(get_authz_controller, None)

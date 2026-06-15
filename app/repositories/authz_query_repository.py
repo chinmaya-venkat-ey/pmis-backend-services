@@ -21,6 +21,7 @@ from typing import Dict, List, Optional, Sequence, Set
 from sqlalchemy import and_, exists, or_, select
 from sqlalchemy.orm import Session
 
+from app.models._cross_schema import ProjectVendor
 from app.models.role import Role
 from app.models.user import User
 from app.models.user_role import UserRole
@@ -33,6 +34,61 @@ _ADMIN_ROLE_NAMES = ("admin", "super_admin")
 class AuthzQueryRepository:
     def __init__(self, db: Session):
         self.db = db
+
+    def users_assignable_to_project(
+        self, project_id: str, target_role: str,
+    ) -> List[User]:
+        """Role-tiered candidate pool for assigning ``target_role`` on
+        ``project_id``, scoped to the project's ORG (vendor) — what the
+        Manage-Team pickers show.
+
+          * ``project_admin`` → users holding ``project_admin`` on ANY project of
+            the project's vendor(s), PLUS the vendor(s)' ``org_admin`` holders
+            (org_admins carry project-admin authority via the vendor->project
+            projection, so they are valid project-admin candidates).
+          * ``project_member`` → users holding ``project_member`` on ANY project
+            of the project's vendor(s).
+
+        "For that org" is resolved through ``project.project_vendors``: this
+        project's vendor(s) → every project mapped to those vendor(s). deleted /
+        inactive users excluded. Returns DISTINCT users sorted by login.
+        """
+        vendor_subq = select(ProjectVendor.vendor_id).where(
+            ProjectVendor.project_id == project_id
+        )
+        org_projects_subq = select(ProjectVendor.project_id).where(
+            ProjectVendor.vendor_id.in_(vendor_subq)
+        )
+
+        by_id: Dict[str, User] = {}
+
+        role_stmt = (
+            select(User)
+            .join(UserRoleAssignment, UserRoleAssignment.user_id == User.id)
+            .join(Role, Role.id == UserRoleAssignment.role_id)
+            .where(UserRoleAssignment.project_id.in_(org_projects_subq))
+            .where(Role.name == target_role)
+            .where(User.deleted_at.is_(None))
+            .where(User.status != "inactive")
+        )
+        for u in self.db.execute(role_stmt).scalars().unique().all():
+            by_id[u.id] = u
+
+        # The project-admin picker also offers the org's org_admins.
+        if target_role == "project_admin":
+            org_admin_stmt = (
+                select(User)
+                .join(UserRoleAssignment, UserRoleAssignment.user_id == User.id)
+                .join(Role, Role.id == UserRoleAssignment.role_id)
+                .where(UserRoleAssignment.organization_id.in_(vendor_subq))
+                .where(Role.name == "org_admin")
+                .where(User.deleted_at.is_(None))
+                .where(User.status != "inactive")
+            )
+            for u in self.db.execute(org_admin_stmt).scalars().unique().all():
+                by_id[u.id] = u
+
+        return sorted(by_id.values(), key=lambda u: (u.login or ""))
 
     def users_by_project_role(
         self, project_id: str, role_name: Optional[str] = None,

@@ -108,3 +108,27 @@ def test_list_users_requires_exactly_one_selector():
         ctrl.list_users()  # zero selectors
     with pytest.raises(ValidationError):
         ctrl.list_users(project_id="P1", divisions=["D1"])  # two selectors
+
+
+def test_list_assignable_users_delegates_and_sorts():
+    query = MagicMock()
+    query.users_assignable_to_project.return_value = [
+        _user("u2", "bob"), _user("u1", "alice"),
+    ]
+    query.roles_by_user_ids.return_value = {
+        "u1": ["project_admin"], "u2": ["org_admin"],
+    }
+
+    out = AuthzController(MagicMock(), query).list_assignable_users(
+        project_id="P1", role="project_admin",
+    )
+
+    assert [u.login for u in out] == ["alice", "bob"]  # sorted by login
+    query.users_assignable_to_project.assert_called_once_with("P1", "project_admin")
+
+
+def test_list_assignable_users_rejects_bad_role():
+    ctrl = AuthzController(MagicMock(), MagicMock())
+    for bad in ("org_admin", "admin", "garbage", ""):
+        with pytest.raises(ValidationError):
+            ctrl.list_assignable_users(project_id="P1", role=bad)

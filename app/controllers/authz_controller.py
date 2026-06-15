@@ -124,3 +124,39 @@ class AuthzController:
             for u in users
         ]
         return sorted(out, key=lambda x: (x.login or ""))
+
+    def list_assignable_users(
+        self, *, project_id: str, role: str,
+    ) -> List[AuthzUserSummary]:
+        """Manage-Team picker: the role-tiered candidate pool for assigning
+        ``role`` on ``project_id``, scoped to the project's org (vendor) — one
+        self-contained call per dropdown.
+
+          * ``project_admin`` → the org's project_admins + org_admins
+          * ``project_member`` → the org's project_members
+
+        See ``AuthzQueryRepository.users_assignable_to_project``.
+        """
+        if role not in ("project_admin", "project_member"):
+            raise ValidationError(
+                "role must be 'project_admin' or 'project_member'",
+                details={"role": role},
+            )
+        if self.query is None:  # pragma: no cover - wiring guard
+            raise ValidationError("Discovery query backend not configured")
+
+        users = self.query.users_assignable_to_project(project_id, role)
+        roles_by_id = self.query.roles_by_user_ids([u.id for u in users])
+        out = [
+            AuthzUserSummary(
+                id=u.id,
+                login=u.login,
+                email=u.email,
+                full_name=u.full_name,
+                vendor_id=u.vendor_id,
+                division=u.division,
+                roles=roles_by_id.get(u.id, []),
+            )
+            for u in users
+        ]
+        return sorted(out, key=lambda x: (x.login or ""))

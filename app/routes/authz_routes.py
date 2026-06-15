@@ -86,3 +86,30 @@ def list_users(
         org_id=org_id,
         exclude_admin_tier=exclude_admin_tier,
     )
+
+
+@router.get(
+    "/projects/{project_uuid}/assignable-users/{role}",
+    response_model=List[AuthzUserSummary],
+    summary="Manage-Team picker: who can be assigned a project role",
+    description=(
+        "Single self-contained call for one Manage-Team dropdown. Returns the "
+        "role-tiered candidate pool for assigning `role` on the project, scoped "
+        "to the project's org (vendor): "
+        "`project_admin` -> the org's project_admins (across its projects) + "
+        "the org's org_admins; "
+        "`project_member` -> the org's project_members. "
+        "`role` must be `project_admin` or `project_member`."
+    ),
+    responses={
+        401: {"description": "Anonymous / expired / revoked token"},
+        422: {"description": "role must be project_admin or project_member"},
+    },
+)
+def list_assignable_users(
+    project_uuid: str,
+    role: str,
+    controller: Annotated[AuthzController, Depends(get_authz_controller)],
+    _user_id: Annotated[str, Depends(get_current_user_id)],
+):
+    return controller.list_assignable_users(project_id=project_uuid, role=role)

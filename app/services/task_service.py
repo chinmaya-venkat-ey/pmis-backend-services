@@ -581,17 +581,20 @@ class TaskService:
         self._cascade_to_parent(row, caller_user_id=caller_user_id)
 
     def _cascade_to_parent(self, row, *, caller_user_id: Optional[str]) -> None:
-        """Walk one step up: task -> parent activity. Defers to
-        ActivityService for the actual auto-complete attempt.
+        """Walk one step up: task -> parent activity.
+
+        Intentionally a no-op: completing an activity's tasks no longer
+        auto-completes the activity. Activity completion is now an explicit
+        decision — driven by the approval workflow (or an explicit "complete"
+        action) rather than implicitly cascaded from a child task finishing.
+
+        Only the task->activity link is removed here. Subtask->task
+        auto-complete (``_attempt_auto_complete`` above) and the
+        activity->milestone->project roll-up (owned by ActivityService /
+        MilestoneService) are unaffected: those still fire whenever an
+        activity is completed through an explicit path.
         """
-        from app.services.activity_service import ActivityService
-        act_service = ActivityService(self.db)
-        act = act_service.repo.get_by_id(row.activity_id)
-        if act is not None:
-            act_service._attempt_auto_complete(
-                act, caller_user_id=caller_user_id,
-                triggering_child_id=row.id,
-            )
+        return
 
     def _all_live_top_level_subtasks_terminal(self, task_id: str) -> bool:
         """True iff the task has at least one live top-level subtask AND

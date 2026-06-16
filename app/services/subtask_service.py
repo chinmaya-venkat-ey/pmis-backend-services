@@ -44,6 +44,7 @@ from app.utilities.catalogs import (
 )
 from app.utilities.date_rules import validate_entity_dates
 from app.utilities.project_lock import assert_task_subtask_writable
+from app.utilities.required_fields import assert_required_not_cleared
 
 
 class SubtaskService:
@@ -206,6 +207,14 @@ class SubtaskService:
         # the field walker can gate the sub-resource `depends_on` code.
         touched = set(updates.keys())
         depends_on = updates.pop("depends_on", None)
+
+        # Required-field parity with create: a PATCH may omit these (no
+        # change) but may not clear them to empty.
+        assert_required_not_cleared(
+            updates,
+            {"name": "name", "start_date": "startDate", "end_date": "endDate"},
+            entity="subtask",
+        )
 
         # Priority catalog + status-completion + parent-revert gates.
         if "priority" in updates:

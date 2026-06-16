@@ -52,6 +52,7 @@ from app.utilities.multipart_form import (
     upload_files_via_client,
 )
 from app.utilities.project_lock import assert_milestone_activity_writable
+from app.utilities.required_fields import assert_required_not_cleared
 from app.utilities.vendor_resolver import assert_vendor_in_project
 
 
@@ -352,6 +353,23 @@ class ActivityService:
             updates["category"] = category_after
         if ccn_value_after is not None:
             updates["ccn_value"] = ccn_value_after
+
+        # Required-field parity with create: a PATCH may omit these (no
+        # change) but may not clear them to empty. The business fields
+        # (ownerDivision/vendorId/priority/concernedDivision) are required
+        # only for non-meeting activities — same exemption as create.
+        required = {
+            "name": "name", "start_date": "startDate", "end_date": "endDate",
+        }
+        _business = {
+            "owner_division": "ownerDivision", "vendor_id": "vendorId",
+            "priority": "priority", "concerned_divisions": "concernedDivision",
+        }
+        if any(f in updates for f in _business):
+            _milestone = self.milestones.get_by_id(row.milestone_id)
+            if not getattr(_milestone, "is_meeting", False):
+                required.update(_business)
+        assert_required_not_cleared(updates, required, entity="activity")
 
         # ----- catalog + transition validations on touched fields ------
         # Status is schema-level — no service check.

@@ -43,6 +43,7 @@ from app.utilities.catalogs import (
 )
 from app.utilities.date_rules import validate_entity_dates
 from app.utilities.project_lock import assert_milestone_activity_writable
+from app.utilities.required_fields import assert_required_not_cleared
 from app.utilities.vendor_resolver import resolve_and_validate_vendor_ids
 
 
@@ -260,6 +261,15 @@ class MilestoneService:
             updates["ccn_value"] = ccn_value_after
         if not updates and depends_on is None and vendor_ids is None:
             return row
+
+        # Required-field parity with create: a PATCH may omit these (no
+        # change) but may not clear them to empty. (Meeting milestones are
+        # already blocked from update above.)
+        assert_required_not_cleared(
+            updates,
+            {"name": "name", "start_date": "startDate", "end_date": "endDate"},
+            entity="milestone",
+        )
 
         # ----- catalog + transition validations on touched fields ------
         # Status validation lives at the schema level (2-value hardcoded

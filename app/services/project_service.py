@@ -55,6 +55,7 @@ from app.utilities.catalogs import (
 )
 from app.utilities.code_generators import generate_project_code
 from app.utilities.owner_pair import validate_owner_pair
+from app.utilities.required_fields import assert_required_not_cleared, is_empty_value
 from app.utilities.vendor_resolver import resolve_and_validate_vendor_ids
 
 
@@ -217,6 +218,24 @@ class ProjectService:
         if not updates and vendor_ids is None:
             return row
 
+        # Required-field parity with create: a PATCH may omit these (no
+        # change) but may not clear them to empty.
+        assert_required_not_cleared(
+            updates,
+            {
+                "name": "name", "owner": "owner",
+                "start_date": "startDate", "end_date": "endDate",
+            },
+            entity="project",
+        )
+        # vendor_ids is popped out of ``updates`` above; reject an explicit
+        # clear (sent as [] / null) while still allowing omission.
+        if vendor_ids is not None and is_empty_value(vendor_ids):
+            raise ValidationError(
+                "Cannot clear required field(s) on project update: vendorIds.",
+                details={"cleared": ["vendorIds"]},
+            )
+
         # Doc-finance: publish-lock on the three contract finance fields.
         # If any are touched and the project is published, reject 409.
         # (The dedicated /finance PATCH route applies the same rule.)
@@ -327,6 +346,10 @@ class ProjectService:
             owner=payload.owner,
             require_owner=True,
         )
+        # Required-field parity with create — PUT is a full upsert, so the
+        # required fields must be present and non-empty on BOTH the insert
+        # and the in-place update branch.
+        self._assert_project_create_required(payload)
         # Doc-38 ignore: category fields force-NULL (see create()).
         self._validate_parent_exists(payload.parent_id, own_id=project_id)
         canonical_vendor_ids = (

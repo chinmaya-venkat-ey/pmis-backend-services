@@ -562,25 +562,63 @@ class ActivityService:
             kind_singular="activity",
         )
 
+    def dependency_completion_status(self, activity_id: str) -> dict:
+        """Read-only check of whether every dependency target of
+        ``activity_id`` is in a terminal status.
+
+        Returns ``{"eligible": bool, "blockers": [{"id", "name",
+        "status"}]}`` where ``blockers`` lists the dependency targets that
+        are NOT yet terminal. ``eligible`` is True when there are no such
+        blockers — including the no-dependencies case. Does not raise and
+        does not validate that ``activity_id`` itself exists (callers that
+        need a 404 should load the row first).
+
+        Shared by the completion-eligibility endpoint and the status-flip
+        gate (``_assert_deps_completed``) so both apply identical logic.
+        """
+        from sqlalchemy import select
+        from app.models.activity import Activity
+        dep_ids = self.repo.list_dependencies_for(activity_id)
+        if not dep_ids:
+            return {"eligible": True, "blockers": []}
+        rows = self.db.execute(
+            select(Activity.id, Activity.name, Activity.status)
+            .where(Activity.id.in_(dep_ids))
+            .where(Activity.deleted_at.is_(None))
+        ).all()
+        blockers = [
+            {"id": aid, "name": name, "status": status}
+            for aid, name, status in rows
+            if not is_terminal_status(status)
+        ]
+        return {"eligible": not blockers, "blockers": blockers}
+
+    def completion_eligibility(self, activity_id: str) -> dict:
+        """Read-only completion-eligibility for the public endpoint.
+
+        Validates the activity exists (raising NotFound -> 404 otherwise),
+        then returns ``{"activity_id", "eligible", "blocking_dependencies"}``
+        computed from ``dependency_completion_status``. Pure read — mutates
+        nothing.
+        """
+        self.get_by_id(activity_id)  # 404 when missing / soft-deleted
+        status = self.dependency_completion_status(activity_id)
+        return {
+            "activity_id": activity_id,
+            "eligible": status["eligible"],
+            "blocking_dependencies": status["blockers"],
+        }
+
     def _assert_deps_completed(self, activity_id: str) -> None:
         """Dependency-completion gate (monolith parity, _gate_status_against_deps).
         Block flipping an activity's status to ``completed`` while any of its
         dependency targets are still ``not_completed``. Mirrors monolith
         ``PMIS-OpenProject/app/api/v3/activities/services/update.py:88-118``.
         """
-        from sqlalchemy import select
-        from app.models.activity import Activity
-        dep_ids = self.repo.list_dependencies_for(activity_id)
-        if not dep_ids:
+        result = self.dependency_completion_status(activity_id)
+        if result["eligible"]:
             return
-        rows = self.db.execute(
-            select(Activity.name, Activity.status)
-            .where(Activity.id.in_(dep_ids))
-            .where(Activity.deleted_at.is_(None))
-        ).all()
-        blockers = [name for name, status in rows if not is_terminal_status(status)]
-        if not blockers:
-            return
+        blockers = [b["name"] for b in result["blockers"]]
         names = ", ".join(f"'{n}'" for n in blockers[:3])
         more = f" (+{len(blockers) - 3} more)" if len(blockers) > 3 else ""
         raise ValidationError(

@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.repositories.activity_repository import ActivityRepository
 from app.schemas.activity import (
+    ActivityCompletionEligibilityResponse,
     ActivityCreateRequest,
     ActivityResourceSchema,
     ActivityResponse,
@@ -85,6 +86,12 @@ class ActivityController:
 
     def get(self, activity_id: str) -> ActivityResponse:
         return self._to_response(self.service.get_by_id(activity_id))
+
+    def completion_eligibility(
+        self, activity_id: str,
+    ) -> ActivityCompletionEligibilityResponse:
+        result = self.service.completion_eligibility(activity_id)
+        return ActivityCompletionEligibilityResponse.model_validate(result)
 
     def list_for_milestone(
         self, milestone_id: str, *, offset=1, page_size=50, include_deleted=False,

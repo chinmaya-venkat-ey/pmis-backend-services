@@ -107,6 +107,25 @@ class ActivityResponse(ResponseModel):
     comment: Optional[CommentResponse] = None
 
 
+class CompletionBlocker(ResponseModel):
+    """One dependency target that is blocking an activity's completion."""
+
+    id: str
+    name: str
+    status: Optional[str] = None
+
+
+class ActivityCompletionEligibilityResponse(ResponseModel):
+    """Read-only result of the dependency completion-eligibility check:
+    whether every dependency target of the activity is completed, plus the
+    list of any that are not. ``eligible`` is True when there are no
+    blockers (including the no-dependencies case)."""
+
+    activity_id: str
+    eligible: bool
+    blocking_dependencies: List[CompletionBlocker] = Field(default_factory=list)
+
+
 class ActivityAttachmentInput(BaseModel):
     """One inline attachment on a MEETING activity-create payload.
 

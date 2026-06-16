@@ -30,6 +30,7 @@ from app.core.rbac import (
 )
 from app.dependencies import get_activity_controller, get_optional_current_user_id
 from app.schemas.activity import (
+    ActivityCompletionEligibilityResponse,
     ActivityCreateRequest,
     ActivityResponse,
     ActivityUpdateRequest,
@@ -170,6 +171,28 @@ def get_activity(
     controller: Annotated[ActivityController, Depends(get_activity_controller)],
 ):
     return controller.get(activity_id)
+
+
+@router.get(
+    "/{activity_id}/completion-eligibility",
+    response_model=ActivityCompletionEligibilityResponse,
+    summary="Check whether an activity's dependency targets are all completed",
+    description=(
+        "Read-only pre-flight for activity completion. Returns whether "
+        "every dependency target of the activity is in a terminal status "
+        "(``eligible``) plus the list of any blocking dependencies. Mutates "
+        "nothing. Intended to be called before attempting a status→completed "
+        "update (e.g. by the workflow service) so the caller can block the "
+        "completion when dependencies are unfinished, mirroring the same "
+        "gate the PATCH update enforces server-side."
+    ),
+    dependencies=[Depends(require_project_permission(ACTIVITIES_READ))],
+)
+def activity_completion_eligibility(
+    activity_id: str,
+    controller: Annotated[ActivityController, Depends(get_activity_controller)],
+):
+    return controller.completion_eligibility(activity_id)
 
 
 @router.patch(

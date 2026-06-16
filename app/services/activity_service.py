@@ -107,6 +107,13 @@ class ActivityService:
                 "Project is closed. Reopen project first to add activities.",
                 details={"project_id": milestone.project_id, "project_status": "closed"},
             )
+        # Required-field parity with the create UI. A non-meeting activity
+        # must carry owner division, organization (vendor), priority and at
+        # least one concerned division — the same fields the UI marks
+        # mandatory. Meeting/governance activities are created without these
+        # business fields, so they are exempt.
+        if not getattr(milestone, "is_meeting", False):
+            self._assert_activity_create_required(payload)
         # Status validation is schema-level (2-value hardcoded set per
         # monolith parity); priority + ownerDivision are service-level
         # catalog checks; concerned_divisions accepted silently (no
@@ -235,6 +242,32 @@ class ActivityService:
         self._cascade_revert_from_new_child(row, caller_user_id=caller_user_id)
         self.db.commit()
         return row
+
+    def _assert_activity_create_required(self, payload) -> None:
+        """Create-time mandatory-field gate mirroring the activity UI.
+
+        Owner division, organization (vendor), priority and at least one
+        concerned division are required to create a non-meeting activity.
+        Raises a single 422 listing every missing field by wire name. The
+        update/PATCH path is intentionally NOT gated here — partial updates
+        stay partial. Meeting/governance activities are exempt and never
+        reach this method (see ``create``).
+        """
+        missing: list[str] = []
+        if not (payload.owner_division and str(payload.owner_division).strip()):
+            missing.append("ownerDivision")
+        if not (payload.vendor_id and str(payload.vendor_id).strip()):
+            missing.append("vendorId")
+        if not (payload.priority and str(payload.priority).strip()):
+            missing.append("priority")
+        if not payload.concerned_divisions:
+            missing.append("concernedDivision")
+        if missing:
+            raise ValidationError(
+                "Missing required field(s) for activity creation: "
+                f"{', '.join(missing)}.",
+                details={"missing": missing},
+            )
 
     def _prepare_meeting_attachments(
         self, milestone, attachments: Optional[List[ActivityAttachmentInput]],

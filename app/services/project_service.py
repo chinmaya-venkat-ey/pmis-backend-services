@@ -120,6 +120,10 @@ class ProjectService:
             owner=payload.owner,
             require_owner=True,
         )
+        # Required-field parity with the create UI: expected start/end dates
+        # and at least one organization (vendor) are mandatory to create a
+        # project. Update/PATCH stays partial and is not gated here.
+        self._assert_project_create_required(payload)
         # Bug #141: project names must be unique among LIVE rows. Pre-check
         # surfaces a friendly 409; uq_projects_name_live is the race-safe
         # safety net.
@@ -175,6 +179,27 @@ class ProjectService:
         )
         self.db.commit()
         return row
+
+    def _assert_project_create_required(self, payload) -> None:
+        """Create-time mandatory-field gate mirroring the project UI:
+        expected start date, expected end date and at least one organization
+        (vendor) are required to create a project. Raises a single 422
+        listing every missing field by wire name. Update/PATCH stays partial
+        and is not gated here.
+        """
+        missing: list[str] = []
+        if payload.start_date is None:
+            missing.append("startDate")
+        if payload.end_date is None:
+            missing.append("endDate")
+        if not payload.vendor_ids:
+            missing.append("vendorIds")
+        if missing:
+            raise ValidationError(
+                "Missing required field(s) for project creation: "
+                f"{', '.join(missing)}.",
+                details={"missing": missing},
+            )
 
     def update(
         self,

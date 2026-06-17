@@ -189,7 +189,7 @@ def test_assignable_picker_unions_sources_dedups_and_projects_org_role():
         inst.fetch_users.side_effect = [
             [{"id": "u1", "login": "alice", "email": "a@x",
               "full_name": "Alice L", "roles": ["project_member"]}],     # (a) project
-            [{"id": "u2", "login": "bob", "roles": ["org_admin"]}],      # (b) org_admin
+            [{"id": "u2", "login": "bob", "roles": ["org_admin"]}],      # (b) vendor member
             [{"id": "u1", "login": "alice", "roles": ["project_member"]}],  # (c) dup
         ]
         out = repo.list_assignable_users_for_project("P1", authorization="Bearer x")
@@ -201,6 +201,8 @@ def test_assignable_picker_unions_sources_dedups_and_projects_org_role():
     calls = inst.fetch_users.call_args_list
     assert calls[0].kwargs["project_id"] == "P1"
     assert calls[1].kwargs["vendor_ids"] == ["V1"]
-    assert calls[1].kwargs["role"] == "org_admin"
+    # Bug #142: branch (b) fetches ALL members of the project's vendor(s), not
+    # just org_admins — so no role filter is sent.
+    assert "role" not in calls[1].kwargs
     assert calls[2].kwargs["divisions"] == ["D1"]
     assert all(c.kwargs["exclude_admin_tier"] for c in calls)

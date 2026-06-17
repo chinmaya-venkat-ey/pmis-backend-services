@@ -8,7 +8,7 @@ Two read surfaces:
     role-assignment endpoint (which carries the ids) is a separate change.
 
   - ``list_assignable_users_for_project`` — union of (a) project-tier role
-    holders, (b) org_admin holders on the project's vendor(s), and (c) users
+    holders, (b) all members of the project's vendor(s)/org(s), and (c) users
     in the project's divisions, minus admin/super_admin tier. The RBAC half
     now comes from user-svc's ``/authz/users`` (the single source of truth);
     this service only supplies its OWN resource facts — the project's vendor
@@ -99,10 +99,15 @@ class AssignableUsersRepository:
     def list_assignable_users_for_project(
         self, project_id: str, *, authorization: str,
     ) -> List[Dict[str, Any]]:
-        """Union of (a) project-role holders, (b) org_admins on the project's
-        vendor(s), and (c) users in the project's divisions — admin/super_admin
-        tier excluded. The three RBAC queries are answered by user-svc's
-        ``/authz/users``; this service supplies only the local resource facts.
+        """Union of (a) project-role holders, (b) ALL members of the project's
+        vendor(s)/org(s), and (c) users in the project's divisions —
+        admin/super_admin tier excluded. The three RBAC queries are answered by
+        user-svc's ``/authz/users``; this service supplies only the local
+        resource facts.
+
+        Bug #142: branch (b) is every user who belongs to a project's
+        organization (home ``vendor_id``), not just that org's admins — any
+        member of a mapped org must be assignable inside the project.
 
         Each entry carries ``id`` / ``login`` / ``email`` / ``full_name`` /
         ``org_role`` (highest tier the user holds).
@@ -125,12 +130,13 @@ class AssignableUsersRepository:
             project_id=project_id,
             exclude_admin_tier=True,
         ))
-        # (b) org_admin holders on the project's vendor(s).
+        # (b) ALL members of the project's vendor(s)/org(s) — everyone whose
+        # home organization is mapped to this project, not just org_admins
+        # (Bug #142). admin/super_admin tier still excluded.
         if vendor_ids:
             _merge(client.fetch_users(
                 authorization=authorization,
                 vendor_ids=vendor_ids,
-                role="org_admin",
                 exclude_admin_tier=True,
             ))
         # (c) users in the project's divisions.

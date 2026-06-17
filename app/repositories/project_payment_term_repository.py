@@ -10,6 +10,7 @@ from typing import List, Optional, Tuple
 from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
+from app.core.pagination import paginate
 from app.models.project_payment_term import ProjectPaymentTerm
 
 
@@ -37,7 +38,7 @@ class ProjectPaymentTermRepository:
         count_stmt = select(func.count()).select_from(ProjectPaymentTerm).where(and_(*clauses))
         total = self.db.execute(count_stmt).scalar_one()
         rows = self.db.execute(
-            stmt.offset(max(0, offset - 1) * page_size).limit(page_size)
+            paginate(stmt, offset, page_size)
         ).scalars().all()
         return list(rows), total
 

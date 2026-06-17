@@ -106,7 +106,7 @@ def _make_list_endpoint(target_kind: str):
         request: Request,
         controller: Annotated[CommentController, Depends(get_comment_controller)],
         offset: Annotated[int, Query(ge=1)] = 1,
-        page_size: Annotated[int, Query(ge=1, le=100, alias="pageSize")] = 20,
+        page_size: Annotated[Optional[int], Query(ge=1, alias="pageSize")] = None,
     ):
         project_id = _project_id_for_target(target_kind, target_id)
         assert_action_allowed(

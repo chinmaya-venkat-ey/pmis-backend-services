@@ -187,7 +187,7 @@ class ActivityService:
         if payload.depends_on:
             resolved_deps = self._resolve_depends_on(row.project_id, payload.depends_on)
             self._guard_dependency_cycle(row.id, resolved_deps)
-            self._assert_deps_exist(resolved_deps)
+            self._assert_deps_in_same_project(row.project_id, resolved_deps)
             self._assert_dep_dates_outlasting(row, resolved_deps)
             self.repo.replace_dependencies(row.id, resolved_deps)
 
@@ -446,7 +446,7 @@ class ActivityService:
             resolved_deps = self._resolve_depends_on(row.project_id, depends_on)
             self._guard_dependency_cycle(row.id, resolved_deps)
             if resolved_deps:
-                self._assert_deps_exist(resolved_deps)
+                self._assert_deps_in_same_project(row.project_id, resolved_deps)
                 self._assert_dep_dates_outlasting(row, resolved_deps)
             self.repo.replace_dependencies(row.id, resolved_deps)
             self.audit.write(
@@ -528,12 +528,9 @@ class ActivityService:
         # gate). Unknown codes pass through and get persisted.
         return
 
-    def _assert_deps_exist(
-        self, depends_on_ids: List[str],
+    def _assert_deps_in_same_project(
+        self, project_id: str, depends_on_ids: List[str],
     ) -> None:
-        """Every dependency target must be a real, non-deleted activity — in
-        ANY project (cross-project dependencies are allowed). Unknown ids and
-        wrong-type ids (a non-activity UUID won't match) are rejected."""
         if not depends_on_ids:
             return
         from sqlalchemy import select
@@ -541,13 +538,15 @@ class ActivityService:
         rows = self.db.execute(
             select(Activity.id)
             .where(Activity.id.in_(depends_on_ids))
+            .where(Activity.project_id == project_id)
             .where(Activity.deleted_at.is_(None))
         ).all()
         found = {r[0] for r in rows}
         missing = [d for d in depends_on_ids if d not in found]
         if missing:
             raise ValidationError(
-                f"Unknown activity dependency target(s): {', '.join(missing)}"
+                f"Unknown or out-of-project activity dependency "
+                f"target(s): {', '.join(missing)}"
             )
 
     def _assert_dep_dates_outlasting(

@@ -50,36 +50,23 @@ class MilestoneController:
     def _resolve_milestone_display_codes(
         self, project_id: str, milestone_ids: List[str],
     ) -> List[str]:
-        """Look up M<position> labels for the supplied milestone UUIDs.
-        Same-project targets render unchanged; cross-project targets are
-        prefixed with their project_code (``<code> · M<n>``). Returns the
-        labels in the same order as ``milestone_ids``; an unresolved UUID is
-        dropped."""
+        """Look up M<position> labels for the supplied milestone UUIDs
+        scoped to the same project. Returns the labels in the same
+        order as ``milestone_ids``; an unresolved UUID is dropped."""
         if not milestone_ids:
             return []
         from sqlalchemy import select
         from app.models.milestone import Milestone
-        from app.models.project import Project
         rows = self.db.execute(
-            select(
-                Milestone.id, Milestone.position,
-                Milestone.project_id, Project.project_code,
-            )
-            .join(Project, Project.id == Milestone.project_id)
+            select(Milestone.id, Milestone.position)
             .where(Milestone.id.in_(milestone_ids))
+            .where(Milestone.project_id == project_id)
             .where(Milestone.deleted_at.is_(None))
         ).all()
-        by_id = {mid: (pos, proj_id, code) for mid, pos, proj_id, code in rows}
-        out = []
-        for mid in milestone_ids:
-            t = by_id.get(mid)
-            if t and t[0]:
-                pos, proj_id, code = t
-                label = f"M{pos}"
-                if proj_id != project_id:
-                    label = f"{code} · {label}"
-                out.append(label)
-        return out
+        by_id = dict(rows)
+        return [
+            f"M{by_id[mid]}" for mid in milestone_ids if mid in by_id and by_id[mid]
+        ]
 
     def get(self, milestone_id: str) -> MilestoneResponse:
         return self._to_response(self.service.get_by_id(milestone_id))

@@ -66,32 +66,23 @@ class CriticalPathRepository:
     def get_activity_dependencies(
         self, project_id: str
     ) -> List[Tuple[str, str]]:
-        """Return (from_activity_id, to_activity_id) pairs where BOTH
-        endpoints are activities in this project.
+        """Return (from_activity_id, to_activity_id) pairs.
 
         Semantic: from_activity_id DEPENDS ON to_activity_id
         i.e. to_activity_id is the predecessor that must finish first.
-
-        Cross-project dependency edges (target in another project) are
-        EXCLUDED so the critical-path graph never references a node outside
-        its own project node set — keeping CPA correct and crash-proof.
-        Critical path is a per-project schedule view; cross-project links are
-        honoured by the completion / cycle / date gates, not here.
         """
-        in_project = select(Activity.id).where(
-            and_(
-                Activity.project_id == project_id,
-                Activity.deleted_at.is_(None),
-            )
-        )
         rows = self.db.execute(
             select(
                 ActivityDependency.from_activity_id,
                 ActivityDependency.to_activity_id,
             ).where(
-                and_(
-                    ActivityDependency.from_activity_id.in_(in_project),
-                    ActivityDependency.to_activity_id.in_(in_project),
+                ActivityDependency.from_activity_id.in_(
+                    select(Activity.id).where(
+                        and_(
+                            Activity.project_id == project_id,
+                            Activity.deleted_at.is_(None),
+                        )
+                    )
                 )
             )
         ).mappings().all()

@@ -7,6 +7,7 @@ from typing import List, Optional, Tuple
 from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
+from app.core.pagination import paginate
 from app.models.comment import Comment
 
 
@@ -35,7 +36,7 @@ class CommentRepository:
             select(func.count()).select_from(Comment).where(and_(*clauses))
         ).scalar_one()
         rows = self.db.execute(
-            stmt.offset(max(0, offset - 1) * page_size).limit(page_size)
+            paginate(stmt, offset, page_size)
         ).scalars().all()
         return list(rows), total
 
@@ -79,7 +80,7 @@ class CommentRepository:
             select(func.count()).select_from(Comment).where(and_(*clauses))
         ).scalar_one()
         rows = self.db.execute(
-            stmt.offset(max(0, offset - 1) * page_size).limit(page_size)
+            paginate(stmt, offset, page_size)
         ).scalars().all()
         return list(rows), total
 
@@ -136,9 +137,11 @@ class CommentRepository:
             select(func.count()).select_from(Comment).where(where_expr)
         ).scalar_one()
         rows = self.db.execute(
-            select(Comment).where(where_expr)
-            .order_by(Comment.created_at.desc(), Comment.id.desc())
-            .offset(max(0, offset - 1) * page_size).limit(page_size)
+            paginate(
+                select(Comment).where(where_expr)
+                .order_by(Comment.created_at.desc(), Comment.id.desc()),
+                offset, page_size,
+            )
         ).scalars().all()
         return list(rows), total
 

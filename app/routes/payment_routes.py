@@ -103,7 +103,7 @@ def list_cost_items(
     project_uuid: str,
     controller: Annotated[ProjectCostItemController, Depends(get_project_cost_item_controller)],
     offset: Annotated[int, Query(ge=1)] = 1,
-    page_size: Annotated[int, Query(ge=1, le=100, alias="pageSize")] = 50,
+    page_size: Annotated[Optional[int], Query(ge=1, alias="pageSize")] = None,
     include_deleted: Annotated[bool, Query(alias="includeDeleted")] = False,
 ):
     return controller.list_for_project(
@@ -191,7 +191,7 @@ def list_payment_terms(
     project_uuid: str,
     controller: Annotated[ProjectPaymentTermController, Depends(get_project_payment_term_controller)],
     offset: Annotated[int, Query(ge=1)] = 1,
-    page_size: Annotated[int, Query(ge=1, le=100, alias="pageSize")] = 50,
+    page_size: Annotated[Optional[int], Query(ge=1, alias="pageSize")] = None,
     include_deleted: Annotated[bool, Query(alias="includeDeleted")] = False,
 ):
     return controller.list_for_project(

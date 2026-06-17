@@ -6,6 +6,7 @@ from typing import List, Optional, Tuple
 from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
+from app.core.pagination import paginate
 from app.models.subtask import Subtask
 from app.models.subtask_dependency import SubtaskDependency
 from app.models.subtask_resource import SubtaskResource
@@ -59,7 +60,7 @@ class SubtaskRepository:
             select(func.count()).select_from(Subtask).where(and_(*clauses))
         ).scalar_one()
         rows = self.db.execute(
-            stmt.offset(max(0, offset - 1) * page_size).limit(page_size)
+            paginate(stmt, offset, page_size)
         ).scalars().all()
         return list(rows), total
 

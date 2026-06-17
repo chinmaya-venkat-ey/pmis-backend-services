@@ -228,7 +228,7 @@ def list_projects(
     caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
     caller_is_admin: Annotated[bool, Depends(get_caller_is_admin)],
     offset: Annotated[int, Query(ge=1)] = 1,
-    page_size: Annotated[int, Query(ge=1, le=100, alias="pageSize")] = 20,
+    page_size: Annotated[Optional[int], Query(ge=1, alias="pageSize")] = None,
     active: Annotated[Optional[bool], Query()] = None,
 ):
     # Monolith parity (Doc-38): query schema is offset / pageSize / active
@@ -257,7 +257,7 @@ def list_all_projects(
     caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
     caller_is_admin: Annotated[bool, Depends(get_caller_is_admin)],
     offset: Annotated[int, Query(ge=1)] = 1,
-    page_size: Annotated[int, Query(ge=1, le=100, alias="pageSize")] = 20,
+    page_size: Annotated[Optional[int], Query(ge=1, alias="pageSize")] = None,
     active: Annotated[Optional[bool], Query()] = None,
 ):
     held = getattr(request.state, "user_permissions", None) or set()
@@ -470,8 +470,8 @@ def list_project_audit_logs(
     controller: Annotated[ProjectController, Depends(get_project_controller)],
     offset: Annotated[int, Query(ge=1, description="Page number (1-indexed).")] = 1,
     page_size: Annotated[int, Query(
-        ge=1, le=200, alias="pageSize",
-        description="Items per page (max 200).",
+        ge=1, alias="pageSize",
+        description="Items per page (omit for the default page; uncapped).",
     )] = 50,
 ):
     return controller.audit_logs(
@@ -497,8 +497,8 @@ def list_project_discussion_feed(
     controller: Annotated[ProjectController, Depends(get_project_controller)],
     offset: Annotated[int, Query(ge=1, description="Page number (1-indexed).")] = 1,
     page_size: Annotated[int, Query(
-        ge=1, le=200, alias="pageSize",
-        description="Items per page (max 200).",
+        ge=1, alias="pageSize",
+        description="Items per page (omit for the default page; uncapped).",
     )] = 50,
 ):
     return controller.discussion_feed(

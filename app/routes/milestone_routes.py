@@ -151,7 +151,7 @@ def list_project_milestones(
     project_uuid: str,
     controller: Annotated[MilestoneController, Depends(get_milestone_controller)],
     offset: Annotated[int, Query(ge=1)] = 1,
-    page_size: Annotated[int, Query(ge=1, le=100, alias="pageSize")] = 20,
+    page_size: Annotated[Optional[int], Query(ge=1, alias="pageSize")] = None,
     include_deleted: Annotated[bool, Query(alias="includeDeleted")] = False,
 ):
     return controller.list_for_project(

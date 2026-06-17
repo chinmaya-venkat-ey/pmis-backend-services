@@ -147,7 +147,7 @@ def list_milestone_activities(
     milestone_id: str,
     controller: Annotated[ActivityController, Depends(get_activity_controller)],
     offset: Annotated[int, Query(ge=1)] = 1,
-    page_size: Annotated[int, Query(ge=1, le=100, alias="pageSize")] = 20,
+    page_size: Annotated[Optional[int], Query(ge=1, alias="pageSize")] = None,
     include_deleted: Annotated[bool, Query(alias="includeDeleted")] = False,
 ):
     return controller.list_for_milestone(

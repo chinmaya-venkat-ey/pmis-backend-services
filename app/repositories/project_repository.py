@@ -12,6 +12,7 @@ from typing import List, Optional, Set, Tuple
 from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
+from app.core.pagination import paginate
 from app.models.activity import Activity
 from app.models.activity_resource import ActivityResource
 from app.models.milestone import Milestone
@@ -106,9 +107,7 @@ class ProjectRepository:
 
         total = self.db.execute(count_stmt).scalar_one()
         rows = self.db.execute(
-            stmt.order_by(Project.created_at.desc())
-            .offset(max(0, offset - 1) * page_size)
-            .limit(page_size)
+            paginate(stmt.order_by(Project.created_at.desc()), offset, page_size)
         ).scalars().all()
         return list(rows), total
 

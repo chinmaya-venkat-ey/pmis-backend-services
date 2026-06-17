@@ -59,39 +59,29 @@ class ActivityController:
     def _resolve_activity_display_codes(
         self, project_id: str, activity_ids: List[str],
     ) -> List[str]:
-        """Resolve activity UUIDs to ``A<m_pos>.<a_pos>`` labels. Same-project
-        targets render unchanged; cross-project targets are prefixed with
-        their project_code (``<code> · A<m>.<a>``). Returns labels in the same
-        order as the input UUIDs; unresolved UUIDs are skipped."""
+        """Resolve activity UUIDs to ``A<m_pos>.<a_pos>`` labels scoped
+        to the same project. Returns labels in the same order as the
+        input UUIDs; unresolved UUIDs are skipped."""
         if not activity_ids:
             return []
         from sqlalchemy import select
         from app.models.activity import Activity
         from app.models.milestone import Milestone
-        from app.models.project import Project
         rows = self.db.execute(
             select(
                 Activity.id, Activity.position, Milestone.position,
-                Activity.project_id, Project.project_code,
             )
             .join(Milestone, Milestone.id == Activity.milestone_id)
-            .join(Project, Project.id == Activity.project_id)
             .where(Activity.id.in_(activity_ids))
+            .where(Activity.project_id == project_id)
             .where(Activity.deleted_at.is_(None))
         ).all()
-        by_id = {
-            aid: (a_pos, m_pos, proj_id, proj_code)
-            for aid, a_pos, m_pos, proj_id, proj_code in rows
-        }
+        by_id = {aid: (a_pos, m_pos) for aid, a_pos, m_pos in rows}
         out = []
         for aid in activity_ids:
             t = by_id.get(aid)
             if t and t[0] and t[1]:
-                a_pos, m_pos, proj_id, proj_code = t
-                label = f"A{m_pos}.{a_pos}"
-                if proj_id != project_id:
-                    label = f"{proj_code} · {label}"
-                out.append(label)
+                out.append(f"A{t[1]}.{t[0]}")
         return out
 
     def get(self, activity_id: str) -> ActivityResponse:

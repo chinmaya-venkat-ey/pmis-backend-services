@@ -362,7 +362,9 @@ def _wrap_paged_dict(value: dict, request_path: Optional[str]) -> dict:
         wrapped_elements,
         total=int(value["total"]),
         offset=int(value.get("offset", 1)),
-        page_size=int(value.get("page_size", len(items))),
+        # page_size None => "return all" (no cap); hal_collection renders it as
+        # a single full page. Don't int() it in that case.
+        page_size=(None if value.get("page_size") is None else int(value["page_size"])),
         base_path=collection_base,
     )
 

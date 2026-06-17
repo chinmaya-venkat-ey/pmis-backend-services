@@ -49,41 +49,25 @@ def test_milestone_writable_does_not_require_publish():
     assert_milestone_activity_writable(draft)  # should not raise
 
 
-# ------------------------------------------ dep existence check (xproj) -----
-# Cross-project dependencies are now allowed: the gate only rejects targets
-# that don't resolve to a real (non-deleted) row of the right type — it no
-# longer rejects targets that merely live in another project.
+# ---------------------------------------------- same-project dep check -----
 
 
-def test_task_dep_rejects_unknown_target():
-    """A task dependency on a non-existent task id is rejected as
-    ``Unknown task dependency target(s)``."""
+def test_task_dep_same_project_rejects_outsiders():
+    """A task that depends on tasks belonging to ANOTHER project must be
+    rejected as ``Unknown or out-of-project task dependency target(s)``."""
     from app.services.task_service import TaskService
 
     svc = TaskService(MagicMock())
     exec_mock = MagicMock()
-    exec_mock.all.return_value = []  # id resolves to no task row
+    exec_mock.all.return_value = []  # zero rows in the same project
     svc.db.execute = MagicMock(return_value=exec_mock)
 
     with pytest.raises(ValidationError) as exc:
-        svc._assert_deps_exist(["t-unknown"])
-    assert "Unknown task dependency target" in str(exc.value)
+        svc._assert_deps_in_same_project("p-1", ["t-outsider"])
+    assert "out-of-project" in str(exc.value)
 
 
-def test_task_dep_allows_existing_cross_project_target():
-    """An existing task in ANOTHER project is a valid dependency target now —
-    the existence query returns the row, so no error is raised."""
-    from app.services.task_service import TaskService
-
-    svc = TaskService(MagicMock())
-    exec_mock = MagicMock()
-    exec_mock.all.return_value = [("t-other-project",)]  # row exists (any project)
-    svc.db.execute = MagicMock(return_value=exec_mock)
-
-    svc._assert_deps_exist(["t-other-project"])  # must not raise
-
-
-def test_subtask_dep_rejects_unknown_target():
+def test_subtask_dep_same_project_rejects_outsiders():
     from app.services.subtask_service import SubtaskService
 
     svc = SubtaskService(MagicMock())
@@ -92,19 +76,8 @@ def test_subtask_dep_rejects_unknown_target():
     svc.db.execute = MagicMock(return_value=exec_mock)
 
     with pytest.raises(ValidationError) as exc:
-        svc._assert_deps_exist(["s-unknown"])
-    assert "Unknown subtask dependency target" in str(exc.value)
-
-
-def test_subtask_dep_allows_existing_cross_project_target():
-    from app.services.subtask_service import SubtaskService
-
-    svc = SubtaskService(MagicMock())
-    exec_mock = MagicMock()
-    exec_mock.all.return_value = [("s-other-project",)]
-    svc.db.execute = MagicMock(return_value=exec_mock)
-
-    svc._assert_deps_exist(["s-other-project"])  # must not raise
+        svc._assert_deps_in_same_project("p-1", ["s-outsider"])
+    assert "out-of-project" in str(exc.value)
 
 
 # ------------------------------------------- Doc-31 dep-date outlasting ----

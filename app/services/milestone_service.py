@@ -167,7 +167,7 @@ class MilestoneService:
         if payload.depends_on:
             resolved_deps = self._resolve_depends_on(project_id, payload.depends_on)
             self._guard_dependency_cycle(row.id, resolved_deps)
-            self._assert_deps_exist(resolved_deps)
+            self._assert_deps_in_same_project(project_id, resolved_deps)
             self._assert_dep_dates_outlasting(row, resolved_deps)
             self.repo.replace_dependencies(row.id, resolved_deps)
         if canonical_vendor_ids:
@@ -351,7 +351,7 @@ class MilestoneService:
             resolved_deps = self._resolve_depends_on(row.project_id, depends_on)
             self._guard_dependency_cycle(row.id, resolved_deps)
             if resolved_deps:
-                self._assert_deps_exist(resolved_deps)
+                self._assert_deps_in_same_project(row.project_id, resolved_deps)
                 self._assert_dep_dates_outlasting(row, resolved_deps)
             self.repo.replace_dependencies(row.id, resolved_deps)
             self.audit.write(
@@ -484,13 +484,11 @@ class MilestoneService:
                 f"{', '.join(missing)}. Add them to the project first."
             )
 
-    def _assert_deps_exist(
-        self, depends_on_ids: List[str],
+    def _assert_deps_in_same_project(
+        self, project_id: str, depends_on_ids: List[str],
     ) -> None:
-        """Every dependency target must be a real, non-deleted milestone — in
-        ANY project (cross-project dependencies are allowed). Meeting
-        milestones still can't be targets (not part of deliverable scope), and
-        unknown / wrong-type ids are rejected."""
+        """Every dependency target must belong to the same project
+        (monolith parity — depends-on across projects is rejected)."""
         if not depends_on_ids:
             return
         from sqlalchemy import select
@@ -502,6 +500,7 @@ class MilestoneService:
         rows = self.db.execute(
             select(Milestone.id)
             .where(Milestone.id.in_(depends_on_ids))
+            .where(Milestone.project_id == project_id)
             .where(Milestone.deleted_at.is_(None))
             .where(Milestone.is_meeting.is_(False))
         ).all()
@@ -509,7 +508,8 @@ class MilestoneService:
         missing = [d for d in depends_on_ids if d not in found]
         if missing:
             raise ValidationError(
-                f"Unknown milestone dependency target(s): {', '.join(missing)}"
+                f"Unknown or out-of-project milestone dependency "
+                f"target(s): {', '.join(missing)}"
             )
 
     def _assert_dep_dates_outlasting(

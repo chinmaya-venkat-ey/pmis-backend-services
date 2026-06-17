@@ -66,7 +66,7 @@ def list_dashboard_projects_route(
     vendor_id: Annotated[Optional[str], Query(alias="vendorId")] = None,
     division: Annotated[Optional[str], Query()] = None,
     page: Annotated[int, Query(ge=1)] = 1,
-    page_size: Annotated[int, Query(ge=1, le=500, alias="pageSize")] = 200,
+    page_size: Annotated[Optional[int], Query(ge=1, alias="pageSize")] = None,
 ) -> Dict[str, Any]:
     return controller.projects(
         bucket=bucket,

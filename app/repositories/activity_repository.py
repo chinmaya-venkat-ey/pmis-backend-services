@@ -6,6 +6,7 @@ from typing import List, Optional, Tuple
 from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
+from app.core.pagination import paginate
 from app.models.activity import Activity
 from app.models.activity_dependency import ActivityDependency
 from app.models.activity_resource import ActivityResource
@@ -52,7 +53,7 @@ class ActivityRepository:
             select(func.count()).select_from(Activity).where(and_(*clauses))
         ).scalar_one()
         rows = self.db.execute(
-            stmt.offset(max(0, offset - 1) * page_size).limit(page_size)
+            paginate(stmt, offset, page_size)
         ).scalars().all()
         return list(rows), total
 
@@ -70,7 +71,7 @@ class ActivityRepository:
             select(func.count()).select_from(Activity).where(and_(*clauses))
         ).scalar_one()
         rows = self.db.execute(
-            stmt.offset(max(0, offset - 1) * page_size).limit(page_size)
+            paginate(stmt, offset, page_size)
         ).scalars().all()
         return list(rows), total
 

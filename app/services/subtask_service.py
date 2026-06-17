@@ -159,7 +159,7 @@ class SubtaskService:
         if payload.depends_on:
             resolved_deps = self._resolve_depends_on(row.project_id, payload.depends_on)
             self._guard_dependency_cycle(row.id, resolved_deps)
-            self._assert_deps_exist(resolved_deps)
+            self._assert_deps_in_same_project(row.project_id, resolved_deps)
             self._assert_dep_dates_outlasting(row, resolved_deps)
             self.repo.replace_dependencies(row.id, resolved_deps)
 
@@ -292,7 +292,7 @@ class SubtaskService:
             resolved_deps = self._resolve_depends_on(row.project_id, depends_on)
             self._guard_dependency_cycle(row.id, resolved_deps)
             if resolved_deps:
-                self._assert_deps_exist(resolved_deps)
+                self._assert_deps_in_same_project(row.project_id, resolved_deps)
                 self._assert_dep_dates_outlasting(row, resolved_deps)
             self.repo.replace_dependencies(row.id, resolved_deps)
             self.audit.write(
@@ -674,25 +674,24 @@ class SubtaskService:
             f"task first."
         )
 
-    def _assert_deps_exist(
-        self, depends_on_ids: List[str],
+    def _assert_deps_in_same_project(
+        self, project_id: str, depends_on_ids: List[str],
     ) -> None:
-        """Every dependency target must be a real, non-deleted subtask — in
-        ANY project (cross-project dependencies are allowed). Unknown /
-        wrong-type ids are rejected."""
         if not depends_on_ids:
             return
         from app.models.subtask import Subtask
         rows = self.db.execute(
             select(Subtask.id)
             .where(Subtask.id.in_(depends_on_ids))
+            .where(Subtask.project_id == project_id)
             .where(Subtask.deleted_at.is_(None))
         ).all()
         found = {r[0] for r in rows}
         missing = [d for d in depends_on_ids if d not in found]
         if missing:
             raise ValidationError(
-                f"Unknown subtask dependency target(s): {', '.join(missing)}"
+                f"Unknown or out-of-project subtask dependency target(s): "
+                f"{', '.join(missing)}"
             )
 
     def _assert_dep_dates_outlasting(
@@ -814,6 +813,13 @@ class SubtaskService:
                 "Assignee is soft-deleted",
                 details={"check": "user_not_deleted", "assigned_to": assignee_user_id},
             )
+        # An admin / super_admin is implicitly a member of every project, so they
+        # are a valid assignee anywhere — exempt them from the vendor/role-on-
+        # project invariants below (which they can never satisfy: no vendor, no
+        # project-scoped role).
+        from app.core.admin_tier import is_user_admin_tier
+        if is_user_admin_tier(self.db, assignee_user_id):
+            return
         project_vendor_ids = list(self.db.execute(
             select(ProjectVendor.vendor_id).where(ProjectVendor.project_id == project_id)
         ).scalars())

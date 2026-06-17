@@ -161,7 +161,7 @@ def list_task_subtasks(
     task_id: str,
     controller: Annotated[SubtaskController, Depends(get_subtask_controller)],
     offset: Annotated[int, Query(ge=1)] = 1,
-    page_size: Annotated[int, Query(ge=1, le=100, alias="pageSize")] = 20,
+    page_size: Annotated[Optional[int], Query(ge=1, alias="pageSize")] = None,
     include_deleted: Annotated[bool, Query(alias="includeDeleted")] = False,
 ):
     # Monolith parity: no ``topLevelOnly`` filter — returns every subtask

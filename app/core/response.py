@@ -65,7 +65,7 @@ def hal_collection(
     total: int,
     *,
     offset: int = 1,
-    page_size: int = 20,
+    page_size: Optional[int] = 20,
     self_link: Optional[str] = None,
     base_path: Optional[str] = None,
     extra_links: Optional[dict[str, dict]] = None,
@@ -78,6 +78,11 @@ def hal_collection(
     ``format_*_collection`` HAL pagination shape.
     """
     items = list(elements)
+    if page_size is None:
+        # No pagination cap requested (pageSize omitted) — present the whole
+        # result set as a single page so the envelope stays consistent and no
+        # synthetic next/last links are emitted.
+        page_size = total if total and total > 0 else len(items)
     links: dict[str, dict] = {}
     if base_path:
         links["self"] = {

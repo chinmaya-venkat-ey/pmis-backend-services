@@ -782,7 +782,7 @@ class DashboardService:
         vendor_id: Optional[str] = None,
         division: Optional[str] = None,
         page: int = 1,
-        page_size: int = 200,
+        page_size: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Paginated project cards with optional filters."""
         if bucket is not None and bucket not in self._VALID_BUCKETS_FOR_LIST:
@@ -791,7 +791,8 @@ class DashboardService:
 
         if page < 1:
             page = 1
-        page_size = max(1, min(page_size, 500))
+        if page_size is not None:
+            page_size = max(1, page_size)
 
         today = _ist_today()
         projects, counters, vendors_by_pid, derived = (
@@ -817,11 +818,14 @@ class DashboardService:
         # next to the listing.
         counts = _build_bucket_counts([derived[p.id][1] for p in matched])
 
-        # Pagination.
+        # Pagination. page_size None => no cap, return every matched card.
         total = len(matched)
-        start = (page - 1) * page_size
-        end = start + page_size
-        page_projects = matched[start:end]
+        if page_size is None:
+            page_projects = matched
+        else:
+            start = (page - 1) * page_size
+            end = start + page_size
+            page_projects = matched[start:end]
 
         cards = [
             self._build_project_card(
@@ -837,7 +841,7 @@ class DashboardService:
         return {
             "asOf": today.isoformat(),
             "page": page,
-            "pageSize": page_size,
+            "pageSize": page_size if page_size is not None else total,
             "total": total,
             "counts": counts,
             "projects": cards,

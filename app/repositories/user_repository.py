@@ -15,6 +15,7 @@ from typing import List, Optional, Tuple
 from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.orm import Session
 
+from app.core.pagination import paginate
 from app.core.permissions import ADMIN_ROLE, SUPER_ADMIN_ROLE
 from app.models.role import Role
 from app.models.user import User
@@ -78,7 +79,7 @@ class UserRepository:
         self,
         *,
         offset: int = 1,
-        page_size: int = 20,
+        page_size: Optional[int] = None,
         status: Optional[str] = None,
         include_deleted: bool = False,
         vendor_id_filter: Optional[str] = None,
@@ -129,7 +130,7 @@ class UserRepository:
 
         # FE convention: 1-based offset. Newest users first (Bug #2).
         zero_based = max(0, offset - 1)
-        base = base.order_by(User.created_at.desc()).offset(zero_based * page_size).limit(page_size)
+        base = paginate(base.order_by(User.created_at.desc()), offset, page_size)
 
         rows = list(self.db.execute(base).scalars().all())
         total = self.db.execute(count_base).scalar_one()

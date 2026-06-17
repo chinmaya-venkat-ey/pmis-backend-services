@@ -79,7 +79,8 @@ def _wrap(value: Any, hal_type: str) -> Optional[dict]:
             items,
             total=int(value["total"]),
             offset=int(value.get("offset", 1)),
-            page_size=int(value.get("page_size", len(items))),
+            page_size=(None if value.get("page_size") is None
+                       else int(value["page_size"])),
         )
 
     if isinstance(value, list):

@@ -1,7 +1,7 @@
 """Routes for /user/roles/* (role CRUD + role-permission management)."""
 from __future__ import annotations
 
-from typing import Annotated, List
+from typing import Annotated, List, Optional
 
 from fastapi import APIRouter, Depends, Query, status
 
@@ -35,13 +35,17 @@ router = APIRouter(prefix="/roles", tags=["roles"])
 def list_roles(
     controller: Annotated[RoleController, Depends(get_role_controller)],
     offset: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100, alias="pageSize"),
+    page_size: Optional[int] = Query(None, ge=1, alias="pageSize"),
 ):
     all_roles = controller.list_()
     total = len(all_roles)
-    zero_based = max(0, offset - 1)
-    page = all_roles[zero_based * page_size : zero_based * page_size + page_size]
-    return {"items": page, "total": total, "offset": offset, "pageSize": page_size}
+    if page_size is None:
+        page = all_roles  # no cap -> return every role
+    else:
+        zero_based = max(0, offset - 1)
+        page = all_roles[zero_based * page_size : zero_based * page_size + page_size]
+    return {"items": page, "total": total, "offset": offset,
+            "pageSize": page_size if page_size is not None else total}
 
 
 @router.post(

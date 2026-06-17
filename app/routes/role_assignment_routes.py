@@ -3,7 +3,7 @@ and /user/vendors/{vid}/{projects,users}/list (vendor sub-listings).
 """
 from __future__ import annotations
 
-from typing import Annotated, List, Union
+from typing import Annotated, List, Optional, Union
 
 from fastapi import APIRouter, Depends, Query, status
 
@@ -359,7 +359,7 @@ def list_vendor_users(
     vendor_id: str,
     controller: Annotated[RoleAssignmentController, Depends(get_role_assignment_controller)],
     offset: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: Optional[int] = Query(None, ge=1),
     include_deleted: bool = Query(False),
 ):
     return controller.list_vendor_users(

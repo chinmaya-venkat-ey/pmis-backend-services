@@ -1,7 +1,7 @@
 """Routes for /users CRUD, permissions, roles, and project listings."""
 from __future__ import annotations
 
-from typing import Annotated, List
+from typing import Annotated, List, Optional
 
 from fastapi import APIRouter, Depends, Query, Request, status
 
@@ -55,7 +55,7 @@ def list_users(
     caller_user_id: Annotated[str, Depends(get_current_user_id)],
     caller_is_admin: Annotated[bool, Depends(get_caller_is_admin)],
     offset: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=200, alias="pageSize"),
+    page_size: Optional[int] = Query(None, ge=1, alias="pageSize"),
     status: str = Query(None),
     include_deleted: bool = Query(False),
     request: Request = None,

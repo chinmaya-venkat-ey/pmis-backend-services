@@ -1,7 +1,7 @@
 """RoleAssignmentController — HTTP adapter for role-assignment + vendor sub-listing routes."""
 from __future__ import annotations
 
-from typing import List, Union
+from typing import List, Optional, Union
 
 from app.repositories.user_repository import UserRepository
 from app.repositories.user_role_assignment_repository import UserRoleAssignmentRepository
@@ -129,7 +129,7 @@ class RoleAssignmentController:
         vendor_id: str,
         *,
         offset: int,
-        page_size: int,
+        page_size: Optional[int],
         include_deleted: bool,
     ) -> dict:
         rows = self.assignments.list_users_for_vendor(vendor_id)
@@ -139,12 +139,15 @@ class RoleAssignmentController:
         if not include_deleted:
             rows = [u for u in rows if u.deleted_at is None]
         total = len(rows)
-        # 1-based offset pagination
-        zero_based = max(0, offset - 1)
-        page = rows[zero_based * page_size : zero_based * page_size + page_size]
+        # 1-based offset pagination; page_size None -> no cap (all rows)
+        if page_size is None:
+            page = rows
+        else:
+            zero_based = max(0, offset - 1)
+            page = rows[zero_based * page_size : zero_based * page_size + page_size]
         return {
             "items": [UserSummary.model_validate(u) for u in page],
             "total": total,
             "offset": offset,
-            "pageSize": page_size,
+            "pageSize": page_size if page_size is not None else total,
         }

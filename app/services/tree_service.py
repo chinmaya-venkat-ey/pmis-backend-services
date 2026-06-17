@@ -20,7 +20,7 @@ from collections import defaultdict
 from datetime import date as _date_type, datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-from sqlalchemy import asc, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.errors import NotFoundError
@@ -151,6 +151,7 @@ class _LabelIndex:
         "activity_id_to_label",
         "task_id_to_label",
         "subtask_id_to_label",
+        "cross_project_id_to_label",
     )
 
     def __init__(self) -> None:
@@ -158,6 +159,10 @@ class _LabelIndex:
         self.activity_id_to_label: Dict[str, str] = {}
         self.task_id_to_label: Dict[str, str] = {}
         self.subtask_id_to_label: Dict[str, str] = {}
+        # Cross-project dep targets (any kind) -> "ProjectName · <code>".
+        # Populated after the in-project index is built; UUIDs are globally
+        # unique so a single kind-agnostic map is safe.
+        self.cross_project_id_to_label: Dict[str, str] = {}
 
     def for_kind(self, kind: str) -> Dict[str, str]:
         return {
@@ -170,16 +175,20 @@ class _LabelIndex:
     def label_of(self, kind: str, entity_id: Optional[str]) -> Optional[str]:
         if entity_id is None:
             return None
-        return self.for_kind(kind).get(entity_id)
+        return (
+            self.for_kind(kind).get(entity_id)
+            or self.cross_project_id_to_label.get(entity_id)
+        )
 
     def labels_of(self, kind: str, ids: List[str]) -> List[str]:
-        """Map a list of UUIDs to labels (input order). Unknown ids
-        are silently dropped — they're soft-deleted parents or
-        cross-project references."""
+        """Map a list of UUIDs to labels (input order). In-project ids resolve
+        to their ``<code>``; cross-project ids resolve to
+        ``<ProjectName> · <code>`` via the cross-project map. Ids that resolve
+        to neither (truly unknown / soft-deleted) are silently dropped."""
         m = self.for_kind(kind)
         out: List[str] = []
         for i in ids or []:
-            label = m.get(i)
+            label = m.get(i) or self.cross_project_id_to_label.get(i)
             if label is not None:
                 out.append(label)
         return out
@@ -188,88 +197,83 @@ class _LabelIndex:
 def _index_milestones(
     db: Session, project_id: str, idx: "_LabelIndex",
 ) -> Dict[str, int]:
-    """Label every live milestone ``M{n}`` and return ``{mid: rank}``.
+    """Label every live milestone ``M{position}`` and return ``{mid: position}``.
 
-    Meeting milestones (is_meeting=True) are excluded from the M{n}
-    label series — they're hidden from the project tree and shouldn't
-    consume a display position.
+    Uses the STORED position (not a dense rank) so the tree's display codes
+    round-trip with the controllers, the dependsOn resolver, and what the FE
+    echoes back. Meeting milestones (is_meeting=True) are excluded — they're
+    hidden from the project tree and carry no display code.
     """
     stmt = (
         select(Milestone.id, Milestone.position)
         .where(Milestone.project_id == project_id)
         .where(Milestone.deleted_at.is_(None))
         .where(Milestone.is_meeting.is_(False))
-        .order_by(asc(Milestone.position), asc(Milestone.id))
     )
-    m_id_to_rank: Dict[str, int] = {}
-    for m_idx, (mid, _pos) in enumerate(db.execute(stmt).all(), start=1):
-        idx.milestone_id_to_label[mid] = f"M{m_idx}"
-        m_id_to_rank[mid] = m_idx
-    return m_id_to_rank
+    m_id_to_pos: Dict[str, int] = {}
+    for mid, pos in db.execute(stmt).all():
+        if not pos:
+            continue
+        idx.milestone_id_to_label[mid] = f"M{pos}"
+        m_id_to_pos[mid] = pos
+    return m_id_to_pos
 
 
 def _index_activities(
     db: Session,
     project_id: str,
     idx: "_LabelIndex",
-    m_id_to_rank: Dict[str, int],
+    m_id_to_pos: Dict[str, int],
 ) -> Dict[str, Tuple[int, int]]:
-    """Label live activities ``A{m}.{n}`` and return ``{aid: (m, n)}``."""
+    """Label live activities ``A{m_pos}.{a_pos}`` (stored positions) and
+    return ``{aid: (m_pos, a_pos)}``."""
     stmt = (
         select(Activity.id, Activity.position, Activity.milestone_id)
         .where(Activity.project_id == project_id)
         .where(Activity.deleted_at.is_(None))
     )
-    acts_by_milestone: Dict[str, List[Tuple[str, int]]] = defaultdict(list)
+    a_id_to_pos: Dict[str, Tuple[int, int]] = {}
     for aid, pos, mid in db.execute(stmt).all():
-        acts_by_milestone[mid].append((aid, pos))
-    a_id_to_rank: Dict[str, Tuple[int, int]] = {}
-    for mid, pairs in acts_by_milestone.items():
-        m_rank = m_id_to_rank.get(mid)
-        if m_rank is None:
-            continue  # orphan (parent milestone soft-deleted)
-        pairs.sort(key=lambda x: (x[1], x[0]))
-        for a_idx, (aid, _pos) in enumerate(pairs, start=1):
-            idx.activity_id_to_label[aid] = f"A{m_rank}.{a_idx}"
-            a_id_to_rank[aid] = (m_rank, a_idx)
-    return a_id_to_rank
+        m_pos = m_id_to_pos.get(mid)
+        if m_pos is None or not pos:
+            continue  # orphan (parent milestone soft-deleted/meeting) or no pos
+        idx.activity_id_to_label[aid] = f"A{m_pos}.{pos}"
+        a_id_to_pos[aid] = (m_pos, pos)
+    return a_id_to_pos
 
 
 def _index_tasks(
     db: Session,
     project_id: str,
     idx: "_LabelIndex",
-    a_id_to_rank: Dict[str, Tuple[int, int]],
+    a_id_to_pos: Dict[str, Tuple[int, int]],
 ) -> Dict[str, Tuple[int, int, int]]:
-    """Label live tasks ``T{m}.{a}.{n}`` and return ``{tid: (m, a, n)}``."""
+    """Label live tasks ``T{m_pos}.{a_pos}.{t_pos}`` (stored positions) and
+    return ``{tid: (m_pos, a_pos, t_pos)}``."""
     stmt = (
         select(Task.id, Task.position, Task.activity_id)
         .where(Task.project_id == project_id)
         .where(Task.deleted_at.is_(None))
     )
-    tasks_by_activity: Dict[str, List[Tuple[str, int]]] = defaultdict(list)
+    t_id_to_pos: Dict[str, Tuple[int, int, int]] = {}
     for tid, pos, aid in db.execute(stmt).all():
-        tasks_by_activity[aid].append((tid, pos))
-    t_id_to_rank: Dict[str, Tuple[int, int, int]] = {}
-    for aid, pairs in tasks_by_activity.items():
-        m_a = a_id_to_rank.get(aid)
-        if m_a is None:
+        m_a = a_id_to_pos.get(aid)
+        if m_a is None or not pos:
             continue
-        m_rank, a_rank = m_a
-        pairs.sort(key=lambda x: (x[1], x[0]))
-        for t_idx, (tid, _pos) in enumerate(pairs, start=1):
-            idx.task_id_to_label[tid] = f"T{m_rank}.{a_rank}.{t_idx}"
-            t_id_to_rank[tid] = (m_rank, a_rank, t_idx)
-    return t_id_to_rank
+        m_pos, a_pos = m_a
+        idx.task_id_to_label[tid] = f"T{m_pos}.{a_pos}.{pos}"
+        t_id_to_pos[tid] = (m_pos, a_pos, pos)
+    return t_id_to_pos
 
 
 def _index_subtasks(
     db: Session,
     project_id: str,
     idx: "_LabelIndex",
-    t_id_to_rank: Dict[str, Tuple[int, int, int]],
+    t_id_to_pos: Dict[str, Tuple[int, int, int]],
 ) -> None:
-    """Label variable-depth subtask trees ``S{m}.{a}.{t}.{...}`` (DFS)."""
+    """Label variable-depth subtask trees ``S{m}.{a}.{t}.{...}`` using STORED
+    positions (DFS through parent_subtask_id)."""
     stmt = (
         select(
             Subtask.id,
@@ -287,37 +291,96 @@ def _index_subtasks(
             top_by_task[tid].append((sid, pos))
         else:
             children_by_parent[pid].append((sid, pos))
-    for bucket in top_by_task.values():
-        bucket.sort(key=lambda x: (x[1], x[0]))
-    for bucket in children_by_parent.values():
-        bucket.sort(key=lambda x: (x[1], x[0]))
 
     for tid, top_pairs in top_by_task.items():
-        m_a_t = t_id_to_rank.get(tid)
+        m_a_t = t_id_to_pos.get(tid)
         if m_a_t is None:
             continue
-        m_rank, a_rank, t_rank = m_a_t
-        prefix = f"S{m_rank}.{a_rank}.{t_rank}"
-        for top_idx, (top_sid, _pos) in enumerate(top_pairs, start=1):
-            stack: List[Tuple[str, str]] = [(top_sid, f"{prefix}.{top_idx}")]
+        m_pos, a_pos, t_pos = m_a_t
+        prefix = f"S{m_pos}.{a_pos}.{t_pos}"
+        for top_sid, top_pos in top_pairs:
+            if not top_pos:
+                continue
+            stack: List[Tuple[str, str]] = [(top_sid, f"{prefix}.{top_pos}")]
             while stack:
                 node_id, label = stack.pop()
                 idx.subtask_id_to_label[node_id] = label
-                children = children_by_parent.get(node_id, [])
-                for child_idx, (child_sid, _cpos) in enumerate(
-                    children, start=1,
-                ):
-                    stack.append((child_sid, f"{label}.{child_idx}"))
+                for child_sid, child_pos in children_by_parent.get(node_id, []):
+                    if child_pos:
+                        stack.append((child_sid, f"{label}.{child_pos}"))
 
 
 def _build_label_index(db: Session, project_id: str) -> _LabelIndex:
     """Build a complete label index for one project (4 queries)."""
     idx = _LabelIndex()
-    m_id_to_rank = _index_milestones(db, project_id, idx)
-    a_id_to_rank = _index_activities(db, project_id, idx, m_id_to_rank)
-    t_id_to_rank = _index_tasks(db, project_id, idx, a_id_to_rank)
-    _index_subtasks(db, project_id, idx, t_id_to_rank)
+    m_id_to_pos = _index_milestones(db, project_id, idx)
+    a_id_to_pos = _index_activities(db, project_id, idx, m_id_to_pos)
+    t_id_to_pos = _index_tasks(db, project_id, idx, a_id_to_pos)
+    _index_subtasks(db, project_id, idx, t_id_to_pos)
     return idx
+
+
+def _augment_cross_project_labels(
+    db: Session,
+    idx: "_LabelIndex",
+    edge_maps: List[Tuple[str, Dict[str, List[str]]]],
+) -> None:
+    """Resolve dep targets that aren't in the in-project index (cross-project
+    references) to ``<ProjectName> · <code>`` and store them on
+    ``idx.cross_project_id_to_label``.
+
+    Reuses ``_build_label_index`` for each referenced external project so a
+    cross-project code uses the exact same stored-position labelling as that
+    project's own tree. Same-project labels are untouched.
+    """
+    model_by_kind = {
+        KIND_MILESTONE: Milestone,
+        KIND_ACTIVITY: Activity,
+        KIND_TASK: Task,
+        KIND_SUBTASK: Subtask,
+    }
+    # 1. Collect dep target ids not labelled in-project, per kind.
+    unknown_by_kind: Dict[str, set] = {}
+    for kind, deps_by_source in edge_maps:
+        in_kind = idx.for_kind(kind)
+        bucket = unknown_by_kind.setdefault(kind, set())
+        for targets in deps_by_source.values():
+            for t in targets:
+                if t not in in_kind:
+                    bucket.add(t)
+    # 2. Map each (kind, id) -> its project_id; gather external project ids.
+    triples: List[Tuple[str, str, str]] = []  # (kind, entity_id, project_id)
+    project_ids: set = set()
+    for kind, ids in unknown_by_kind.items():
+        if not ids:
+            continue
+        model = model_by_kind[kind]
+        for eid, pid in db.execute(
+            select(model.id, model.project_id).where(model.id.in_(ids))
+        ).all():
+            triples.append((kind, eid, pid))
+            project_ids.add(pid)
+    if not project_ids:
+        return
+    # 3. Project names + a stored-position label index per external project.
+    proj_name = {
+        pid: name for pid, name in db.execute(
+            select(Project.id, Project.name).where(Project.id.in_(project_ids))
+        ).all()
+    }
+    idx_by_project: Dict[str, "_LabelIndex"] = {
+        pid: _build_label_index(db, pid) for pid in project_ids
+    }
+    # 4. Compose "<ProjectName> · <code>".
+    for kind, eid, pid in triples:
+        ext_idx = idx_by_project.get(pid)
+        if ext_idx is None:
+            continue
+        code = ext_idx.for_kind(kind).get(eid)
+        if code is None:
+            continue
+        name = proj_name.get(pid) or ""
+        idx.cross_project_id_to_label[eid] = f"{name} · {code}"
 
 
 # =========================================================================
@@ -452,16 +515,33 @@ class TreeService:
         to_col: Any,
         live_src_ids: set,
         live_tgt_ids: set,
+        tgt_id_col: Any,
+        tgt_deleted_col: Any,
     ) -> Dict[str, List[str]]:
-        """Load every dependency edge whose ``from`` is in
-        ``live_src_ids`` and ``to`` is in ``live_tgt_ids``. Returns
-        ``{from_id: [to_id, ...]}``."""
+        """Load every dependency edge whose ``from`` is in ``live_src_ids``.
+        Same-project targets (in ``live_tgt_ids``) are kept; cross-project
+        targets are kept too, as long as they're live — ``tgt_id_col`` /
+        ``tgt_deleted_col`` prune soft-deleted cross-project endpoints.
+        Returns ``{from_id: [to_id, ...]}``."""
         out: Dict[str, List[str]] = defaultdict(list)
         if not live_src_ids:
             return out
-        stmt = select(from_col, to_col).where(from_col.in_(live_src_ids))
-        for src, tgt in self.db.execute(stmt).all():
-            if tgt in live_tgt_ids:
+        raw = self.db.execute(
+            select(from_col, to_col).where(from_col.in_(live_src_ids))
+        ).all()
+        # Cross-project candidate targets: in the edges but not in this
+        # project's live set. Keep the ones that are live (not deleted).
+        xproj = {tgt for _, tgt in raw if tgt not in live_tgt_ids}
+        live_xproj: set = set()
+        if xproj:
+            rows = self.db.execute(
+                select(tgt_id_col)
+                .where(tgt_id_col.in_(xproj))
+                .where(tgt_deleted_col.is_(None))
+            ).all()
+            live_xproj = {r[0] for r in rows}
+        for src, tgt in raw:
+            if tgt in live_tgt_ids or tgt in live_xproj:
                 out[src].append(tgt)
         return out
 
@@ -519,29 +599,42 @@ class TreeService:
             from_col=MilestoneDependency.from_milestone_id,
             to_col=MilestoneDependency.to_milestone_id,
             live_src_ids=live_m_ids, live_tgt_ids=live_m_ids,
+            tgt_id_col=Milestone.id, tgt_deleted_col=Milestone.deleted_at,
         )
         act_deps_by_source = self._bulk_load_dep_edges(
             dep_model=ActivityDependency,
             from_col=ActivityDependency.from_activity_id,
             to_col=ActivityDependency.to_activity_id,
             live_src_ids=live_a_ids, live_tgt_ids=live_a_ids,
+            tgt_id_col=Activity.id, tgt_deleted_col=Activity.deleted_at,
         )
         task_deps_by_source = self._bulk_load_dep_edges(
             dep_model=TaskDependency,
             from_col=TaskDependency.from_task_id,
             to_col=TaskDependency.to_task_id,
             live_src_ids=live_t_ids, live_tgt_ids=live_t_ids,
+            tgt_id_col=Task.id, tgt_deleted_col=Task.deleted_at,
         )
         subtask_deps_by_source = self._bulk_load_dep_edges(
             dep_model=SubtaskDependency,
             from_col=SubtaskDependency.from_subtask_id,
             to_col=SubtaskDependency.to_subtask_id,
             live_src_ids=live_s_ids, live_tgt_ids=live_s_ids,
+            tgt_id_col=Subtask.id, tgt_deleted_col=Subtask.deleted_at,
         )
 
         # Build the label index ONCE per tree request — populates
         # displayCode + dependsOnDisplay on every node.
         label_idx = _build_label_index(db, project_id)
+        # Add labels for cross-project dependency targets ("ProjectName ·
+        # <code>") so the tree shows cross-project deps consistently with the
+        # single-entity GET. Same-project labels are unaffected.
+        _augment_cross_project_labels(db, label_idx, [
+            (KIND_MILESTONE, milestone_deps_by_source),
+            (KIND_ACTIVITY, act_deps_by_source),
+            (KIND_TASK, task_deps_by_source),
+            (KIND_SUBTASK, subtask_deps_by_source),
+        ])
 
         # Group children by their immediate parent for O(1) lookup during
         # stitch.

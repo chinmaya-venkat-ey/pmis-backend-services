@@ -61,7 +61,7 @@ class ActivityController:
     ) -> List[str]:
         """Resolve activity UUIDs to ``A<m_pos>.<a_pos>`` labels. Same-project
         targets render unchanged; cross-project targets are prefixed with
-        their project_code (``<code> · A<m>.<a>``). Returns labels in the same
+        their project NAME (``<name> · A<m>.<a>``). Returns labels in the same
         order as the input UUIDs; unresolved UUIDs are skipped."""
         if not activity_ids:
             return []
@@ -72,7 +72,7 @@ class ActivityController:
         rows = self.db.execute(
             select(
                 Activity.id, Activity.position, Milestone.position,
-                Activity.project_id, Project.project_code,
+                Activity.project_id, Project.name,
             )
             .join(Milestone, Milestone.id == Activity.milestone_id)
             .join(Project, Project.id == Activity.project_id)
@@ -80,17 +80,17 @@ class ActivityController:
             .where(Activity.deleted_at.is_(None))
         ).all()
         by_id = {
-            aid: (a_pos, m_pos, proj_id, proj_code)
-            for aid, a_pos, m_pos, proj_id, proj_code in rows
+            aid: (a_pos, m_pos, proj_id, proj_name)
+            for aid, a_pos, m_pos, proj_id, proj_name in rows
         }
         out = []
         for aid in activity_ids:
             t = by_id.get(aid)
             if t and t[0] and t[1]:
-                a_pos, m_pos, proj_id, proj_code = t
+                a_pos, m_pos, proj_id, proj_name = t
                 label = f"A{m_pos}.{a_pos}"
                 if proj_id != project_id:
-                    label = f"{proj_code} · {label}"
+                    label = f"{proj_name} · {label}"
                 out.append(label)
         return out
 

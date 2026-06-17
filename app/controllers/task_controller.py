@@ -64,7 +64,7 @@ class TaskController:
     ) -> List[str]:
         """Resolve task UUIDs to ``T<m_pos>.<a_pos>.<t_pos>`` labels.
         Same-project targets render unchanged; cross-project targets are
-        prefixed with their project_code (``<code> · T<m>.<a>.<t>``). Returns
+        prefixed with their project NAME (``<name> · T<m>.<a>.<t>``). Returns
         labels in the same order as the input UUIDs; unresolved UUIDs are
         skipped."""
         if not task_ids:
@@ -77,7 +77,7 @@ class TaskController:
         rows = self.db.execute(
             select(
                 Task.id, Task.position, Activity.position, Milestone.position,
-                Task.project_id, Project.project_code,
+                Task.project_id, Project.name,
             )
             .join(Activity, Activity.id == Task.activity_id)
             .join(Milestone, Milestone.id == Activity.milestone_id)
@@ -86,17 +86,17 @@ class TaskController:
             .where(Task.deleted_at.is_(None))
         ).all()
         by_id = {
-            tid: (t_pos, a_pos, m_pos, proj_id, code)
-            for tid, t_pos, a_pos, m_pos, proj_id, code in rows
+            tid: (t_pos, a_pos, m_pos, proj_id, name)
+            for tid, t_pos, a_pos, m_pos, proj_id, name in rows
         }
         out = []
         for tid in task_ids:
             t = by_id.get(tid)
             if t and t[0] and t[1] and t[2]:
-                t_pos, a_pos, m_pos, proj_id, code = t
+                t_pos, a_pos, m_pos, proj_id, name = t
                 label = f"T{m_pos}.{a_pos}.{t_pos}"
                 if proj_id != project_id:
-                    label = f"{code} · {label}"
+                    label = f"{name} · {label}"
                 out.append(label)
         return out
 

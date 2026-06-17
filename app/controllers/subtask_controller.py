@@ -74,18 +74,18 @@ class SubtaskController:
     ) -> List[str]:
         """Return dep display codes in input order. Same-project targets
         render unchanged; cross-project targets are prefixed with their
-        project_code (``<code> · S...``). Unresolved UUIDs are dropped."""
+        project NAME (``<name> · S...``). Unresolved UUIDs are dropped."""
         if not dep_uuids:
             return []
         from sqlalchemy import select
         from app.models.project import Project
         from app.models.subtask import Subtask
         rows = self.db.execute(
-            select(Subtask.id, Subtask.project_id, Project.project_code)
+            select(Subtask.id, Subtask.project_id, Project.name)
             .join(Project, Project.id == Subtask.project_id)
             .where(Subtask.id.in_(dep_uuids))
         ).all()
-        proj_by_id = {sid: (pid, code) for sid, pid, code in rows}
+        proj_by_id = {sid: (pid, name) for sid, pid, name in rows}
         out: List[str] = []
         for uid in dep_uuids:
             if uid not in codes:

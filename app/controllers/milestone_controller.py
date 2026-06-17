@@ -52,7 +52,7 @@ class MilestoneController:
     ) -> List[str]:
         """Look up M<position> labels for the supplied milestone UUIDs.
         Same-project targets render unchanged; cross-project targets are
-        prefixed with their project_code (``<code> · M<n>``). Returns the
+        prefixed with their project NAME (``<name> · M<n>``). Returns the
         labels in the same order as ``milestone_ids``; an unresolved UUID is
         dropped."""
         if not milestone_ids:
@@ -63,21 +63,21 @@ class MilestoneController:
         rows = self.db.execute(
             select(
                 Milestone.id, Milestone.position,
-                Milestone.project_id, Project.project_code,
+                Milestone.project_id, Project.name,
             )
             .join(Project, Project.id == Milestone.project_id)
             .where(Milestone.id.in_(milestone_ids))
             .where(Milestone.deleted_at.is_(None))
         ).all()
-        by_id = {mid: (pos, proj_id, code) for mid, pos, proj_id, code in rows}
+        by_id = {mid: (pos, proj_id, name) for mid, pos, proj_id, name in rows}
         out = []
         for mid in milestone_ids:
             t = by_id.get(mid)
             if t and t[0]:
-                pos, proj_id, code = t
+                pos, proj_id, name = t
                 label = f"M{pos}"
                 if proj_id != project_id:
-                    label = f"{code} · {label}"
+                    label = f"{name} · {label}"
                 out.append(label)
         return out
 

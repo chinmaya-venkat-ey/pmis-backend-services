@@ -22,6 +22,10 @@ class CpaDependsOn(BaseModel):
     activity_id: str
     display_code: str
     name: str
+    # Cross-project predecessor flags (additive; default False/None keeps the
+    # wire backward-compatible for same-project deps).
+    cross_project: bool = False
+    project_name: Optional[str] = None
 
 
 class CpaDependencyRow(BaseModel):

@@ -348,10 +348,13 @@ def _build_schedule_row(
     for pred_id in sorted(predecessors.get(aid, set())):
         pred = act_by_id.get(pred_id)
         if pred:
+            is_xproj = bool(pred.get("_cross_project"))
             depends_on.append(CpaDependsOn(
                 activity_id=pred_id,
                 display_code=code_map.get(pred_id, pred_id),
                 name=pred["name"],
+                cross_project=is_xproj,
+                project_name=pred.get("_project_name") if is_xproj else None,
             ))
 
     calc_steps = _build_calculation_steps(
@@ -519,6 +522,9 @@ class CriticalPathService:
 
         milestones = self.repo.get_project_milestones(project_id)
         edges = self.repo.get_activity_dependencies(project_id)
+        # Cross-project predecessors (flagged, project-name qualified) so the
+        # dependency table is consistent with the analysis + deps/tree views.
+        xproj_edges, external_acts = self.repo.get_cross_project_predecessors(project_id)
 
         act_by_id: Dict[str, Dict[str, Any]] = {a["id"]: a for a in activities}
 
@@ -527,6 +533,9 @@ class CriticalPathService:
         for from_id, to_id in edges:
             if to_id in act_by_id:
                 preds[from_id].append(to_id)
+        xpreds: Dict[str, List[str]] = defaultdict(list)
+        for from_id, to_id in xproj_edges:
+            xpreds[from_id].append(to_id)
 
         rows: List[CpaDependencyRow] = []
         for act in activities:
@@ -544,6 +553,19 @@ class CriticalPathService:
                         activity_id=pred_id,
                         display_code=_display_code(pred_ms.get("position", 0), pred["position"]),
                         name=pred["name"],
+                    ))
+            for pred_id in xpreds.get(act["id"], []):
+                ext = external_acts.get(pred_id)
+                if ext:
+                    depends_on.append(CpaDependsOn(
+                        activity_id=pred_id,
+                        display_code=(
+                            f"{ext['project_name']} · "
+                            f"A{ext['milestone_position']}.{ext['position']}"
+                        ),
+                        name=ext["name"],
+                        cross_project=True,
+                        project_name=ext["project_name"],
                     ))
 
             rows.append(CpaDependencyRow(
@@ -583,15 +605,24 @@ class CriticalPathService:
         edges = self.repo.get_activity_dependencies(project_id)
 
         act_by_id: Dict[str, Dict[str, Any]] = {a["id"]: a for a in activities}
+        in_project_ids: Set[str] = set(act_by_id.keys())
         override_map = _build_override_map(overrides)
+
+        # Cross-project predecessors are folded into the graph as constraint
+        # nodes so the UNCHANGED CPM formula pulls their finish into the
+        # dependents' Early Start. They are kept OUT of the schedule / flow
+        # output and surfaced only via depends_on (flagged cross_project).
+        xproj_edges, external_acts = self.repo.get_cross_project_predecessors(project_id)
+        for ext_id, ext in external_acts.items():
+            act_by_id.setdefault(ext_id, ext)
 
         def get_duration(aid: str) -> Tuple[int, int]:
             return _resolve_duration(aid, act_by_id, override_map)
 
-        valid_ids = set(act_by_id.keys())
-        predecessors, successors = _build_adjacency(edges, valid_ids)
+        valid_ids = set(act_by_id.keys())  # union: in-project + external preds
+        predecessors, successors = _build_adjacency(edges + xproj_edges, valid_ids)
 
-        activity_ids = list(act_by_id.keys())
+        activity_ids = list(valid_ids)
         topo_order, has_cycle = _topological_sort(activity_ids, predecessors, successors)
 
         es, ef, project_end = _forward_pass(topo_order, predecessors, get_duration)
@@ -599,11 +630,19 @@ class CriticalPathService:
 
         slack_map: Dict[str, int] = {aid: ls[aid] - es[aid] for aid in activity_ids}
         critical_ids: Set[str] = {aid for aid, s in slack_map.items() if s == 0}
+        # Output is per-project: externals constrain the schedule but are never
+        # listed as their own rows / flow nodes / critical-path entries.
+        critical_in_project = critical_ids & in_project_ids
 
         code_map = _build_code_map(activities, milestones)
+        for ext_id, ext in external_acts.items():
+            code_map[ext_id] = (
+                f"{ext['project_name']} · "
+                f"A{ext['milestone_position']}.{ext['position']}"
+            )
 
         critical_path_ordered = _build_critical_path_ordered(
-            topo_order, critical_ids, act_by_id, milestones, get_duration,
+            topo_order, critical_in_project, act_by_id, milestones, get_duration,
         )
 
         schedule = _build_activity_schedule(
@@ -628,9 +667,11 @@ class CriticalPathService:
             critical_ids=critical_ids,
             get_duration=get_duration,
         )
-        flow_edges = _build_flow_edges(edges, valid_ids, critical_ids)
+        # Flow diagram stays per-project: pass the in-project edges + ids so a
+        # cross-project edge never references a node absent from the diagram.
+        flow_edges = _build_flow_edges(edges, in_project_ids, critical_ids)
 
-        total_buffer = sum(max(0, s) for s in slack_map.values())
+        total_buffer = sum(max(0, slack_map[aid]) for aid in in_project_ids)
         planned_end = _compute_planned_end(
             topo_order, predecessors, act_by_id, fallback=project_end,
         )
@@ -638,8 +679,8 @@ class CriticalPathService:
 
         metadata = CpaMetadata(
             total_project_days=project_end,
-            activities_on_critical_path=len(critical_ids),
-            total_activities=len(activity_ids),
+            activities_on_critical_path=len(critical_in_project),
+            total_activities=len(in_project_ids),
             total_buffer_slack=total_buffer,
             project_delay_days=project_delay,
             has_cycle=has_cycle,

@@ -128,6 +128,25 @@ class AuthzQueryRepository:
             )
         return list(self.db.execute(stmt).scalars().unique().all())
 
+    def users_in_vendors(self, vendor_ids: Sequence[str]) -> List[User]:
+        """All users whose home organization (``users.vendor_id``) is one of
+        ``vendor_ids`` — i.e. members of those orgs regardless of role.
+
+        This is the real notion of org membership in PMIS: a user belongs to an
+        organization via their home ``vendor_id``, not via an org-scoped role
+        assignment (``users_by_org_role`` covers the latter, which only a few
+        users — e.g. org_admins — actually hold). Bug #142."""
+        if not vendor_ids:
+            return []
+        stmt = (
+            select(User)
+            .where(User.vendor_id.in_(list(vendor_ids)))
+            .where(User.deleted_at.is_(None))
+            .where(User.status != "inactive")
+            .order_by(User.login.asc())
+        )
+        return list(self.db.execute(stmt).scalars().unique().all())
+
     def users_by_division(self, divisions: Sequence[str]) -> List[User]:
         """Users whose ``users.division`` is in ``divisions``."""
         if not divisions:

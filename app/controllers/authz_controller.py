@@ -97,7 +97,14 @@ class AuthzController:
         if project_id:
             users = self.query.users_by_project_role(project_id, role)
         elif vendor_ids:
-            users = self.query.users_by_org_role(vendor_ids, role)
+            # "Users of the org" = home-vendor membership (users.vendor_id),
+            # which is how users actually belong to an org (Bug #142). A
+            # supplied role keeps the narrower org-scoped-role-holder semantics
+            # (e.g. role=org_admin).
+            users = (
+                self.query.users_by_org_role(vendor_ids, role) if role
+                else self.query.users_in_vendors(vendor_ids)
+            )
         elif role:
             # Bug #226: division ∩ role (+ optional org), used by the
             # Manage-Team candidate pickers.

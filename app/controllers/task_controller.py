@@ -62,31 +62,42 @@ class TaskController:
     def _resolve_task_display_codes(
         self, project_id: str, task_ids: List[str],
     ) -> List[str]:
-        """Resolve task UUIDs to ``T<m_pos>.<a_pos>.<t_pos>`` labels scoped
-        to the same project. Returns labels in the same order as the
-        input UUIDs; unresolved UUIDs are skipped."""
+        """Resolve task UUIDs to ``T<m_pos>.<a_pos>.<t_pos>`` labels.
+        Same-project targets render unchanged; cross-project targets are
+        prefixed with their project_code (``<code> · T<m>.<a>.<t>``). Returns
+        labels in the same order as the input UUIDs; unresolved UUIDs are
+        skipped."""
         if not task_ids:
             return []
         from sqlalchemy import select
         from app.models.activity import Activity
         from app.models.milestone import Milestone
+        from app.models.project import Project
         from app.models.task import Task
         rows = self.db.execute(
             select(
                 Task.id, Task.position, Activity.position, Milestone.position,
+                Task.project_id, Project.project_code,
             )
             .join(Activity, Activity.id == Task.activity_id)
             .join(Milestone, Milestone.id == Activity.milestone_id)
+            .join(Project, Project.id == Task.project_id)
             .where(Task.id.in_(task_ids))
-            .where(Task.project_id == project_id)
             .where(Task.deleted_at.is_(None))
         ).all()
-        by_id = {tid: (t_pos, a_pos, m_pos) for tid, t_pos, a_pos, m_pos in rows}
+        by_id = {
+            tid: (t_pos, a_pos, m_pos, proj_id, code)
+            for tid, t_pos, a_pos, m_pos, proj_id, code in rows
+        }
         out = []
         for tid in task_ids:
             t = by_id.get(tid)
             if t and t[0] and t[1] and t[2]:
-                out.append(f"T{t[2]}.{t[1]}.{t[0]}")
+                t_pos, a_pos, m_pos, proj_id, code = t
+                label = f"T{m_pos}.{a_pos}.{t_pos}"
+                if proj_id != project_id:
+                    label = f"{code} · {label}"
+                out.append(label)
         return out
 
     def _resolve_assignee_name(self, user_id: str) -> Optional[str]:

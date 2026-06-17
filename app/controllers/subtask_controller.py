@@ -47,9 +47,9 @@ class SubtaskController:
         resp.depends_on = dep_uuids
         if dep_uuids:
             codes = self.service._batch_resolve_display_codes(dep_uuids)
-            resp.depends_on_display = [
-                codes[uid] for uid in dep_uuids if uid in codes
-            ]
+            resp.depends_on_display = self._qualify_cross_project_deps(
+                row.project_id, dep_uuids, codes,
+            )
         else:
             resp.depends_on_display = []
         if row.assigned_to:
@@ -68,6 +68,34 @@ class SubtaskController:
         return resp
 
     # ------------------------------------------------------- helpers
+
+    def _qualify_cross_project_deps(
+        self, source_project_id: str, dep_uuids: List[str], codes: Dict[str, str],
+    ) -> List[str]:
+        """Return dep display codes in input order. Same-project targets
+        render unchanged; cross-project targets are prefixed with their
+        project_code (``<code> · S...``). Unresolved UUIDs are dropped."""
+        if not dep_uuids:
+            return []
+        from sqlalchemy import select
+        from app.models.project import Project
+        from app.models.subtask import Subtask
+        rows = self.db.execute(
+            select(Subtask.id, Subtask.project_id, Project.project_code)
+            .join(Project, Project.id == Subtask.project_id)
+            .where(Subtask.id.in_(dep_uuids))
+        ).all()
+        proj_by_id = {sid: (pid, code) for sid, pid, code in rows}
+        out: List[str] = []
+        for uid in dep_uuids:
+            if uid not in codes:
+                continue
+            label = codes[uid]
+            info = proj_by_id.get(uid)
+            if info and info[0] != source_project_id:
+                label = f"{info[1]} · {label}"
+            out.append(label)
+        return out
 
     def _fetch_mat_chain(self, task_id: str):
         """Return ``(milestone.position, activity.position, task.position)``

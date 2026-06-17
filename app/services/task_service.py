@@ -112,7 +112,7 @@ class TaskService:
         if payload.depends_on:
             resolved_deps = self._resolve_depends_on(row.project_id, payload.depends_on)
             self._guard_dependency_cycle(row.id, resolved_deps)
-            self._assert_deps_in_same_project(row.project_id, resolved_deps)
+            self._assert_deps_exist(resolved_deps)
             self._assert_dep_dates_outlasting(row, resolved_deps)
             self.repo.replace_dependencies(row.id, resolved_deps)
 
@@ -232,7 +232,7 @@ class TaskService:
             resolved_deps = self._resolve_depends_on(row.project_id, depends_on)
             self._guard_dependency_cycle(row.id, resolved_deps)
             if resolved_deps:
-                self._assert_deps_in_same_project(row.project_id, resolved_deps)
+                self._assert_deps_exist(resolved_deps)
                 self._assert_dep_dates_outlasting(row, resolved_deps)
             self.repo.replace_dependencies(row.id, resolved_deps)
             self.audit.write(
@@ -286,9 +286,12 @@ class TaskService:
             f"Priority must be one of: {', '.join(allowed)}."
         )
 
-    def _assert_deps_in_same_project(
-        self, project_id: str, depends_on_ids: List[str],
+    def _assert_deps_exist(
+        self, depends_on_ids: List[str],
     ) -> None:
+        """Every dependency target must be a real, non-deleted task — in ANY
+        project (cross-project dependencies are allowed). Unknown / wrong-type
+        ids are rejected."""
         if not depends_on_ids:
             return
         from sqlalchemy import select
@@ -296,15 +299,13 @@ class TaskService:
         rows = self.db.execute(
             select(Task.id)
             .where(Task.id.in_(depends_on_ids))
-            .where(Task.project_id == project_id)
             .where(Task.deleted_at.is_(None))
         ).all()
         found = {r[0] for r in rows}
         missing = [d for d in depends_on_ids if d not in found]
         if missing:
             raise ValidationError(
-                f"Unknown or out-of-project task dependency target(s): "
-                f"{', '.join(missing)}"
+                f"Unknown task dependency target(s): {', '.join(missing)}"
             )
 
     def _assert_dep_dates_outlasting(

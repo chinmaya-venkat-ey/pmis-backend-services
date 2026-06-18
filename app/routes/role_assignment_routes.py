@@ -7,6 +7,7 @@ from typing import Annotated, List, Optional, Union
 
 from fastapi import APIRouter, Depends, Query, status
 
+from app.controllers.authz_controller import AuthzController
 from app.controllers.role_assignment_controller import RoleAssignmentController
 from app.core.permissions import (
     PROJECT_MEMBERS_READ,
@@ -17,10 +18,12 @@ from app.core.permissions import (
 )
 from app.core.rbac import require_any_permission, require_authenticated, require_permission
 from app.dependencies import (
+    get_authz_controller,
     get_caller_is_admin,
     get_current_user_id,
     get_role_assignment_controller,
 )
+from app.schemas.authz import AuthzUserSummary
 from app.schemas.role_assignment import (
     ProjectRolesBulkWriteRequest,
     RoleAssignmentBatchResponse,
@@ -367,3 +370,24 @@ def list_vendor_users(
         offset=offset, page_size=page_size,
         include_deleted=include_deleted,
     )
+
+
+@vendor_listing_router.get(
+    "/{vendor_id}/assignable-users",
+    response_model=List[AuthzUserSummary],
+    summary="Assigned-To picker: a vendor's assignable users (PM / PA / org_admin)",
+    description=(
+        "The candidate pool for the Task/Subtask 'Assigned To' dropdown. Returns "
+        "the users whose home organization is `vendor_id` and who hold "
+        "project_member, project_admin, or org_admin — one self-contained call so "
+        "the FE can fetch fresh data when the dropdown opens. Deleted, inactive, "
+        "and admin/super_admin-tier users are excluded. Authenticated callers "
+        "only (matches the project assignable-users picker)."
+    ),
+    dependencies=[Depends(require_authenticated())],
+)
+def list_vendor_assignable_users(
+    vendor_id: str,
+    controller: Annotated[AuthzController, Depends(get_authz_controller)],
+):
+    return controller.list_vendor_assignable_users(vendor_id=vendor_id)

@@ -167,3 +167,37 @@ class AuthzController:
             for u in users
         ]
         return sorted(out, key=lambda x: (x.login or ""))
+
+    # Roles that make a vendor member assignable on the Task/Subtask
+    # "Assigned To" dropdown.
+    _VENDOR_ASSIGNABLE_ROLES = frozenset(
+        {"project_member", "project_admin", "org_admin"}
+    )
+
+    def list_vendor_assignable_users(
+        self, *, vendor_id: str,
+    ) -> List[AuthzUserSummary]:
+        """Wrapper for the Task/Subtask "Assigned To" picker: members of
+        ``vendor_id`` (by home ``users.vendor_id``) who hold project_member,
+        project_admin, or org_admin — one self-contained call so the FE can
+        fetch fresh data when the dropdown opens. Deleted/inactive users are
+        already excluded by ``users_in_vendors``; admin/super_admin tier is
+        excluded by the role filter (they hold neither of the three roles)."""
+        if self.query is None:  # pragma: no cover - wiring guard
+            raise ValidationError("Discovery query backend not configured")
+        users = self.query.users_in_vendors([vendor_id])
+        roles_by_id = self.query.roles_by_user_ids([u.id for u in users])
+        out = [
+            AuthzUserSummary(
+                id=u.id,
+                login=u.login,
+                email=u.email,
+                full_name=u.full_name,
+                vendor_id=u.vendor_id,
+                division=u.division,
+                roles=roles_by_id.get(u.id, []),
+            )
+            for u in users
+            if self._VENDOR_ASSIGNABLE_ROLES & set(roles_by_id.get(u.id, []))
+        ]
+        return sorted(out, key=lambda x: (x.login or ""))

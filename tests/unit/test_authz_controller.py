@@ -132,3 +132,25 @@ def test_list_assignable_users_rejects_bad_role():
     for bad in ("org_admin", "admin", "garbage", ""):
         with pytest.raises(ValidationError):
             ctrl.list_assignable_users(project_id="P1", role=bad)
+
+
+def test_list_vendor_assignable_users_filters_to_pm_pa_orgadmin():
+    # Wrapper for the Task/Subtask "Assigned To" dropdown: a vendor's members
+    # (by home vendor_id) keep only project_member / project_admin / org_admin.
+    query = MagicMock()
+    query.users_in_vendors.return_value = [
+        _user("u1", "alice"), _user("u2", "bob"),
+        _user("u3", "carol"), _user("u4", "dave"),
+    ]
+    query.roles_by_user_ids.return_value = {
+        "u1": ["project_member"],
+        "u2": ["org_admin", "viewer"],
+        "u3": ["viewer"],        # no assignable role -> dropped
+        "u4": ["super_admin"],   # admin tier (not one of the three) -> dropped
+    }
+
+    out = AuthzController(MagicMock(), query).list_vendor_assignable_users(vendor_id="V1")
+
+    assert [u.login for u in out] == ["alice", "bob"]  # carol/dave excluded, sorted
+    assert out[1].roles == ["org_admin", "viewer"]
+    query.users_in_vendors.assert_called_once_with(["V1"])

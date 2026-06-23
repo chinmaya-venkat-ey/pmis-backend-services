@@ -63,6 +63,7 @@ class MilestoneResponse(ResponseModel):
     position: int
     status: str
     priority: Optional[str] = None
+    payment_type: Optional[str] = None
     depends_on: List[str] = Field(default_factory=list)
     # ``dependsOnDisplay`` mirrors ``depends_on`` but with each UUID
     # resolved to its target milestone's displayCode (e.g., ["M1"]).
@@ -107,6 +108,7 @@ class MilestoneCreateRequest(BaseModel):
     actual_end_date: Optional[datetime] = None
     status: Annotated[Optional[str], Field(default=None, max_length=32)]
     priority: Annotated[Optional[str], Field(default=None, max_length=16)]
+    payment_type: Annotated[Optional[str], Field(default=None, max_length=32)]
     position: Optional[int] = None
     depends_on: List[str] = Field(default_factory=list)
     vendor_ids: List[str] = Field(default_factory=list)
@@ -186,6 +188,7 @@ class MilestoneUpdateRequest(BaseModel):
     actual_end_date: Optional[datetime] = None
     status: Annotated[Optional[str], Field(default=None, max_length=32)]
     priority: Annotated[Optional[str], Field(default=None, max_length=16)]
+    payment_type: Annotated[Optional[str], Field(default=None, max_length=32)]
     position: Optional[int] = None
     depends_on: Optional[List[str]] = None
     vendor_ids: Optional[List[str]] = None

@@ -21,6 +21,7 @@ from app.models._cross_schema import (
     ActivityStatus as _ActivityStatus,
     Division as _Division,
     MilestoneStatus as _MilestoneStatus,
+    PaymentType as _PaymentType,
     Priority as _Priority,
     ProjectCategory as _ProjectCategory,
     ResourceType as _ResourceType,
@@ -42,6 +43,8 @@ ACTIVITY_STATUS_CHOICES: Tuple[str, ...] = ("not_completed", "completed")
 ACTIVITY_STATUS_DEFAULT: str = "not_completed"
 
 PRIORITY_CHOICES: Tuple[str, ...] = ("P1", "P2", "P3")
+
+PAYMENT_TYPE_CHOICES: Tuple[str, ...] = ("partial_payment", "complete_payment")
 
 PROJECT_CATEGORY_CHOICES: Tuple[str, ...] = ("MSAP", "MSIP", "BSP", "others")
 
@@ -133,6 +136,10 @@ def is_known_priority(db: Session, code: str) -> bool:
     return _is_known_code(db, _Priority, code, PRIORITY_CHOICES)
 
 
+def is_known_payment_type(db: Session, code: str) -> bool:
+    return _is_known_code(db, _PaymentType, code, PAYMENT_TYPE_CHOICES)
+
+
 def is_known_project_category(db: Session, code: str) -> bool:
     return _is_known_code(db, _ProjectCategory, code, PROJECT_CATEGORY_CHOICES)
 
@@ -189,6 +196,10 @@ def active_activity_statuses(db: Session) -> Tuple[str, ...]:
 
 def active_priorities(db: Session) -> Tuple[str, ...]:
     return active_choices_for(db, _Priority, PRIORITY_CHOICES)
+
+
+def active_payment_types(db: Session) -> Tuple[str, ...]:
+    return active_choices_for(db, _PaymentType, PAYMENT_TYPE_CHOICES)
 
 
 def active_project_categories(db: Session) -> Tuple[str, ...]:

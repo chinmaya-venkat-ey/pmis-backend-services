@@ -59,7 +59,7 @@ class ProjectPaymentTerm(Base):
     )
     project_id: Mapped[str] = mapped_column(ForeignKey("project.projects.id"))
 
-    phase: Mapped[Optional[int]] = mapped_column(Integer)
+    phase: Mapped[Optional[str]] = mapped_column(String(64))
     milestone_id: Mapped[Optional[str]] = mapped_column(
         ForeignKey("project.milestones.id")
     )

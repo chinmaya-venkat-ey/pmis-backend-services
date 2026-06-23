@@ -282,7 +282,7 @@ def set_phase_qrg(
     controller: Annotated[PaymentPageController, Depends(get_payment_page_controller)],
     caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
     caller_is_admin: Annotated[bool, Depends(get_caller_is_admin)],
-    phase: Annotated[int, Path(ge=0)],
+    phase: Annotated[str, Path(min_length=1, max_length=64)],
 ):
     return controller.set_qrg(
         project_uuid, phase, payload.qrg_applied,
@@ -302,7 +302,7 @@ def set_phase_frequency(
     controller: Annotated[PaymentPageController, Depends(get_payment_page_controller)],
     caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
     caller_is_admin: Annotated[bool, Depends(get_caller_is_admin)],
-    phase: Annotated[int, Path(ge=0)],
+    phase: Annotated[str, Path(min_length=1, max_length=64)],
 ):
     return controller.set_phase_frequency(
         project_uuid, phase, payload.frequency_code,

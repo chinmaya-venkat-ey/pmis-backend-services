@@ -66,7 +66,7 @@ async def _create_multipart(
             string_keys=(
                 "description", "startDate", "endDate",
                 "actualStartDate", "actualEndDate",
-                "status", "priority",
+                "status", "priority", "paymentType",
             ),
             int_keys=("position",),
             array_keys=("dependsOn", "vendors", "vendorIds"),
@@ -85,6 +85,7 @@ async def _create_multipart(
         "actual_end_date": fields.get("actualEndDate"),
         "status": fields.get("status"),
         "priority": fields.get("priority"),
+        "payment_type": fields.get("paymentType"),
         "position": fields.get("position"),
         "depends_on": fields.get("dependsOn") or [],
         # Multipart wire used ``vendors`` in monolith; accept either alias.

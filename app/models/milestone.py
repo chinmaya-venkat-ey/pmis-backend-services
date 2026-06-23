@@ -42,6 +42,7 @@ class Milestone(Base):
         ),
         Index("ix_milestones_status", "status"),
         Index("ix_milestones_priority", "priority"),
+        Index("ix_milestones_payment_type", "payment_type"),
         Index("ix_milestones_deleted_at", "deleted_at"),
         {"schema": "project"},
     )
@@ -64,6 +65,8 @@ class Milestone(Base):
     position: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[str] = mapped_column(String(32), default="not_completed")
     priority: Mapped[Optional[str]] = mapped_column(String(16))
+    # Logical FK to masters.payment_types.code (cross-schema). Nullable.
+    payment_type: Mapped[Optional[str]] = mapped_column(String(32))
 
     # Category + CCN value (Doc-finance).
     #   'original' — created pre-publish; the entire baseline scope (default).

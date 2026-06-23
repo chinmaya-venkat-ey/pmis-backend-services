@@ -36,8 +36,10 @@ from app.schemas.milestone import MilestoneCreateRequest, MilestoneUpdateRequest
 from app.utilities import ccn_calc
 from app.utilities.catalogs import (
     active_milestone_statuses,
+    active_payment_types,
     active_priorities,
     is_known_milestone_status,
+    is_known_payment_type,
     is_known_priority,
     is_terminal_status,
 )
@@ -114,6 +116,7 @@ class MilestoneService:
         # Service-level catalog checks are skipped — monolith uses the
         # same 2-value list, not the broader transitions catalog.
         self._validate_priority(payload.priority)
+        self._validate_payment_type(payload.payment_type)
         # Vendor IDs: monolith parity — silently drop unknown / not-on-
         # project entries (don't raise). The resolved set is persisted on
         # the project_vendors mapping for the milestone but ``vendors`` on
@@ -158,6 +161,7 @@ class MilestoneService:
             actual_end_date=payload.actual_end_date,
             status=payload.status or "not_completed",
             priority=payload.priority,
+            payment_type=payload.payment_type,
             position=position,
             category=category,
             ccn_value=ccn_value,
@@ -277,6 +281,8 @@ class MilestoneService:
         # is skipped here to match monolith.
         if "priority" in updates:
             self._validate_priority(updates["priority"])
+        if "payment_type" in updates:
+            self._validate_payment_type(updates["payment_type"])
         # Status-completion + parent-revert gates fire when status changes.
         if "status" in updates and updates["status"] is not None:
             new_status = updates["status"]
@@ -458,6 +464,16 @@ class MilestoneService:
         allowed = active_priorities(self.db)
         raise ValidationError(
             f"Priority must be one of: {', '.join(allowed)}."
+        )
+
+    def _validate_payment_type(self, payment_type: Optional[str]) -> None:
+        if payment_type is None:
+            return
+        if is_known_payment_type(self.db, payment_type):
+            return
+        allowed = active_payment_types(self.db)
+        raise ValidationError(
+            f"Payment type must be one of: {', '.join(allowed)}."
         )
 
     def _assert_vendors_on_project(

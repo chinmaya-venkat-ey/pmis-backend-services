@@ -22,7 +22,7 @@ class PaymentPageController:
         return self.service.build_page(project_id)
 
     def set_qrg(
-        self, project_id: str, phase: int, applied: bool, *,
+        self, project_id: str, phase: str, applied: bool, *,
         caller_user_id: Optional[str], caller_is_admin: bool = False,
     ) -> PaymentPageResponse:
         return self.service.set_qrg(
@@ -40,7 +40,7 @@ class PaymentPageController:
         )
 
     def set_phase_frequency(
-        self, project_id: str, phase: int, frequency_code: str, *,
+        self, project_id: str, phase: str, frequency_code: str, *,
         caller_user_id: Optional[str], caller_is_admin: bool = False,
     ) -> PaymentPageResponse:
         return self.service.set_phase_frequency(

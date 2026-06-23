@@ -67,8 +67,8 @@ class ProjectCostItem(Base):
 
     # Logical FK to masters.cost_types.code (cross-schema). Nullable for now.
     cost_type_code: Mapped[Optional[str]] = mapped_column(String(32))
-    # Free integer phase (1,2,3…). NULL for one-time rows.
-    phase: Mapped[Optional[int]] = mapped_column(Integer)
+    # Free-text phase label (e.g. "1", "Phase A"). NULL for one-time rows.
+    phase: Mapped[Optional[str]] = mapped_column(String(64))
 
     cost: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 2))
     # Tax is now an exact AMOUNT (e.g. 1000 on a 10000 cost). ``total`` =

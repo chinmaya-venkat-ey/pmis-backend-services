@@ -61,7 +61,7 @@ class CostItemCreateRequest(BaseModel):
     model_config = _REQUEST_CONFIG
 
     cost_type_code: Annotated[str, Field(min_length=1, max_length=32)]
-    phase: Annotated[Optional[int], Field(default=None, ge=0)] = None
+    phase: Annotated[Optional[str], Field(default=None, max_length=64)] = None
     cost: Annotated[Optional[Decimal], Field(default=None, ge=0)] = None
     # Tax as an exact AMOUNT (cost + taxAmount = total). taxPercent is legacy
     # (optional, unused).
@@ -78,7 +78,7 @@ class CostItemUpdateRequest(BaseModel):
     model_config = _REQUEST_CONFIG
 
     cost_type_code: Annotated[Optional[str], Field(default=None, min_length=1, max_length=32)]
-    phase: Annotated[Optional[int], Field(default=None, ge=0)] = None
+    phase: Annotated[Optional[str], Field(default=None, max_length=64)] = None
     cost: Annotated[Optional[Decimal], Field(default=None, ge=0)] = None
     tax_amount: Annotated[Optional[Decimal], Field(default=None, ge=0)] = None
     tax_percent: Annotated[Optional[Decimal], Field(default=None, ge=0, le=100)] = None
@@ -90,7 +90,7 @@ class CostItemResponse(ResponseModel):
     id: str
     project_id: str
     cost_type_code: Optional[str] = None
-    phase: Optional[int] = None
+    phase: Optional[str] = None
     cost: Optional[Decimal] = None
     tax_amount: Optional[Decimal] = None
     tax_percent: Optional[Decimal] = None      # legacy (unused)
@@ -125,7 +125,7 @@ class PaymentTermUpdateRequest(BaseModel):
 class PaymentTermResponse(ResponseModel):
     id: str
     project_id: str
-    phase: Optional[int] = None               # display grouping only
+    phase: Optional[str] = None               # display grouping only
     cost_item_id: Optional[str] = None        # the cost row this term belongs to (calc unit)
     milestone_id: Optional[str] = None
     frequency_code: Optional[str] = None
@@ -157,7 +157,7 @@ class QrgUpdateRequest(BaseModel):
 
 
 class QrgResponse(ResponseModel):
-    phase: int
+    phase: str
     applied: bool                             # true only on the single QRG phase
     percent: Optional[Decimal] = None         # derived: 100 − Σ percent_of_payment
     value: Optional[Decimal] = None           # derived: QRG phase leftover (distributable amount)
@@ -199,7 +199,7 @@ class CcnBlock(ResponseModel):
 
 
 class PhaseBlock(ResponseModel):
-    phase: int
+    phase: str
     phase_fixed_total: Decimal = Decimal("0.00")     # original cost-rows total of the phase
     # QRG amount this phase received from an earlier QRG phase (0 if none).
     qrg_received: Decimal = Decimal("0.00")

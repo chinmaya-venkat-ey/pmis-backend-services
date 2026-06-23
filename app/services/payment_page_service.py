@@ -176,7 +176,7 @@ class PaymentPageService:
     # ----------------------------------------------------------------- write
 
     def set_phase_frequency(
-        self, project_id: str, phase: int, frequency_code: str, *,
+        self, project_id: str, phase: str, frequency_code: str, *,
         caller_user_id: Optional[str], caller_is_admin: bool = False,
     ) -> PaymentPageResponse:
         """Set ONE frequency for the WHOLE phase — applied to every live payment
@@ -198,7 +198,7 @@ class PaymentPageService:
         return self.build_page(project_id)
 
     def set_qrg(
-        self, project_id: str, phase: int, applied: bool, *,
+        self, project_id: str, phase: str, applied: bool, *,
         caller_user_id: Optional[str], caller_is_admin: bool = False,
     ) -> PaymentPageResponse:
         project = self._require_project(project_id)

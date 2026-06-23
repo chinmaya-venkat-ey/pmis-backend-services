@@ -45,7 +45,7 @@ class ProjectPhaseQrg(Base):
         String(36), primary_key=True, default=lambda: str(uuid4())
     )
     project_id: Mapped[str] = mapped_column(ForeignKey("project.projects.id"))
-    phase: Mapped[int] = mapped_column(Integer)
+    phase: Mapped[str] = mapped_column(String(64))
     qrg_applied: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false"), default=False
     )

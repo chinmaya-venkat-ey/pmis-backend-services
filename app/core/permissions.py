@@ -128,6 +128,13 @@ FREQUENCIES_MANAGE: Final[str] = "frequencies:manage"
 
 
 # =========================================================================
+# Catalog: payment_types  (milestone — Payment Type dropdown)
+# =========================================================================
+PAYMENT_TYPES_READ: Final[str] = "payment_types:read"
+PAYMENT_TYPES_MANAGE: Final[str] = "payment_types:manage"
+
+
+# =========================================================================
 # Aggregate lists — used by the bootstrap migration and CI drift tests.
 # =========================================================================
 ALL_MASTERS_READ_PERMISSIONS: Final[tuple[str, ...]] = (
@@ -143,6 +150,7 @@ ALL_MASTERS_READ_PERMISSIONS: Final[tuple[str, ...]] = (
     NOTIFICATION_TEMPLATES_READ,
     COST_TYPES_READ,
     FREQUENCIES_READ,
+    PAYMENT_TYPES_READ,
 )
 
 ALL_MASTERS_MANAGE_PERMISSIONS: Final[tuple[str, ...]] = (
@@ -158,5 +166,6 @@ ALL_MASTERS_MANAGE_PERMISSIONS: Final[tuple[str, ...]] = (
     NOTIFICATION_TEMPLATES_MANAGE,
     COST_TYPES_MANAGE,
     FREQUENCIES_MANAGE,
+    PAYMENT_TYPES_MANAGE,
 )
 

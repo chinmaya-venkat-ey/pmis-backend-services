@@ -17,6 +17,7 @@ from app.controllers.milestone_status_controller import MilestoneStatusControlle
 from app.controllers.notification_template_controller import (
     NotificationTemplateController,
 )
+from app.controllers.payment_type_controller import PaymentTypeController
 from app.controllers.priority_controller import PriorityController
 from app.controllers.project_category_controller import ProjectCategoryController
 from app.controllers.project_status_transition_controller import (
@@ -29,6 +30,7 @@ from app.services.activity_status_service import ActivityStatusService
 from app.services.activity_type_service import ActivityTypeService
 from app.services.cost_type_service import CostTypeService
 from app.services.division_service import DivisionService
+from app.services.payment_type_service import PaymentTypeService
 from app.services.frequency_service import FrequencyService
 from app.services.milestone_status_service import MilestoneStatusService
 from app.services.notification_template_service import NotificationTemplateService
@@ -65,6 +67,10 @@ def get_cost_type_controller(db: Session = Depends(get_db)) -> CostTypeControlle
 
 def get_frequency_controller(db: Session = Depends(get_db)) -> FrequencyController:
     return FrequencyController(FrequencyService(db))
+
+
+def get_payment_type_controller(db: Session = Depends(get_db)) -> PaymentTypeController:
+    return PaymentTypeController(PaymentTypeService(db))
 
 
 def get_project_category_controller(

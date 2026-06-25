@@ -212,3 +212,83 @@ def qrg_distribution(cost_rows, term_rows, qrg_phase) -> dict:
         "leftover": _round_money(leftover),
         "distributed": distributed,
     }
+
+
+# Carry-forward modes (per-phase config — replaces the auto QRG split).
+CF_PERCENT = "percent"
+CF_AMOUNT = "amount"
+
+
+def phase_base_with_one_time(items, phase, *, is_first: bool) -> Decimal:
+    """Phase FIXED total, plus the whole One-Time amount when this is the FIRST
+    phase by SEQUENCE (``is_first``). Unlike the legacy ``phase_payment_base``
+    this takes ``is_first`` explicitly so ordering follows the phase sequence,
+    not the lexical phase name."""
+    base = phase_fixed_total(items, phase)
+    if is_first:
+        base += one_time_total(items)
+    return _round_money(base)
+
+
+def carry_forward_distribution(cost_rows, term_rows, ordered_phases, config_by_phase) -> dict:
+    """Carry-forward ("carry forward cost", ex-QRG) over phases in SEQUENCE order.
+
+    Each phase may opt in (``config_by_phase[phase] = {"enabled", "mode",
+    "percent", "amount"}``) to carry its *leftover* (the unallocated balance
+    after its milestone payouts) to the IMMEDIATELY-NEXT phase. It COMPOUNDS:
+    a phase's base includes what it received, so its own leftover (and onward
+    carry) can include amounts handed down the chain. The last phase can never
+    carry forward (no successor).
+
+    ``ordered_phases`` is the list of phase names in ascending sequence order.
+    Returns per-phase maps::
+
+        {"received": {p: amount},        # carried INTO p from p-1
+         "effective_base": {p: amount},  # fixed(+one_time on first) + received
+         "leftover": {p: amount},        # effective_base − Σ payouts (≥0)
+         "carried_out": {p: amount}}     # carried OUT of p to p+1
+    """
+    ordered = list(ordered_phases)
+    received = {p: _ZERO for p in ordered}
+    effective_base: dict = {}
+    leftover: dict = {}
+    carried_out = {p: _ZERO for p in ordered}
+    one_time = one_time_total(cost_rows)
+    n = len(ordered)
+
+    for i, p in enumerate(ordered):
+        base = phase_fixed_total(cost_rows, p)
+        if i == 0:
+            base += one_time
+        base = _round_money(base + received[p])
+        effective_base[p] = base
+
+        allocated = _ZERO
+        for t in term_rows:
+            if getattr(t, "phase", None) == p:
+                allocated += payment_value(getattr(t, "percent_of_payment", None), base)
+        lo = base - allocated
+        lo = _round_money(lo) if lo > _ZERO else _ZERO
+        leftover[p] = lo
+
+        cfg = config_by_phase.get(p) or {}
+        is_last = i == n - 1
+        carried = _ZERO
+        if cfg.get("enabled") and not is_last and lo > _ZERO:
+            mode = cfg.get("mode")
+            if mode == CF_AMOUNT:
+                carried = min(_to_decimal(cfg.get("amount")), lo)
+            elif mode == CF_PERCENT:
+                carried = min(_round_money(lo * _to_decimal(cfg.get("percent")) / _HUNDRED), lo)
+        carried = _round_money(carried) if carried > _ZERO else _ZERO
+        if carried > _ZERO:
+            nxt = ordered[i + 1]
+            received[nxt] = _round_money(received[nxt] + carried)
+            carried_out[p] = carried
+
+    return {
+        "received": received,
+        "effective_base": effective_base,
+        "leftover": leftover,
+        "carried_out": carried_out,
+    }

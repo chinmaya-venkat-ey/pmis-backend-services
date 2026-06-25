@@ -36,6 +36,7 @@ from app.dependencies import (
     get_project_payment_term_controller,
 )
 from app.schemas.payment import (
+    CarryForwardUpdateRequest,
     CcnCapUpdateRequest,
     CostItemCreateRequest,
     CostItemResponse,
@@ -43,10 +44,11 @@ from app.schemas.payment import (
     CycleCountResponse,
     CycleFrequency,
     PaymentPageResponse,
+    PaymentTermActivitiesUpdateRequest,
     PaymentTermResponse,
     PaymentTermUpdateRequest,
     PhaseFrequencyUpdateRequest,
-    QrgUpdateRequest,
+    PhaseSequenceUpdateRequest,
 )
 
 
@@ -234,6 +236,34 @@ def update_payment_term(
     )
 
 
+@payment_term_router.patch(
+    "/{term_id}/activities",
+    response_model=PaymentTermResponse,
+    summary="Set the per-activity split of a partial-payment milestone's term",
+    description=(
+        "Distributes the milestone term's percent across its activities. Only "
+        "valid for a partial-payment milestone; the allocations must sum to the "
+        "term's percentOfPayment (empty list clears the split). Returns the "
+        "recomputed payment term."
+    ),
+    dependencies=[Depends(require_permission(PROJECTS_UPDATE_FINANCE))],
+)
+def set_payment_term_activities(
+    term_id: str,
+    payload: PaymentTermActivitiesUpdateRequest,
+    controller: Annotated[PaymentPageController, Depends(get_payment_page_controller)],
+    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
+    caller_is_admin: Annotated[bool, Depends(get_caller_is_admin)],
+):
+    allocations = [
+        {"activity_id": a.activity_id, "percent_of_payment": a.percent_of_payment}
+        for a in payload.activities
+    ]
+    return controller.set_payment_term_activities(
+        term_id, allocations, caller_user_id=caller_user_id, caller_is_admin=caller_is_admin,
+    )
+
+
 # ============================================================ aggregated page + ccn
 payment_page_router = APIRouter(prefix="/projects", tags=["payment-page"])
 
@@ -271,21 +301,49 @@ def update_ccn_cap(
 
 
 @payment_page_router.put(
-    "/{project_uuid}/phases/{phase}/qrg",
+    "/{project_uuid}/phases/{phase}/carry-forward",
     response_model=PaymentPageResponse,
-    summary="Apply/remove QRG on a phase (at most one phase; returns the recomputed page)",
+    summary="Configure carry-forward on a phase (to the next phase; returns the recomputed page)",
+    description=(
+        "Enable/disable carrying a phase's remaining (leftover) balance to the "
+        "immediately-next phase. When enabled, pass exactly one of percent (of "
+        "the leftover) or amount. Rejected on the last phase or when an amount "
+        "exceeds the phase's leftover."
+    ),
     dependencies=[Depends(require_project_permission(PROJECTS_UPDATE_FINANCE))],
 )
-def set_phase_qrg(
+def set_phase_carry_forward(
     project_uuid: str,
-    payload: QrgUpdateRequest,
+    payload: CarryForwardUpdateRequest,
     controller: Annotated[PaymentPageController, Depends(get_payment_page_controller)],
     caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
     caller_is_admin: Annotated[bool, Depends(get_caller_is_admin)],
     phase: Annotated[str, Path(min_length=1, max_length=64)],
 ):
-    return controller.set_qrg(
-        project_uuid, phase, payload.qrg_applied,
+    return controller.set_carry_forward(
+        project_uuid, phase,
+        enabled=payload.enabled, mode=payload.mode,
+        percent=payload.percent, amount=payload.amount,
+        caller_user_id=caller_user_id, caller_is_admin=caller_is_admin,
+    )
+
+
+@payment_page_router.put(
+    "/{project_uuid}/phases/{phase}/sequence",
+    response_model=PaymentPageResponse,
+    summary="Override a phase's integer order (returns the recomputed page)",
+    dependencies=[Depends(require_project_permission(PROJECTS_UPDATE_FINANCE))],
+)
+def set_phase_sequence(
+    project_uuid: str,
+    payload: PhaseSequenceUpdateRequest,
+    controller: Annotated[PaymentPageController, Depends(get_payment_page_controller)],
+    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
+    caller_is_admin: Annotated[bool, Depends(get_caller_is_admin)],
+    phase: Annotated[str, Path(min_length=1, max_length=64)],
+):
+    return controller.set_phase_sequence(
+        project_uuid, phase, payload.sequence,
         caller_user_id=caller_user_id, caller_is_admin=caller_is_admin,
     )
 

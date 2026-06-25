@@ -34,6 +34,7 @@ from fastapi import FastAPI, Request, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import IntegrityError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.errors import DomainError
@@ -231,6 +232,21 @@ def register_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             content={"detail": errors},
+        )
+
+    @app.exception_handler(IntegrityError)
+    async def integrity_error_handler(request: Request, exc: IntegrityError):
+        # A DB constraint violation (e.g. the per-parent uq_*_position_live
+        # uniqueness index when two creates race on the same parent) must
+        # surface as a clean 409, not a 500. The request's DB session is
+        # rolled back by the get_db dependency teardown on close.
+        logger.warning("IntegrityError -> 409 (%s): %s", request.url.path, exc)
+        code = _module_style_code("conflict", request.url.path)
+        return api_response(
+            status=status.HTTP_409_CONFLICT,
+            error=format_error(
+                code, "The request conflicts with the current state of the resource.",
+            ),
         )
 
     @app.exception_handler(Exception)

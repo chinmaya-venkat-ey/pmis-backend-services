@@ -15,6 +15,7 @@ from app.models.subtask_resource import SubtaskResource
 from app.models.task import Task
 from app.models.task_resource import TaskResource
 from app.repositories._cascade import clear_deleted, stamp_deleted
+from app.utilities.positions import lock_position_scope
 from app.utilities.timezones import now_ist
 
 
@@ -75,7 +76,24 @@ class ActivityRepository:
         ).scalars().all()
         return list(rows), total
 
+    def list_by_milestone_ids(self, milestone_ids):
+        """{milestone_id: [live activities...]} ordered by position — bulk, no
+        N+1. Used to enrich partial-payment milestones' payment terms."""
+        out = {}
+        if not milestone_ids:
+            return out
+        rows = self.db.execute(
+            select(Activity)
+            .where(Activity.milestone_id.in_(list(milestone_ids)))
+            .where(Activity.deleted_at.is_(None))
+            .order_by(Activity.milestone_id.asc(), Activity.position.asc())
+        ).scalars().all()
+        for r in rows:
+            out.setdefault(r.milestone_id, []).append(r)
+        return out
+
     def next_position_for_milestone(self, milestone_id: str) -> int:
+        lock_position_scope(self.db, f"activity_pos:{milestone_id}")
         row = self.db.execute(
             select(func.coalesce(func.max(Activity.position), 0))
             .where(Activity.milestone_id == milestone_id)

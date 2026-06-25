@@ -18,7 +18,9 @@ Surfaces (all project-scoped under /api/v3):
     DELETE /payment-terms/{id} POST /payment-terms/{id}/restore
         → PaymentTermResponse
 
-  QRG       PUT /projects/{uuid}/phases/{phase}/qrg   QrgUpdateRequest → QrgResponse
+  Term split PATCH /payment-terms/{id}/activities    PaymentTermActivitiesUpdateRequest
+  CarryFwd  PUT /projects/{uuid}/phases/{phase}/carry-forward  CarryForwardUpdateRequest
+  Phase seq PUT /projects/{uuid}/phases/{phase}/sequence       PhaseSequenceUpdateRequest
   CCN cap   PATCH /projects/{uuid}/ccn-cap            CcnCapUpdateRequest
   Page      GET /projects/{uuid}/payment-page         → PaymentPageResponse
 
@@ -34,7 +36,7 @@ from decimal import Decimal
 from enum import Enum
 from typing import Annotated, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic.alias_generators import to_camel
 
 from app.schemas._base import ResponseModel
@@ -122,16 +124,52 @@ class PaymentTermUpdateRequest(BaseModel):
     percent_of_payment: Annotated[Optional[Decimal], Field(default=None, ge=0, le=100)] = None
 
 
+# ----------------------------------------------- per-activity payment split
+
+class PaymentTermActivityAllocation(BaseModel):
+    """One activity's share of a (partial-payment) milestone's payment term."""
+
+    model_config = _REQUEST_CONFIG
+
+    activity_id: Annotated[str, Field(min_length=1, max_length=36)]
+    percent_of_payment: Annotated[Decimal, Field(ge=0, le=100)]
+
+
+class PaymentTermActivitiesUpdateRequest(BaseModel):
+    """PATCH /payment-terms/{id}/activities — set the per-activity split.
+
+    Only valid for a partial-payment milestone's term. The allocations' percents
+    must sum to the term's ``percentOfPayment`` (enforced in the service). Pass
+    an empty list to clear the split.
+    """
+
+    model_config = _REQUEST_CONFIG
+
+    activities: List[PaymentTermActivityAllocation] = Field(default_factory=list)
+
+
+class PaymentTermActivityResponse(ResponseModel):
+    id: Optional[str] = None
+    activity_id: str
+    activity_name: Optional[str] = None
+    activity_display_code: Optional[str] = None
+    percent_of_payment: Optional[Decimal] = None
+    value: Decimal = Decimal("0.00")          # derived: percent × phase EFFECTIVE total
+
+
 class PaymentTermResponse(ResponseModel):
     id: str
     project_id: str
     phase: Optional[str] = None               # display grouping only
     cost_item_id: Optional[str] = None        # the cost row this term belongs to (calc unit)
     milestone_id: Optional[str] = None
+    payment_type: Optional[str] = None        # the milestone's payment type (partial/complete)
     frequency_code: Optional[str] = None
     percent_of_payment: Optional[Decimal] = None
     row_total: Decimal = Decimal("0.00")      # the cost row's own total (informational)
-    value: Decimal = Decimal("0.00")          # derived: percent × the phase's EFFECTIVE total (incl QRG share)
+    value: Decimal = Decimal("0.00")          # derived: percent × the phase's EFFECTIVE total (incl carry-forward)
+    # Per-activity split — populated only for partial-payment milestones.
+    activities: List[PaymentTermActivityResponse] = Field(default_factory=list)
     # This milestone's own date span (drives the per-milestone cycle count).
     start_date: Optional[datetime] = None
     end_date: Optional[datetime] = None
@@ -146,21 +184,57 @@ class PaymentTermResponse(ResponseModel):
     deleted_at: Optional[datetime] = None
 
 
-# =========================================================================== qrg
+# ================================================================ carry forward
 
-class QrgUpdateRequest(BaseModel):
-    """PUT /projects/{uuid}/phases/{phase}/qrg."""
+class CarryForwardUpdateRequest(BaseModel):
+    """PUT /projects/{uuid}/phases/{phase}/carry-forward.
+
+    ``enabled=false`` clears carry-forward for the phase. ``enabled=true``
+    requires EXACTLY ONE of ``percent`` (of the phase's remaining/leftover) or
+    ``amount`` (a flat figure). ``mode`` is optional and inferred from which of
+    percent/amount is supplied; if given it must match.
+    """
 
     model_config = _REQUEST_CONFIG
 
-    qrg_applied: bool
+    enabled: bool
+    mode: Annotated[Optional[str], Field(default=None, max_length=16)] = None
+    percent: Annotated[Optional[Decimal], Field(default=None, ge=0, le=100)] = None
+    amount: Annotated[Optional[Decimal], Field(default=None, ge=0)] = None
+
+    @model_validator(mode="after")
+    def _validate(self) -> "CarryForwardUpdateRequest":
+        if not self.enabled:
+            self.mode = None
+            self.percent = None
+            self.amount = None
+            return self
+        has_pct = self.percent is not None
+        has_amt = self.amount is not None
+        if has_pct == has_amt:
+            raise ValueError(
+                "Provide exactly one of percent or amount when carry-forward is enabled."
+            )
+        inferred = "percent" if has_pct else "amount"
+        if self.mode is not None and self.mode != inferred:
+            raise ValueError("mode does not match the supplied percent/amount.")
+        self.mode = inferred
+        if inferred == "percent" and not (Decimal("0") < self.percent <= Decimal("100")):
+            raise ValueError("percent must be greater than 0 and at most 100.")
+        if inferred == "amount" and self.amount <= Decimal("0"):
+            raise ValueError("amount must be greater than 0.")
+        return self
 
 
-class QrgResponse(ResponseModel):
-    phase: str
-    applied: bool                             # true only on the single QRG phase
-    percent: Optional[Decimal] = None         # derived: 100 − Σ percent_of_payment
-    value: Optional[Decimal] = None           # derived: QRG phase leftover (distributable amount)
+class CarryForwardResponse(ResponseModel):
+    enabled: bool = False
+    mode: Optional[str] = None                # 'percent' | 'amount' (null if disabled)
+    percent: Optional[Decimal] = None         # configured percent (mode=percent)
+    amount: Optional[Decimal] = None          # configured amount (mode=amount)
+    leftover: Decimal = Decimal("0.00")       # unallocated balance — the carry basis
+    carried_out: Decimal = Decimal("0.00")    # amount actually carried to the next phase
+    received: Decimal = Decimal("0.00")       # amount received from the previous phase
+    is_last_phase: bool = False               # carry-forward not allowed on the last phase
 
 
 # ======================================================================= ccn cap
@@ -200,11 +274,10 @@ class CcnBlock(ResponseModel):
 
 class PhaseBlock(ResponseModel):
     phase: str
+    sequence: Optional[int] = None                   # integer phase order
     phase_fixed_total: Decimal = Decimal("0.00")     # original cost-rows total of the phase
-    # QRG amount this phase received from an earlier QRG phase (0 if none).
-    qrg_received: Decimal = Decimal("0.00")
-    # The base used for milestone value + the 100% cap: phaseFixedTotal + qrgReceived
-    # (e.g. 15000 + 2000 = 17000). Milestone value = % × this.
+    # The base used for milestone value + the 100% cap: phaseFixedTotal folded
+    # with the one-time (first phase) + carry-forward received. value = % × this.
     effective_phase_total: Decimal = Decimal("0.00")
     # Phase date span — earliest milestone start / latest milestone end in the
     # phase (null if the phase has no live milestone). Inputs to the cycle count.
@@ -215,7 +288,15 @@ class PhaseBlock(ResponseModel):
     # valid frequency is applied / when dates are missing.
     cycle_count: Optional[int] = None
     payment_terms: List[PaymentTermResponse] = Field(default_factory=list)
-    qrg: QrgResponse
+    carry_forward: CarryForwardResponse
+
+
+class PhaseSequenceUpdateRequest(BaseModel):
+    """PUT /projects/{uuid}/phases/{phase}/sequence — override the phase order."""
+
+    model_config = _REQUEST_CONFIG
+
+    sequence: Annotated[int, Field(ge=0)]
 
 
 class PaymentPageResponse(ResponseModel):

@@ -93,11 +93,8 @@ class SubtaskService:
             parent = self.get_by_id(parent_subtask_id)
             resolved_task_id = parent.task_id
             project_id = parent.project_id
-            position = (
-                payload.position
-                if payload.position is not None and payload.position > 0
-                else self.repo.next_position_under_subtask(parent.id)
-            )
+            # Position always server-assigned (append) — see TaskService.create.
+            position = self.repo.next_position_under_subtask(parent.id)
             # Nested subtask: parent floor is the parent SUBTASK (monolith
             # parity — see PMIS-OpenProject/app/api/v3/subtasks/services/
             # create.py:219-226 which sets parent_label="subtask").
@@ -109,11 +106,8 @@ class SubtaskService:
                 raise TaskNotFoundError("The task could not be found.")
             resolved_task_id = task.id
             project_id = task.project_id
-            position = (
-                payload.position
-                if payload.position is not None and payload.position > 0
-                else self.repo.next_position_under_task(task.id)
-            )
+            # Position always server-assigned (append) — see TaskService.create.
+            position = self.repo.next_position_under_task(task.id)
             # Top-level subtask: parent floor is the owning TASK.
             parent_start_for_floor = task.start_date
             parent_label_for_msg = "task"

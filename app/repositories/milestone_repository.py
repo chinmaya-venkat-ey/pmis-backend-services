@@ -18,6 +18,7 @@ from app.models.subtask_resource import SubtaskResource
 from app.models.task import Task
 from app.models.task_resource import TaskResource
 from app.repositories._cascade import clear_deleted, stamp_deleted
+from app.utilities.positions import lock_position_scope
 from app.utilities.timezones import now_ist
 
 
@@ -30,6 +31,17 @@ class MilestoneRepository:
         if not include_deleted:
             stmt = stmt.where(Milestone.deleted_at.is_(None))
         return self.db.execute(stmt).scalar_one_or_none()
+
+    def payment_type_by_ids(self, milestone_ids):
+        """{milestone_id: payment_type} for the given live milestones — bulk."""
+        if not milestone_ids:
+            return {}
+        rows = self.db.execute(
+            select(Milestone.id, Milestone.payment_type)
+            .where(Milestone.id.in_(list(milestone_ids)))
+            .where(Milestone.deleted_at.is_(None))
+        ).all()
+        return {mid: ptype for mid, ptype in rows}
 
     def _snapshot_subtree_ids(self, milestone_id: str, *, deleted_at):
         """Return (activity_ids, task_ids, subtask_ids) under this milestone
@@ -87,6 +99,7 @@ class MilestoneRepository:
         ).scalar_one_or_none()
 
     def next_position_for_project(self, project_id: str) -> int:
+        lock_position_scope(self.db, f"milestone_pos:{project_id}")
         row = self.db.execute(
             select(func.coalesce(func.max(Milestone.position), 0))
             .where(Milestone.project_id == project_id)

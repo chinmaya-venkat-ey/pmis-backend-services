@@ -108,10 +108,8 @@ class ProjectCostItemService:
             self._validate_milestones(project_id, milestone_ids)
             self._assert_milestones_free(project_id, milestone_ids, exclude_id=None)
 
-        position = (
-            payload.position if payload.position is not None and payload.position > 0
-            else self.repo.next_position_for_project(project_id)
-        )
+        # Position always server-assigned (append) — see TaskService.create.
+        position = self.repo.next_position_for_project(project_id)
 
         try:
             row = self.repo.create(

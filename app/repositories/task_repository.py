@@ -13,6 +13,7 @@ from app.models.task import Task
 from app.models.task_dependency import TaskDependency
 from app.models.task_resource import TaskResource
 from app.repositories._cascade import clear_deleted, stamp_deleted
+from app.utilities.positions import lock_position_scope
 from app.utilities.timezones import now_ist
 
 
@@ -43,6 +44,7 @@ class TaskRepository:
         return list(rows), total
 
     def next_position_for_activity(self, activity_id: str) -> int:
+        lock_position_scope(self.db, f"task_pos:{activity_id}")
         row = self.db.execute(
             select(func.coalesce(func.max(Task.position), 0))
             .where(Task.activity_id == activity_id)

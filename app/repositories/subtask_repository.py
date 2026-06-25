@@ -11,6 +11,7 @@ from app.models.subtask import Subtask
 from app.models.subtask_dependency import SubtaskDependency
 from app.models.subtask_resource import SubtaskResource
 from app.repositories._cascade import clear_deleted, stamp_deleted
+from app.utilities.positions import lock_position_scope
 from app.utilities.timezones import now_ist
 
 
@@ -73,6 +74,7 @@ class SubtaskRepository:
         ).scalars())
 
     def next_position_under_task(self, task_id: str) -> int:
+        lock_position_scope(self.db, f"subtask_pos:task:{task_id}")
         row = self.db.execute(
             select(func.coalesce(func.max(Subtask.position), 0))
             .where(Subtask.task_id == task_id)
@@ -82,6 +84,7 @@ class SubtaskRepository:
         return int(row) + 1
 
     def next_position_under_subtask(self, parent_subtask_id: str) -> int:
+        lock_position_scope(self.db, f"subtask_pos:sub:{parent_subtask_id}")
         row = self.db.execute(
             select(func.coalesce(func.max(Subtask.position), 0))
             .where(Subtask.parent_subtask_id == parent_subtask_id)

@@ -88,11 +88,11 @@ class TaskService:
         )
         if payload.assigned_to:
             self._validate_assignee(payload.assigned_to, activity.project_id)
-        position = (
-            payload.position
-            if payload.position is not None and payload.position > 0
-            else self.repo.next_position_for_activity(activity_id)
-        )
+        # Position is always server-assigned (append to end). A client-supplied
+        # absolute position collided with an existing live task and tripped the
+        # uq_tasks_activity_position_live index -> 500; reordering is a separate
+        # operation, not a create-time concern.
+        position = self.repo.next_position_for_activity(activity_id)
         row = self.repo.create(
             project_id=activity.project_id,
             activity_id=activity_id,

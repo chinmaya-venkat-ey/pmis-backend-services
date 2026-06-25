@@ -14,6 +14,7 @@ from app.core.pagination import paginate
 from app.models.cost_item_milestone import CostItemMilestone
 from app.models.milestone import Milestone
 from app.models.project_cost_item import ProjectCostItem
+from app.utilities.positions import lock_position_scope
 
 
 class ProjectCostItemRepository:
@@ -52,6 +53,7 @@ class ProjectCostItemRepository:
         ).scalars().all())
 
     def next_position_for_project(self, project_id: str) -> int:
+        lock_position_scope(self.db, f"costitem_pos:{project_id}")
         row = self.db.execute(
             select(func.coalesce(func.max(ProjectCostItem.position), 0))
             .where(ProjectCostItem.project_id == project_id)

@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.core.pagination import paginate
 from app.models.project_payment_term import ProjectPaymentTerm
+from app.utilities.positions import lock_position_scope
 
 
 class ProjectPaymentTermRepository:
@@ -51,6 +52,7 @@ class ProjectPaymentTermRepository:
         ).scalars().all())
 
     def next_position_for_project(self, project_id: str) -> int:
+        lock_position_scope(self.db, f"paymentterm_pos:{project_id}")
         row = self.db.execute(
             select(func.coalesce(func.max(ProjectPaymentTerm.position), 0))
             .where(ProjectPaymentTerm.project_id == project_id)

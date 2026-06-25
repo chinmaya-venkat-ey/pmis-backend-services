@@ -152,11 +152,8 @@ class ActivityService:
         meeting_attachment_envelopes = self._prepare_meeting_attachments(
             milestone, payload.attachments,
         )
-        position = (
-            payload.position
-            if payload.position is not None and payload.position > 0
-            else self.repo.next_position_for_milestone(milestone_id)
-        )
+        # Position always server-assigned (append) — see TaskService.create.
+        position = self.repo.next_position_for_milestone(milestone_id)
         # Doc-finance: resolve category + ccn_value based on project state.
         category, ccn_value = self._resolve_create_category(
             project=project,

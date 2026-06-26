@@ -303,12 +303,12 @@ def update_ccn_cap(
 @payment_page_router.put(
     "/{project_uuid}/phases/{phase}/carry-forward",
     response_model=PaymentPageResponse,
-    summary="Configure carry-forward on a phase (to the next phase; returns the recomputed page)",
+    summary="Configure carry-forward on a phase (full leftover; returns the recomputed page)",
     description=(
-        "Enable/disable carrying a phase's remaining (leftover) balance to the "
-        "immediately-next phase. When enabled, pass exactly one of percent (of "
-        "the leftover) or amount. Rejected on the last phase or when an amount "
-        "exceeds the phase's leftover."
+        "Enable/disable carrying a phase's ENTIRE leftover forward, split "
+        "equally by mode: 'phase' (across all subsequent phases) or 'milestone' "
+        "(across all subsequent milestones). Rejected when there are no eligible "
+        "subsequent recipients for the chosen mode."
     ),
     dependencies=[Depends(require_project_permission(PROJECTS_UPDATE_FINANCE))],
 )
@@ -323,7 +323,6 @@ def set_phase_carry_forward(
     return controller.set_carry_forward(
         project_uuid, phase,
         enabled=payload.enabled, mode=payload.mode,
-        percent=payload.percent, amount=payload.amount,
         caller_user_id=caller_user_id, caller_is_admin=caller_is_admin,
     )
 

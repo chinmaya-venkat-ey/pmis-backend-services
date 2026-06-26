@@ -149,11 +149,10 @@ class PaymentTermActivitiesUpdateRequest(BaseModel):
 
 
 class PaymentTermActivityResponse(ResponseModel):
-    id: Optional[str] = None
     activity_id: str
     activity_name: Optional[str] = None
-    activity_display_code: Optional[str] = None
-    percent_of_payment: Optional[Decimal] = None
+    activity_display_code: Optional[str] = None   # A<milestonePos>.<activityPos>
+    percent_of_payment: Optional[Decimal] = None  # defaults to an even split
     value: Decimal = Decimal("0.00")          # derived: percent × phase EFFECTIVE total
 
 
@@ -167,7 +166,9 @@ class PaymentTermResponse(ResponseModel):
     frequency_code: Optional[str] = None
     percent_of_payment: Optional[Decimal] = None
     row_total: Decimal = Decimal("0.00")      # the cost row's own total (informational)
-    value: Decimal = Decimal("0.00")          # derived: percent × the phase's EFFECTIVE total (incl carry-forward)
+    value: Decimal = Decimal("0.00")          # derived: percent × phase EFFECTIVE total + carryReceived
+    # Carry-forward received DIRECTLY by this milestone (milestone-wise mode).
+    carry_received: Decimal = Decimal("0.00")
     # Per-activity split — populated only for partial-payment milestones.
     activities: List[PaymentTermActivityResponse] = Field(default_factory=list)
     # This milestone's own date span (drives the per-milestone cycle count).
@@ -189,52 +190,39 @@ class PaymentTermResponse(ResponseModel):
 class CarryForwardUpdateRequest(BaseModel):
     """PUT /projects/{uuid}/phases/{phase}/carry-forward.
 
-    ``enabled=false`` clears carry-forward for the phase. ``enabled=true``
-    requires EXACTLY ONE of ``percent`` (of the phase's remaining/leftover) or
-    ``amount`` (a flat figure). ``mode`` is optional and inferred from which of
-    percent/amount is supplied; if given it must match.
+    A carrying phase ALWAYS carries its entire leftover. ``enabled=false``
+    clears it. ``enabled=true`` requires ``mode`` = the distribution unit:
+      * ``"phase"``     — split equally across all subsequent phases.
+      * ``"milestone"`` — split equally across all subsequent milestones.
     """
 
     model_config = _REQUEST_CONFIG
 
     enabled: bool
     mode: Annotated[Optional[str], Field(default=None, max_length=16)] = None
-    percent: Annotated[Optional[Decimal], Field(default=None, ge=0, le=100)] = None
-    amount: Annotated[Optional[Decimal], Field(default=None, ge=0)] = None
 
     @model_validator(mode="after")
     def _validate(self) -> "CarryForwardUpdateRequest":
         if not self.enabled:
             self.mode = None
-            self.percent = None
-            self.amount = None
             return self
-        has_pct = self.percent is not None
-        has_amt = self.amount is not None
-        if has_pct == has_amt:
-            raise ValueError(
-                "Provide exactly one of percent or amount when carry-forward is enabled."
-            )
-        inferred = "percent" if has_pct else "amount"
-        if self.mode is not None and self.mode != inferred:
-            raise ValueError("mode does not match the supplied percent/amount.")
-        self.mode = inferred
-        if inferred == "percent" and not (Decimal("0") < self.percent <= Decimal("100")):
-            raise ValueError("percent must be greater than 0 and at most 100.")
-        if inferred == "amount" and self.amount <= Decimal("0"):
-            raise ValueError("amount must be greater than 0.")
+        if self.mode not in ("phase", "milestone"):
+            raise ValueError("mode must be 'phase' or 'milestone' when enabled.")
         return self
 
 
 class CarryForwardResponse(ResponseModel):
     enabled: bool = False
-    mode: Optional[str] = None                # 'percent' | 'amount' (null if disabled)
-    percent: Optional[Decimal] = None         # configured percent (mode=percent)
-    amount: Optional[Decimal] = None          # configured amount (mode=amount)
-    leftover: Decimal = Decimal("0.00")       # unallocated balance — the carry basis
-    carried_out: Decimal = Decimal("0.00")    # amount actually carried to the next phase
-    received: Decimal = Decimal("0.00")       # amount received from the previous phase
-    is_last_phase: bool = False               # carry-forward not allowed on the last phase
+    mode: Optional[str] = None                # 'phase' | 'milestone' (null if disabled)
+    leftover: Decimal = Decimal("0.00")       # this phase's leftover — the full carry basis
+    carried_out: Decimal = Decimal("0.00")    # leftover carried out (0 if no recipients)
+    # phase-wise inflow (grows the % base, equal per phase).
+    received: Decimal = Decimal("0.00")
+    # milestone-wise inflow — Σ of the per-milestone add-ons paid to THIS phase's
+    # milestones. Proportional to the phase's milestone count; does NOT change
+    # the % base or the milestone weightages.
+    received_milestone: Decimal = Decimal("0.00")
+    is_last_phase: bool = False               # no subsequent recipients → cannot carry
 
 
 # ======================================================================= ccn cap

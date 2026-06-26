@@ -7,20 +7,21 @@ Originally a single ``qrg_applied`` flag; now the per-phase carry-forward
                                became a free-text string). Drives next/last
                                phase for carry-forward. NULL until assigned;
                                the service backfills from the numeric name.
-  * ``carry_forward_enabled``— phase opts in to carrying its leftover forward.
-  * ``carry_forward_mode``   — 'percent' (of the phase's remaining/leftover)
-                               or 'amount' (a flat figure). NULL when disabled.
-  * ``carry_forward_percent``/``carry_forward_amount`` — exactly one is set
-                               when enabled; the other is NULL.
+  * ``carry_forward_enabled``— phase opts in to carrying its ENTIRE leftover
+                               forward.
+  * ``carry_forward_mode``   — the distribution unit: 'phase' (split the
+                               leftover equally across all SUBSEQUENT phases'
+                               totals) or 'milestone' (split equally across all
+                               subsequent milestones' payable values). NULL when
+                               disabled.
 
-Carry-forward flows to the IMMEDIATE NEXT phase only (by ``sequence``) and
-compounds down the chain. ``qrg_applied`` is retained (legacy / back-compat)
+Phase-wise carries compound down the chain (received grows a phase's base, so
+its own onward leftover can include it). ``qrg_applied`` is retained (legacy)
 but superseded by ``carry_forward_enabled``. One live row per (project, phase).
 """
 from __future__ import annotations
 
 from datetime import datetime
-from decimal import Decimal
 from typing import Optional
 from uuid import uuid4
 
@@ -30,7 +31,6 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
-    Numeric,
     String,
     text,
 )
@@ -69,9 +69,8 @@ class ProjectPhaseQrg(Base):
     carry_forward_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false"), default=False
     )
+    # Distribution unit when enabled: 'phase' | 'milestone'.
     carry_forward_mode: Mapped[Optional[str]] = mapped_column(String(16))
-    carry_forward_percent: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2))
-    carry_forward_amount: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 2))
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=datetime.utcnow

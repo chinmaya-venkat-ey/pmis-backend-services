@@ -28,13 +28,12 @@ class PaymentPageController:
 
     def set_carry_forward(
         self, project_id: str, phase: str, *,
-        enabled: bool, mode: Optional[str], percent: Optional[Decimal],
-        amount: Optional[Decimal], caller_user_id: Optional[str],
+        enabled: bool, mode: Optional[str], caller_user_id: Optional[str],
         caller_is_admin: bool = False,
     ) -> PaymentPageResponse:
         return self.service.set_carry_forward(
-            project_id, phase, enabled=enabled, mode=mode, percent=percent,
-            amount=amount, caller_user_id=caller_user_id, caller_is_admin=caller_is_admin,
+            project_id, phase, enabled=enabled, mode=mode,
+            caller_user_id=caller_user_id, caller_is_admin=caller_is_admin,
         )
 
     def set_phase_sequence(

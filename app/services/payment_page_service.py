@@ -109,8 +109,6 @@ class PaymentPageService:
             p: {
                 "enabled": bool(getattr(config_by_phase.get(p), "carry_forward_enabled", False)),
                 "mode": getattr(config_by_phase.get(p), "carry_forward_mode", None),
-                "percent": getattr(config_by_phase.get(p), "carry_forward_percent", None),
-                "amount": getattr(config_by_phase.get(p), "carry_forward_amount", None),
             }
             for p in ordered
         }
@@ -154,7 +152,9 @@ class PaymentPageService:
         payment_type_map = self.milestones.payment_type_by_ids(term_ms_ids)
         partial_ms_ids = [m for m in term_ms_ids if payment_type_map.get(m) == _PARTIAL]
         activities_by_ms = self.activities.list_by_milestone_ids(partial_ms_ids)
+        ms_pos = self.milestones.position_by_ids(partial_ms_ids)
         term_acts = self.term_activities.list_for_terms([t.id for t in term_rows])
+        ms_received = cf["milestone_received"]
 
         row_total_by_ci = {
             c.id: payment_calc.row_total(c.cost, c.tax_amount) for c in cost_rows
@@ -184,6 +184,7 @@ class PaymentPageService:
                     t, effective_total, row_total_by_ci.get(t.cost_item_id, Decimal("0")),
                     cycle_count=_safe_cycle_count(m_start, m_end, t.frequency_code),
                     start_date=m_start, end_date=m_end,
+                    carry_received=ms_received.get(t.milestone_id, Decimal("0")),
                 )
                 resp.payment_type = payment_type_map.get(t.milestone_id)
                 if resp.payment_type == _PARTIAL:
@@ -191,6 +192,8 @@ class PaymentPageService:
                         effective_total,
                         activities_by_ms.get(t.milestone_id, []),
                         term_acts.get(t.id, []),
+                        t.percent_of_payment,
+                        ms_pos.get(t.milestone_id),
                     )
                 term_responses.append(resp)
 
@@ -198,14 +201,19 @@ class PaymentPageService:
             phase_frequency = next(
                 (t.frequency_code for t in terms_in_phase if t.frequency_code), None,
             )
+            # Milestone-wise inflow to THIS phase = Σ add-ons paid to its
+            # milestones (proportional to its milestone count).
+            received_ms = sum(
+                (ms_received.get(t.milestone_id, Decimal("0")) for t in terms_in_phase),
+                Decimal("0"),
+            )
             cf_block = CarryForwardResponse(
                 enabled=bool(getattr(cfg, "carry_forward_enabled", False)),
                 mode=getattr(cfg, "carry_forward_mode", None),
-                percent=getattr(cfg, "carry_forward_percent", None),
-                amount=getattr(cfg, "carry_forward_amount", None),
                 leftover=cf["leftover"].get(phase, Decimal("0.00")),
                 carried_out=cf["carried_out"].get(phase, Decimal("0.00")),
-                received=cf["received"].get(phase, Decimal("0.00")),
+                received=cf["phase_received"].get(phase, Decimal("0.00")),
+                received_milestone=payment_calc.to_2dp(received_ms),
                 is_last_phase=(idx == len(ordered) - 1),
             )
             phase_blocks.append(PhaseBlock(
@@ -259,7 +267,9 @@ class PaymentPageService:
         payment_type_map = self.milestones.payment_type_by_ids(term_ms_ids)
         partial_ms_ids = [m for m in term_ms_ids if payment_type_map.get(m) == _PARTIAL]
         activities_by_ms = self.activities.list_by_milestone_ids(partial_ms_ids)
+        ms_pos = self.milestones.position_by_ids(partial_ms_ids)
         term_acts = self.term_activities.list_for_terms([t.id for t in term_rows])
+        ms_received = cf["milestone_received"]
         out: List[PaymentTermResponse] = []
         for t in term_rows:
             eff = cf["effective_base"].get(t.phase, Decimal("0"))
@@ -268,11 +278,13 @@ class PaymentPageService:
                 t, eff, row_total_by_ci.get(t.cost_item_id, Decimal("0")),
                 cycle_count=_safe_cycle_count(m_start, m_end, t.frequency_code),
                 start_date=m_start, end_date=m_end,
+                carry_received=ms_received.get(t.milestone_id, Decimal("0")),
             )
             resp.payment_type = payment_type_map.get(t.milestone_id)
             if resp.payment_type == _PARTIAL:
                 resp.activities = _build_term_activities(
                     eff, activities_by_ms.get(t.milestone_id, []), term_acts.get(t.id, []),
+                    t.percent_of_payment, ms_pos.get(t.milestone_id),
                 )
             out.append(resp)
         return out
@@ -327,45 +339,53 @@ class PaymentPageService:
 
     def set_carry_forward(
         self, project_id: str, phase: str, *,
-        enabled: bool, mode: Optional[str], percent: Optional[Decimal],
-        amount: Optional[Decimal], caller_user_id: Optional[str],
+        enabled: bool, mode: Optional[str], caller_user_id: Optional[str],
         caller_is_admin: bool = False,
     ) -> PaymentPageResponse:
-        """Configure carry-forward ("carry forward cost") for a phase.
+        """Configure carry-forward for a phase. A carrying phase always carries
+        its ENTIRE leftover, split equally across all SUBSEQUENT phases
+        (mode='phase') or all subsequent milestones (mode='milestone').
 
-        Validations: the phase must exist on the cost rows, must NOT be the last
-        phase (no successor to carry to), and an explicit ``amount`` cannot
-        exceed the phase's current remaining/leftover.
+        Validations: the phase must exist; mode must be 'phase'|'milestone'; and
+        there must be eligible recipients (a phase with no subsequent phase
+        can't carry phase-wise; with no subsequent milestones, can't carry
+        milestone-wise).
         """
         project = self._require_project(project_id)
         assert_payment_writable(project, caller_is_admin=caller_is_admin)
         self.ensure_phase_configs(project_id)
 
-        ordered, config_by_phase, cf, _, _ = self._load_phase_state(project_id)
+        ordered, config_by_phase, cf, _, term_rows = self._load_phase_state(project_id)
         if phase not in ordered:
             raise ValidationError(
                 f"Phase '{phase}' has no cost rows to carry forward from.",
                 code="validation_error",
             )
-        if enabled and ordered.index(phase) == len(ordered) - 1:
-            raise ValidationError(
-                "Cannot carry forward from the last phase — there is no subsequent phase.",
-                code="validation_error",
-            )
-        if enabled and mode == payment_calc.CF_AMOUNT:
-            leftover = cf["leftover"].get(phase, Decimal("0"))
-            if Decimal(str(amount)) > leftover:
+        if enabled:
+            if mode not in (payment_calc.CF_PHASE, payment_calc.CF_MILESTONE):
                 raise ValidationError(
-                    f"Cannot carry forward {amount}; only {leftover} remains in phase '{phase}'.",
-                    code="validation_error",
-                    details={"phase": phase, "leftover": str(leftover), "requested": str(amount)},
+                    "mode must be 'phase' or 'milestone'.", code="validation_error",
                 )
+            subsequent = ordered[ordered.index(phase) + 1:]
+            if mode == payment_calc.CF_PHASE and not subsequent:
+                raise ValidationError(
+                    "Cannot carry forward phase-wise from the last phase — no subsequent phase.",
+                    code="validation_error",
+                )
+            if mode == payment_calc.CF_MILESTONE:
+                sub_ms = [
+                    t.milestone_id for t in term_rows
+                    if t.phase in subsequent and t.milestone_id is not None
+                ]
+                if not sub_ms:
+                    raise ValidationError(
+                        "Cannot carry forward milestone-wise — no subsequent milestones.",
+                        code="validation_error",
+                    )
 
         fields = dict(
             carry_forward_enabled=enabled,
             carry_forward_mode=mode if enabled else None,
-            carry_forward_percent=percent if (enabled and mode == payment_calc.CF_PERCENT) else None,
-            carry_forward_amount=amount if (enabled and mode == payment_calc.CF_AMOUNT) else None,
             updated_by=caller_user_id,
         )
         row = config_by_phase.get(phase) or self.phase_qrg.get_for_phase(project_id, phase)
@@ -381,8 +401,7 @@ class PaymentPageService:
         self.audit.write(
             project_id=project_id, target_kind="phase_config", target_id=row.id,
             action="set_carry_forward", actor_user_id=caller_user_id,
-            changes={"phase": phase, "enabled": enabled, "mode": mode,
-                     "percent": _s(percent), "amount": _s(amount)},
+            changes={"phase": phase, "enabled": enabled, "mode": mode},
         )
         self.db.commit()
         return self.build_page(project_id)
@@ -488,14 +507,18 @@ class PaymentPageService:
             term, effective_total, row_total,
             cycle_count=_safe_cycle_count(m_start, m_end, term.frequency_code),
             start_date=m_start, end_date=m_end,
+            carry_received=cf["milestone_received"].get(term.milestone_id, Decimal("0")),
         )
         resp.payment_type = self.milestones.payment_type_by_ids(
             [term.milestone_id]).get(term.milestone_id)
         if resp.payment_type == _PARTIAL:
             ms_acts = self.activities.list_by_milestone_ids(
                 [term.milestone_id]).get(term.milestone_id, [])
+            ms_position = self.milestones.position_by_ids(
+                [term.milestone_id]).get(term.milestone_id)
             resp.activities = _build_term_activities(
                 effective_total, ms_acts, self.term_activities.list_for_term(term_id),
+                term.percent_of_payment, ms_position,
             )
         return resp
 
@@ -515,31 +538,60 @@ def _cost_item_response(row, milestone_ids: List[str]) -> CostItemResponse:
 
 def _payment_term_response(
     row, phase_base: Decimal, row_base: Decimal, cycle_count: Optional[int] = None,
-    start_date=None, end_date=None,
+    start_date=None, end_date=None, carry_received: Decimal = Decimal("0"),
 ) -> PaymentTermResponse:
-    """Value is PHASE-based on the phase's EFFECTIVE total
-    (fixed [+ one-time on first] + carry-forward received): ``percent ×
-    phase_base``. ``row_base`` is the term's own cost-row total, surfaced as
-    ``rowTotal`` for info only."""
+    """``value`` = ``percent × phase EFFECTIVE total`` (fixed [+ one-time on
+    first] + phase-wise received) PLUS any milestone-wise ``carry_received``
+    paid directly to this milestone. ``row_base`` is the term's own cost-row
+    total, surfaced as ``rowTotal`` for info only."""
     resp = PaymentTermResponse.model_validate(row)
     resp.row_total = payment_calc.to_2dp(row_base)
-    resp.value = payment_calc.payment_value(row.percent_of_payment, phase_base)
+    base_value = payment_calc.payment_value(row.percent_of_payment, phase_base)
+    cr = payment_calc.to_2dp(carry_received)
+    resp.carry_received = cr
+    resp.value = payment_calc.to_2dp(base_value + cr)
     resp.start_date = start_date
     resp.end_date = end_date
     resp.cycle_count = cycle_count
     return resp
 
 
-def _build_term_activities(phase_base: Decimal, activities, allocations) -> List[PaymentTermActivityResponse]:
-    """One response per milestone ACTIVITY (so the FE can show the full set),
-    carrying its allocated percent (null if unallocated) and derived value."""
-    pct_by_act = {a.activity_id: a.percent_of_payment for a in allocations}
+def _build_term_activities(
+    phase_base: Decimal, activities, allocations, term_percent=None, milestone_position=None,
+) -> List[PaymentTermActivityResponse]:
+    """One response per milestone ACTIVITY (so the FE can show the full set).
+
+    Percent comes from the stored split (``allocations``); with NO stored split
+    it defaults to an EVEN division of ``term_percent`` across the activities
+    (the last absorbs the rounding remainder so the sum is exact). Display code
+    is ``A<milestonePos>.<activityPos>``."""
     out: List[PaymentTermActivityResponse] = []
+    if not activities:
+        return out
+
+    pct_by_act = {a.activity_id: a.percent_of_payment for a in allocations}
+    even: dict = {}
+    if not allocations and term_percent is not None:
+        n = len(activities)
+        tp = payment_calc.to_2dp(term_percent)
+        share = payment_calc.to_2dp(tp / Decimal(n))
+        running = Decimal("0")
+        for idx, act in enumerate(activities):
+            s = payment_calc.to_2dp(tp - running) if idx == n - 1 else share
+            running += s
+            even[act.id] = s
+
     for act in activities:
-        pct = pct_by_act.get(act.id)
+        pct = even.get(act.id) if even else pct_by_act.get(act.id)
+        act_pos = getattr(act, "position", None)
+        disp = (
+            f"A{milestone_position}.{act_pos}"
+            if milestone_position is not None and act_pos is not None else None
+        )
         out.append(PaymentTermActivityResponse(
             activity_id=act.id,
             activity_name=getattr(act, "name", None),
+            activity_display_code=disp,
             percent_of_payment=pct,
             value=payment_calc.payment_value(pct, phase_base),
         ))

@@ -43,6 +43,18 @@ class MilestoneRepository:
         ).all()
         return {mid: ptype for mid, ptype in rows}
 
+    def position_by_ids(self, milestone_ids):
+        """{milestone_id: position} for the given live milestones — bulk. Used
+        to build activity display codes (A<milestonePos>.<activityPos>)."""
+        if not milestone_ids:
+            return {}
+        rows = self.db.execute(
+            select(Milestone.id, Milestone.position)
+            .where(Milestone.id.in_(list(milestone_ids)))
+            .where(Milestone.deleted_at.is_(None))
+        ).all()
+        return {mid: pos for mid, pos in rows}
+
     def _snapshot_subtree_ids(self, milestone_id: str, *, deleted_at):
         """Return (activity_ids, task_ids, subtask_ids) under this milestone
         whose ``deleted_at`` matches the predicate. Used by both soft-delete

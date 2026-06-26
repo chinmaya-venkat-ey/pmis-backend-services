@@ -214,53 +214,70 @@ def qrg_distribution(cost_rows, term_rows, qrg_phase) -> dict:
     }
 
 
-# Carry-forward modes (per-phase config — replaces the auto QRG split).
-CF_PERCENT = "percent"
-CF_AMOUNT = "amount"
+# Carry-forward distribution units (per-phase config).
+CF_PHASE = "phase"
+CF_MILESTONE = "milestone"
 
 
-def phase_base_with_one_time(items, phase, *, is_first: bool) -> Decimal:
-    """Phase FIXED total, plus the whole One-Time amount when this is the FIRST
-    phase by SEQUENCE (``is_first``). Unlike the legacy ``phase_payment_base``
-    this takes ``is_first`` explicitly so ordering follows the phase sequence,
-    not the lexical phase name."""
-    base = phase_fixed_total(items, phase)
-    if is_first:
-        base += one_time_total(items)
-    return _round_money(base)
+def _distribute_equal(amount: Decimal, recipients, acc: dict) -> None:
+    """Add ``amount`` split EQUALLY across ``recipients`` into accumulator
+    ``acc`` (keyed by recipient). The last recipient absorbs the rounding
+    remainder so the distributed total equals ``amount`` exactly."""
+    n = len(recipients)
+    if n == 0 or amount <= _ZERO:
+        return
+    share = _round_money(amount / Decimal(n))
+    running = _ZERO
+    for idx, r in enumerate(recipients):
+        s = _round_money(amount - running) if idx == n - 1 else share
+        running += s
+        acc[r] = _round_money(acc.get(r, _ZERO) + s)
 
 
 def carry_forward_distribution(cost_rows, term_rows, ordered_phases, config_by_phase) -> dict:
-    """Carry-forward ("carry forward cost", ex-QRG) over phases in SEQUENCE order.
+    """Carry-forward ("carry forward cost") over phases in SEQUENCE order.
 
-    Each phase may opt in (``config_by_phase[phase] = {"enabled", "mode",
-    "percent", "amount"}``) to carry its *leftover* (the unallocated balance
-    after its milestone payouts) to the IMMEDIATELY-NEXT phase. It COMPOUNDS:
-    a phase's base includes what it received, so its own leftover (and onward
-    carry) can include amounts handed down the chain. The last phase can never
-    carry forward (no successor).
+    A phase may opt in (``config_by_phase[phase] = {"enabled", "mode"}``) to
+    carry its ENTIRE leftover (effective base − Σ %-payouts) forward, split
+    EQUALLY across recipients chosen by ``mode``:
 
-    ``ordered_phases`` is the list of phase names in ascending sequence order.
-    Returns per-phase maps::
+      * ``"phase"``     — across all SUBSEQUENT phases' totals (``phase_received``
+                          grows their base; compounds down the chain).
+      * ``"milestone"`` — across all SUBSEQUENT milestones' payable values
+                          (``milestone_received``; a direct add-on, paid out, so
+                          it does not re-enter a phase base).
 
-        {"received": {p: amount},        # carried INTO p from p-1
-         "effective_base": {p: amount},  # fixed(+one_time on first) + received
-         "leftover": {p: amount},        # effective_base − Σ payouts (≥0)
-         "carried_out": {p: amount}}     # carried OUT of p to p+1
+    A phase with no eligible recipients for its mode carries nothing.
+
+    Returns::
+
+        {"phase_received": {phase: amt},       # phase-wise inflow (grows base)
+         "milestone_received": {ms_id: amt},   # milestone-wise inflow (direct)
+         "effective_base": {phase: amt},       # fixed(+one_time first) + phase_received
+         "leftover": {phase: amt},             # effective_base − Σ %-payouts (≥0)
+         "carried_out": {phase: amt}}          # leftover carried OUT (0 if none)
     """
     ordered = list(ordered_phases)
-    received = {p: _ZERO for p in ordered}
+    phase_received = {p: _ZERO for p in ordered}
+    milestone_received: dict = {}
     effective_base: dict = {}
     leftover: dict = {}
     carried_out = {p: _ZERO for p in ordered}
     one_time = one_time_total(cost_rows)
-    n = len(ordered)
+
+    # Milestone ids present per phase (from the live payment terms).
+    ms_by_phase: dict = {}
+    for t in term_rows:
+        ph = getattr(t, "phase", None)
+        mid = getattr(t, "milestone_id", None)
+        if ph is not None and mid is not None:
+            ms_by_phase.setdefault(ph, []).append(mid)
 
     for i, p in enumerate(ordered):
         base = phase_fixed_total(cost_rows, p)
         if i == 0:
             base += one_time
-        base = _round_money(base + received[p])
+        base = _round_money(base + phase_received[p])
         effective_base[p] = base
 
         allocated = _ZERO
@@ -272,22 +289,21 @@ def carry_forward_distribution(cost_rows, term_rows, ordered_phases, config_by_p
         leftover[p] = lo
 
         cfg = config_by_phase.get(p) or {}
-        is_last = i == n - 1
-        carried = _ZERO
-        if cfg.get("enabled") and not is_last and lo > _ZERO:
+        if cfg.get("enabled") and lo > _ZERO:
             mode = cfg.get("mode")
-            if mode == CF_AMOUNT:
-                carried = min(_to_decimal(cfg.get("amount")), lo)
-            elif mode == CF_PERCENT:
-                carried = min(_round_money(lo * _to_decimal(cfg.get("percent")) / _HUNDRED), lo)
-        carried = _round_money(carried) if carried > _ZERO else _ZERO
-        if carried > _ZERO:
-            nxt = ordered[i + 1]
-            received[nxt] = _round_money(received[nxt] + carried)
-            carried_out[p] = carried
+            subsequent = ordered[i + 1:]
+            if mode == CF_PHASE and subsequent:
+                _distribute_equal(lo, subsequent, phase_received)
+                carried_out[p] = lo
+            elif mode == CF_MILESTONE:
+                sub_ms = [m for sp in subsequent for m in ms_by_phase.get(sp, [])]
+                if sub_ms:
+                    _distribute_equal(lo, sub_ms, milestone_received)
+                    carried_out[p] = lo
 
     return {
-        "received": received,
+        "phase_received": phase_received,
+        "milestone_received": milestone_received,
         "effective_base": effective_base,
         "leftover": leftover,
         "carried_out": carried_out,

@@ -28,12 +28,15 @@ class PaymentPageController:
 
     def set_carry_forward(
         self, project_id: str, phase: str, *,
-        enabled: bool, mode: Optional[str], caller_user_id: Optional[str],
+        enabled: bool, method_code: Optional[str], caller_user_id: Optional[str],
+        allocation_mode: Optional[str] = None, allocations: Optional[list] = None,
         caller_is_admin: bool = False,
     ) -> PaymentPageResponse:
         return self.service.set_carry_forward(
-            project_id, phase, enabled=enabled, mode=mode,
-            caller_user_id=caller_user_id, caller_is_admin=caller_is_admin,
+            project_id, phase, enabled=enabled, method_code=method_code,
+            caller_user_id=caller_user_id,
+            allocation_mode=allocation_mode, allocations=allocations,
+            caller_is_admin=caller_is_admin,
         )
 
     def set_phase_sequence(
@@ -63,6 +66,15 @@ class PaymentPageController:
             caller_user_id=caller_user_id, caller_is_admin=caller_is_admin,
         )
 
+    def set_project_frequency(
+        self, project_id: str, frequency_code: str, *,
+        caller_user_id: Optional[str], caller_is_admin: bool = False,
+    ) -> PaymentPageResponse:
+        return self.service.set_project_frequency(
+            project_id, frequency_code,
+            caller_user_id=caller_user_id, caller_is_admin=caller_is_admin,
+        )
+
     def set_phase_frequency(
         self, project_id: str, phase: str, frequency_code: str, *,
         caller_user_id: Optional[str], caller_is_admin: bool = False,
@@ -75,7 +87,7 @@ class PaymentPageController:
     def cycle_count(
         self, start_date: datetime, end_date: datetime, frequency: str,
     ) -> CycleCountResponse:
-        """Number of FY-aligned billing cycles between two dates (stateless).
+        """Number of calendar-aligned billing cycles between two dates (stateless).
 
         Dates are ``datetime`` on the wire (same type milestones/projects use);
         the calc normalizes to the IST calendar date before counting.

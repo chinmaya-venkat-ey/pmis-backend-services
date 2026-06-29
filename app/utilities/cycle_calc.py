@@ -1,19 +1,20 @@
 """Cycle-count calculator — Project-Finance "number of cycles" utility.
 
 Given a ``[start_date, end_date]`` window and a billing ``frequency``, returns
-how many billing CYCLES the window spans, aligned to the UIDAI financial year
-(April 1 – March 31). Pure date math — no DB, no project context.
+how many billing CYCLES the window spans, aligned to CALENDAR periods. Pure date
+math — no DB, no project context.
 
-FY-aligned buckets:
-  - Quarter : Q1 Apr-Jun, Q2 Jul-Sep, Q3 Oct-Dec, Q4 Jan-Mar
-  - Half    : H1 Apr-Sep, H2 Oct-Mar
-  - Year    : the financial year (Apr-Mar)
-  - Month   : plain calendar month (FY-independent)
+Calendar buckets:
+  - Month   : plain calendar month
+  - Quarter : Q1 Jan-Mar, Q2 Apr-Jun, Q3 Jul-Sep, Q4 Oct-Dec
+  - Half    : H1 Jan-Jun, H2 Jul-Dec
+  - Year    : calendar year
 
 Counting rule — inclusive "bucket-touch": a window that touches a bucket by even
 one day counts it as one full cycle. So ``cycles = endIndex − startIndex + 1`` on
-a monotonic per-frequency index; a full FY is 4 quarters / 2 halves / 1 year /
-12 months.
+a monotonic per-frequency index; a calendar year is 4 quarters / 2 halves / 1
+year / 12 months. Example: a half-yearly window Dec 1 → Mar 1 touches H2 (Jul-Dec)
+then H1 (Jan-Jun) → 2 cycles.
 
 Guards: ``end_date`` must be on/after ``start_date``; the window may not exceed
 ``MAX_SPAN_YEARS`` (10) — larger inputs raise ValidationError so a runaway range
@@ -37,31 +38,24 @@ HALF_YEARLY = "half_yearly"
 YEARLY = "yearly"
 
 
-def _fy_start_year(d: date) -> int:
-    """The calendar year the financial year STARTS in (FY runs Apr–Mar)."""
-    return d.year if d.month >= 4 else d.year - 1
-
-
 def _month_index(d: date) -> int:
-    """Monotonic calendar-month index (FY-independent)."""
+    """Monotonic calendar-month index."""
     return d.year * 12 + (d.month - 1)
 
 
 def _quarter_index(d: date) -> int:
-    """Monotonic FY-quarter index (Q1 Apr-Jun … Q4 Jan-Mar)."""
-    quarter_in_fy = ((d.month - 4) % 12) // 3          # Apr→0 … Mar→3
-    return _fy_start_year(d) * 4 + quarter_in_fy
+    """Monotonic CALENDAR-quarter index (Q1 Jan-Mar, Q2 Apr-Jun, Q3 Jul-Sep, Q4 Oct-Dec)."""
+    return d.year * 4 + (d.month - 1) // 3
 
 
 def _half_index(d: date) -> int:
-    """Monotonic FY-half index (H1 Apr-Sep, H2 Oct-Mar)."""
-    half_in_fy = ((d.month - 4) % 12) // 6             # Apr→0 … Mar→1
-    return _fy_start_year(d) * 2 + half_in_fy
+    """Monotonic CALENDAR-half index (H1 Jan-Jun, H2 Jul-Dec)."""
+    return d.year * 2 + (d.month - 1) // 6
 
 
 def _year_index(d: date) -> int:
-    """Monotonic financial-year index."""
-    return _fy_start_year(d)
+    """Monotonic calendar-year index."""
+    return d.year
 
 
 _INDEXERS = {
@@ -81,7 +75,7 @@ def _add_years(d: date, n: int) -> date:
 
 
 def count_cycles(start_date: date, end_date: date, frequency: str) -> int:
-    """Number of FY-aligned ``frequency`` cycles the [start, end] window spans.
+    """Number of calendar-aligned ``frequency`` cycles the [start, end] window spans.
 
     Inclusive bucket-touch — a partial bucket still counts as one full cycle.
     Raises ValidationError on an inverted range, an over-long span (> 10 yrs),

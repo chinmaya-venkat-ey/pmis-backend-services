@@ -20,7 +20,10 @@ import pytest
 from app.core.errors import ValidationError
 from app.schemas.payment import CarryForwardUpdateRequest
 from app.services import payment_page_service as pps
-from app.services.payment_page_service import PaymentPageService, _build_term_activities, _seq_key
+from app.services.payment_page_service import (
+    PaymentPageService, _build_term_activities, _even_split,
+    _last_phase_percent_overrides, _seq_key,
+)
 from app.utilities import payment_calc
 
 
@@ -91,25 +94,124 @@ def test_one_time_folds_into_first_phase_by_sequence():
     assert cf["effective_base"]["2"] == Decimal("20000.00")
 
 
+# ----------------------------------------- custom + time-based (formula-driven)
+
+def _cf_cfg(method, formula, recipient_vars):
+    return {"enabled": True, "method": method, "formula": formula,
+            "recipient_vars": recipient_vars}
+
+
+def test_phase_custom_splits_by_recipient_percent():
+    cost_rows = [_cost("1", 10000), _cost("2", 0), _cost("3", 0)]
+    term_rows = [_term("1", 0, "m1")]  # leftover phase 1 = 10000
+    cfg = {"1": _cf_cfg("phase", "leftover * recipientPercent / 100", {
+        "2": {"recipientPercent": Decimal("70")},
+        "3": {"recipientPercent": Decimal("30")},
+    })}
+    cf = payment_calc.carry_forward_distribution(cost_rows, term_rows, ["1", "2", "3"], cfg)
+    assert cf["phase_received"]["2"] == Decimal("7000.00")
+    assert cf["phase_received"]["3"] == Decimal("3000.00")
+    assert cf["carried_out"]["1"] == Decimal("10000.00")
+
+
+def test_phase_custom_zero_share_recipient_gets_nothing():
+    cost_rows = [_cost("1", 10000), _cost("2", 0), _cost("3", 0)]
+    term_rows = [_term("1", 0, "m1")]
+    cfg = {"1": _cf_cfg("phase", "leftover * recipientPercent / 100", {
+        "2": {"recipientPercent": Decimal("100")},
+        "3": {"recipientPercent": Decimal("0")},
+    })}
+    cf = payment_calc.carry_forward_distribution(cost_rows, term_rows, ["1", "2", "3"], cfg)
+    assert cf["phase_received"]["2"] == Decimal("10000.00")
+    assert cf["phase_received"]["3"] == Decimal("0.00")     # explicit 0 stays 0
+
+
+def test_time_splits_proportional_to_recipient_cycles():
+    cost_rows = [_cost("1", 9000), _cost("2", 0), _cost("3", 0)]
+    term_rows = [_term("1", 0, "m1")]  # leftover 9000
+    cfg = {"1": _cf_cfg("time", "leftover * recipientCycles / totalCycles", {
+        "2": {"recipientCycles": Decimal("2"), "totalCycles": Decimal("3")},
+        "3": {"recipientCycles": Decimal("1"), "totalCycles": Decimal("3")},
+    })}
+    cf = payment_calc.carry_forward_distribution(cost_rows, term_rows, ["1", "2", "3"], cfg)
+    assert cf["phase_received"]["2"] == Decimal("6000.00")  # 2/3 of 9000
+    assert cf["phase_received"]["3"] == Decimal("3000.00")  # 1/3 of 9000
+    assert cf["carried_out"]["1"] == Decimal("9000.00")
+
+
 # ------------------------------------------------- CarryForwardUpdateRequest
 
-def test_cf_request_requires_mode_when_enabled():
+def test_cf_request_requires_method_when_enabled():
     with pytest.raises(Exception):
         CarryForwardUpdateRequest(enabled=True)
 
 
-def test_cf_request_rejects_unknown_mode():
+def test_cf_request_rejects_unknown_mode_alias():
     with pytest.raises(Exception):
         CarryForwardUpdateRequest(enabled=True, mode="amount")
 
 
-def test_cf_request_accepts_phase_and_milestone():
-    assert CarryForwardUpdateRequest(enabled=True, mode="phase").mode == "phase"
-    assert CarryForwardUpdateRequest(enabled=True, mode="milestone").mode == "milestone"
+def test_cf_request_accepts_method_code():
+    assert CarryForwardUpdateRequest(
+        enabled=True, method_code="phase_evenly").method_code == "phase_evenly"
+    assert CarryForwardUpdateRequest(
+        enabled=True, method_code="milestone_evenly").method_code == "milestone_evenly"
 
 
-def test_cf_request_disabled_clears_mode():
-    assert CarryForwardUpdateRequest(enabled=False, mode="phase").mode is None
+def test_cf_request_legacy_mode_folds_into_method_code():
+    assert CarryForwardUpdateRequest(enabled=True, mode="phase").method_code == "phase_evenly"
+    assert CarryForwardUpdateRequest(
+        enabled=True, mode="milestone").method_code == "milestone_evenly"
+
+
+def test_cf_request_disabled_clears_method_code():
+    assert CarryForwardUpdateRequest(enabled=False, mode="phase").method_code is None
+    assert CarryForwardUpdateRequest(
+        enabled=False, method_code="phase_evenly").method_code is None
+
+
+# --------------------------------------------- last-phase auto-utilise (even split)
+
+def _pterm(tid, phase, percent):
+    return SimpleNamespace(id=tid, phase=phase,
+                           percent_of_payment=None if percent is None else Decimal(str(percent)))
+
+
+def test_even_split_sums_exactly():
+    assert _even_split(Decimal("100"), 2) == [Decimal("50.00"), Decimal("50.00")]
+    three = _even_split(Decimal("100"), 3)
+    assert sum(three) == Decimal("100.00") and three == [Decimal("33.33"), Decimal("33.33"), Decimal("33.34")]
+
+
+def test_last_phase_even_split_when_all_null():
+    terms = [_pterm("a", "1", 30), _pterm("b", "3", None), _pterm("c", "3", None)]
+    ov = _last_phase_percent_overrides(["1", "2", "3"], terms)
+    assert ov == {"b": Decimal("50.00"), "c": Decimal("50.00")}  # last phase (3), both null
+
+
+def test_last_phase_fills_remaining_when_partially_explicit():
+    # 60% explicit + one null → null fills the remaining 40% (phase totals 100%)
+    terms = [_pterm("b", "3", 60), _pterm("c", "3", None)]
+    assert _last_phase_percent_overrides(["1", "2", "3"], terms) == {"c": Decimal("40.00")}
+
+
+def test_last_phase_fills_remaining_split_across_nulls():
+    # 50% explicit + two nulls → split the remaining 50% evenly → 25% each
+    terms = [_pterm("a", "3", 50), _pterm("b", "3", None), _pterm("c", "3", None)]
+    assert _last_phase_percent_overrides(["1", "2", "3"], terms) == {
+        "b": Decimal("25.00"), "c": Decimal("25.00")}
+
+
+def test_last_phase_no_fill_when_all_explicit():
+    # nothing null to fill — explicit values stand as-is
+    terms = [_pterm("b", "3", 60), _pterm("c", "3", 30)]
+    assert _last_phase_percent_overrides(["1", "2", "3"], terms) == {}
+
+
+def test_non_last_phase_never_overridden():
+    terms = [_pterm("a", "1", None), _pterm("b", "1", None), _pterm("c", "3", 100)]
+    # phase 1 (non-last) is all-null but must NOT be auto-split; phase 3 explicit → no override
+    assert _last_phase_percent_overrides(["1", "2", "3"], terms) == {}
 
 
 # ----------------------------------------------------------- phase ordering
@@ -146,43 +248,88 @@ def test_build_term_activities_stored_allocations_override_even_split():
 
 # --------------------------------------------------- set_carry_forward (svc)
 
-def _svc(monkeypatch, ordered, term_rows=None):
+_CF_METHODS = {
+    "phase_evenly": ("phase", "evenly", "leftover / numRecipients"),
+    "milestone_evenly": ("milestone", "evenly", "leftover / numRecipients"),
+    "phase_custom": ("phase", "custom", "leftover * recipientPercent / 100"),
+    "time_quarterly": ("time", "quarterly", "leftover * recipientCycles / totalCycles"),
+}
+
+
+def _svc(monkeypatch, ordered, term_rows=None, *, freq="quarterly", phase_dates=None):
     svc = PaymentPageService(MagicMock())
-    svc._require_project = MagicMock(return_value=SimpleNamespace(id="p1"))
+    svc._require_project = MagicMock(
+        return_value=SimpleNamespace(id="p1", payment_frequency_code=freq))
     svc.ensure_phase_configs = MagicMock()
     svc.build_page = MagicMock(return_value="PAGE")
     svc.audit = MagicMock()
     svc.phase_qrg = MagicMock()
+    svc.cf_allocations = MagicMock()
+    svc.cost_items = MagicMock()
+    svc.cost_items.phase_milestone_date_bounds = MagicMock(return_value=phase_dates or {})
     svc._load_phase_state = MagicMock(
         return_value=(ordered, {p: SimpleNamespace(id=f"cfg{p}") for p in ordered},
-                      {"leftover": {}}, [], term_rows or []),
+                      {"leftover": {p: Decimal("1000.00") for p in ordered}}, [], term_rows or []),
     )
+    # Stub the masters catalog + method resolver so the guard logic runs without a DB.
     monkeypatch.setattr(pps, "assert_payment_writable", lambda *a, **k: None)
+    monkeypatch.setattr(
+        pps.catalogs, "is_known_carry_forward_method",
+        lambda db, code: code in _CF_METHODS,
+    )
+    svc._resolve_cf_method = lambda code: _CF_METHODS.get(code, (None, None, None))
     return svc
 
 
 def test_set_cf_phase_wise_rejects_last_phase(monkeypatch):
     svc = _svc(monkeypatch, ["1", "2"])
     with pytest.raises(ValidationError):
-        svc.set_carry_forward("p1", "2", enabled=True, mode="phase", caller_user_id="u1")
+        svc.set_carry_forward("p1", "2", enabled=True, method_code="phase_evenly", caller_user_id="u1")
 
 
 def test_set_cf_milestone_wise_rejects_no_subsequent_milestones(monkeypatch):
     # phase 1 carrying milestone-wise, but phase 2 has no terms/milestones
     svc = _svc(monkeypatch, ["1", "2"], term_rows=[_term("1", 45, "m1")])
     with pytest.raises(ValidationError):
-        svc.set_carry_forward("p1", "1", enabled=True, mode="milestone", caller_user_id="u1")
+        svc.set_carry_forward("p1", "1", enabled=True, method_code="milestone_evenly", caller_user_id="u1")
 
 
-def test_set_cf_rejects_unknown_mode(monkeypatch):
+def test_set_cf_rejects_unknown_method(monkeypatch):
     svc = _svc(monkeypatch, ["1", "2"])
     with pytest.raises(ValidationError):
-        svc.set_carry_forward("p1", "1", enabled=True, mode="amount", caller_user_id="u1")
+        svc.set_carry_forward("p1", "1", enabled=True, method_code="amount", caller_user_id="u1")
+
+
+def test_set_cf_time_rejects_when_no_cycles(monkeypatch):
+    # time method needs dated subsequent phases; empty date bounds -> 0 cycles.
+    svc = _svc(monkeypatch, ["1", "2"], phase_dates={})
+    with pytest.raises(ValidationError):
+        svc.set_carry_forward("p1", "1", enabled=True, method_code="time_quarterly", caller_user_id="u1")
+
+
+def test_set_cf_custom_requires_full_allocation(monkeypatch):
+    # phase_custom across subsequent phase "2" — 60% does not fully allocate.
+    svc = _svc(monkeypatch, ["1", "2"])
+    with pytest.raises(ValidationError):
+        svc.set_carry_forward(
+            "p1", "1", enabled=True, method_code="phase_custom",
+            allocation_mode="percent", allocations=[{"recipient_key": "2", "value": Decimal("60")}],
+            caller_user_id="u1")
+
+
+def test_set_cf_custom_persists_when_fully_allocated(monkeypatch):
+    svc = _svc(monkeypatch, ["1", "2"])
+    out = svc.set_carry_forward(
+        "p1", "1", enabled=True, method_code="phase_custom",
+        allocation_mode="percent", allocations=[{"recipient_key": "2", "value": Decimal("100")}],
+        caller_user_id="u1")
+    assert out == "PAGE"
+    svc.cf_allocations.replace_for_phase.assert_called_once()
 
 
 def test_set_cf_persists_when_valid(monkeypatch):
     svc = _svc(monkeypatch, ["1", "2"])
-    out = svc.set_carry_forward("p1", "1", enabled=True, mode="phase", caller_user_id="u1")
+    out = svc.set_carry_forward("p1", "1", enabled=True, method_code="phase_evenly", caller_user_id="u1")
     assert out == "PAGE"
     svc.phase_qrg.update.assert_called_once()
 

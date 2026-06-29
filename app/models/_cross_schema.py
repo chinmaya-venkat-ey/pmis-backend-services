@@ -281,6 +281,31 @@ class PaymentType(MirrorBase):
     is_builtin: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
+class CarryForwardMethod(MirrorBase):
+    """Project-Finance carry-forward "method" selector source. Canonical:
+    masters-svc app/models/carry_forward_method.py. Each row is a
+    (method, variant) combo carrying a ``formula`` that computes the
+    per-recipient carry-forward amount over a fixed variable set
+    (leftover, numRecipients, recipientCycles, totalCycles, recipientPercent).
+    Codes: 'milestone_evenly', 'milestone_custom', 'phase_evenly',
+    'phase_custom', 'time_monthly', 'time_quarterly', 'time_half_yearly',
+    'time_yearly'."""
+
+    __tablename__ = "carry_forward_methods"
+    __table_args__ = {"schema": "masters"}
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    code: Mapped[str] = mapped_column(String(40))
+    name: Mapped[str] = mapped_column(String(80))
+    description: Mapped[Optional[str]] = mapped_column(String(500))
+    method: Mapped[str] = mapped_column(String(16))
+    variant: Mapped[str] = mapped_column(String(16))
+    formula: Mapped[str] = mapped_column(String(500))
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_builtin: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
 class Frequency(MirrorBase):
     """Project-Finance "Frequency" dropdown source. Canonical:
     masters-svc app/models/frequency.py. Codes: 'one_time', 'daily',

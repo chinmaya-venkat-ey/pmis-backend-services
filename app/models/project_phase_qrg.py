@@ -9,11 +9,16 @@ Originally a single ``qrg_applied`` flag; now the per-phase carry-forward
                                the service backfills from the numeric name.
   * ``carry_forward_enabled``— phase opts in to carrying its ENTIRE leftover
                                forward.
-  * ``carry_forward_mode``   — the distribution unit: 'phase' (split the
-                               leftover equally across all SUBSEQUENT phases'
-                               totals) or 'milestone' (split equally across all
-                               subsequent milestones' payable values). NULL when
-                               disabled.
+  * ``carry_forward_method_code``
+                             — the master-driven carry-forward METHOD code
+                               (``masters.carry_forward_methods.code``), e.g.
+                               'phase_evenly' / 'milestone_evenly' /
+                               'time_quarterly' / 'phase_custom'. The master row
+                               carries the recipient unit (phase|milestone|time)
+                               and the share ``formula``. NULL when disabled.
+                               (Superseded the legacy 'phase'|'milestone'
+                               ``carry_forward_mode`` flag, which maps onto the
+                               ``*_evenly`` methods.)
 
 Phase-wise carries compound down the chain (received grows a phase's base, so
 its own onward leftover can include it). ``qrg_applied`` is retained (legacy)
@@ -69,8 +74,9 @@ class ProjectPhaseQrg(Base):
     carry_forward_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false"), default=False
     )
-    # Distribution unit when enabled: 'phase' | 'milestone'.
-    carry_forward_mode: Mapped[Optional[str]] = mapped_column(String(16))
+    # Master carry-forward method code when enabled (FK by value to
+    # masters.carry_forward_methods.code). NULL when disabled.
+    carry_forward_method_code: Mapped[Optional[str]] = mapped_column(String(40))
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=datetime.utcnow

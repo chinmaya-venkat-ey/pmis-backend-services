@@ -109,6 +109,10 @@ class Project(Base):
         Numeric(5, 2), nullable=False,
         server_default=text("25"), default=Decimal("25"),
     )
+    # Project-level billing frequency for the payment screen — ONE per project
+    # (applies to every phase's cycle counts + time-based carry-forward).
+    # Logical FK to masters.frequencies.code. Null until set.
+    payment_frequency_code: Mapped[Optional[str]] = mapped_column(String(32))
 
     # Audit / soft-delete. user-id FKs are LOGICAL only (cross-schema).
     created_by: Mapped[Optional[str]] = mapped_column(String(36))

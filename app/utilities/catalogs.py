@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.models._cross_schema import (
     ActivityStatus as _ActivityStatus,
+    CarryForwardMethod as _CarryForwardMethod,
     Division as _Division,
     MilestoneStatus as _MilestoneStatus,
     PaymentType as _PaymentType,
@@ -45,6 +46,15 @@ ACTIVITY_STATUS_DEFAULT: str = "not_completed"
 PRIORITY_CHOICES: Tuple[str, ...] = ("P1", "P2", "P3")
 
 PAYMENT_TYPE_CHOICES: Tuple[str, ...] = ("partial_payment", "complete_payment")
+
+CARRY_FORWARD_METHOD_CHOICES: Tuple[str, ...] = (
+    "milestone_evenly", "milestone_custom",
+    "phase_evenly", "phase_custom",
+    "time_monthly", "time_quarterly", "time_half_yearly", "time_yearly",
+)
+"""Built-in carry-forward method codes seeded by masters-svc. The legacy
+per-phase ``carry_forward_mode`` values 'phase'/'milestone' map onto
+'phase_evenly'/'milestone_evenly' at the service layer."""
 
 PROJECT_CATEGORY_CHOICES: Tuple[str, ...] = ("MSAP", "MSIP", "BSP", "others")
 
@@ -140,6 +150,24 @@ def is_known_payment_type(db: Session, code: str) -> bool:
     return _is_known_code(db, _PaymentType, code, PAYMENT_TYPE_CHOICES)
 
 
+def is_known_carry_forward_method(db: Session, code: str) -> bool:
+    return _is_known_code(db, _CarryForwardMethod, code, CARRY_FORWARD_METHOD_CHOICES)
+
+
+def carry_forward_method_row(db: Session, code: str):
+    """Fetch the ACTIVE carry-forward-method mirror row for ``code`` (or None).
+    Used by the distribution engine to read ``method`` / ``variant`` /
+    ``formula`` for the selected method."""
+    if not code:
+        return None
+    return db.execute(
+        select(_CarryForwardMethod)
+        .where(_CarryForwardMethod.code == str(code).strip())
+        .where(_CarryForwardMethod.active.is_(True))
+        .limit(1)
+    ).scalar_one_or_none()
+
+
 def is_known_project_category(db: Session, code: str) -> bool:
     return _is_known_code(db, _ProjectCategory, code, PROJECT_CATEGORY_CHOICES)
 
@@ -200,6 +228,10 @@ def active_priorities(db: Session) -> Tuple[str, ...]:
 
 def active_payment_types(db: Session) -> Tuple[str, ...]:
     return active_choices_for(db, _PaymentType, PAYMENT_TYPE_CHOICES)
+
+
+def active_carry_forward_methods(db: Session) -> Tuple[str, ...]:
+    return active_choices_for(db, _CarryForwardMethod, CARRY_FORWARD_METHOD_CHOICES)
 
 
 def active_project_categories(db: Session) -> Tuple[str, ...]:

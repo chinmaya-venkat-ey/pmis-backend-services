@@ -174,7 +174,7 @@ class PaymentTermResponse(ResponseModel):
     # This milestone's own date span (drives the per-milestone cycle count).
     start_date: Optional[datetime] = None
     end_date: Optional[datetime] = None
-    # FY-aligned billing cycles over THIS milestone's own start/end at the
+    # calendar-aligned billing cycles over THIS milestone's own start/end at the
     # phase's frequency. Null until a valid frequency is applied / dates missing.
     cycle_count: Optional[int] = None
     position: int
@@ -187,33 +187,81 @@ class PaymentTermResponse(ResponseModel):
 
 # ================================================================ carry forward
 
+class CarryForwardAllocationItem(BaseModel):
+    """One custom-split share in a carry-forward request: how much of the
+    carrying phase's leftover goes to ``recipientKey`` (a subsequent phase name
+    or milestone id). ``value`` is read per the request's ``allocationMode``
+    (percent 0..100, or rupee amount)."""
+
+    model_config = _REQUEST_CONFIG
+
+    recipient_key: Annotated[str, Field(min_length=1, max_length=64)]
+    value: Decimal = Decimal("0")
+
+
 class CarryForwardUpdateRequest(BaseModel):
     """PUT /projects/{uuid}/phases/{phase}/carry-forward.
 
     A carrying phase ALWAYS carries its entire leftover. ``enabled=false``
-    clears it. ``enabled=true`` requires ``mode`` = the distribution unit:
-      * ``"phase"``     — split equally across all subsequent phases.
-      * ``"milestone"`` — split equally across all subsequent milestones.
+    clears it. ``enabled=true`` requires ``methodCode`` = a master carry-forward
+    method (``masters.carry_forward_methods.code``):
+      * ``"*_evenly"``  — split equally across subsequent phases / milestones.
+      * ``"*_custom"``  — explicit per-recipient split; provide ``allocationMode``
+                          ('percent' | 'amount') and ``allocations`` that fully
+                          allocate the leftover (some recipients may be 0).
+      * ``"time_*"``    — split across subsequent phases weighted by each phase's
+                          payment-cycle count at the project frequency.
+
+    Back-compat: the legacy ``mode`` field ('phase' | 'milestone') is still
+    accepted and maps onto the matching ``*_evenly`` method when ``methodCode``
+    is omitted.
     """
 
     model_config = _REQUEST_CONFIG
 
     enabled: bool
+    method_code: Annotated[Optional[str], Field(default=None, max_length=40)] = None
+    # Deprecated alias — superseded by method_code.
     mode: Annotated[Optional[str], Field(default=None, max_length=16)] = None
+    # Custom-split inputs (only read when methodCode is a ``*_custom`` method).
+    allocation_mode: Annotated[Optional[str], Field(default=None, max_length=8)] = None
+    allocations: Optional[List[CarryForwardAllocationItem]] = None
+
+    _MODE_TO_METHOD = {"phase": "phase_evenly", "milestone": "milestone_evenly"}
 
     @model_validator(mode="after")
     def _validate(self) -> "CarryForwardUpdateRequest":
         if not self.enabled:
+            self.method_code = None
             self.mode = None
+            self.allocation_mode = None
+            self.allocations = None
             return self
-        if self.mode not in ("phase", "milestone"):
-            raise ValueError("mode must be 'phase' or 'milestone' when enabled.")
+        # Fold the legacy mode alias into method_code when method_code is absent.
+        if not self.method_code and self.mode is not None:
+            mapped = self._MODE_TO_METHOD.get(self.mode)
+            if mapped is None:
+                raise ValueError("mode must be 'phase' or 'milestone' when enabled.")
+            self.method_code = mapped
+        if not self.method_code:
+            raise ValueError("methodCode is required when enabled.")
+        # Custom methods require the allocation inputs (deep-validated in service).
+        if self.method_code.endswith("_custom") and not self.allocations:
+            raise ValueError("allocations are required for a custom carry-forward method.")
         return self
+
+
+class CarryForwardAllocationResponse(ResponseModel):
+    recipient_key: str
+    recipient_kind: str                       # 'phase' | 'milestone'
+    alloc_mode: str                           # 'percent' | 'amount' (how it was entered)
+    input_value: Decimal = Decimal("0.00")    # the raw entered percent / amount
+    percent: Decimal = Decimal("0.0000")      # normalised share (0..100)
 
 
 class CarryForwardResponse(ResponseModel):
     enabled: bool = False
-    mode: Optional[str] = None                # 'phase' | 'milestone' (null if disabled)
+    method_code: Optional[str] = None         # master method code (null if disabled)
     leftover: Decimal = Decimal("0.00")       # this phase's leftover — the full carry basis
     carried_out: Decimal = Decimal("0.00")    # leftover carried out (0 if no recipients)
     # phase-wise inflow (grows the % base, equal per phase).
@@ -223,6 +271,8 @@ class CarryForwardResponse(ResponseModel):
     # the % base or the milestone weightages.
     received_milestone: Decimal = Decimal("0.00")
     is_last_phase: bool = False               # no subsequent recipients → cannot carry
+    # Saved custom-split shares for this phase (empty unless a *_custom method).
+    allocations: List["CarryForwardAllocationResponse"] = []
 
 
 # ======================================================================= ccn cap
@@ -238,9 +288,17 @@ class CcnCapUpdateRequest(BaseModel):
 # ================================================================ phase frequency
 
 class PhaseFrequencyUpdateRequest(BaseModel):
-    """PUT /projects/{uuid}/phases/{phase}/frequency — set ONE frequency for the
-    whole phase (applied to every payment term in it; all milestones in a phase
-    share one frequency)."""
+    """PUT /projects/{uuid}/phases/{phase}/frequency — back-compat alias that now
+    sets the PROJECT-level frequency (frequency is one value per project)."""
+
+    model_config = _REQUEST_CONFIG
+
+    frequency_code: Annotated[str, Field(min_length=1, max_length=32)]
+
+
+class ProjectFrequencyUpdateRequest(BaseModel):
+    """PUT /projects/{uuid}/frequency — set the ONE billing frequency for the
+    whole project (drives all cycle counts + time-based carry-forward)."""
 
     model_config = _REQUEST_CONFIG
 
@@ -271,7 +329,7 @@ class PhaseBlock(ResponseModel):
     # phase (null if the phase has no live milestone). Inputs to the cycle count.
     start_date: Optional[datetime] = None
     end_date: Optional[datetime] = None
-    # Number of FY-aligned billing cycles over [start_date, end_date] for the
+    # Number of calendar-aligned billing cycles over [start_date, end_date] for the
     # phase's applied frequency (all terms in a phase share one). Null until a
     # valid frequency is applied / when dates are missing.
     cycle_count: Optional[int] = None
@@ -295,7 +353,10 @@ class PaymentPageResponse(ResponseModel):
     project_code: Optional[str] = None
     status: str
     is_locked: bool
-    # Project's own date span + QUARTERLY cycle count over it (null if no dates).
+    # The ONE project-level billing frequency (null until set). Drives every
+    # cycle count below and time-based carry-forward.
+    frequency_code: Optional[str] = None
+    # Project's own date span + cycle count over it at the project frequency.
     start_date: Optional[datetime] = None
     end_date: Optional[datetime] = None
     cycle_count: Optional[int] = None
@@ -319,7 +380,7 @@ class CycleFrequency(str, Enum):
 
 
 class CycleCountResponse(ResponseModel):
-    """Number of FY-aligned billing cycles. ``cycles`` is null only for the
+    """Number of calendar-aligned billing cycles. ``cycles`` is null only for the
     project-level read when the project has no start/end dates set."""
 
     cycles: Optional[int] = None

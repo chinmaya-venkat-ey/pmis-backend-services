@@ -214,40 +214,96 @@ def qrg_distribution(cost_rows, term_rows, qrg_phase) -> dict:
     }
 
 
-# Carry-forward distribution units (per-phase config).
-CF_PHASE = "phase"
-CF_MILESTONE = "milestone"
+# Carry-forward recipient UNITS (which master ``method`` distributes to what).
+CF_PHASE = "phase"          # split across subsequent phases (grows their base)
+CF_MILESTONE = "milestone"  # split across subsequent milestones (direct add-on)
+CF_TIME = "time"            # split across subsequent phases, weighted by cycles
+
+# Default formula for the legacy / evenly path (master ``*_evenly`` rows).
+_EVENLY_FORMULA = "leftover / numRecipients"
 
 
-def _distribute_equal(amount: Decimal, recipients, acc: dict) -> None:
-    """Add ``amount`` split EQUALLY across ``recipients`` into accumulator
-    ``acc`` (keyed by recipient). The last recipient absorbs the rounding
-    remainder so the distributed total equals ``amount`` exactly."""
+def _normalize_cf_config(cfg: dict) -> dict:
+    """Normalise a per-phase carry-forward config into ``{enabled, method,
+    formula, recipient_vars}``.
+
+    Accepts BOTH shapes:
+      * new — ``{"enabled", "method", "variant", "formula", "recipient_vars"}``
+        where ``method`` ∈ {phase, milestone, time}; ``recipient_vars`` maps a
+        recipient key → extra formula variables (recipientCycles/totalCycles for
+        time, recipientPercent for custom). Stage-3 evenly passes none.
+      * legacy — ``{"enabled", "mode"}`` with ``mode`` ∈ {phase, milestone};
+        treated as the matching ``*_evenly`` formula. Keeps the direct
+        ``payment_calc`` unit tests + any un-migrated caller working.
+    """
+    if not cfg:
+        return {"enabled": False, "method": None, "formula": _EVENLY_FORMULA, "recipient_vars": {}}
+    method = cfg.get("method") or cfg.get("mode")
+    formula = cfg.get("formula") or _EVENLY_FORMULA
+    return {
+        "enabled": bool(cfg.get("enabled")),
+        "method": method,
+        "formula": formula,
+        "recipient_vars": cfg.get("recipient_vars") or {},
+    }
+
+
+def _distribute_by_formula(amount: Decimal, recipients, formula, acc: dict,
+                           recipient_vars: Optional[dict] = None) -> Decimal:
+    """Add ``amount`` distributed across ``recipients`` into accumulator ``acc``
+    using ``formula`` (evaluated per recipient via the sandboxed engine).
+
+    Each recipient r's raw share = ``round(evaluate(formula, {leftover,
+    numRecipients, **recipient_vars[r]}))``. The rounding remainder
+    (``amount − Σ raw``) is handed to the LAST recipient that has a positive
+    share, so an explicit 0-share custom recipient never receives stray paise
+    (falls back to the last recipient when every share is zero). For the evenly
+    formula (all shares equal) this is mathematically identical to the previous
+    equal-split-with-last-absorbs behaviour. Returns the total distributed
+    (== ``amount`` whenever there is any positive share)."""
+    from app.utilities import formula_eval
+
     n = len(recipients)
     if n == 0 or amount <= _ZERO:
-        return
-    share = _round_money(amount / Decimal(n))
-    running = _ZERO
-    for idx, r in enumerate(recipients):
-        s = _round_money(amount - running) if idx == n - 1 else share
-        running += s
-        acc[r] = _round_money(acc.get(r, _ZERO) + s)
+        return _ZERO
+    per = recipient_vars or {}
+    base_vars = {"leftover": amount, "numRecipients": Decimal(n)}
+    raw = []
+    for r in recipients:
+        v = dict(base_vars)
+        v.update(per.get(r, {}))
+        raw.append(_round_money(formula_eval.evaluate(formula, v)))
+    remainder = _round_money(amount - sum(raw, _ZERO))
+    if remainder != _ZERO:
+        idx = next((k for k in range(n - 1, -1, -1) if raw[k] > _ZERO), n - 1)
+        raw[idx] = _round_money(raw[idx] + remainder)
+    distributed = _ZERO
+    for r, s in zip(recipients, raw):
+        if s > _ZERO:
+            acc[r] = _round_money(acc.get(r, _ZERO) + s)
+            distributed += s
+    return _round_money(distributed)
 
 
 def carry_forward_distribution(cost_rows, term_rows, ordered_phases, config_by_phase) -> dict:
     """Carry-forward ("carry forward cost") over phases in SEQUENCE order.
 
-    A phase may opt in (``config_by_phase[phase] = {"enabled", "mode"}``) to
-    carry its ENTIRE leftover (effective base − Σ %-payouts) forward, split
-    EQUALLY across recipients chosen by ``mode``:
+    A phase may opt in (``config_by_phase[phase]``) to carry its ENTIRE leftover
+    (effective base − Σ %-payouts) forward. The master-driven ``method`` chooses
+    the recipient UNIT and the ``formula`` chooses each recipient's SHARE:
 
-      * ``"phase"``     — across all SUBSEQUENT phases' totals (``phase_received``
-                          grows their base; compounds down the chain).
+      * ``"phase"`` / ``"time"`` — across all SUBSEQUENT phases' totals
+                          (``phase_received`` grows their base; compounds down
+                          the chain). ``time`` additionally weights shares by
+                          per-phase cycle counts supplied in ``recipient_vars``.
       * ``"milestone"`` — across all SUBSEQUENT milestones' payable values
                           (``milestone_received``; a direct add-on, paid out, so
                           it does not re-enter a phase base).
 
-    A phase with no eligible recipients for its mode carries nothing.
+    Config shape per phase (see ``_normalize_cf_config``): the new
+    ``{"enabled", "method", "formula", "recipient_vars"}`` or the legacy
+    ``{"enabled", "mode"}`` (evenly). A phase with no eligible recipients for
+    its method carries nothing.
 
     Returns::
 
@@ -288,18 +344,20 @@ def carry_forward_distribution(cost_rows, term_rows, ordered_phases, config_by_p
         lo = _round_money(lo) if lo > _ZERO else _ZERO
         leftover[p] = lo
 
-        cfg = config_by_phase.get(p) or {}
-        if cfg.get("enabled") and lo > _ZERO:
-            mode = cfg.get("mode")
+        cfg = _normalize_cf_config(config_by_phase.get(p) or {})
+        if cfg["enabled"] and lo > _ZERO:
+            method = cfg["method"]
+            formula = cfg["formula"]
+            rvars = cfg["recipient_vars"]
             subsequent = ordered[i + 1:]
-            if mode == CF_PHASE and subsequent:
-                _distribute_equal(lo, subsequent, phase_received)
-                carried_out[p] = lo
-            elif mode == CF_MILESTONE:
+            if method in (CF_PHASE, CF_TIME) and subsequent:
+                carried_out[p] = _distribute_by_formula(
+                    lo, subsequent, formula, phase_received, rvars)
+            elif method == CF_MILESTONE:
                 sub_ms = [m for sp in subsequent for m in ms_by_phase.get(sp, [])]
                 if sub_ms:
-                    _distribute_equal(lo, sub_ms, milestone_received)
-                    carried_out[p] = lo
+                    carried_out[p] = _distribute_by_formula(
+                        lo, sub_ms, formula, milestone_received, rvars)
 
     return {
         "phase_received": phase_received,

@@ -49,6 +49,7 @@ from app.schemas.payment import (
     PaymentTermUpdateRequest,
     PhaseFrequencyUpdateRequest,
     PhaseSequenceUpdateRequest,
+    ProjectFrequencyUpdateRequest,
 )
 
 
@@ -305,10 +306,14 @@ def update_ccn_cap(
     response_model=PaymentPageResponse,
     summary="Configure carry-forward on a phase (full leftover; returns the recomputed page)",
     description=(
-        "Enable/disable carrying a phase's ENTIRE leftover forward, split "
-        "equally by mode: 'phase' (across all subsequent phases) or 'milestone' "
-        "(across all subsequent milestones). Rejected when there are no eligible "
-        "subsequent recipients for the chosen mode."
+        "Enable/disable carrying a phase's ENTIRE leftover forward, distributed "
+        "per the master carry-forward methodCode: '*_evenly' (equal split across "
+        "subsequent phases / milestones), '*_custom' (explicit per-recipient "
+        "allocations that must fully allocate the leftover; provide allocationMode "
+        "+ allocations), or 'time_*' (split across subsequent phases weighted by "
+        "each phase's payment-cycle count). Rejected when there are no eligible "
+        "subsequent recipients, a custom set does not fully allocate, or a "
+        "time method has no payment cycles to weight by."
     ),
     dependencies=[Depends(require_project_permission(PROJECTS_UPDATE_FINANCE))],
 )
@@ -322,7 +327,10 @@ def set_phase_carry_forward(
 ):
     return controller.set_carry_forward(
         project_uuid, phase,
-        enabled=payload.enabled, mode=payload.mode,
+        enabled=payload.enabled, method_code=payload.method_code,
+        allocation_mode=payload.allocation_mode,
+        allocations=([a.model_dump() for a in payload.allocations]
+                     if payload.allocations else None),
         caller_user_id=caller_user_id, caller_is_admin=caller_is_admin,
     )
 
@@ -348,9 +356,28 @@ def set_phase_sequence(
 
 
 @payment_page_router.put(
+    "/{project_uuid}/frequency",
+    response_model=PaymentPageResponse,
+    summary="Set the ONE billing frequency for the whole project (drives all cycle counts)",
+    dependencies=[Depends(require_project_permission(PROJECTS_UPDATE_FINANCE))],
+)
+def set_project_frequency(
+    project_uuid: str,
+    payload: ProjectFrequencyUpdateRequest,
+    controller: Annotated[PaymentPageController, Depends(get_payment_page_controller)],
+    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
+    caller_is_admin: Annotated[bool, Depends(get_caller_is_admin)],
+):
+    return controller.set_project_frequency(
+        project_uuid, payload.frequency_code,
+        caller_user_id=caller_user_id, caller_is_admin=caller_is_admin,
+    )
+
+
+@payment_page_router.put(
     "/{project_uuid}/phases/{phase}/frequency",
     response_model=PaymentPageResponse,
-    summary="Set ONE frequency for the whole phase (applies to all its terms; returns the page)",
+    summary="[back-compat] Sets the PROJECT-level frequency (phase is ignored; returns the page)",
     dependencies=[Depends(require_project_permission(PROJECTS_UPDATE_FINANCE))],
 )
 def set_phase_frequency(
@@ -376,7 +403,7 @@ cycle_count_router = APIRouter(prefix="/payment", tags=["payment-page"])
 @cycle_count_router.get(
     "/cycle-count",
     response_model=CycleCountResponse,
-    summary="Number of FY-aligned billing cycles between two dates (FY Apr–Mar)",
+    summary="Number of calendar-aligned billing cycles between two dates",
     dependencies=[Depends(require_authenticated())],
 )
 def get_cycle_count(

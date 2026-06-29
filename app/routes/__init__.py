@@ -29,6 +29,7 @@ from app.routes.milestone_status_routes import router as milestone_status_router
 from app.routes.notification_template_routes import (
     router as notification_template_router,
 )
+from app.routes.carry_forward_method_routes import router as carry_forward_method_router
 from app.routes.payment_type_routes import router as payment_type_router
 from app.routes.priority_routes import router as priority_router
 from app.routes.project_category_routes import router as project_category_router
@@ -47,6 +48,7 @@ api_router.include_router(priority_router)
 api_router.include_router(cost_type_router)
 api_router.include_router(frequency_router)
 api_router.include_router(payment_type_router)
+api_router.include_router(carry_forward_method_router)
 api_router.include_router(project_category_router)
 api_router.include_router(activity_type_router)
 api_router.include_router(activity_status_router)

@@ -17,6 +17,7 @@ from app.controllers.milestone_status_controller import MilestoneStatusControlle
 from app.controllers.notification_template_controller import (
     NotificationTemplateController,
 )
+from app.controllers.carry_forward_method_controller import CarryForwardMethodController
 from app.controllers.payment_type_controller import PaymentTypeController
 from app.controllers.priority_controller import PriorityController
 from app.controllers.project_category_controller import ProjectCategoryController
@@ -30,6 +31,7 @@ from app.services.activity_status_service import ActivityStatusService
 from app.services.activity_type_service import ActivityTypeService
 from app.services.cost_type_service import CostTypeService
 from app.services.division_service import DivisionService
+from app.services.carry_forward_method_service import CarryForwardMethodService
 from app.services.payment_type_service import PaymentTypeService
 from app.services.frequency_service import FrequencyService
 from app.services.milestone_status_service import MilestoneStatusService
@@ -71,6 +73,12 @@ def get_frequency_controller(db: Session = Depends(get_db)) -> FrequencyControll
 
 def get_payment_type_controller(db: Session = Depends(get_db)) -> PaymentTypeController:
     return PaymentTypeController(PaymentTypeService(db))
+
+
+def get_carry_forward_method_controller(
+    db: Session = Depends(get_db),
+) -> CarryForwardMethodController:
+    return CarryForwardMethodController(CarryForwardMethodService(db))
 
 
 def get_project_category_controller(

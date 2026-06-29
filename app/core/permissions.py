@@ -135,6 +135,13 @@ PAYMENT_TYPES_MANAGE: Final[str] = "payment_types:manage"
 
 
 # =========================================================================
+# Catalog: carry_forward_methods  (Project-Finance carry-forward selector)
+# =========================================================================
+CARRY_FORWARD_METHODS_READ: Final[str] = "carry_forward_methods:read"
+CARRY_FORWARD_METHODS_MANAGE: Final[str] = "carry_forward_methods:manage"
+
+
+# =========================================================================
 # Aggregate lists — used by the bootstrap migration and CI drift tests.
 # =========================================================================
 ALL_MASTERS_READ_PERMISSIONS: Final[tuple[str, ...]] = (
@@ -151,6 +158,7 @@ ALL_MASTERS_READ_PERMISSIONS: Final[tuple[str, ...]] = (
     COST_TYPES_READ,
     FREQUENCIES_READ,
     PAYMENT_TYPES_READ,
+    CARRY_FORWARD_METHODS_READ,
 )
 
 ALL_MASTERS_MANAGE_PERMISSIONS: Final[tuple[str, ...]] = (
@@ -167,5 +175,6 @@ ALL_MASTERS_MANAGE_PERMISSIONS: Final[tuple[str, ...]] = (
     COST_TYPES_MANAGE,
     FREQUENCIES_MANAGE,
     PAYMENT_TYPES_MANAGE,
+    CARRY_FORWARD_METHODS_MANAGE,
 )
 

@@ -6,9 +6,10 @@ carry-forward ("carry forward cost") settings, not just the old QRG flag.
 """
 from __future__ import annotations
 
-from typing import List, Optional
+from datetime import datetime
+from typing import Iterable, List, Optional
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.models.project_phase_qrg import ProjectPhaseQrg
@@ -51,6 +52,24 @@ class ProjectPhaseQrgRepository:
             .where(ProjectPhaseQrg.sequence.is_not(None))
         ).scalars().all()
         return max(rows) if rows else 0
+
+    def soft_delete_orphans(
+        self, project_id: str, live_phases: Iterable[str], *, actor_user_id=None,
+    ) -> None:
+        """Soft-delete live config rows whose phase is not in ``live_phases``
+        (i.e. phases that no longer have any live cost row). An empty
+        ``live_phases`` prunes every config row for the project."""
+        live = list(live_phases)
+        stmt = (
+            update(ProjectPhaseQrg)
+            .where(ProjectPhaseQrg.project_id == project_id)
+            .where(ProjectPhaseQrg.deleted_at.is_(None))
+        )
+        if live:
+            stmt = stmt.where(ProjectPhaseQrg.phase.not_in(live))
+        stmt = stmt.values(deleted_at=datetime.utcnow(), updated_by=actor_user_id)
+        self.db.execute(stmt)
+        self.db.flush()
 
     def create(self, **kwargs) -> ProjectPhaseQrg:
         row = ProjectPhaseQrg(**kwargs)

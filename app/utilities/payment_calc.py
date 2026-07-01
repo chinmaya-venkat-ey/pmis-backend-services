@@ -256,11 +256,13 @@ def _distribute_by_formula(amount: Decimal, recipients, formula, acc: dict,
     Each recipient r's raw share = ``round(evaluate(formula, {leftover,
     numRecipients, **recipient_vars[r]}))``. The rounding remainder
     (``amount − Σ raw``) is handed to the LAST recipient that has a positive
-    share, so an explicit 0-share custom recipient never receives stray paise
-    (falls back to the last recipient when every share is zero). For the evenly
-    formula (all shares equal) this is mathematically identical to the previous
-    equal-split-with-last-absorbs behaviour. Returns the total distributed
-    (== ``amount`` whenever there is any positive share)."""
+    share, so an explicit 0-share custom recipient never receives stray paise.
+    When NO recipient has a positive share (e.g. a fully-stale custom config
+    whose only allocated recipients dropped out of "subsequent"), nothing is
+    distributed — the leftover stays with the carrying phase rather than being
+    dumped onto an unallocated recipient. For the evenly formula (all shares
+    equal) this is mathematically identical to the previous equal-split-with-
+    last-absorbs behaviour. Returns the total distributed."""
     from app.utilities import formula_eval
 
     n = len(recipients)
@@ -275,8 +277,10 @@ def _distribute_by_formula(amount: Decimal, recipients, formula, acc: dict,
         raw.append(_round_money(formula_eval.evaluate(formula, v)))
     remainder = _round_money(amount - sum(raw, _ZERO))
     if remainder != _ZERO:
-        idx = next((k for k in range(n - 1, -1, -1) if raw[k] > _ZERO), n - 1)
-        raw[idx] = _round_money(raw[idx] + remainder)
+        idx = next((k for k in range(n - 1, -1, -1) if raw[k] > _ZERO), None)
+        if idx is not None:  # absorb the rounding remainder into the last positive share
+            raw[idx] = _round_money(raw[idx] + remainder)
+        # else: no positive share anywhere → distribute nothing (carry stays put)
     distributed = _ZERO
     for r, s in zip(recipients, raw):
         if s > _ZERO:

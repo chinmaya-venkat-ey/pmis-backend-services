@@ -22,7 +22,7 @@ from app.schemas.payment import CarryForwardUpdateRequest
 from app.services import payment_page_service as pps
 from app.services.payment_page_service import (
     PaymentPageService, _build_term_activities, _even_split,
-    _last_phase_percent_overrides, _seq_key,
+    _last_phase_percent_overrides, _phase_order_key,
 )
 from app.utilities import payment_calc
 
@@ -139,6 +139,44 @@ def test_time_splits_proportional_to_recipient_cycles():
     assert cf["carried_out"]["1"] == Decimal("9000.00")
 
 
+def test_custom_all_zero_recipients_carries_nothing():
+    # Fully-stale custom config (every recipient 0%) -> nothing dumped anywhere;
+    # the leftover stays with the carrying phase.
+    cost_rows = [_cost("1", 10000), _cost("2", 0), _cost("3", 0)]
+    term_rows = [_term("1", 0, "m1")]  # leftover 10000
+    cfg = {"1": _cf_cfg("phase", "leftover * recipientPercent / 100", {
+        "2": {"recipientPercent": Decimal("0")},
+        "3": {"recipientPercent": Decimal("0")},
+    })}
+    cf = payment_calc.carry_forward_distribution(cost_rows, term_rows, ["1", "2", "3"], cfg)
+    assert cf["phase_received"]["2"] == Decimal("0.00")
+    assert cf["phase_received"]["3"] == Decimal("0.00")
+    assert cf["carried_out"]["1"] == Decimal("0.00")
+
+
+# ------------------------- custom re-normalisation (stale-after-reorder) -----
+
+def test_cf_recipient_vars_renormalises_stale_custom():
+    # Carrying from 'A' (idx 0); subsequent = [B, C]. A 3rd recipient dropped out
+    # of "subsequent" after a reorder, so the stored shares now sum to 80 — they
+    # are scaled back to 100 (50/30 -> 62.5/37.5), not dumped on the last one.
+    svc = PaymentPageService(MagicMock())
+    alloc_map = {"B": SimpleNamespace(percent=Decimal("50")),
+                 "C": SimpleNamespace(percent=Decimal("30"))}
+    out = svc._build_cf_recipient_vars("phase", "custom", 0, ["A", "B", "C"], {}, {}, alloc_map)
+    assert out["B"]["recipientPercent"] == Decimal("62.5")
+    assert out["C"]["recipientPercent"] == Decimal("37.5")
+
+
+def test_cf_recipient_vars_custom_noop_when_full():
+    svc = PaymentPageService(MagicMock())
+    alloc_map = {"B": SimpleNamespace(percent=Decimal("60")),
+                 "C": SimpleNamespace(percent=Decimal("40"))}
+    out = svc._build_cf_recipient_vars("phase", "custom", 0, ["A", "B", "C"], {}, {}, alloc_map)
+    assert out["B"]["recipientPercent"] == Decimal("60")
+    assert out["C"]["recipientPercent"] == Decimal("40")
+
+
 # ------------------------------------------------- CarryForwardUpdateRequest
 
 def test_cf_request_requires_method_when_enabled():
@@ -216,8 +254,31 @@ def test_non_last_phase_never_overridden():
 
 # ----------------------------------------------------------- phase ordering
 
-def test_seq_key_numeric_names_sort_numerically():
-    assert sorted(["2", "10", "1"], key=lambda p: _seq_key(p, None)) == ["1", "2", "10"]
+def _dt(s):
+    from datetime import datetime
+    return datetime.fromisoformat(s)
+
+
+def test_phase_order_by_start_then_shorter_span_then_undated_last():
+    # a & b share a start; a has the earlier end (shorter span) -> a precedes b.
+    # c starts later. d has no dates -> sorts last.
+    dates = {
+        "a": (_dt("2025-01-01"), _dt("2025-03-01")),
+        "b": (_dt("2025-01-01"), _dt("2025-06-01")),
+        "c": (_dt("2025-04-01"), _dt("2025-05-01")),
+        "d": (None, None),
+    }
+    ordered = sorted(["d", "c", "b", "a"], key=lambda p: _phase_order_key(p, dates))
+    assert ordered == ["a", "b", "c", "d"]
+
+
+def test_phase_order_ignores_insertion_and_name():
+    # '10' starts before '2' -> chronology wins over numeric name / insertion.
+    dates = {
+        "10": (_dt("2025-01-01"), _dt("2025-02-01")),
+        "2": (_dt("2025-05-01"), _dt("2025-06-01")),
+    }
+    assert sorted(["2", "10"], key=lambda p: _phase_order_key(p, dates)) == ["10", "2"]
 
 
 # --------------------------------------------------------- term activities

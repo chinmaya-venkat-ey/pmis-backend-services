@@ -65,15 +65,30 @@ def _safe_cycle_count(start, end, frequency) -> Optional[int]:
         return None
 
 
-def _seq_key(phase, config):
-    """Sort key for a phase: explicit sequence first, else numeric name, else
-    non-numeric names last (lexical)."""
-    seq = getattr(config, "sequence", None) if config is not None else None
-    if seq is not None:
-        return (0, seq, str(phase))
-    if str(phase).isdigit():
-        return (0, int(phase), str(phase))
-    return (1, 0, str(phase))
+def _name_key(phase):
+    """Deterministic tie-break on the phase NAME: numeric names by value
+    (1, 2, 10 not 1, 10, 2), non-numeric names after, lexical."""
+    s = str(phase)
+    return (0, int(s), s) if s.isdigit() else (1, 0, s)
+
+
+def _phase_order_key(phase, phase_dates):
+    """Chronological sort key for a phase, derived purely from its live
+    milestone date span (``phase_dates[phase] = (min_start, max_end)``):
+
+      * earliest ``start`` first;
+      * ties broken by earliest ``end`` — the shorter span precedes;
+      * undated phases (no bound milestone dates) sort last, by name.
+
+    The legacy ``project_phase_qrg.sequence`` column is NO LONGER consulted —
+    phase order is a pure function of the dates, so it can never drift out of
+    sync when milestone dates change."""
+    start, end = phase_dates.get(phase, (None, None))
+    dated = 0 if start is not None else 1
+    # The leading ``dated`` flag (0 dated / 1 undated) always separates the two
+    # groups, so the date fields are only ever compared within a group (both
+    # datetimes, or both None → equal) and never datetime-vs-None.
+    return (dated, start, end if end is not None else start, _name_key(phase))
 
 
 class PaymentPageService:
@@ -91,8 +106,11 @@ class PaymentPageService:
 
     # ------------------------------------------------------------- phase order
 
-    def _order_phases(self, phases, config_by_phase) -> List[str]:
-        return sorted(phases, key=lambda p: _seq_key(p, config_by_phase.get(p)))
+    def _order_phases(self, phases, phase_dates) -> List[str]:
+        """Chronological phase order (see ``_phase_order_key``) — earliest start
+        first, shorter span breaks ties, undated last. Drives both the displayed
+        order AND the carry-forward "subsequent phases/milestones" set."""
+        return sorted(phases, key=lambda p: _phase_order_key(p, phase_dates))
 
     def _load_phase_state(self, project_id, *, cost_rows=None, term_rows=None, configs=None):
         """Resolve ordered phases + carry-forward distribution for a project.
@@ -106,16 +124,19 @@ class PaymentPageService:
         if configs is None:
             configs = self.phase_qrg.list_all_live(project_id)
         config_by_phase = {q.phase: q for q in configs}
+        # A phase EXISTS iff it has live cost/term rows. Config rows
+        # (project_phase_qrg) are NOT a source of phases — a phase whose cost
+        # rows were deleted/renamed leaves a stale config behind, and counting
+        # it here is what made a deleted/edited phase linger as a phantom.
         distinct = {c.phase for c in cost_rows if c.phase is not None}
         distinct |= {t.phase for t in term_rows if t.phase is not None}
-        distinct |= {q.phase for q in configs if q.phase is not None}
-        ordered = self._order_phases(distinct, config_by_phase)
 
-        # Per-phase cycle counts (time methods) + milestone ids per phase (custom
-        # milestone recipients) + custom allocation rows — all keyed for the
-        # recipient-vars builder below.
+        # Per-phase date span drives BOTH the chronological order and the
+        # per-phase cycle counts (time methods). Ordering is date-derived — the
+        # legacy ``sequence`` column is not consulted.
         project_freq = self._require_project(project_id).payment_frequency_code
         phase_dates = self.cost_items.phase_milestone_date_bounds(project_id)
+        ordered = self._order_phases(distinct, phase_dates)
         phase_cycle_counts = {}
         for p in ordered:
             s, e = phase_dates.get(p, (None, None))
@@ -173,9 +194,9 @@ class PaymentPageService:
           * time methods   → ``recipientCycles`` (the recipient phase's own
                              cycle count at the project frequency) + ``totalCycles``
                              (Σ over the subsequent phases).
-          * custom methods → ``recipientPercent`` (the stored normalised share;
-                             every subsequent recipient is covered, defaulting to
-                             0 so an unallocated recipient receives nothing).
+          * custom methods → ``recipientPercent`` (the stored share, covering
+                             every current subsequent recipient — see the
+                             re-normalisation note below).
           * evenly methods → ``{}`` (the formula needs no per-recipient var).
         """
         subsequent = ordered[idx + 1:]
@@ -196,6 +217,20 @@ class PaymentPageService:
                 a = alloc_map.get(r)
                 pct = Decimal(str(a.percent)) if (a is not None and a.percent is not None) else Decimal("0")
                 out[r] = {"recipientPercent": pct}
+            # Re-normalise the still-valid recipients to 100%. A saved custom
+            # allocation can go stale when a milestone-date edit reorders phases
+            # so that a recipient drops out of "subsequent" — the remaining
+            # shares then sum to < 100. Scaling them back to 100 distributes the
+            # leftover PROPORTIONALLY among the valid targets (e.g. 50/30 → 62.5/
+            # 37.5) instead of dumping the missing share onto the last one. It's
+            # a no-op in the normal case (shares already sum to 100). When
+            # nothing valid remains (total 0) it stays 0 and the phase carries
+            # nothing (see _distribute_by_formula).
+            total = sum((v["recipientPercent"] for v in out.values()), Decimal("0"))
+            if total > Decimal("0") and total != Decimal("100"):
+                scale = Decimal("100") / total
+                for v in out.values():
+                    v["recipientPercent"] = v["recipientPercent"] * scale
             return out
         return {}
 
@@ -324,7 +359,9 @@ class PaymentPageService:
             )
             phase_blocks.append(PhaseBlock(
                 phase=phase,
-                sequence=getattr(cfg, "sequence", None),
+                # 1-based position in the chronological order — array order and
+                # ``sequence`` always agree (no longer the stored counter).
+                sequence=idx + 1,
                 phase_fixed_total=phase_fixed,
                 effective_phase_total=effective_total,
                 start_date=start_date,

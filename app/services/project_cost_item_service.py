@@ -32,6 +32,10 @@ from app.models.project_cost_item import ProjectCostItem
 from app.repositories.project_audit_log_repository import ProjectAuditLogRepository
 from app.repositories.project_cost_item_repository import ProjectCostItemRepository
 from app.repositories.project_payment_term_repository import ProjectPaymentTermRepository
+from app.repositories.project_phase_cf_allocation_repository import (
+    ProjectPhaseCfAllocationRepository,
+)
+from app.repositories.project_phase_qrg_repository import ProjectPhaseQrgRepository
 from app.repositories.project_repository import ProjectRepository
 from app.schemas.payment import CostItemCreateRequest, CostItemUpdateRequest
 from app.utilities.payment_lock import assert_payment_writable
@@ -46,6 +50,8 @@ class ProjectCostItemService:
         self.db = db
         self.repo = ProjectCostItemRepository(db)
         self.payment_terms = ProjectPaymentTermRepository(db)
+        self.phase_qrg = ProjectPhaseQrgRepository(db)
+        self.cf_allocations = ProjectPhaseCfAllocationRepository(db)
         self.projects = ProjectRepository(db)
         self.audit = ProjectAuditLogRepository(db)
 
@@ -280,6 +286,23 @@ class ProjectCostItemService:
                     position=self.payment_terms.next_position_for_project(project_id),
                     created_by=caller_user_id, updated_by=caller_user_id,
                 )
+
+        self._prune_orphan_phase_config(project_id, caller_user_id)
+
+    def _prune_orphan_phase_config(self, project_id: str, caller_user_id: Optional[str]) -> None:
+        """Soft-delete carry-forward config (project_phase_qrg) + custom
+        allocation rows for phases that no longer have any live FIXED cost row.
+
+        A phase EXISTS only while it has cost rows; when it's edited to a new
+        name or deleted, its old config/allocation rows must go too — otherwise
+        the phase lingers as a phantom on the payment page and a re-created
+        same-name phase would silently inherit stale carry-forward settings."""
+        live_phases = {
+            c.phase for c in self.repo.list_all_live(project_id)
+            if c.cost_type_code == FIXED and c.phase is not None
+        }
+        self.phase_qrg.soft_delete_orphans(project_id, live_phases, actor_user_id=caller_user_id)
+        self.cf_allocations.soft_delete_orphans(project_id, live_phases, actor_user_id=caller_user_id)
 
     # --------------------------------------------------------------- helpers
 

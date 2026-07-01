@@ -48,6 +48,30 @@ class ProjectPhaseCfAllocationRepository:
         )
         self.db.flush()
 
+    def soft_delete_orphans(
+        self, project_id: str, live_phases, *, actor_user_id=None,
+    ) -> None:
+        """Soft-delete allocation rows whose SOURCE phase, or whose phase-kind
+        RECIPIENT, is no longer a live phase. An empty ``live_phases`` prunes
+        every allocation row for the project."""
+        live = list(live_phases)
+        stmt = (
+            update(ProjectPhaseCfAllocation)
+            .where(ProjectPhaseCfAllocation.project_id == project_id)
+            .where(ProjectPhaseCfAllocation.deleted_at.is_(None))
+        )
+        if live:
+            stmt = stmt.where(
+                ProjectPhaseCfAllocation.source_phase.not_in(live)
+                | (
+                    (ProjectPhaseCfAllocation.recipient_kind == "phase")
+                    & ProjectPhaseCfAllocation.recipient_key.not_in(live)
+                )
+            )
+        stmt = stmt.values(deleted_at=datetime.utcnow(), updated_by=actor_user_id)
+        self.db.execute(stmt)
+        self.db.flush()
+
     def replace_for_phase(
         self, project_id: str, source_phase: str, rows: List[dict], *, actor_user_id=None,
     ) -> List[ProjectPhaseCfAllocation]:

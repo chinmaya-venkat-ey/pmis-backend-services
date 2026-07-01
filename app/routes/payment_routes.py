@@ -338,7 +338,14 @@ def set_phase_carry_forward(
 @payment_page_router.put(
     "/{project_uuid}/phases/{phase}/sequence",
     response_model=PaymentPageResponse,
-    summary="Override a phase's integer order (returns the recomputed page)",
+    summary="DEPRECATED — phase order is now derived from milestone dates; this no longer affects ordering",
+    deprecated=True,
+    description=(
+        "Deprecated. Phase order is derived purely from each phase's milestone "
+        "date span (earliest start first, shorter span breaks ties). This "
+        "endpoint still writes the legacy ``sequence`` column but it no longer "
+        "influences the displayed order or carry-forward 'subsequent' scoping."
+    ),
     dependencies=[Depends(require_project_permission(PROJECTS_UPDATE_FINANCE))],
 )
 def set_phase_sequence(

@@ -21,6 +21,7 @@ controller (payment_calc); the service returns the ORM row.
 """
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import List, Optional
 
 from sqlalchemy import select
@@ -240,8 +241,13 @@ class ProjectCostItemService:
         """Make the live payment-term rows exactly match the milestones bound
         to the live FIXED cost rows — one row per milestone, carrying its cost
         row (``cost_item_id``, the calc unit) and that row's phase (display).
-        Preserves user-entered frequency/percent across add → remove → re-add
-        (restores the soft-deleted row)."""
+
+        Preserves a milestone's entered percent across add → remove → re-add and
+        across a phase RENAME, but resets it to null whenever keeping it would
+        push the target phase over its 100% cap (a reassign into an already-full
+        phase, or a same-phase refill race). This mirrors the per-phase cap the
+        direct term-PATCH enforces, so the cap can't be bypassed via cost-item
+        edits."""
         binding = self.repo.milestone_cost_binding(project_id)  # {ms: (cost_item_id, phase)}
         eligible = set(binding.keys())
 
@@ -258,6 +264,10 @@ class ProjectCostItemService:
             updates = {}
             if term.phase != phase:
                 updates["phase"] = phase
+                # The percent was allocated within the OLD phase; keep it only if
+                # it still fits the NEW phase's 100% headroom, else drop to null.
+                if not self._percent_fits_phase(project_id, phase, term.percent_of_payment):
+                    updates["percent_of_payment"] = None
             if term.cost_item_id != cost_item_id:
                 updates["cost_item_id"] = cost_item_id
             if updates:
@@ -270,11 +280,15 @@ class ProjectCostItemService:
                 continue
             dead = self.payment_terms.get_soft_deleted_by_milestone(project_id, milestone_id)
             if dead is not None:
-                # Bring it back live in a single flush with a FRESH position
-                # (its old slot may be taken) and the current cost row + phase,
-                # preserving the user-entered frequency/percent.
+                # Bring it back live with a FRESH position and the current cost
+                # row + phase. Keep its saved percent only if it still fits the
+                # phase's headroom (guards the same-phase refill race), else null.
+                keep_pct = dead.percent_of_payment
+                if not self._percent_fits_phase(project_id, phase, keep_pct):
+                    keep_pct = None
                 self.payment_terms.update(
                     dead, deleted_at=None, phase=phase, cost_item_id=cost_item_id,
+                    percent_of_payment=keep_pct,
                     position=self.payment_terms.next_position_for_project(project_id),
                     updated_by=caller_user_id,
                 )
@@ -288,6 +302,15 @@ class ProjectCostItemService:
                 )
 
         self._prune_orphan_phase_config(project_id, caller_user_id)
+
+    def _percent_fits_phase(self, project_id: str, phase, pct) -> bool:
+        """True if adding ``pct`` to the phase's current live Σ percent keeps it
+        within the 100% cap (mirrors ProjectPaymentTermService's per-phase cap).
+        ``None`` percent always fits."""
+        if pct is None:
+            return True
+        others = self.payment_terms.sum_percent_for_phase(project_id, phase)
+        return others + Decimal(str(pct)) <= Decimal("100")
 
     def _prune_orphan_phase_config(self, project_id: str, caller_user_id: Optional[str]) -> None:
         """Soft-delete carry-forward config (project_phase_qrg) + custom

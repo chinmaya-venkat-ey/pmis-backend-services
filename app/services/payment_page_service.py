@@ -65,30 +65,13 @@ def _safe_cycle_count(start, end, frequency) -> Optional[int]:
         return None
 
 
-def _name_key(phase):
-    """Deterministic tie-break on the phase NAME: numeric names by value
-    (1, 2, 10 not 1, 10, 2), non-numeric names after, lexical."""
-    s = str(phase)
-    return (0, int(s), s) if s.isdigit() else (1, 0, s)
-
-
-def _phase_order_key(phase, phase_dates):
-    """Chronological sort key for a phase, derived purely from its live
-    milestone date span (``phase_dates[phase] = (min_start, max_end)``):
-
-      * earliest ``start`` first;
-      * ties broken by earliest ``end`` — the shorter span precedes;
-      * undated phases (no bound milestone dates) sort last, by name.
-
-    The legacy ``project_phase_qrg.sequence`` column is NO LONGER consulted —
-    phase order is a pure function of the dates, so it can never drift out of
-    sync when milestone dates change."""
-    start, end = phase_dates.get(phase, (None, None))
-    dated = 0 if start is not None else 1
-    # The leading ``dated`` flag (0 dated / 1 undated) always separates the two
-    # groups, so the date fields are only ever compared within a group (both
-    # datetimes, or both None → equal) and never datetime-vs-None.
-    return (dated, start, end if end is not None else start, _name_key(phase))
+# Phase ordering lives in a shared util so this builder and the payment-term
+# "last phase must total 100%" validation agree on order / which phase is last.
+# Re-exported under the legacy underscore names (used by tests + _order_phases).
+from app.utilities.phase_order import (  # noqa: E402
+    name_key as _name_key,  # noqa: F401
+    phase_order_key as _phase_order_key,
+)
 
 
 class PaymentPageService:

@@ -24,11 +24,13 @@ from sqlalchemy.orm import Session
 from app.core.errors import ProjectNotFoundError, ValidationError
 from app.models.project_payment_term import ProjectPaymentTerm
 from app.repositories.project_audit_log_repository import ProjectAuditLogRepository
+from app.repositories.project_cost_item_repository import ProjectCostItemRepository
 from app.repositories.project_payment_term_repository import ProjectPaymentTermRepository
 from app.repositories.project_repository import ProjectRepository
 from app.schemas.payment import PaymentTermUpdateRequest
 from app.utilities.payment_lock import assert_payment_writable
 from app.utilities.payment_masters import validate_frequency_code
+from app.utilities.phase_order import order_phases
 
 _HUNDRED = Decimal("100")
 
@@ -37,6 +39,7 @@ class ProjectPaymentTermService:
     def __init__(self, db: Session):
         self.db = db
         self.repo = ProjectPaymentTermRepository(db)
+        self.cost_items = ProjectCostItemRepository(db)
         self.projects = ProjectRepository(db)
         self.audit = ProjectAuditLogRepository(db)
 
@@ -91,6 +94,35 @@ class ProjectPaymentTermService:
                     f"(headroom {_HUNDRED - others}%).",
                 )
 
+        # The FINAL phase must be fully utilised (100%) — it has nowhere to carry
+        # a shortfall forward, so any under-allocation there is lost. The
+        # last-phase auto-fill only covers NULL milestones; if this update leaves
+        # every milestone in the last phase EXPLICIT and the total != 100, reject
+        # (mirrors the FE's "Last phase must total 100%" guard).
+        if (
+            "percent_of_payment" in updates
+            and row.phase is not None
+            and self._is_last_phase(row.project_id, row.phase)
+        ):
+            phase_terms = [
+                t for t in self.repo.list_all_live(row.project_id) if t.phase == row.phase
+            ]
+            total = Decimal("0")
+            all_explicit = True
+            for t in phase_terms:
+                val = updates["percent_of_payment"] if t.id == row.id else t.percent_of_payment
+                if val is None:
+                    all_explicit = False  # a null term will auto-fill the remainder
+                else:
+                    total += Decimal(str(val))
+            if all_explicit and total != _HUNDRED:
+                short = _HUNDRED - total
+                raise ValidationError(
+                    f"The final phase must total 100% (this would make it {total}%). "
+                    + (f"Add {short}% more" if short > 0 else f"Remove {-short}%")
+                    + " across its milestones, or leave one milestone blank to auto-fill.",
+                )
+
         before = {k: getattr(row, k) for k in updates}
         self.repo.update(row, updated_by=caller_user_id, **updates)
         self.audit.write(
@@ -102,6 +134,15 @@ class ProjectPaymentTermService:
         return row
 
     # --------------------------------------------------------------- helpers
+
+    def _is_last_phase(self, project_id: str, phase) -> bool:
+        """True if ``phase`` is the chronologically LAST phase among the phases
+        that carry payment terms (same date ordering the payment page uses)."""
+        dates = self.cost_items.phase_milestone_date_bounds(project_id)
+        phases = {t.phase for t in self.repo.list_all_live(project_id) if t.phase is not None}
+        phases.add(phase)
+        ordered = order_phases(phases, dates)
+        return bool(ordered) and ordered[-1] == phase
 
     def _require_project(self, project_id: str):
         project = self.projects.get_by_id(project_id)

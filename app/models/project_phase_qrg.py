@@ -27,6 +27,7 @@ but superseded by ``carry_forward_enabled``. One live row per (project, phase).
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Optional
 from uuid import uuid4
 
@@ -36,6 +37,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     String,
     text,
 )
@@ -77,6 +79,16 @@ class ProjectPhaseQrg(Base):
     # Master carry-forward method code when enabled (FK by value to
     # masters.carry_forward_methods.code). NULL when disabled.
     carry_forward_method_code: Mapped[Optional[str]] = mapped_column(String(40))
+
+    # Per-phase share of the PROJECT one-time pool (opt-in). ``one_time_mode``
+    # is 'percent' (of the one-time total) or 'amount' (₹). The chronologically
+    # LAST phase auto-absorbs the unallocated remainder, so this config is only
+    # honoured for non-last phases. NULL/false = the phase takes no explicit share.
+    one_time_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false"), default=False
+    )
+    one_time_mode: Mapped[Optional[str]] = mapped_column(String(8))
+    one_time_value: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 2))
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=datetime.utcnow

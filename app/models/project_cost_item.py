@@ -77,6 +77,19 @@ class ProjectCostItem(Base):
     tax_amount: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 2))
     tax_percent: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2))
 
+    # Transaction-cost rows: total = per_transaction_cost × planned_transactions.
+    per_transaction_cost: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 2))
+    planned_transactions: Mapped[Optional[int]] = mapped_column(Integer)
+    # Display label for a standalone expense line (resource / transaction cost) —
+    # the "milestone" name for that cost. NULL for fixed / one-time rows.
+    line_label: Mapped[Optional[str]] = mapped_column(String(255))
+    # How much of a resource/transaction line's own value is BILLED in its phase.
+    # ``billed_mode`` = 'percent' (of the line's value) | 'amount' (₹); default
+    # percent 100 (fully billed). Whatever is not billed carries forward with the
+    # phase's leftover. NULL for fixed / one-time rows.
+    billed_mode: Mapped[Optional[str]] = mapped_column(String(8))
+    billed_value: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 2))
+
     position: Mapped[int] = mapped_column(Integer, default=0)
 
     created_at: Mapped[datetime] = mapped_column(

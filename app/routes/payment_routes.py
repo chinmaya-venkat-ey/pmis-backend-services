@@ -37,6 +37,7 @@ from app.dependencies import (
 )
 from app.schemas.payment import (
     CarryForwardUpdateRequest,
+    OneTimeUpdateRequest,
     CcnCapUpdateRequest,
     CostItemCreateRequest,
     CostItemResponse,
@@ -331,6 +332,33 @@ def set_phase_carry_forward(
         allocation_mode=payload.allocation_mode,
         allocations=([a.model_dump() for a in payload.allocations]
                      if payload.allocations else None),
+        caller_user_id=caller_user_id, caller_is_admin=caller_is_admin,
+    )
+
+
+@payment_page_router.put(
+    "/{project_uuid}/phases/{phase}/one-time",
+    response_model=PaymentPageResponse,
+    summary="Opt a phase into a share of the project one-time pool (returns the recomputed page)",
+    description=(
+        "Enable/disable a phase carrying part of the project one-time cost. On "
+        "enable, provide mode ('percent' of the one-time total | 'amount' in ₹) "
+        "and value. The chronologically LAST phase auto-absorbs the remainder "
+        "and cannot be set explicitly; the non-last shares may not exceed the pool."
+    ),
+    dependencies=[Depends(require_project_permission(PROJECTS_UPDATE_FINANCE))],
+)
+def set_phase_one_time(
+    project_uuid: str,
+    payload: OneTimeUpdateRequest,
+    controller: Annotated[PaymentPageController, Depends(get_payment_page_controller)],
+    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
+    caller_is_admin: Annotated[bool, Depends(get_caller_is_admin)],
+    phase: Annotated[str, Path(min_length=1, max_length=64)],
+):
+    return controller.set_one_time_allocation(
+        project_uuid, phase,
+        enabled=payload.enabled, mode=payload.mode, value=payload.value,
         caller_user_id=caller_user_id, caller_is_admin=caller_is_admin,
     )
 

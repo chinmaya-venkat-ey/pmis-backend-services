@@ -41,9 +41,13 @@ from app.repositories.project_repository import ProjectRepository
 from app.schemas.payment import CostItemCreateRequest, CostItemUpdateRequest
 from app.utilities.payment_lock import assert_payment_writable
 from app.utilities.payment_masters import validate_cost_type_code
+from app.utilities.phase_order import order_phases
 
 FIXED = "fixed"
 ONE_TIME = "one_time"
+RESOURCE_COST = "resource_cost"
+TRANSACTION_COST = "transaction_cost"
+EXPENSE_TYPES = (RESOURCE_COST, TRANSACTION_COST)
 
 
 class ProjectCostItemService:
@@ -102,14 +106,40 @@ class ProjectCostItemService:
             raise ValidationError("Cost type is required.")
         phase = payload.phase
         milestone_ids = list(payload.milestone_ids or [])
+        per_txn = None
+        planned = None
+        label = None
+        billed_mode = None
+        billed_value = None
 
-        # One-time is a single deliverable: no phase, no milestones.
+        # One-time is a single standalone amount: no phase, no milestones.
         if cost_type == ONE_TIME:
             phase = None
             milestone_ids = []
         elif cost_type == FIXED:
             if phase is None:
                 raise ValidationError("Phase is required for a fixed cost row.")
+            # A fixed (delivery) row must bill against at least one milestone —
+            # otherwise it is a phase with value but nothing to pay it out (the
+            # phantom / stranded-value case). Every phase is therefore payable.
+            if not milestone_ids:
+                raise ValidationError("A fixed cost row needs at least one milestone.")
+        elif cost_type in EXPENSE_TYPES:
+            # Resource / transaction cost: a standalone labelled expense line that
+            # attaches to an EXISTING fixed phase; no deliverable-milestone binding.
+            self._assert_expense_phase(project_id, phase, cost_type)
+            milestone_ids = []
+            label = payload.line_label
+            if cost_type == TRANSACTION_COST:
+                per_txn = payload.per_transaction_cost
+                planned = payload.planned_transactions
+            # Billed split — default fully billed (100%); the unbilled remainder
+            # carries forward. The last phase can't carry, so must stay at 100%.
+            billed_mode = (payload.billed_mode or "percent")
+            billed_value = payload.billed_value if payload.billed_value is not None else Decimal("100")
+            self._assert_expense_billed(
+                project_id, phase, cost_type, billed_mode, billed_value,
+                per_txn, planned, payload.cost, payload.tax_amount)
 
         if milestone_ids:
             self._validate_milestones(project_id, milestone_ids)
@@ -126,6 +156,11 @@ class ProjectCostItemService:
                 cost=payload.cost,
                 tax_amount=payload.tax_amount,
                 tax_percent=payload.tax_percent,
+                per_transaction_cost=per_txn,
+                planned_transactions=planned,
+                line_label=label,
+                billed_mode=billed_mode,
+                billed_value=billed_value,
                 position=position,
                 created_by=caller_user_id,
                 updated_by=caller_user_id,
@@ -174,6 +209,44 @@ class ProjectCostItemService:
         elif effective_type == FIXED:
             if effective_phase is None:
                 raise ValidationError("Phase is required for a fixed cost row.")
+            # Must keep at least one milestone (see create) so the phase stays payable.
+            effective_ms = milestone_ids if milestone_ids is not None else self.repo.list_milestone_ids(row.id)
+            if not effective_ms:
+                raise ValidationError("A fixed cost row needs at least one milestone.")
+        elif effective_type in EXPENSE_TYPES:
+            self._assert_expense_phase(row.project_id, effective_phase, effective_type)
+            milestone_ids = []  # standalone expense line — no deliverable binding
+            eff_mode = (updates.get("billed_mode", row.billed_mode) or "percent")
+            eff_bval = updates.get("billed_value", row.billed_value)
+            if eff_bval is None:
+                eff_bval = Decimal("100")
+            if row.billed_mode is None and "billed_mode" not in updates:
+                updates["billed_mode"] = eff_mode
+            if row.billed_value is None and "billed_value" not in updates:
+                updates["billed_value"] = eff_bval
+            self._assert_expense_billed(
+                row.project_id, effective_phase, effective_type, eff_mode, eff_bval,
+                updates.get("per_transaction_cost", row.per_transaction_cost),
+                updates.get("planned_transactions", row.planned_transactions),
+                updates.get("cost", row.cost), updates.get("tax_amount", row.tax_amount))
+
+        # Keep the expense-only columns consistent with the effective cost type.
+        if effective_type != TRANSACTION_COST and (
+            row.per_transaction_cost is not None or row.planned_transactions is not None
+            or "per_transaction_cost" in updates or "planned_transactions" in updates
+        ):
+            updates["per_transaction_cost"] = None
+            updates["planned_transactions"] = None
+        if effective_type not in EXPENSE_TYPES and (
+            row.line_label is not None or "line_label" in updates
+        ):
+            updates["line_label"] = None
+        if effective_type not in EXPENSE_TYPES and (
+            row.billed_mode is not None or row.billed_value is not None
+            or "billed_mode" in updates or "billed_value" in updates
+        ):
+            updates["billed_mode"] = None
+            updates["billed_value"] = None
 
         if milestone_ids is not None and milestone_ids:
             self._validate_milestones(row.project_id, milestone_ids)
@@ -328,6 +401,49 @@ class ProjectCostItemService:
         self.cf_allocations.soft_delete_orphans(project_id, live_phases, actor_user_id=caller_user_id)
 
     # --------------------------------------------------------------- helpers
+
+    def _is_last_phase(self, project_id: str, phase) -> bool:
+        """True if ``phase`` is the chronologically LAST phase (same date order the
+        payment page uses, over the phases that have fixed cost)."""
+        dates = self.repo.phase_milestone_date_bounds(project_id)
+        phases = {c.phase for c in self.repo.list_all_live(project_id)
+                  if c.cost_type_code == FIXED and c.phase is not None}
+        phases.add(phase)
+        ordered = order_phases(phases, dates)
+        return bool(ordered) and ordered[-1] == phase
+
+    def _assert_expense_billed(self, project_id, phase, cost_type, billed_mode,
+                               billed_value, per_txn, planned, cost, tax) -> None:
+        """The LAST phase can't carry a remainder forward, so a resource/transaction
+        line there must be fully billed (100% / its full value)."""
+        if cost_type == TRANSACTION_COST:
+            value = Decimal(str(per_txn or 0)) * Decimal(str(planned or 0))
+        else:
+            value = Decimal(str(cost or 0)) + Decimal(str(tax or 0))
+        if (billed_mode or "percent").lower() == "percent":
+            billed = value * Decimal(str(billed_value if billed_value is not None else 100)) / Decimal("100")
+        else:
+            billed = Decimal(str(billed_value or 0))
+        if billed < value - Decimal("0.005") and self._is_last_phase(project_id, phase):
+            raise ValidationError(
+                "On the last phase a resource/transaction cost must be fully billed "
+                "(100%) — it has nowhere to carry a remainder forward.")
+
+    def _assert_expense_phase(self, project_id: str, phase, cost_type: str) -> None:
+        """Resource / transaction cost may attach ONLY to an existing phase that
+        already has fixed (delivery) cost — decision A1, so there are no
+        expense-only phases."""
+        if phase is None:
+            raise ValidationError(f"Phase is required for a {cost_type.replace('_', ' ')} row.")
+        has_fixed = any(
+            c.phase == phase for c in self.repo.list_all_live(project_id)
+            if c.cost_type_code == FIXED
+        )
+        if not has_fixed:
+            raise ValidationError(
+                f"A {cost_type.replace('_', ' ')} can only be added to a phase that "
+                "already has a fixed (delivery) cost."
+            )
 
     def _require_project(self, project_id: str):
         project = self.projects.get_by_id(project_id)

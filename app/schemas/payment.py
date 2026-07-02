@@ -55,9 +55,11 @@ _REQUEST_CONFIG = ConfigDict(
 class CostItemCreateRequest(BaseModel):
     """POST /projects/{uuid}/cost-items.
 
-    ``costTypeCode`` is REQUIRED (fixed / one_time). ``phase`` must be >= 0
-    and is required for ``fixed`` rows (enforced in the service); it is
-    forced null for ``one_time``.
+    ``costTypeCode`` is REQUIRED. ``phase`` is required for ``fixed`` /
+    ``resource_cost`` / ``transaction_cost`` rows and forced null for
+    ``one_time``. Resource/transaction rows are standalone labelled expense
+    lines (``lineLabel``); transaction total = ``perTransactionCost`` ×
+    ``plannedTransactions``. All enforced in the service.
     """
 
     model_config = _REQUEST_CONFIG
@@ -69,6 +71,14 @@ class CostItemCreateRequest(BaseModel):
     # (optional, unused).
     tax_amount: Annotated[Optional[Decimal], Field(default=None, ge=0)] = None
     tax_percent: Annotated[Optional[Decimal], Field(default=None, ge=0, le=100)] = None
+    # Resource / transaction expense-line fields.
+    per_transaction_cost: Annotated[Optional[Decimal], Field(default=None, ge=0)] = None
+    planned_transactions: Annotated[Optional[int], Field(default=None, ge=0)] = None
+    line_label: Annotated[Optional[str], Field(default=None, max_length=255)] = None
+    # How much of the expense line's value is billed in-phase (default 100%); the
+    # rest carries forward. billedMode 'percent' | 'amount'.
+    billed_mode: Annotated[Optional[str], Field(default=None, max_length=8)] = None
+    billed_value: Annotated[Optional[Decimal], Field(default=None, ge=0)] = None
     milestone_ids: List[str] = Field(default_factory=list)
     position: Optional[int] = None
 
@@ -84,6 +94,11 @@ class CostItemUpdateRequest(BaseModel):
     cost: Annotated[Optional[Decimal], Field(default=None, ge=0)] = None
     tax_amount: Annotated[Optional[Decimal], Field(default=None, ge=0)] = None
     tax_percent: Annotated[Optional[Decimal], Field(default=None, ge=0, le=100)] = None
+    per_transaction_cost: Annotated[Optional[Decimal], Field(default=None, ge=0)] = None
+    planned_transactions: Annotated[Optional[int], Field(default=None, ge=0)] = None
+    line_label: Annotated[Optional[str], Field(default=None, max_length=255)] = None
+    billed_mode: Annotated[Optional[str], Field(default=None, max_length=8)] = None
+    billed_value: Annotated[Optional[Decimal], Field(default=None, ge=0)] = None
     milestone_ids: Optional[List[str]] = None
     position: Optional[int] = None
 
@@ -96,7 +111,14 @@ class CostItemResponse(ResponseModel):
     cost: Optional[Decimal] = None
     tax_amount: Optional[Decimal] = None
     tax_percent: Optional[Decimal] = None      # legacy (unused)
-    total: Decimal = Decimal("0.00")          # derived: cost + taxAmount
+    per_transaction_cost: Optional[Decimal] = None
+    planned_transactions: Optional[int] = None
+    line_label: Optional[str] = None
+    billed_mode: Optional[str] = None         # 'percent' | 'amount' (resource/transaction; default 100%)
+    billed_value: Optional[Decimal] = None
+    billed_amount: Decimal = Decimal("0.00")  # derived: value billed in-phase (resource/transaction)
+    unbilled_amount: Decimal = Decimal("0.00")# derived: value that carries forward (resource/transaction)
+    total: Decimal = Decimal("0.00")          # derived: line total (txn = perTxn × planned; else cost + tax)
     milestone_ids: List[str] = Field(default_factory=list)
     position: int
     created_at: datetime
@@ -251,6 +273,36 @@ class CarryForwardUpdateRequest(BaseModel):
         return self
 
 
+class OneTimeUpdateRequest(BaseModel):
+    """PUT /projects/{uuid}/phases/{phase}/one-time.
+
+    A phase opts into a share of the project one-time pool. ``enabled=false``
+    clears it. ``enabled=true`` requires ``mode`` ('percent' of the one-time
+    total | 'amount' in ₹) and ``value``. The chronologically LAST phase
+    auto-absorbs the remainder and cannot be set explicitly.
+    """
+
+    model_config = _REQUEST_CONFIG
+
+    enabled: bool
+    mode: Annotated[Optional[str], Field(default=None, max_length=8)] = None
+    value: Annotated[Optional[Decimal], Field(default=None, ge=0)] = None
+
+    @model_validator(mode="after")
+    def _validate(self) -> "OneTimeUpdateRequest":
+        if not self.enabled:
+            self.mode = None
+            self.value = None
+            return self
+        if self.mode not in ("percent", "amount"):
+            raise ValueError("mode must be 'percent' or 'amount' when enabled.")
+        if self.value is None:
+            raise ValueError("value is required when enabled.")
+        if self.mode == "percent" and self.value > Decimal("100"):
+            raise ValueError("percent value cannot exceed 100.")
+        return self
+
+
 class CarryForwardAllocationResponse(ResponseModel):
     recipient_key: str
     recipient_kind: str                       # 'phase' | 'milestone'
@@ -311,6 +363,8 @@ class PaymentTotals(ResponseModel):
     total_contract_cost: Decimal = Decimal("0.00")
     fixed_cost: Decimal = Decimal("0.00")
     one_time_cost: Decimal = Decimal("0.00")
+    resource_cost: Decimal = Decimal("0.00")
+    transaction_cost: Decimal = Decimal("0.00")
 
 
 class CcnBlock(ResponseModel):
@@ -321,10 +375,26 @@ class CcnBlock(ResponseModel):
 class PhaseBlock(ResponseModel):
     phase: str
     sequence: Optional[int] = None                   # integer phase order
-    phase_fixed_total: Decimal = Decimal("0.00")     # original cost-rows total of the phase
+    phase_fixed_total: Decimal = Decimal("0.00")     # fixed cost-rows total of the phase
     # The base used for milestone value + the 100% cap: phaseFixedTotal folded
-    # with the one-time (first phase) + carry-forward received. value = % × this.
+    # with the one-time allocated to this phase + carry-forward received.
+    # value = % × this.
     effective_phase_total: Decimal = Decimal("0.00")
+    # This phase's share of the project one-time pool (₹). For the last phase this
+    # is the auto-absorbed remainder. Already included in effectivePhaseTotal.
+    one_time_allocated: Decimal = Decimal("0.00")
+    one_time_enabled: bool = False            # phase opted in to an explicit share
+    one_time_mode: Optional[str] = None       # 'percent' | 'amount' (null if not opted in)
+    one_time_value: Optional[Decimal] = None  # the entered % or ₹ amount
+    # Resource + transaction expenses in this phase. ``expenseTotal`` is the full
+    # value; ``expenseBilled`` is billed in-phase; ``expenseUnbilled`` carries
+    # forward with the phase's leftover.
+    expense_total: Decimal = Decimal("0.00")
+    expense_billed: Decimal = Decimal("0.00")
+    expense_unbilled: Decimal = Decimal("0.00")
+    # phaseFixedTotal + expenseTotal (+ one-time allocated) — the phase's full
+    # displayed cost. Carry-forward still operates on the fixed+one-time base only.
+    phase_total: Decimal = Decimal("0.00")
     # Phase date span — earliest milestone start / latest milestone end in the
     # phase (null if the phase has no live milestone). Inputs to the cycle count.
     start_date: Optional[datetime] = None

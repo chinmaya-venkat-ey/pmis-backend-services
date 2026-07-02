@@ -39,6 +39,16 @@ class PaymentPageController:
             caller_is_admin=caller_is_admin,
         )
 
+    def set_one_time_allocation(
+        self, project_id: str, phase: str, *,
+        enabled: bool, mode: Optional[str], value=None,
+        caller_user_id: Optional[str], caller_is_admin: bool = False,
+    ) -> PaymentPageResponse:
+        return self.service.set_one_time_allocation(
+            project_id, phase, enabled=enabled, mode=mode, value=value,
+            caller_user_id=caller_user_id, caller_is_admin=caller_is_admin,
+        )
+
     def set_phase_sequence(
         self, project_id: str, phase: str, sequence: int, *,
         caller_user_id: Optional[str], caller_is_admin: bool = False,

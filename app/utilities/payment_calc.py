@@ -38,6 +38,13 @@ _QUANTIZE = Decimal("0.01")
 
 FIXED = "fixed"
 ONE_TIME = "one_time"
+RESOURCE_COST = "resource_cost"
+TRANSACTION_COST = "transaction_cost"
+
+# Standalone labelled expense lines added to a phase (flat planned expenses):
+# their value adds to the phase's displayed total but they are NEVER billed by
+# milestone % and NEVER part of carry-forward.
+EXPENSE_TYPES = (RESOURCE_COST, TRANSACTION_COST)
 
 
 def _to_decimal(value) -> Decimal:
@@ -110,24 +117,105 @@ def _code(item) -> str:
     return str(getattr(item, "cost_type_code", None) or "").lower()
 
 
+def transaction_total(per_transaction_cost, planned_transactions) -> Decimal:
+    """A transaction-cost line's total: ``per_transaction_cost × planned_transactions``.
+    Either input NULL/≤0 → 0."""
+    per = _to_decimal(per_transaction_cost)
+    n = _to_decimal(planned_transactions)
+    if per <= _ZERO or n <= _ZERO:
+        return _ZERO
+    return _round_money(per * n)
+
+
+def line_total(item) -> Decimal:
+    """The money a cost row contributes: transaction-cost rows use
+    ``per_transaction_cost × planned_transactions``; every other type uses
+    ``cost + tax_amount``."""
+    if _code(item) == TRANSACTION_COST:
+        return transaction_total(
+            getattr(item, "per_transaction_cost", None),
+            getattr(item, "planned_transactions", None),
+        )
+    return row_total(getattr(item, "cost", None), getattr(item, "tax_amount", None))
+
+
 def contract_totals(items) -> dict:
-    """Return ``{total_contract_cost, fixed_cost, one_time_cost}`` (2dp)."""
+    """Return ``{total_contract_cost, fixed_cost, one_time_cost, resource_cost,
+    transaction_cost}`` (2dp). ``total_contract_cost`` is every row's line total."""
     total = _ZERO
     fixed = _ZERO
     one_time = _ZERO
+    resource = _ZERO
+    transaction = _ZERO
     for it in items:
-        rt = row_total(getattr(it, "cost", None), getattr(it, "tax_amount", None))
-        total += rt
+        lt = line_total(it)
+        total += lt
         code = _code(it)
         if code == FIXED:
-            fixed += rt
+            fixed += lt
         elif code == ONE_TIME:
-            one_time += rt
+            one_time += lt
+        elif code == RESOURCE_COST:
+            resource += lt
+        elif code == TRANSACTION_COST:
+            transaction += lt
     return {
         "total_contract_cost": _round_money(total),
         "fixed_cost": _round_money(fixed),
         "one_time_cost": _round_money(one_time),
+        "resource_cost": _round_money(resource),
+        "transaction_cost": _round_money(transaction),
     }
+
+
+def phase_expense_total(items, phase) -> Decimal:
+    """Σ line total (full value) of the RESOURCE / TRANSACTION rows in ``phase``."""
+    total = _ZERO
+    for it in items:
+        if _code(it) in EXPENSE_TYPES and getattr(it, "phase", None) == phase:
+            total += line_total(it)
+    return _round_money(total)
+
+
+def line_billed(item) -> Decimal:
+    """How much of a RESOURCE / TRANSACTION line's own value is billed in its phase.
+    Default (no billed spec) = the full value. ``billed_mode`` 'percent' → value ×
+    %/100; 'amount' → the ₹ amount. Clamped to [0, value]. Non-expense rows return
+    their full line total (their billing is handled elsewhere)."""
+    total = line_total(item)
+    if _code(item) not in EXPENSE_TYPES:
+        return total
+    val = getattr(item, "billed_value", None)
+    if val is None:
+        return total  # legacy / not set → fully billed
+    val = _to_decimal(val)
+    if (getattr(item, "billed_mode", None) or "percent").lower() == "percent":
+        billed = _round_money(total * val / _HUNDRED)
+    else:
+        billed = _round_money(val)
+    if billed < _ZERO:
+        return _ZERO
+    return billed if billed <= total else total
+
+
+def line_unbilled(item) -> Decimal:
+    """A resource/transaction line's value NOT billed in its phase — this is what
+    carries forward. 0 for non-expense rows and fully-billed lines."""
+    if _code(item) not in EXPENSE_TYPES:
+        return _ZERO
+    return _round_money(line_total(item) - line_billed(item))
+
+
+def phase_expense_billed(items, phase) -> Decimal:
+    return _round_money(sum(
+        (line_billed(it) for it in items
+         if _code(it) in EXPENSE_TYPES and getattr(it, "phase", None) == phase), _ZERO))
+
+
+def phase_expense_unbilled(items, phase) -> Decimal:
+    return _round_money(sum(
+        (line_unbilled(it) for it in items
+         if _code(it) in EXPENSE_TYPES and getattr(it, "phase", None) == phase), _ZERO))
 
 
 def phase_fixed_total(items, phase) -> Decimal:
@@ -289,7 +377,47 @@ def _distribute_by_formula(amount: Decimal, recipients, formula, acc: dict,
     return _round_money(distributed)
 
 
-def carry_forward_distribution(cost_rows, term_rows, ordered_phases, config_by_phase) -> dict:
+def _phase_one_time_share(cfg, pool) -> Decimal:
+    """A phase's explicit one-time share: ``value`` as a percent of the pool, or
+    a ₹ amount. NULL/≤0 → 0."""
+    v = _to_decimal(cfg.get("value"))
+    if v <= _ZERO:
+        return _ZERO
+    if (cfg.get("mode") or "").lower() == "percent":
+        return _round_money(pool * v / _HUNDRED)
+    return _round_money(v)
+
+
+def one_time_distribution(cost_rows, ordered_phases, one_time_config) -> dict:
+    """Distribute the project ONE-TIME pool across phases.
+
+    ``one_time_config[phase] = {"enabled", "mode", "value"}``. Each NON-last
+    opted-in phase takes its explicit share (percent of the pool, or a ₹ amount),
+    clamped so the running total never exceeds the pool. The chronologically LAST
+    phase auto-absorbs the remainder, so the pool is always fully used. Returns
+    ``{phase: allocated_amount}`` (0 for phases that take no share)."""
+    ordered = list(ordered_phases)
+    alloc = {p: _ZERO for p in ordered}
+    pool = one_time_total(cost_rows)
+    if not ordered or pool <= _ZERO:
+        return alloc
+    used = _ZERO
+    for p in ordered[:-1]:
+        cfg = one_time_config.get(p) or {}
+        if cfg.get("enabled"):
+            share = _phase_one_time_share(cfg, pool)
+            if share > pool - used:      # defensive clamp (write path validates the cap)
+                share = _round_money(pool - used)
+            if share < _ZERO:
+                share = _ZERO
+            alloc[p] = share
+            used = _round_money(used + share)
+    alloc[ordered[-1]] = _round_money(pool - used)  # last phase = the remainder
+    return alloc
+
+
+def carry_forward_distribution(cost_rows, term_rows, ordered_phases, config_by_phase,
+                               one_time_alloc=None) -> dict:
     """Carry-forward ("carry forward cost") over phases in SEQUENCE order.
 
     A phase may opt in (``config_by_phase[phase]``) to carry its ENTIRE leftover
@@ -323,7 +451,9 @@ def carry_forward_distribution(cost_rows, term_rows, ordered_phases, config_by_p
     effective_base: dict = {}
     leftover: dict = {}
     carried_out = {p: _ZERO for p in ordered}
-    one_time = one_time_total(cost_rows)
+    # One-time is distributed to phases (see one_time_distribution) and joins
+    # each phase's billable base — it is NO LONGER auto-folded into the first phase.
+    one_time_alloc = one_time_alloc or {}
 
     # Milestone ids present per phase (from the live payment terms).
     ms_by_phase: dict = {}
@@ -334,9 +464,7 @@ def carry_forward_distribution(cost_rows, term_rows, ordered_phases, config_by_p
             ms_by_phase.setdefault(ph, []).append(mid)
 
     for i, p in enumerate(ordered):
-        base = phase_fixed_total(cost_rows, p)
-        if i == 0:
-            base += one_time
+        base = phase_fixed_total(cost_rows, p) + one_time_alloc.get(p, _ZERO)
         base = _round_money(base + phase_received[p])
         effective_base[p] = base
 
@@ -344,7 +472,10 @@ def carry_forward_distribution(cost_rows, term_rows, ordered_phases, config_by_p
         for t in term_rows:
             if getattr(t, "phase", None) == p:
                 allocated += payment_value(getattr(t, "percent_of_payment", None), base)
-        lo = base - allocated
+        # The unbilled part of the phase's resource/transaction expenses joins the
+        # leftover and carries forward with everything else (it is NOT part of the
+        # fixed % base, so it isn't diluted by the milestone percentages).
+        lo = (base - allocated) + phase_expense_unbilled(cost_rows, p)
         lo = _round_money(lo) if lo > _ZERO else _ZERO
         leftover[p] = lo
 

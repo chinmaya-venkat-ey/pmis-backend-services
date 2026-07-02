@@ -18,7 +18,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.core.errors import ValidationError
-from app.schemas.payment import CarryForwardUpdateRequest
+from app.schemas.payment import CarryForwardUpdateRequest, OneTimeUpdateRequest
 from app.services import payment_page_service as pps
 from app.services.payment_page_service import (
     PaymentPageService, _build_term_activities, _even_split,
@@ -87,11 +87,52 @@ def test_milestone_wise_phase_inflow_is_proportional_to_milestone_count():
     assert cf["phase_received"]["2"] == Decimal("0.00")
 
 
-def test_one_time_folds_into_first_phase_by_sequence():
+def test_one_time_no_longer_auto_folds_without_allocation():
+    # one-time is distributed via one_time_distribution now, not auto-folded here.
     cost_rows = [_cost("1", 10000), _cost("2", 20000), _cost(None, 3000, code="one_time")]
     cf = payment_calc.carry_forward_distribution(cost_rows, [], ["1", "2"], {})
-    assert cf["effective_base"]["1"] == Decimal("13000.00")
+    assert cf["effective_base"]["1"] == Decimal("10000.00")
     assert cf["effective_base"]["2"] == Decimal("20000.00")
+
+
+def test_one_time_distribution_last_phase_absorbs_by_default():
+    cost_rows = [_cost("1", 10000), _cost("2", 20000), _cost(None, 3000, code="one_time")]
+    alloc = payment_calc.one_time_distribution(cost_rows, ["1", "2"], {})
+    assert alloc == {"1": Decimal("0.00"), "2": Decimal("3000.00")}  # last phase = remainder
+
+
+def test_one_time_distribution_explicit_shares_plus_remainder():
+    cost_rows = [_cost("1", 10000), _cost("2", 20000), _cost("3", 5000),
+                 _cost(None, 10000, code="one_time")]
+    cfg = {"1": {"enabled": True, "mode": "amount", "value": Decimal("4000")},
+           "2": {"enabled": True, "mode": "percent", "value": Decimal("20")}}  # 20% of 10000
+    alloc = payment_calc.one_time_distribution(cost_rows, ["1", "2", "3"], cfg)
+    assert alloc["1"] == Decimal("4000.00")
+    assert alloc["2"] == Decimal("2000.00")
+    assert alloc["3"] == Decimal("4000.00")            # last absorbs 10000 − 6000
+    assert sum(alloc.values()) == Decimal("10000.00")  # fully utilised
+
+
+def test_carry_forward_base_includes_one_time_alloc():
+    cost_rows = [_cost("1", 10000), _cost("2", 20000), _cost(None, 3000, code="one_time")]
+    alloc = {"1": Decimal("3000.00"), "2": Decimal("0.00")}
+    cf = payment_calc.carry_forward_distribution(cost_rows, [], ["1", "2"], {}, one_time_alloc=alloc)
+    assert cf["effective_base"]["1"] == Decimal("13000.00")   # 10000 fixed + 3000 one-time
+    assert cf["effective_base"]["2"] == Decimal("20000.00")
+
+
+def test_one_time_request_validation():
+    with pytest.raises(Exception):
+        OneTimeUpdateRequest(enabled=True)                                  # mode+value required
+    with pytest.raises(Exception):
+        OneTimeUpdateRequest(enabled=True, mode="percent")                  # value required
+    with pytest.raises(Exception):
+        OneTimeUpdateRequest(enabled=True, mode="bad", value=Decimal("10"))  # bad mode
+    with pytest.raises(Exception):
+        OneTimeUpdateRequest(enabled=True, mode="percent", value=Decimal("150"))  # >100
+    assert OneTimeUpdateRequest(enabled=True, mode="amount", value=Decimal("5000")).value == Decimal("5000")
+    d = OneTimeUpdateRequest(enabled=False, mode="percent", value=Decimal("30"))
+    assert d.mode is None and d.value is None                                # disabled clears
 
 
 # ----------------------------------------- custom + time-based (formula-driven)

@@ -152,7 +152,22 @@ class PaymentPageService:
                 "formula": formula,
                 "recipient_vars": recipient_vars,
             }
-        cf = payment_calc.carry_forward_distribution(cost_rows, term_rows, ordered, cf_config)
+
+        # One-time pool distribution: each non-last opted-in phase takes its
+        # share (₹/%), the last phase absorbs the remainder. The allocation joins
+        # each phase's billable base for carry-forward.
+        one_time_config = {
+            q.phase: {
+                "enabled": bool(getattr(q, "one_time_enabled", False)),
+                "mode": getattr(q, "one_time_mode", None),
+                "value": getattr(q, "one_time_value", None),
+            }
+            for q in configs
+        }
+        one_time_alloc = payment_calc.one_time_distribution(cost_rows, ordered, one_time_config)
+        cf = payment_calc.carry_forward_distribution(
+            cost_rows, term_rows, ordered, cf_config, one_time_alloc=one_time_alloc)
+        self._one_time_alloc = one_time_alloc  # exposed to build_page for the response
         return ordered, config_by_phase, cf, cost_rows, term_rows
 
     def _resolve_cf_method(self, code):
@@ -281,6 +296,8 @@ class PaymentPageService:
             total_contract_cost=totals_d["total_contract_cost"],
             fixed_cost=totals_d["fixed_cost"],
             one_time_cost=totals_d["one_time_cost"],
+            resource_cost=totals_d["resource_cost"],
+            transaction_cost=totals_d["transaction_cost"],
         )
 
         cost_items = [
@@ -297,6 +314,11 @@ class PaymentPageService:
             cfg = config_by_phase.get(phase)
             phase_fixed = payment_calc.phase_fixed_total(cost_rows, phase)
             effective_total = cf["effective_base"].get(phase, phase_fixed)
+            # Resource + transaction expenses for this phase: full value, billed
+            # in-phase, and the unbilled remainder (which joins the carry leftover).
+            expense_total = payment_calc.phase_expense_total(cost_rows, phase)
+            expense_billed = payment_calc.phase_expense_billed(cost_rows, phase)
+            expense_unbilled = payment_calc.phase_expense_unbilled(cost_rows, phase)
             terms_in_phase = [t for t in term_rows if t.phase == phase]
             term_responses = []
             for t in terms_in_phase:
@@ -347,6 +369,16 @@ class PaymentPageService:
                 sequence=idx + 1,
                 phase_fixed_total=phase_fixed,
                 effective_phase_total=effective_total,
+                one_time_allocated=getattr(self, "_one_time_alloc", {}).get(phase, Decimal("0.00")),
+                one_time_enabled=bool(getattr(cfg, "one_time_enabled", False)),
+                one_time_mode=getattr(cfg, "one_time_mode", None),
+                one_time_value=getattr(cfg, "one_time_value", None),
+                expense_total=expense_total,
+                expense_billed=expense_billed,
+                expense_unbilled=expense_unbilled,
+                # Full displayed cost of the phase (fixed base incl. any one-time
+                # + expenses). The unbilled expense portion carries forward.
+                phase_total=payment_calc.to_2dp(effective_total + expense_total),
                 start_date=start_date,
                 end_date=end_date,
                 cycle_count=_safe_cycle_count(start_date, end_date, project_freq),
@@ -595,6 +627,78 @@ class PaymentPageService:
         self.db.commit()
         return self.build_page(project_id)
 
+    @staticmethod
+    def _one_time_share(mode, value, pool) -> Decimal:
+        v = Decimal(str(value or 0))
+        if v <= 0:
+            return Decimal("0.00")
+        if (mode or "").lower() == "percent":
+            return payment_calc.to_2dp(pool * v / Decimal("100"))
+        return payment_calc.to_2dp(v)
+
+    def set_one_time_allocation(
+        self, project_id: str, phase: str, *,
+        enabled: bool, mode: Optional[str], value: Optional[Decimal],
+        caller_user_id: Optional[str], caller_is_admin: bool = False,
+    ) -> PaymentPageResponse:
+        """Opt a phase into a share of the project one-time pool (₹ or % of the
+        one-time total). The chronologically LAST phase auto-absorbs the
+        remainder and can't be set. Σ of the non-last explicit shares may not
+        exceed the pool."""
+        project = self._require_project(project_id)
+        assert_payment_writable(project, caller_is_admin=caller_is_admin)
+        self.ensure_phase_configs(project_id)
+
+        ordered, config_by_phase, _cf, cost_rows, _terms = self._load_phase_state(project_id)
+        if phase not in ordered:
+            raise ValidationError(
+                f"Phase '{phase}' has no cost rows.", code="validation_error")
+        if enabled and ordered and ordered[-1] == phase:
+            raise ValidationError(
+                "The last phase auto-absorbs the one-time remainder; it cannot be "
+                "given an explicit share.", code="validation_error")
+        if enabled:
+            pool = payment_calc.one_time_total(cost_rows)
+            if pool <= 0:
+                raise ValidationError(
+                    "There is no one-time cost to allocate.", code="validation_error")
+            this_share = self._one_time_share(mode, value, pool)
+            last = ordered[-1] if ordered else None
+            others = Decimal("0.00")
+            for q in config_by_phase.values():
+                if (q.phase != phase and q.phase in ordered and q.phase != last
+                        and getattr(q, "one_time_enabled", False)):
+                    others += self._one_time_share(q.one_time_mode, q.one_time_value, pool)
+            if others + this_share > pool + Decimal("0.01"):
+                raise ValidationError(
+                    f"One-time allocations would exceed the pool (₹{pool}). Already "
+                    f"allocated ₹{others}, attempted ₹{this_share} "
+                    f"(headroom ₹{pool - others}).", code="validation_error")
+
+        fields = dict(
+            one_time_enabled=enabled,
+            one_time_mode=mode if enabled else None,
+            one_time_value=value if enabled else None,
+            updated_by=caller_user_id,
+        )
+        row = config_by_phase.get(phase) or self.phase_qrg.get_for_phase(project_id, phase)
+        if row is None:
+            seq = int(phase) if str(phase).isdigit() else self.phase_qrg.max_sequence(project_id) + 1
+            row = self.phase_qrg.create(
+                project_id=project_id, phase=phase, sequence=seq,
+                created_by=caller_user_id, **fields)
+        else:
+            self.phase_qrg.update(row, **fields)
+
+        self.audit.write(
+            project_id=project_id, target_kind="phase_config", target_id=row.id,
+            action="set_one_time_allocation", actor_user_id=caller_user_id,
+            changes={"phase": phase, "enabled": enabled, "mode": mode,
+                     "value": (str(value) if value is not None else None)},
+        )
+        self.db.commit()
+        return self.build_page(project_id)
+
     def _normalise_cf_allocations(
         self, method, allocation_mode, allocations, recipients, *, leftover: Decimal,
     ) -> List[dict]:
@@ -792,7 +896,10 @@ class PaymentPageService:
 
 def _cost_item_response(row, milestone_ids: List[str]) -> CostItemResponse:
     resp = CostItemResponse.model_validate(row)
-    resp.total = payment_calc.row_total(row.cost, row.tax_amount)
+    # Transaction rows total = perTxn × planned; every other type = cost + tax.
+    resp.total = payment_calc.line_total(row)
+    resp.billed_amount = payment_calc.line_billed(row)
+    resp.unbilled_amount = payment_calc.line_unbilled(row)
     resp.milestone_ids = list(milestone_ids)
     return resp
 

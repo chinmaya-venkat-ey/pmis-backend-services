@@ -167,17 +167,34 @@ def test_phase_custom_zero_share_recipient_gets_nothing():
     assert cf["phase_received"]["3"] == Decimal("0.00")     # explicit 0 stays 0
 
 
-def test_time_splits_proportional_to_recipient_cycles():
-    cost_rows = [_cost("1", 9000), _cost("2", 0), _cost("3", 0)]
-    term_rows = [_term("1", 0, "m1")]  # leftover 9000
-    cfg = {"1": _cf_cfg("time", "leftover * recipientCycles / totalCycles", {
-        "2": {"recipientCycles": Decimal("2"), "totalCycles": Decimal("3")},
-        "3": {"recipientCycles": Decimal("1"), "totalCycles": Decimal("3")},
-    })}
-    cf = payment_calc.carry_forward_distribution(cost_rows, term_rows, ["1", "2", "3"], cfg)
-    assert cf["phase_received"]["2"] == Decimal("6000.00")  # 2/3 of 9000
-    assert cf["phase_received"]["3"] == Decimal("3000.00")  # 1/3 of 9000
-    assert cf["carried_out"]["1"] == Decimal("9000.00")
+def test_time_method_builds_a_dated_pool_not_applied_to_phases():
+    # FREQUENCY (pool) method: the leftover becomes a dated installment schedule
+    # and is NEVER added to any phase value. This mirrors the RFP's QGR example:
+    # 350 held back, project = 26 quarters, phase ends at quarter 6 → 20 remaining
+    # → 17.50 each.
+    from datetime import date
+    cost_rows = [_cost("1", 350), _cost("2", 0)]
+    term_rows = [_term("1", 0, "m1")]  # whole 350 is leftover
+    cfg = {"1": {"enabled": True, "method": "time", "frequency": "quarterly",
+                 "formula": "", "recipient_vars": {}}}
+    # Project spans 26 quarters (2027-Q1 .. 2033-Q2); phase 1 ends in 2028-Q2 (the
+    # 6th quarter), so 20 future quarters remain.
+    phase_dates = {"1": (date(2027, 1, 1), date(2028, 6, 30)), "2": (None, None)}
+    project_bounds = (date(2027, 1, 1), date(2033, 6, 30))
+    cf = payment_calc.carry_forward_distribution(
+        cost_rows, term_rows, ["1", "2"], cfg,
+        phase_dates=phase_dates, project_bounds=project_bounds)
+    # Not applied anywhere.
+    assert cf["phase_received"]["2"] == Decimal("0.00")
+    # A 20-installment dated schedule of 17.50 each, summing to 350.
+    pool = cf["pool"]["1"]
+    assert len(pool) == 20
+    assert all(x["amount"] == Decimal("17.50") for x in pool)
+    assert sum(x["amount"] for x in pool) == Decimal("350.00")
+    assert cf["carried_out"]["1"] == Decimal("350.00")
+    # First installment is the quarter AFTER phase 1 ends (2028-Q3 = Jul-Sep 2028).
+    assert pool[0]["period_start"] == date(2028, 7, 1)
+    assert pool[0]["period_end"] == date(2028, 9, 30)
 
 
 def test_custom_all_zero_recipients_carries_nothing():

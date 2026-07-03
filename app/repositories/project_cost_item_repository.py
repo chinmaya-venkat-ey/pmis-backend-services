@@ -16,6 +16,10 @@ from app.models.milestone import Milestone
 from app.models.project_cost_item import ProjectCostItem
 from app.utilities.positions import lock_position_scope
 
+# Cost types that live on a phase, carry milestones and bill via payment terms
+# (fixed + the now-first-class resource / transaction lines).
+_PHASE_COST_TYPES = ("fixed", "resource_cost", "transaction_cost")
+
 
 class ProjectCostItemRepository:
     def __init__(self, db: Session):
@@ -151,7 +155,7 @@ class ProjectCostItemRepository:
             .join(Milestone, Milestone.id == CostItemMilestone.milestone_id)
             .where(ProjectCostItem.project_id == project_id)
             .where(ProjectCostItem.deleted_at.is_(None))
-            .where(ProjectCostItem.cost_type_code == "fixed")
+            .where(ProjectCostItem.cost_type_code.in_(_PHASE_COST_TYPES))
             .where(ProjectCostItem.phase.is_not(None))
             .where(Milestone.deleted_at.is_(None))
             .group_by(ProjectCostItem.phase)
@@ -169,7 +173,7 @@ class ProjectCostItemRepository:
             .join(Milestone, Milestone.id == CostItemMilestone.milestone_id)
             .where(ProjectCostItem.project_id == project_id)
             .where(ProjectCostItem.deleted_at.is_(None))
-            .where(ProjectCostItem.cost_type_code == "fixed")
+            .where(ProjectCostItem.cost_type_code.in_(_PHASE_COST_TYPES))
             .where(Milestone.deleted_at.is_(None))
         ).all()
         return {mid: (start, end) for mid, start, end in rows}
@@ -184,7 +188,7 @@ class ProjectCostItemRepository:
             .join(ProjectCostItem, ProjectCostItem.id == CostItemMilestone.cost_item_id)
             .where(ProjectCostItem.project_id == project_id)
             .where(ProjectCostItem.deleted_at.is_(None))
-            .where(ProjectCostItem.cost_type_code == "fixed")
+            .where(ProjectCostItem.cost_type_code.in_(_PHASE_COST_TYPES))
             .where(ProjectCostItem.phase.is_not(None))
         ).all()
         return dict(rows)
@@ -204,7 +208,7 @@ class ProjectCostItemRepository:
             .join(ProjectCostItem, ProjectCostItem.id == CostItemMilestone.cost_item_id)
             .where(ProjectCostItem.project_id == project_id)
             .where(ProjectCostItem.deleted_at.is_(None))
-            .where(ProjectCostItem.cost_type_code == "fixed")
+            .where(ProjectCostItem.cost_type_code.in_(_PHASE_COST_TYPES))
         ).all()
         return {mid: (cid, phase) for mid, cid, phase in rows}
 

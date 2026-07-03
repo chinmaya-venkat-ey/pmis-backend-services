@@ -31,7 +31,7 @@ computed server-side. Every value field is optional for now.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
 from typing import Annotated, List, Optional
@@ -71,14 +71,11 @@ class CostItemCreateRequest(BaseModel):
     # (optional, unused).
     tax_amount: Annotated[Optional[Decimal], Field(default=None, ge=0)] = None
     tax_percent: Annotated[Optional[Decimal], Field(default=None, ge=0, le=100)] = None
-    # Resource / transaction expense-line fields.
+    # Resource / transaction cost-line fields (they now bill via payment terms
+    # like fixed; a transaction line's value = perTransactionCost × plannedTransactions).
     per_transaction_cost: Annotated[Optional[Decimal], Field(default=None, ge=0)] = None
     planned_transactions: Annotated[Optional[int], Field(default=None, ge=0)] = None
     line_label: Annotated[Optional[str], Field(default=None, max_length=255)] = None
-    # How much of the expense line's value is billed in-phase (default 100%); the
-    # rest carries forward. billedMode 'percent' | 'amount'.
-    billed_mode: Annotated[Optional[str], Field(default=None, max_length=8)] = None
-    billed_value: Annotated[Optional[Decimal], Field(default=None, ge=0)] = None
     milestone_ids: List[str] = Field(default_factory=list)
     position: Optional[int] = None
 
@@ -97,8 +94,6 @@ class CostItemUpdateRequest(BaseModel):
     per_transaction_cost: Annotated[Optional[Decimal], Field(default=None, ge=0)] = None
     planned_transactions: Annotated[Optional[int], Field(default=None, ge=0)] = None
     line_label: Annotated[Optional[str], Field(default=None, max_length=255)] = None
-    billed_mode: Annotated[Optional[str], Field(default=None, max_length=8)] = None
-    billed_value: Annotated[Optional[Decimal], Field(default=None, ge=0)] = None
     milestone_ids: Optional[List[str]] = None
     position: Optional[int] = None
 
@@ -114,10 +109,6 @@ class CostItemResponse(ResponseModel):
     per_transaction_cost: Optional[Decimal] = None
     planned_transactions: Optional[int] = None
     line_label: Optional[str] = None
-    billed_mode: Optional[str] = None         # 'percent' | 'amount' (resource/transaction; default 100%)
-    billed_value: Optional[Decimal] = None
-    billed_amount: Decimal = Decimal("0.00")  # derived: value billed in-phase (resource/transaction)
-    unbilled_amount: Decimal = Decimal("0.00")# derived: value that carries forward (resource/transaction)
     total: Decimal = Decimal("0.00")          # derived: line total (txn = perTxn × planned; else cost + tax)
     milestone_ids: List[str] = Field(default_factory=list)
     position: int
@@ -311,6 +302,18 @@ class CarryForwardAllocationResponse(ResponseModel):
     percent: Decimal = Decimal("0.0000")      # normalised share (0..100)
 
 
+class CfPoolInstallmentResponse(ResponseModel):
+    """One dated installment of a FREQUENCY-based (pool) carry-forward. These are
+    NOT added to any phase or milestone value — they are a schedule invoicing
+    later draws from (the installments whose period has started and which no
+    earlier invoice already took)."""
+    period_index: int                         # calendar bucket index (monotonic)
+    period_start: date
+    period_end: date
+    amount: Decimal = Decimal("0.00")
+    status: str = "pending"                   # 'pending' | 'on_invoice'
+
+
 class CarryForwardResponse(ResponseModel):
     enabled: bool = False
     method_code: Optional[str] = None         # master method code (null if disabled)
@@ -325,6 +328,14 @@ class CarryForwardResponse(ResponseModel):
     is_last_phase: bool = False               # no subsequent recipients → cannot carry
     # Saved custom-split shares for this phase (empty unless a *_custom method).
     allocations: List["CarryForwardAllocationResponse"] = []
+    # FREQUENCY (pool) methods only: the dated installment schedule this phase's
+    # leftover becomes. Empty for applied (phase/milestone) methods. NOT part of
+    # any phase total — surfaced for the (future) invoicing screen.
+    pool: List["CfPoolInstallmentResponse"] = []
+    # The per-period split value = leftover / remaining periods (each pool
+    # installment carries this; the last absorbs the rounding remainder). 0 for
+    # applied methods / when there is no pool.
+    pool_per_period: Decimal = Decimal("0.00")
 
 
 # ======================================================================= ccn cap
@@ -375,8 +386,11 @@ class CcnBlock(ResponseModel):
 class PhaseBlock(ResponseModel):
     phase: str
     sequence: Optional[int] = None                   # integer phase order
-    phase_fixed_total: Decimal = Decimal("0.00")     # fixed cost-rows total of the phase
-    # The base used for milestone value + the 100% cap: phaseFixedTotal folded
+    phase_fixed_total: Decimal = Decimal("0.00")     # fixed-only subtotal (informational)
+    # The full billable base a phase's milestone %s split: fixed + resource +
+    # transaction cost lines in the phase (before one-time / carry-forward).
+    phase_base_total: Decimal = Decimal("0.00")
+    # The base used for milestone value + the 100% cap: phaseBaseTotal folded
     # with the one-time allocated to this phase + carry-forward received.
     # value = % × this.
     effective_phase_total: Decimal = Decimal("0.00")
@@ -386,14 +400,11 @@ class PhaseBlock(ResponseModel):
     one_time_enabled: bool = False            # phase opted in to an explicit share
     one_time_mode: Optional[str] = None       # 'percent' | 'amount' (null if not opted in)
     one_time_value: Optional[Decimal] = None  # the entered % or ₹ amount
-    # Resource + transaction expenses in this phase. ``expenseTotal`` is the full
-    # value; ``expenseBilled`` is billed in-phase; ``expenseUnbilled`` carries
-    # forward with the phase's leftover.
+    # Resource + transaction subtotal in this phase (informational — already part
+    # of phaseBaseTotal / effectivePhaseTotal, billed via the milestone terms).
     expense_total: Decimal = Decimal("0.00")
-    expense_billed: Decimal = Decimal("0.00")
-    expense_unbilled: Decimal = Decimal("0.00")
-    # phaseFixedTotal + expenseTotal (+ one-time allocated) — the phase's full
-    # displayed cost. Carry-forward still operates on the fixed+one-time base only.
+    # The phase's full billable base = effectivePhaseTotal (fixed + resource +
+    # transaction + one-time allocated + carry-forward received).
     phase_total: Decimal = Decimal("0.00")
     # Phase date span — earliest milestone start / latest milestone end in the
     # phase (null if the phase has no live milestone). Inputs to the cycle count.
@@ -403,6 +414,11 @@ class PhaseBlock(ResponseModel):
     # phase's applied frequency (all terms in a phase share one). Null until a
     # valid frequency is applied / when dates are missing.
     cycle_count: Optional[int] = None
+    # Whole project frequency periods (e.g. quarters) REMAINING after this phase
+    # ends — from just after end_date to the project end. This is how many
+    # installments a frequency (pool) carry-forward from this phase would spread
+    # over. Null when dates/frequency are missing; 0 for the final phase.
+    pending_cycles: Optional[int] = None
     payment_terms: List[PaymentTermResponse] = Field(default_factory=list)
     carry_forward: CarryForwardResponse
 

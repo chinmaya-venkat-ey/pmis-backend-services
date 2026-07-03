@@ -28,6 +28,9 @@ from app.repositories.project_cost_item_repository import ProjectCostItemReposit
 from app.repositories.project_payment_term_activity_repository import (
     ProjectPaymentTermActivityRepository,
 )
+from app.repositories.project_cf_pool_installment_repository import (
+    ProjectCfPoolInstallmentRepository,
+)
 from app.repositories.project_payment_term_repository import ProjectPaymentTermRepository
 from app.repositories.project_phase_cf_allocation_repository import (
     ProjectPhaseCfAllocationRepository,
@@ -37,6 +40,7 @@ from app.repositories.project_repository import ProjectRepository
 from app.schemas.payment import (
     CarryForwardAllocationResponse,
     CarryForwardResponse,
+    CfPoolInstallmentResponse,
     CcnBlock,
     CostItemResponse,
     PaymentPageResponse,
@@ -45,7 +49,7 @@ from app.schemas.payment import (
     PaymentTotals,
     PhaseBlock,
 )
-from app.utilities import catalogs, cycle_calc, payment_calc
+from app.utilities import catalogs, cf_pool, cycle_calc, payment_calc
 from app.utilities.payment_lock import assert_payment_writable, is_payment_locked
 from app.utilities.payment_masters import validate_frequency_code
 
@@ -82,6 +86,7 @@ class PaymentPageService:
         self.payment_terms = ProjectPaymentTermRepository(db)
         self.phase_qrg = ProjectPhaseQrgRepository(db)
         self.cf_allocations = ProjectPhaseCfAllocationRepository(db)
+        self.cf_pool = ProjectCfPoolInstallmentRepository(db)
         self.milestones = MilestoneRepository(db)
         self.activities = ActivityRepository(db)
         self.term_activities = ProjectPaymentTermActivityRepository(db)
@@ -117,7 +122,9 @@ class PaymentPageService:
         # Per-phase date span drives BOTH the chronological order and the
         # per-phase cycle counts (time methods). Ordering is date-derived — the
         # legacy ``sequence`` column is not consulted.
-        project_freq = self._require_project(project_id).payment_frequency_code
+        project = self._require_project(project_id)
+        project_freq = project.payment_frequency_code
+        project_bounds = (project.start_date, project.end_date)
         phase_dates = self.cost_items.phase_milestone_date_bounds(project_id)
         ordered = self._order_phases(distinct, phase_dates)
         phase_cycle_counts = {}
@@ -137,12 +144,17 @@ class PaymentPageService:
             cfg_row = config_by_phase.get(p)
             enabled = bool(getattr(cfg_row, "carry_forward_enabled", False))
             code = getattr(cfg_row, "carry_forward_method_code", None)
+            frequency = None
             if enabled:
                 method, variant, formula = self._resolve_cf_method(code)
                 recipient_vars = self._build_cf_recipient_vars(
                     method, variant, i, ordered, ms_by_phase,
                     phase_cycle_counts, alloc_by_phase.get(p, {}),
                 )
+                # For the POOL family the variant IS the calendar frequency
+                # (time_quarterly → quarterly) driving the installment schedule.
+                if method == payment_calc.CF_TIME:
+                    frequency = variant
             else:
                 method = formula = None
                 recipient_vars = {}
@@ -151,6 +163,7 @@ class PaymentPageService:
                 "method": method,
                 "formula": formula,
                 "recipient_vars": recipient_vars,
+                "frequency": frequency,
             }
 
         # One-time pool distribution: each non-last opted-in phase takes its
@@ -166,7 +179,8 @@ class PaymentPageService:
         }
         one_time_alloc = payment_calc.one_time_distribution(cost_rows, ordered, one_time_config)
         cf = payment_calc.carry_forward_distribution(
-            cost_rows, term_rows, ordered, cf_config, one_time_alloc=one_time_alloc)
+            cost_rows, term_rows, ordered, cf_config, one_time_alloc=one_time_alloc,
+            phase_dates=phase_dates, project_bounds=project_bounds)
         self._one_time_alloc = one_time_alloc  # exposed to build_page for the response
         return ordered, config_by_phase, cf, cost_rows, term_rows
 
@@ -313,12 +327,11 @@ class PaymentPageService:
         for idx, phase in enumerate(ordered):
             cfg = config_by_phase.get(phase)
             phase_fixed = payment_calc.phase_fixed_total(cost_rows, phase)
-            effective_total = cf["effective_base"].get(phase, phase_fixed)
-            # Resource + transaction expenses for this phase: full value, billed
-            # in-phase, and the unbilled remainder (which joins the carry leftover).
+            phase_base = payment_calc.phase_base_total(cost_rows, phase)
+            effective_total = cf["effective_base"].get(phase, phase_base)
+            # Resource + transaction subtotal on this phase (informational — their
+            # value is already part of the base that milestone %s split).
             expense_total = payment_calc.phase_expense_total(cost_rows, phase)
-            expense_billed = payment_calc.phase_expense_billed(cost_rows, phase)
-            expense_unbilled = payment_calc.phase_expense_unbilled(cost_rows, phase)
             terms_in_phase = [t for t in term_rows if t.phase == phase]
             term_responses = []
             for t in terms_in_phase:
@@ -350,6 +363,7 @@ class PaymentPageService:
                 Decimal("0"),
             )
             is_last = idx == len(ordered) - 1
+            pool_list = cf.get("pool", {}).get(phase, [])
             cf_block = CarryForwardResponse(
                 enabled=bool(getattr(cfg, "carry_forward_enabled", False)),
                 method_code=getattr(cfg, "carry_forward_method_code", None),
@@ -361,6 +375,17 @@ class PaymentPageService:
                 received_milestone=payment_calc.to_2dp(received_ms),
                 is_last_phase=is_last,
                 allocations=alloc_resp_by_phase.get(phase, []),
+                pool=[
+                    CfPoolInstallmentResponse(
+                        period_index=inst["period_index"],
+                        period_start=inst["period_start"],
+                        period_end=inst["period_end"],
+                        amount=payment_calc.to_2dp(inst["amount"]),
+                    )
+                    for inst in pool_list
+                ],
+                pool_per_period=(payment_calc.to_2dp(pool_list[0]["amount"])
+                                 if pool_list else Decimal("0.00")),
             )
             phase_blocks.append(PhaseBlock(
                 phase=phase,
@@ -368,20 +393,22 @@ class PaymentPageService:
                 # ``sequence`` always agree (no longer the stored counter).
                 sequence=idx + 1,
                 phase_fixed_total=phase_fixed,
+                phase_base_total=phase_base,
                 effective_phase_total=effective_total,
                 one_time_allocated=getattr(self, "_one_time_alloc", {}).get(phase, Decimal("0.00")),
                 one_time_enabled=bool(getattr(cfg, "one_time_enabled", False)),
                 one_time_mode=getattr(cfg, "one_time_mode", None),
                 one_time_value=getattr(cfg, "one_time_value", None),
                 expense_total=expense_total,
-                expense_billed=expense_billed,
-                expense_unbilled=expense_unbilled,
-                # Full displayed cost of the phase (fixed base incl. any one-time
-                # + expenses). The unbilled expense portion carries forward.
-                phase_total=payment_calc.to_2dp(effective_total + expense_total),
+                # Full billable base of the phase: fixed + resource + transaction
+                # (+ any one-time allocation + carry-forward received). Milestone
+                # %s pay out of this, and its unallocated remainder carries forward.
+                phase_total=payment_calc.to_2dp(effective_total),
                 start_date=start_date,
                 end_date=end_date,
                 cycle_count=_safe_cycle_count(start_date, end_date, project_freq),
+                pending_cycles=cf_pool.remaining_periods(
+                    project.end_date, end_date, project_freq),
                 payment_terms=term_responses,
                 carry_forward=cf_block,
             ))
@@ -562,8 +589,9 @@ class PaymentPageService:
                 t.milestone_id for t in term_rows
                 if t.phase in subsequent and t.milestone_id is not None
             ]
-            # Recipient availability.
-            if method in (payment_calc.CF_PHASE, payment_calc.CF_TIME) and not subsequent:
+            # Recipient availability. APPLIED phase-wise needs a subsequent phase;
+            # the FREQUENCY (pool) family needs future calendar periods, not phases.
+            if method == payment_calc.CF_PHASE and not subsequent:
                 raise ValidationError(
                     "Cannot carry forward phase-wise from the last phase — no subsequent phase.",
                     code="validation_error",
@@ -573,18 +601,25 @@ class PaymentPageService:
                     "Cannot carry forward milestone-wise — no subsequent milestones.",
                     code="validation_error",
                 )
-            # Time methods need a usable project frequency (cycles to weight by).
+            # Frequency (pool) methods build a dated schedule over the periods
+            # AFTER this phase ends up to the project end — there must be at least
+            # one such future period at the method's frequency.
             if method == payment_calc.CF_TIME:
-                project_freq = project.payment_frequency_code
-                phase_dates = self.cost_items.phase_milestone_date_bounds(project_id)
-                total_cycles = sum(
-                    (_safe_cycle_count(*phase_dates.get(r, (None, None)), project_freq) or 0)
-                    for r in subsequent
-                )
-                if total_cycles <= 0:
+                if not project.payment_frequency_code:
                     raise ValidationError(
-                        "Time-based carry-forward needs a project frequency and dated "
-                        "subsequent phases (no payment cycles to weight by).",
+                        "Time-based carry-forward needs a project frequency.",
+                        code="validation_error",
+                    )
+                phase_dates = self.cost_items.phase_milestone_date_bounds(project_id)
+                _, phase_end = phase_dates.get(phase, (None, None))
+                if not (phase_end and project.start_date and project.end_date):
+                    raise ValidationError(
+                        "Time-based carry-forward needs a dated phase and project bounds.",
+                        code="validation_error",
+                    )
+                if not cf_pool.remaining_periods(project.end_date, phase_end, variant):
+                    raise ValidationError(
+                        "Time-based carry-forward has no future billing periods after this phase.",
                         code="validation_error",
                     )
             # Custom methods need a fully-allocated share set over valid recipients.
@@ -617,6 +652,15 @@ class PaymentPageService:
         else:
             self.cf_allocations.soft_delete_for_phase(
                 project_id, phase, actor_user_id=caller_user_id)
+
+        # NOTE: the PENDING pool schedule is derived state (a pure function of the
+        # phase's current leftover), so it is computed fresh on every payment-page
+        # read and returned in CarryForwardResponse.pool — never persisted here.
+        # Persisting it would go stale the moment any later edit changed the
+        # leftover. The project_cf_pool_installment table is reserved for the
+        # FROZEN (on_invoice) installments that the future invoicing flow writes
+        # when it draws from the pool — those are immutable, so persisting them is
+        # correct.
 
         self.audit.write(
             project_id=project_id, target_kind="phase_config", target_id=row.id,
@@ -898,8 +942,6 @@ def _cost_item_response(row, milestone_ids: List[str]) -> CostItemResponse:
     resp = CostItemResponse.model_validate(row)
     # Transaction rows total = perTxn × planned; every other type = cost + tax.
     resp.total = payment_calc.line_total(row)
-    resp.billed_amount = payment_calc.line_billed(row)
-    resp.unbilled_amount = payment_calc.line_unbilled(row)
     resp.milestone_ids = list(milestone_ids)
     return resp
 

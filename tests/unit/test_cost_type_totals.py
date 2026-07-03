@@ -43,8 +43,10 @@ def test_phase_expense_total_only_expenses_in_phase():
     ]
     assert pc.phase_expense_total(rows, "A") == Decimal("25000.00")     # 20000 + 5000
     assert pc.phase_expense_total(rows, "B") == Decimal("9000.00")
-    # fixed is NOT an expense
+    # fixed-only subtotal vs the full phase base (fixed + resource + transaction)
     assert pc.phase_fixed_total(rows, "A") == Decimal("100000.00")
+    assert pc.phase_base_total(rows, "A") == Decimal("125000.00")       # 100000 + 20000 + 5000
+    assert pc.phase_base_total(rows, "B") == Decimal("9000.00")
 
 
 def test_contract_totals_split_by_type():
@@ -62,44 +64,28 @@ def test_contract_totals_split_by_type():
     assert t["total_contract_cost"] == Decimal("175000.00")            # 100000+50000+20000+5000
 
 
-# ---------------------- billed split (resource/transaction in carry-forward) --
-
-def test_line_billed_defaults_to_full_value():
-    assert pc.line_billed(_row("resource_cost", cost=20000)) == Decimal("20000.00")   # no billed spec
-    assert pc.line_unbilled(_row("resource_cost", cost=20000)) == Decimal("0.00")
-
-
-def test_line_billed_percent_and_amount():
-    r = _row("resource_cost", cost=20000, billed_mode="percent", billed_value=60)
-    assert pc.line_billed(r) == Decimal("12000.00")
-    assert pc.line_unbilled(r) == Decimal("8000.00")
-    a = _row("resource_cost", cost=20000, billed_mode="amount", billed_value=15000)
-    assert pc.line_billed(a) == Decimal("15000.00")
-    assert pc.line_unbilled(a) == Decimal("5000.00")
-    # amount over the value is capped
-    over = _row("resource_cost", cost=20000, billed_mode="amount", billed_value=99999)
-    assert pc.line_billed(over) == Decimal("20000.00")
-    assert pc.line_unbilled(over) == Decimal("0.00")
-
-
-def test_phase_expense_billed_and_unbilled():
-    rows = [
-        _row("fixed", phase="A", cost=100000),
-        _row("resource_cost", phase="A", cost=20000, billed_mode="percent", billed_value=60),   # 12000/8000
-        _row("transaction_cost", phase="A", per_txn=1000, planned=5),                            # 5000/0 (default)
-    ]
-    assert pc.phase_expense_billed(rows, "A") == Decimal("17000.00")     # 12000 + 5000
-    assert pc.phase_expense_unbilled(rows, "A") == Decimal("8000.00")    # 8000 + 0
-
+# ---------------- resource / transaction are part of the phase base ----------
 
 def _term(phase, pct, mid):
     return SimpleNamespace(phase=phase, percent_of_payment=Decimal(str(pct)), milestone_id=mid)
 
 
-def test_carry_forward_leftover_includes_unbilled_expense():
-    # phase 1: fixed 10000, term 0% (whole fixed is leftover) + a resource 20000 at 60% (8000 unbilled).
+def test_phase_base_includes_resource_and_transaction():
+    rows = [
+        _row("fixed", phase="A", cost=100000),
+        _row("resource_cost", phase="A", cost=20000),
+        _row("transaction_cost", phase="A", per_txn=1000, planned=5),   # 5000
+    ]
+    # The base a phase's milestone %s split = fixed + resource + transaction.
+    assert pc.phase_base_total(rows, "A") == Decimal("125000.00")
+
+
+def test_carry_forward_base_and_leftover_include_expense_lines():
+    # phase 1: fixed 10000 + resource 20000, both 0%-allocated → whole 30000 base
+    # is leftover and carries to phase 2 (which has fixed 5000).
     cost_rows = [_row("fixed", phase="1", cost=10000), _row("fixed", phase="2", cost=5000),
-                 _row("resource_cost", phase="1", cost=20000, billed_mode="percent", billed_value=60)]
+                 _row("resource_cost", phase="1", cost=20000)]
     term_rows = [_term("1", 0, "m1"), _term("2", 0, "m2")]
     cf = pc.carry_forward_distribution(cost_rows, term_rows, ["1", "2"], {})
-    assert cf["leftover"]["1"] == Decimal("18000.00")   # 10000 fixed leftover + 8000 unbilled expense
+    assert cf["effective_base"]["1"] == Decimal("30000.00")   # 10000 fixed + 20000 resource
+    assert cf["leftover"]["1"] == Decimal("30000.00")         # nothing allocated → all carries

@@ -26,7 +26,7 @@ from fastapi import APIRouter, Depends, Path, Query, status
 from app.controllers.payment_page_controller import PaymentPageController
 from app.controllers.project_cost_item_controller import ProjectCostItemController
 from app.controllers.project_payment_term_controller import ProjectPaymentTermController
-from app.core.permissions import PROJECTS_READ, PROJECTS_UPDATE_FINANCE
+from app.core.permissions import PAYMENT_READ, PROJECTS_UPDATE_FINANCE
 from app.core.rbac import require_authenticated, require_permission, require_project_permission
 from app.dependencies import (
     get_caller_is_admin,
@@ -86,7 +86,7 @@ def create_cost_item(
         "when adding a cost row. When editing an existing cost row, pass "
         "``excludeCostItemId`` so that row's own milestones stay selectable."
     ),
-    dependencies=[Depends(require_project_permission(PROJECTS_READ))],
+    dependencies=[Depends(require_project_permission(PAYMENT_READ))],
 )
 def available_cost_milestones(
     project_uuid: str,
@@ -101,7 +101,7 @@ def available_cost_milestones(
 @cost_item_project_scoped_router.get(
     "/{project_uuid}/cost-items",
     summary="List a project's cost items",
-    dependencies=[Depends(require_project_permission(PROJECTS_READ))],
+    dependencies=[Depends(require_project_permission(PAYMENT_READ))],
 )
 def list_cost_items(
     project_uuid: str,
@@ -123,7 +123,7 @@ cost_item_router = APIRouter(prefix="/cost-items", tags=["payment-cost-items"])
     "/{cost_item_id}",
     response_model=CostItemResponse,
     summary="Get a cost item by id",
-    dependencies=[Depends(require_permission(PROJECTS_READ))],
+    dependencies=[Depends(require_permission(PAYMENT_READ))],
 )
 def get_cost_item(
     cost_item_id: str,
@@ -189,7 +189,7 @@ payment_term_project_scoped_router = APIRouter(prefix="/projects", tags=["paymen
 @payment_term_project_scoped_router.get(
     "/{project_uuid}/payment-terms",
     summary="List a project's payment terms (auto-managed from cost rows)",
-    dependencies=[Depends(require_project_permission(PROJECTS_READ))],
+    dependencies=[Depends(require_project_permission(PAYMENT_READ))],
 )
 def list_payment_terms(
     project_uuid: str,
@@ -211,7 +211,7 @@ payment_term_router = APIRouter(prefix="/payment-terms", tags=["payment-terms"])
     "/{term_id}",
     response_model=PaymentTermResponse,
     summary="Get a payment term by id",
-    dependencies=[Depends(require_permission(PROJECTS_READ))],
+    dependencies=[Depends(require_permission(PAYMENT_READ))],
 )
 def get_payment_term(
     term_id: str,
@@ -274,13 +274,26 @@ payment_page_router = APIRouter(prefix="/projects", tags=["payment-page"])
     "/{project_uuid}/payment-page",
     response_model=PaymentPageResponse,
     summary="Full payment page (cost items + totals + phases + qrg + ccn) — read-only",
-    dependencies=[Depends(require_project_permission(PROJECTS_READ))],
+    dependencies=[Depends(require_project_permission(PAYMENT_READ))],
 )
 def get_payment_page(
     project_uuid: str,
     controller: Annotated[PaymentPageController, Depends(get_payment_page_controller)],
 ):
     return controller.get_page(project_uuid)
+
+
+@payment_page_router.get(
+    "/{project_uuid}/payment-page/validate",
+    summary="Run the finance-page validation checks (admin only). Returns "
+            "{checks: [{id, label, pass, reason}], allPass}.",
+    dependencies=[Depends(require_project_permission(PAYMENT_READ))],
+)
+def validate_payment_page(
+    project_uuid: str,
+    controller: Annotated[PaymentPageController, Depends(get_payment_page_controller)],
+):
+    return controller.validate(project_uuid)
 
 
 @payment_page_router.patch(

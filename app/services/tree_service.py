@@ -28,6 +28,7 @@ from app.models._cross_schema import User as MirrorUser, Vendor
 from app.models.activity import Activity
 from app.models.activity_dependency import ActivityDependency
 from app.models.activity_resource import ActivityResource
+from app.core.milestone_scope import vendor_milestone_filter
 from app.models.milestone import Milestone
 from app.models.milestone_dependency import MilestoneDependency
 from app.models.project import Project
@@ -444,6 +445,7 @@ class TreeService:
 
     def _fetch_tree_entities(
         self, project_id: str, *, include_deleted: bool,
+        caller_vendor_id=None, caller_is_admin: bool = True,
     ) -> Tuple[List[Any], List[Any], List[Any], List[Any], List[Any], List[Any], List[Any]]:
         """One pass over M/A/A-resources/T/T-resources/S/S-resources for
         a project. All queries filter by the denormalized ``project_id``
@@ -453,6 +455,10 @@ class TreeService:
         project tree — the FE never renders them. Skip even when
         ``include_deleted=True`` since there's no UX value in surfacing
         a soft-deleted meeting row.
+
+        Vendor scoping: a vendor user sees only milestones their org has a live
+        activity on, and the subtree CASCADES — activities under hidden
+        milestones (and their tasks/subtasks) are dropped. Admins see all.
         """
         db = self.db
 
@@ -462,29 +468,39 @@ class TreeService:
                 stmt = stmt.where(model.deleted_at.is_(None))
             return stmt
 
-        milestones = list(db.execute(
-            _scoped(select(Milestone), Milestone)
-            .where(Milestone.is_meeting.is_(False))
-            .order_by(Milestone.position.asc(), Milestone.id.asc())
-        ).scalars().all())
-        activities = list(db.execute(
-            _scoped(select(Activity), Activity)
-            .order_by(Activity.position.asc(), Activity.id.asc())
-        ).scalars().all())
+        vclause = vendor_milestone_filter(
+            project_id, caller_vendor_id=caller_vendor_id, caller_is_admin=caller_is_admin)
+
+        mstmt = (_scoped(select(Milestone), Milestone)
+                 .where(Milestone.is_meeting.is_(False))
+                 .order_by(Milestone.position.asc(), Milestone.id.asc()))
+        if vclause is not None:
+            mstmt = mstmt.where(vclause)
+        milestones = list(db.execute(mstmt).scalars().all())
+
+        astmt = _scoped(select(Activity), Activity).order_by(Activity.position.asc(), Activity.id.asc())
+        if vclause is not None:  # cascade: only activities under a visible milestone
+            astmt = astmt.where(Activity.milestone_id.in_([m.id for m in milestones]))
+        activities = list(db.execute(astmt).scalars().all())
+
         act_resources = list(db.execute(
             _scoped(select(ActivityResource), ActivityResource)
         ).scalars().all())
-        tasks = list(db.execute(
-            _scoped(select(Task), Task)
-            .order_by(Task.position.asc(), Task.id.asc())
-        ).scalars().all())
+
+        tstmt = _scoped(select(Task), Task).order_by(Task.position.asc(), Task.id.asc())
+        if vclause is not None:
+            tstmt = tstmt.where(Task.activity_id.in_([a.id for a in activities]))
+        tasks = list(db.execute(tstmt).scalars().all())
+
         task_resources = list(db.execute(
             _scoped(select(TaskResource), TaskResource)
         ).scalars().all())
-        subtasks = list(db.execute(
-            _scoped(select(Subtask), Subtask)
-            .order_by(Subtask.position.asc(), Subtask.id.asc())
-        ).scalars().all())
+
+        sstmt = _scoped(select(Subtask), Subtask).order_by(Subtask.position.asc(), Subtask.id.asc())
+        if vclause is not None:
+            sstmt = sstmt.where(Subtask.task_id.in_([t.id for t in tasks]))
+        subtasks = list(db.execute(sstmt).scalars().all())
+
         sub_resources = list(db.execute(
             _scoped(select(SubtaskResource), SubtaskResource)
         ).scalars().all())
@@ -550,6 +566,8 @@ class TreeService:
         project_id: str,
         *,
         include_deleted: bool = False,
+        caller_vendor_id=None,
+        caller_is_admin: bool = True,
     ) -> Dict[str, Any]:
         db = self.db
 
@@ -568,6 +586,7 @@ class TreeService:
             subtasks, sub_resources,
         ) = self._fetch_tree_entities(
             project_id, include_deleted=include_deleted,
+            caller_vendor_id=caller_vendor_id, caller_is_admin=caller_is_admin,
         )
 
         # One-shot vendor lookup so each activity node emits ``vendorName``

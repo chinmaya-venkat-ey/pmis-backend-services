@@ -56,6 +56,14 @@ def get_caller_is_admin(request: Request) -> bool:
     return PROJECTS_ADMIN_OVERRIDE in held
 
 
+def get_caller_vendor_id(request: Request):
+    """The caller's own vendor/organization id (``users.vendor_id``), hydrated
+    into request.state by the auth middleware from the authz context. ``None``
+    for users not tied to a vendor (internal/admin). Drives vendor-scoped
+    milestone visibility (see app.core.milestone_scope)."""
+    return getattr(request.state, "user_vendor_id", None)
+
+
 # ---------------------------------------------------------------- controllers
 
 def get_project_controller(db: Session = Depends(get_db)) -> ProjectController:

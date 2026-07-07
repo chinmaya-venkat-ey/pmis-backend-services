@@ -81,15 +81,18 @@ class MilestoneController:
                 out.append(label)
         return out
 
-    def get(self, milestone_id: str) -> MilestoneResponse:
-        return self._to_response(self.service.get_by_id(milestone_id))
+    def get(self, milestone_id: str, *, caller_vendor_id=None, caller_is_admin=True) -> MilestoneResponse:
+        return self._to_response(self.service.get_by_id(
+            milestone_id, caller_vendor_id=caller_vendor_id, caller_is_admin=caller_is_admin))
 
     def list_for_project(
         self, project_id: str, *, offset=1, page_size=50, include_deleted=False,
+        caller_vendor_id=None, caller_is_admin=True,
     ):
         rows, total = self.service.list_for_project(
             project_id, offset=offset, page_size=page_size,
             include_deleted=include_deleted,
+            caller_vendor_id=caller_vendor_id, caller_is_admin=caller_is_admin,
         )
         return {
             "items": [self._to_response(r) for r in rows],

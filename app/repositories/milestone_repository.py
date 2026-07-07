@@ -7,6 +7,7 @@ from typing import List, Optional, Tuple
 from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
+from app.core.milestone_scope import vendor_milestone_filter
 from app.core.pagination import paginate
 from app.models.activity import Activity
 from app.models.activity_resource import ActivityResource
@@ -78,18 +79,28 @@ class MilestoneRepository:
         self, project_id: str, *,
         offset: int = 1, page_size: int = 50, include_deleted: bool = False,
         include_meetings: bool = False,
+        caller_vendor_id: Optional[str] = None, caller_is_admin: bool = True,
     ) -> Tuple[List[Milestone], int]:
         """List milestones under a project. By default, meeting milestones
         (``is_meeting = True``) are filtered out — they're auto-managed
         containers for meeting-type activities and shouldn't appear in
         normal milestone-level surfaces. Set ``include_meetings=True``
         to include them (used by the project-detail controller when it
-        needs to resolve ``meeting_milestone_id``)."""
+        needs to resolve ``meeting_milestone_id``).
+
+        Vendor scoping: pass ``caller_vendor_id`` + ``caller_is_admin`` to
+        restrict a vendor user to milestones their org has a live activity on
+        (see app.core.milestone_scope). Callers that omit them default to
+        ``caller_is_admin=True`` (no restriction) — for internal use."""
         clauses = [Milestone.project_id == project_id]
         if not include_deleted:
             clauses.append(Milestone.deleted_at.is_(None))
         if not include_meetings:
             clauses.append(Milestone.is_meeting.is_(False))
+        vclause = vendor_milestone_filter(
+            project_id, caller_vendor_id=caller_vendor_id, caller_is_admin=caller_is_admin)
+        if vclause is not None:
+            clauses.append(vclause)
         stmt = select(Milestone).where(and_(*clauses)).order_by(Milestone.position.asc())
         count_stmt = select(func.count()).select_from(Milestone).where(and_(*clauses))
         total = self.db.execute(count_stmt).scalar_one()

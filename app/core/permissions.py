@@ -91,6 +91,10 @@ PROJECTS_UPDATE_VENDORS: Final[str] = "projects:update:vendors"
 # dedicated PATCH /projects/{uuid}/finance route and to any finance-field
 # updates that arrive via the generic PATCH /projects/{uuid}/update path.
 PROJECTS_UPDATE_FINANCE: Final[str] = "projects:update:finance"
+# Gate for VIEWING the finance page (finance read endpoints). admin/super_admin
+# ONLY — mirror of canonical; seeded + granted via user-svc r027. Deliberately
+# not part of any bundle, so only the admin tiers can view the finance page.
+PAYMENT_READ: Final[str] = "payment:read"
 # §3.8 (2026-06-02 audit): generic-PATCH gates for previously ungated
 # columns. Mirror of canonical; seeded + granted via r009.
 PROJECTS_UPDATE_ACTIVE: Final[str] = "projects:update:active"

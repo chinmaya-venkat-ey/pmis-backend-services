@@ -26,6 +26,9 @@ class PaymentPageController:
     def get_page(self, project_id: str) -> PaymentPageResponse:
         return self.service.build_page(project_id)
 
+    def validate(self, project_id: str) -> dict:
+        return self.service.validate_finance(project_id)
+
     def set_carry_forward(
         self, project_id: str, phase: str, *,
         enabled: bool, method_code: Optional[str], caller_user_id: Optional[str],

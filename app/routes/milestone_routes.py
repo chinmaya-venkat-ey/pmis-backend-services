@@ -28,7 +28,12 @@ from app.core.rbac import (
     require_permission,
     require_project_permission,
 )
-from app.dependencies import get_milestone_controller, get_optional_current_user_id
+from app.dependencies import (
+    get_caller_is_admin,
+    get_caller_vendor_id,
+    get_milestone_controller,
+    get_optional_current_user_id,
+)
 from app.schemas.milestone import (
     MilestoneCreateRequest,
     MilestoneResponse,
@@ -151,6 +156,8 @@ async def create_milestone(
 def list_project_milestones(
     project_uuid: str,
     controller: Annotated[MilestoneController, Depends(get_milestone_controller)],
+    caller_vendor_id: Annotated[Optional[str], Depends(get_caller_vendor_id)],
+    caller_is_admin: Annotated[bool, Depends(get_caller_is_admin)],
     offset: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[Optional[int], Query(ge=1, alias="pageSize")] = None,
     include_deleted: Annotated[bool, Query(alias="includeDeleted")] = False,
@@ -158,6 +165,7 @@ def list_project_milestones(
     return controller.list_for_project(
         project_uuid, offset=offset, page_size=page_size,
         include_deleted=include_deleted,
+        caller_vendor_id=caller_vendor_id, caller_is_admin=caller_is_admin,
     )
 
 
@@ -174,8 +182,11 @@ router = APIRouter(prefix="/milestones", tags=["milestones"])
 def get_milestone(
     milestone_id: str,
     controller: Annotated[MilestoneController, Depends(get_milestone_controller)],
+    caller_vendor_id: Annotated[Optional[str], Depends(get_caller_vendor_id)],
+    caller_is_admin: Annotated[bool, Depends(get_caller_is_admin)],
 ):
-    return controller.get(milestone_id)
+    return controller.get(
+        milestone_id, caller_vendor_id=caller_vendor_id, caller_is_admin=caller_is_admin)
 
 
 @router.patch(

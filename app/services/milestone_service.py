@@ -67,19 +67,28 @@ class MilestoneService:
 
     # ------------------------------------------------------------------ read
 
-    def get_by_id(self, milestone_id: str):
+    def get_by_id(self, milestone_id: str, *, caller_vendor_id=None, caller_is_admin: bool = True):
         row = self.repo.get_by_id(milestone_id)
         if row is None:
+            raise MilestoneNotFoundError("The milestone could not be found.")
+        # Vendor scoping: a vendor user may only see a milestone their org has a
+        # live activity on. Hide others as 404 (don't reveal existence).
+        from app.core.milestone_scope import can_see_milestone
+        if not can_see_milestone(
+            self.db, row, caller_vendor_id=caller_vendor_id, caller_is_admin=caller_is_admin
+        ):
             raise MilestoneNotFoundError("The milestone could not be found.")
         return row
 
     def list_for_project(
         self, project_id: str, *,
         offset: int = 1, page_size: int = 50, include_deleted: bool = False,
+        caller_vendor_id=None, caller_is_admin: bool = True,
     ):
         return self.repo.list_for_project(
             project_id,
             offset=offset, page_size=page_size, include_deleted=include_deleted,
+            caller_vendor_id=caller_vendor_id, caller_is_admin=caller_is_admin,
         )
 
     # ------------------------------------------------------------------ write

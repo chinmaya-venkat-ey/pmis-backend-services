@@ -19,7 +19,9 @@ class TreeController:
 
     def get_tree(
         self, project_id: str, *, include_deleted: bool = False,
+        caller_vendor_id=None, caller_is_admin: bool = True,
     ) -> Dict[str, Any]:
         return self.service.get_project_tree(
             project_id, include_deleted=include_deleted,
+            caller_vendor_id=caller_vendor_id, caller_is_admin=caller_is_admin,
         )

@@ -436,6 +436,24 @@ class PaymentPageService:
             ccn=ccn,
         )
 
+    def validate_finance(self, project_id: str) -> dict:
+        """Run the server-side finance-page validation checks (the checks behind
+        the FE "Validate" button). Returns ``{"checks": [...], "all_pass": bool}``."""
+        from sqlalchemy import select
+
+        from app.models.milestone import Milestone
+        from app.utilities.finance_validation import run_finance_validation
+
+        self._require_project(project_id)
+        page = self.build_page(project_id)
+        active_ids = list(self.db.execute(
+            select(Milestone.id)
+            .where(Milestone.project_id == project_id)
+            .where(Milestone.deleted_at.is_(None))
+            .where(Milestone.is_meeting.is_(False))
+        ).scalars())
+        return run_finance_validation(page, active_ids)
+
     def term_response(self, term_id: str) -> PaymentTermResponse:
         """Public: one payment-term response with the per-activity split."""
         return self._single_term_response(term_id)

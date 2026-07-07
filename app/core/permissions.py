@@ -140,6 +140,13 @@ PROJECTS_UPDATE_VENDORS: Final[str] = "projects:update:vendors"
 # alembic r004; granted to super_admin / admin / org_admin /
 # project_admin (admin tiers + the project admin).
 PROJECTS_UPDATE_FINANCE: Final[str] = "projects:update:finance"
+
+# Gate for VIEWING the Project-Finance planning page (GET /payment-page and the
+# finance read endpoints). Granted to admin / super_admin ONLY (migration r027)
+# — deliberately NOT part of any project-domain bundle, so project_admin /
+# project_member / org_admin do NOT receive it. This is what restricts the
+# finance page to the admin tiers.
+PAYMENT_READ: Final[str] = "payment:read"
 # §3.8 (2026-06-02 audit): the generic PATCH endpoint previously let
 # callers write these columns without holding a code (Pydantic accepted,
 # walker missed). Seeded + granted to admin/super_admin via r009.

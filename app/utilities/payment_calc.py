@@ -40,6 +40,12 @@ FIXED = "fixed"
 ONE_TIME = "one_time"
 RESOURCE_COST = "resource_cost"
 TRANSACTION_COST = "transaction_cost"
+# A recurring cost is a project-level amount (like one_time — no phase, no
+# milestones) that is distributed across frequency periods as a payment SCHEDULE
+# from the milestone-timeline start over the project duration. It contributes
+# its full line total to the contract cost but does NOT bill via milestone
+# payment terms (its schedule is computed on the payment page).
+RECURRING_COST = "recurring_cost"
 
 # Resource / transaction cost lines are now FIRST-CLASS phase cost lines, just
 # like fixed: they carry milestones, contribute their value to the phase base,
@@ -145,12 +151,14 @@ def line_total(item) -> Decimal:
 
 def contract_totals(items) -> dict:
     """Return ``{total_contract_cost, fixed_cost, one_time_cost, resource_cost,
-    transaction_cost}`` (2dp). ``total_contract_cost`` is every row's line total."""
+    transaction_cost, recurring_cost}`` (2dp). ``total_contract_cost`` is every
+    row's line total."""
     total = _ZERO
     fixed = _ZERO
     one_time = _ZERO
     resource = _ZERO
     transaction = _ZERO
+    recurring = _ZERO
     for it in items:
         lt = line_total(it)
         total += lt
@@ -163,12 +171,15 @@ def contract_totals(items) -> dict:
             resource += lt
         elif code == TRANSACTION_COST:
             transaction += lt
+        elif code == RECURRING_COST:
+            recurring += lt
     return {
         "total_contract_cost": _round_money(total),
         "fixed_cost": _round_money(fixed),
         "one_time_cost": _round_money(one_time),
         "resource_cost": _round_money(resource),
         "transaction_cost": _round_money(transaction),
+        "recurring_cost": _round_money(recurring),
     }
 
 

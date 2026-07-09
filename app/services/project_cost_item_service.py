@@ -40,13 +40,16 @@ from app.repositories.project_phase_qrg_repository import ProjectPhaseQrgReposit
 from app.repositories.project_repository import ProjectRepository
 from app.schemas.payment import CostItemCreateRequest, CostItemUpdateRequest
 from app.utilities.payment_lock import assert_payment_writable
-from app.utilities.payment_masters import validate_cost_type_code
+from app.utilities.payment_masters import validate_cost_type_code, validate_frequency_code
 from app.utilities.phase_order import order_phases
 
 FIXED = "fixed"
 ONE_TIME = "one_time"
 RESOURCE_COST = "resource_cost"
 TRANSACTION_COST = "transaction_cost"
+# Project-level cost distributed across frequency periods as a payment schedule
+# (no phase, no milestones) — like one_time but scheduled.
+RECURRING_COST = "recurring_cost"
 EXPENSE_TYPES = (RESOURCE_COST, TRANSACTION_COST)
 # Cost types that live on a phase, carry milestones and bill via payment terms.
 PHASE_COST_TYPES = (FIXED, RESOURCE_COST, TRANSACTION_COST)
@@ -113,11 +116,23 @@ class ProjectCostItemService:
         label = None
         billed_mode = None
         billed_value = None
+        freq = None
 
         # One-time is a single standalone amount: no phase, no milestones.
         if cost_type == ONE_TIME:
             phase = None
             milestone_ids = []
+        elif cost_type == RECURRING_COST:
+            # Project-level scheduled cost: no phase, no milestones. Needs a cost
+            # amount and a frequency — its ``cost`` is distributed across those
+            # frequency periods as a payment schedule on the payment page.
+            phase = None
+            milestone_ids = []
+            if payload.cost is None:
+                raise ValidationError("A recurring cost row needs a cost amount.")
+            freq = validate_frequency_code(self.db, payload.frequency_code)
+            if freq is None:
+                raise ValidationError("A recurring cost row needs a frequency.")
         elif cost_type == FIXED:
             if phase is None:
                 raise ValidationError("Phase is required for a fixed cost row.")
@@ -158,6 +173,7 @@ class ProjectCostItemService:
                 per_transaction_cost=per_txn,
                 planned_transactions=planned,
                 line_label=label,
+                frequency_code=freq,
                 billed_mode=billed_mode,
                 billed_value=billed_value,
                 position=position,
@@ -205,6 +221,21 @@ class ProjectCostItemService:
             updates["phase"] = None
             effective_phase = None
             milestone_ids = []  # one-time clears its bundle
+        elif effective_type == RECURRING_COST:
+            # Project-level scheduled cost: no phase, no milestones; needs a cost
+            # amount + a frequency (its schedule is computed on the payment page).
+            updates["phase"] = None
+            effective_phase = None
+            milestone_ids = []
+            effective_cost = updates.get("cost", row.cost)
+            if effective_cost is None:
+                raise ValidationError("A recurring cost row needs a cost amount.")
+            if "frequency_code" in updates:
+                updates["frequency_code"] = validate_frequency_code(
+                    self.db, updates["frequency_code"])
+            effective_freq = updates.get("frequency_code", row.frequency_code)
+            if effective_freq is None:
+                raise ValidationError("A recurring cost row needs a frequency.")
         elif effective_type == FIXED:
             if effective_phase is None:
                 raise ValidationError("Phase is required for a fixed cost row.")
@@ -234,6 +265,12 @@ class ProjectCostItemService:
             row.line_label is not None or "line_label" in updates
         ):
             updates["line_label"] = None
+        # frequency_code is meaningful ONLY for recurring_cost — drop any stale
+        # value when the row is (or becomes) a different type.
+        if effective_type != RECURRING_COST and (
+            row.frequency_code is not None or "frequency_code" in updates
+        ):
+            updates["frequency_code"] = None
         # billed_mode / billed_value are deprecated (resource/transaction now bill
         # via payment terms) — never keep a stale value on any row.
         if (row.billed_mode is not None or row.billed_value is not None
@@ -286,6 +323,15 @@ class ProjectCostItemService:
             raise ValidationError("The cost item could not be found.")
         project = self._require_project(row.project_id)
         assert_payment_writable(project, caller_is_admin=caller_is_admin)
+        # The row keeps its milestone bindings through a soft-delete (that is
+        # what lets us restore them). While it was deleted, though, those
+        # milestones may have been re-assigned to a NEW cost row. Restoring now
+        # would double-bind them (two live cost rows on one milestone), breaking
+        # the one-cost-per-milestone invariant. Re-assert they are still free
+        # (excluding this row's own bindings) and fail with a clear conflict.
+        self._assert_milestones_free(
+            row.project_id, self.repo.list_milestone_ids(row.id), exclude_id=row.id,
+        )
         try:
             self.repo.restore(row)
             self.db.flush()

@@ -77,6 +77,41 @@ def bucket_bounds(index: int, frequency: str):
     raise ValueError(f"unsupported frequency {frequency!r}")
 
 
+def build_schedule(amount, start, end, frequency):
+    """Distribute ``amount`` across the calendar ``frequency`` buckets spanning
+    ``start`` → ``end`` INCLUSIVE — the schedule for a ``recurring_cost`` line
+    (from the milestone-timeline start over the project duration).
+
+    Unlike :func:`build_installments` (which spreads a phase's leftover over the
+    buckets AFTER the phase ends), this includes the bucket containing ``start``.
+    Returns ``[{"period_index", "period_start", "period_end", "amount"}]`` (period
+    bounds are ``date``; amount is 2dp Decimal). Empty when ``amount`` ≤ 0, the
+    frequency is unsupported, or a date is missing. Amounts sum to ``amount``
+    exactly (the last installment absorbs the rounding remainder)."""
+    indexer = _INDEXERS.get(frequency)
+    total = Decimal(str(amount or 0))
+    if indexer is None or total <= _ZERO or not (start and end):
+        return []
+    start_i = indexer(_as_date(start))
+    end_i = indexer(_as_date(end))
+    n = end_i - start_i + 1  # inclusive of both the start and end buckets
+    if n <= 0:
+        return []
+    per = _round(total / Decimal(n))
+    out = []
+    allocated = _ZERO
+    for k in range(n):
+        i = start_i + k
+        s, e = bucket_bounds(i, frequency)
+        if k < n - 1:
+            amt = per
+            allocated = _round(allocated + amt)
+        else:
+            amt = _round(total - allocated)  # last installment absorbs the remainder
+        out.append({"period_index": i, "period_start": s, "period_end": e, "amount": amt})
+    return out
+
+
 def build_installments(leftover, project_start, project_end, phase_end, frequency):
     """Return the dated installment schedule for ``leftover`` carried from a phase
     that ends at ``phase_end``, over the calendar periods up to ``project_end``.

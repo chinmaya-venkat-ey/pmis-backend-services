@@ -32,6 +32,7 @@ from app.core.permissions import (
     PROJECTS_PUBLISH,
     PROJECTS_READ,
     PROJECTS_READ_ALL,
+    PROJECTS_UPDATE_CONFIG,
     PROJECT_MEMBERS_READ,
     COMMENTS_CREATE,
 )
@@ -48,6 +49,7 @@ from app.dependencies import (
 )
 from app.schemas.project import (
     ProjectCloseRequest,
+    ProjectConfig,
     ProjectCreateRequest,
     ProjectResponse,
     ProjectUpdateRequest,
@@ -298,6 +300,49 @@ def get_project(
         project_uuid,
         caller_is_admin=caller_is_admin,
         caller_user_id=caller_user_id,
+    )
+
+
+@router.get(
+    "/{project_uuid}/config",
+    response_model=ProjectConfig,
+    summary="Get the per-project config/checks bag",
+    description=(
+        "Returns the grouped, per-project config object (half-day hours, "
+        "attendance/leave policy flags, etc.). These values are NOT master-"
+        "driven — they are set per project via PUT. Unset projects return {}."
+    ),
+    dependencies=[Depends(require_project_permission(PROJECTS_READ))],
+)
+def get_project_config(
+    project_uuid: str,
+    controller: Annotated[ProjectController, Depends(get_project_controller)],
+):
+    return controller.get_config(project_uuid)
+
+
+@router.put(
+    "/{project_uuid}/config",
+    response_model=ProjectConfig,
+    summary="Set (merge) the per-project config/checks bag",
+    description=(
+        "MERGE semantics: only the keys present in the body change; existing "
+        "keys are preserved, so new checks can be added without wiping others. "
+        "Returns the merged config."
+    ),
+    dependencies=[Depends(require_project_permission(PROJECTS_UPDATE_CONFIG))],
+)
+def put_project_config(
+    project_uuid: str,
+    payload: ProjectConfig,
+    controller: Annotated[ProjectController, Depends(get_project_controller)],
+    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
+):
+    # Only the fields the caller actually sent (typed known keys + any extra
+    # keys) are merged — unspecified keys are left untouched.
+    patch = payload.model_dump(exclude_unset=True)
+    return controller.set_config(
+        project_uuid, patch, caller_user_id=caller_user_id,
     )
 
 

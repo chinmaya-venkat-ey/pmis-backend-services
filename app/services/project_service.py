@@ -84,6 +84,34 @@ class ProjectService:
             raise ProjectNotFoundError(f"Project with ID {project_id} not found")
         return row
 
+    # --------------------------------------- project-specific config bag
+
+    def get_config(self, project_id: str) -> dict:
+        """Return the project's config/checks bag (``{}`` when unset)."""
+        row = self.get_by_id(project_id)
+        return dict(row.config or {})
+
+    def set_config(
+        self, project_id: str, patch: dict, *, caller_user_id: Optional[str],
+    ) -> dict:
+        """MERGE ``patch`` into the project's config bag and persist.
+
+        Only the keys present in ``patch`` change; existing keys are preserved
+        (partial-update / PATCH semantics), so adding a new check never wipes
+        the others. Assigns a NEW dict so SQLAlchemy tracks the JSONB change.
+        Returns the merged bag.
+        """
+        row = self.get_by_id(project_id)
+        merged = {**(row.config or {}), **patch}
+        self.repo.update(row, config=merged, updated_by=caller_user_id)
+        self.audit.write(
+            project_id=project_id, target_kind="project", target_id=project_id,
+            action="update_config", actor_user_id=caller_user_id,
+            changes={"config_keys": sorted(patch.keys())},
+        )
+        self.db.commit()
+        return merged
+
     def list_(
         self, *,
         offset: int = 1,

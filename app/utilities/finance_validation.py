@@ -51,6 +51,11 @@ def run_finance_validation(page, active_milestone_ids: Iterable[str]) -> dict:
     add("row-milestone", "Every fixed/resource/transaction row has a milestone",
         not no_ms, f"{len(no_ms)} cost row(s) have no milestone attached.")
 
+    bad_recurring = [c for c in cost_items if c.cost_type_code == "recurring_cost"
+                     and not getattr(c, "frequency_code", None)]
+    add("recurring-frequency", "Recurring rows have a distribution frequency",
+        not bad_recurring, f"{len(bad_recurring)} recurring row(s) missing a frequency.")
+
     neg_tax = [c for c in cost_items if _d(c.tax_amount) < _ZERO]
     add("tax-nonneg", "Tax is not negative", not neg_tax,
         f"{len(neg_tax)} cost row(s) have a negative tax.")

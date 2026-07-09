@@ -33,6 +33,19 @@ class MilestoneRepository:
             stmt = stmt.where(Milestone.deleted_at.is_(None))
         return self.db.execute(stmt).scalar_one_or_none()
 
+    def project_date_span(self, project_id: str) -> Tuple[Optional[datetime], Optional[datetime]]:
+        """(earliest start_date, latest end_date) over the project's live,
+        non-meeting milestones — the project's milestone timeline. Either bound
+        is None when no milestone carries that date. Anchors the recurring-cost
+        schedule (distributed from the milestone-timeline start)."""
+        row = self.db.execute(
+            select(func.min(Milestone.start_date), func.max(Milestone.end_date))
+            .where(Milestone.project_id == project_id)
+            .where(Milestone.deleted_at.is_(None))
+            .where(Milestone.is_meeting.is_(False))
+        ).first()
+        return (row[0], row[1]) if row else (None, None)
+
     def payment_type_by_ids(self, milestone_ids):
         """{milestone_id: payment_type} for the given live milestones — bulk."""
         if not milestone_ids:

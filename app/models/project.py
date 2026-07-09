@@ -20,6 +20,8 @@ from decimal import Decimal
 from typing import Optional
 from uuid import uuid4
 
+from typing import Any
+
 from sqlalchemy import (
     Boolean,
     DateTime,
@@ -30,6 +32,7 @@ from sqlalchemy import (
     Text,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -113,6 +116,16 @@ class Project(Base):
     # (applies to every phase's cycle counts + time-based carry-forward).
     # Logical FK to masters.frequencies.code. Null until set.
     payment_frequency_code: Mapped[Optional[str]] = mapped_column(String(32))
+
+    # Project-specific config/checks bag — a free-form JSONB object of values
+    # that are set per project (NOT driven by any master catalog): half-day
+    # hours, attendance-captured flag, sandwich-leave flag, leaves-per-frequency,
+    # prorated-leaves flag, etc. Grouped into ONE object so new checks can be
+    # added without a schema migration. Shape is validated/documented by the
+    # ``ProjectConfig`` Pydantic model (extra keys tolerated). Defaults to {}.
+    config: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb"), default=dict,
+    )
 
     # Audit / soft-delete. user-id FKs are LOGICAL only (cross-schema).
     created_by: Mapped[Optional[str]] = mapped_column(String(36))

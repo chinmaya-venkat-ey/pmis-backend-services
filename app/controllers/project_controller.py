@@ -12,6 +12,7 @@ from app.models._cross_schema import Division as _DivisionMirror, Vendor as _Ven
 from app.repositories.project_repository import ProjectRepository
 from app.schemas.project import (
     ProjectCloseRequest,
+    ProjectConfig,
     ProjectCreateRequest,
     ProjectResponse,
     ProjectUpdateRequest,
@@ -252,6 +253,18 @@ class ProjectController:
     def delete(self, project_id: str, *, caller_user_id: Optional[str]) -> ProjectResponse:
         row = self.service.delete(project_id, caller_user_id=caller_user_id)
         return self._to_response(row)
+
+    # ---------------------------------------- project-specific config bag
+
+    def get_config(self, project_id: str) -> ProjectConfig:
+        # Existence is enforced by the service (404 when the project is gone).
+        return ProjectConfig.model_validate(self.service.get_config(project_id))
+
+    def set_config(
+        self, project_id: str, patch: dict, *, caller_user_id: Optional[str],
+    ) -> ProjectConfig:
+        merged = self.service.set_config(project_id, patch, caller_user_id=caller_user_id)
+        return ProjectConfig.model_validate(merged)
 
     # ------------------------------------------------------------ lifecycle
 

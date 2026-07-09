@@ -64,6 +64,22 @@ def test_contract_totals_split_by_type():
     assert t["total_contract_cost"] == Decimal("175000.00")            # 100000+50000+20000+5000
 
 
+def test_contract_totals_includes_recurring():
+    rows = [
+        _row("fixed", phase="A", cost=100000),
+        _row("recurring_cost", cost=1200000),           # project-level, no phase
+    ]
+    t = pc.contract_totals(rows)
+    assert t["recurring_cost"] == Decimal("1200000.00")
+    assert t["fixed_cost"] == Decimal("100000.00")
+    assert t["total_contract_cost"] == Decimal("1300000.00")
+
+
+def test_recurring_line_total_is_cost_plus_tax():
+    # recurring uses the plain cost + tax total (not a per-transaction product).
+    assert pc.line_total(_row("recurring_cost", cost=1000000, tax=0)) == Decimal("1000000.00")
+
+
 # ---------------- resource / transaction are part of the phase base ----------
 
 def _term(phase, pct, mid):

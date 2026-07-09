@@ -100,6 +100,11 @@ PAYMENT_READ: Final[str] = "payment:read"
 PROJECTS_UPDATE_ACTIVE: Final[str] = "projects:update:active"
 PROJECTS_UPDATE_PARENT_ID: Final[str] = "projects:update:parent_id"
 PROJECTS_UPDATE_STATUS: Final[str] = "projects:update:status"
+# Gate for writing the per-project config/checks bag (half-day hours,
+# attendance/leave policy flags, etc.) via PUT /projects/{uuid}/config.
+# Mirror of canonical; seeded + granted via user-svc (same roles as the other
+# projects:update:* codes).
+PROJECTS_UPDATE_CONFIG: Final[str] = "projects:update:config"
 
 # --- milestones ---
 MILESTONES_UPDATE_NAME: Final[str] = "milestones:update:name"

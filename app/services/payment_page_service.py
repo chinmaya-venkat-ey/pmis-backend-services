@@ -270,6 +270,33 @@ class PaymentPageService:
 
     # ------------------------------------------------------------------ read
 
+    def _attach_recurring_schedules(self, project_id, project, cost_items, cost_rows) -> None:
+        """Populate ``schedule`` on each ``recurring_cost`` response row: its
+        ``total`` distributed across its frequency periods from the milestone-
+        timeline start over the project duration (last installment absorbs the
+        rounding remainder). The anchor is the earliest live-milestone start
+        (falling back to the project start); the horizon is the project end
+        (falling back to the latest milestone end)."""
+        recurring = [
+            (ci, c) for ci, c in zip(cost_items, cost_rows)
+            if c.cost_type_code == payment_calc.RECURRING_COST
+        ]
+        if not recurring:
+            return
+        ms_start, ms_end = self.milestones.project_date_span(project_id)
+        anchor = ms_start or project.start_date
+        horizon = project.end_date or ms_end
+        for ci, c in recurring:
+            ci.schedule = [
+                CfPoolInstallmentResponse(
+                    period_index=inst["period_index"],
+                    period_start=inst["period_start"],
+                    period_end=inst["period_end"],
+                    amount=payment_calc.to_2dp(inst["amount"]),
+                )
+                for inst in cf_pool.build_schedule(ci.total, anchor, horizon, c.frequency_code)
+            ]
+
     def build_page(self, project_id: str) -> PaymentPageResponse:
         project = self._require_project(project_id)
         project_freq = project.payment_frequency_code  # ONE frequency per project
@@ -312,11 +339,17 @@ class PaymentPageService:
             one_time_cost=totals_d["one_time_cost"],
             resource_cost=totals_d["resource_cost"],
             transaction_cost=totals_d["transaction_cost"],
+            recurring_cost=totals_d["recurring_cost"],
         )
 
         cost_items = [
             _cost_item_response(c, ms_map.get(c.id, [])) for c in cost_rows
         ]
+        # recurring_cost rows: attach the dated installment schedule — the row's
+        # total spread across its frequency periods from the milestone-timeline
+        # start over the project duration (mirrors the carry-forward pool). The
+        # schedule is derived (never stored) so it stays reactive to date edits.
+        self._attach_recurring_schedules(project_id, project, cost_items, cost_rows)
 
         # Last-phase strict full utilisation: null milestones split the
         # remaining (100 − Σ explicit) evenly so the phase always totals 100%

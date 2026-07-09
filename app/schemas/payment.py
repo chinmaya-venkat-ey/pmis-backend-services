@@ -76,6 +76,10 @@ class CostItemCreateRequest(BaseModel):
     per_transaction_cost: Annotated[Optional[Decimal], Field(default=None, ge=0)] = None
     planned_transactions: Annotated[Optional[int], Field(default=None, ge=0)] = None
     line_label: Annotated[Optional[str], Field(default=None, max_length=255)] = None
+    # ``recurring_cost`` rows: the frequency the ``cost`` is spread across
+    # (monthly/quarterly/half_yearly/yearly). Required for recurring, ignored
+    # for every other type (enforced in the service).
+    frequency_code: Annotated[Optional[str], Field(default=None, max_length=32)] = None
     milestone_ids: List[str] = Field(default_factory=list)
     position: Optional[int] = None
 
@@ -94,6 +98,7 @@ class CostItemUpdateRequest(BaseModel):
     per_transaction_cost: Annotated[Optional[Decimal], Field(default=None, ge=0)] = None
     planned_transactions: Annotated[Optional[int], Field(default=None, ge=0)] = None
     line_label: Annotated[Optional[str], Field(default=None, max_length=255)] = None
+    frequency_code: Annotated[Optional[str], Field(default=None, max_length=32)] = None
     milestone_ids: Optional[List[str]] = None
     position: Optional[int] = None
 
@@ -109,7 +114,12 @@ class CostItemResponse(ResponseModel):
     per_transaction_cost: Optional[Decimal] = None
     planned_transactions: Optional[int] = None
     line_label: Optional[str] = None
+    frequency_code: Optional[str] = None       # recurring_cost only: distribution frequency
     total: Decimal = Decimal("0.00")          # derived: line total (txn = perTxn × planned; else cost + tax)
+    # recurring_cost only: the dated installment schedule the ``total`` is spread
+    # across (from the milestone-timeline start over the project duration).
+    # Computed on the payment page; empty for every other cost type.
+    schedule: List["CfPoolInstallmentResponse"] = Field(default_factory=list)
     milestone_ids: List[str] = Field(default_factory=list)
     position: int
     created_at: datetime
@@ -314,6 +324,11 @@ class CfPoolInstallmentResponse(ResponseModel):
     status: str = "pending"                   # 'pending' | 'on_invoice'
 
 
+# CostItemResponse.schedule forward-references CfPoolInstallmentResponse (defined
+# above); resolve the reference now that the target class exists.
+CostItemResponse.model_rebuild()
+
+
 class CarryForwardResponse(ResponseModel):
     enabled: bool = False
     method_code: Optional[str] = None         # master method code (null if disabled)
@@ -376,6 +391,7 @@ class PaymentTotals(ResponseModel):
     one_time_cost: Decimal = Decimal("0.00")
     resource_cost: Decimal = Decimal("0.00")
     transaction_cost: Decimal = Decimal("0.00")
+    recurring_cost: Decimal = Decimal("0.00")
 
 
 class CcnBlock(ResponseModel):

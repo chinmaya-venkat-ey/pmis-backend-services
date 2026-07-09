@@ -80,6 +80,11 @@ class ProjectCostItem(Base):
     # Transaction-cost rows: total = per_transaction_cost × planned_transactions.
     per_transaction_cost: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 2))
     planned_transactions: Mapped[Optional[int]] = mapped_column(Integer)
+    # ``recurring_cost`` rows: the frequency (monthly/quarterly/half_yearly/yearly,
+    # logical FK to masters.frequencies.code) the ``cost`` is distributed across —
+    # one installment per period from the milestone-timeline start over the project
+    # duration. NULL for every other cost type.
+    frequency_code: Mapped[Optional[str]] = mapped_column(String(32))
     # Display label for a standalone expense line (resource / transaction cost) —
     # the "milestone" name for that cost. NULL for fixed / one-time rows.
     line_label: Mapped[Optional[str]] = mapped_column(String(255))

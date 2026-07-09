@@ -57,6 +57,40 @@ class _VendorChip(BaseModel):
     name: Optional[str] = None
 
 
+class ProjectConfig(BaseModel):
+    """Project-specific config/checks bag (see ``Project.config``).
+
+    A grouped object of per-project values that are NOT driven by any master
+    catalog. The known checks are typed below; **unknown keys are preserved**
+    (``extra="allow"``) so new checks can be added over time without a schema
+    change. Every field is optional. Accepts camelCase OR snake_case on write;
+    camelizes on the wire (HAL layer) on read.
+
+    Known checks:
+      * ``half_day_hours`` — definition of a half day, in hours (e.g. 4).
+      * ``attendance_captured`` — whether attendance is captured for the project.
+      * ``sandwich_leave_applied`` — whether the sandwich-leave policy applies
+        (the calendar-date evaluation is a downstream concern; this is the flag).
+      * ``leaves_per_frequency_count`` + ``leaves_frequency`` — how many leave
+        days are granted per period, and the period (e.g. 2 per ``"quarterly"``).
+      * ``prorated_leaves_applied`` — whether leaves are prorated.
+    """
+
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        populate_by_name=True,
+        str_strip_whitespace=True,
+        extra="allow",
+    )
+
+    half_day_hours: Annotated[Optional[Decimal], Field(default=None, ge=0, le=24)] = None
+    attendance_captured: Optional[bool] = None
+    sandwich_leave_applied: Optional[bool] = None
+    leaves_per_frequency_count: Annotated[Optional[int], Field(default=None, ge=0)] = None
+    leaves_frequency: Annotated[Optional[str], Field(default=None, max_length=32)] = None
+    prorated_leaves_applied: Optional[bool] = None
+
+
 class ProjectResponse(ResponseModel):
     # Field order matches monolith ``format_project_response`` byte-for-byte:
     # id, projectCode, name, description, active, public, isPublic,
@@ -101,6 +135,13 @@ class ProjectResponse(ResponseModel):
     tax_percent: Optional[Decimal] = None
     total_project_value_incl_tax: Optional[Decimal] = None
     ccn_cap_percent: Optional[Decimal] = None
+
+    # Project-specific config/checks bag — grouped into ONE object and returned
+    # on every project response so the FE can read all per-project settings
+    # (half-day hours, attendance/leave policy flags, etc.) without a separate
+    # call. Set via ``PUT /projects/{uuid}/config``. Defaults to {} for rows
+    # that never configured it.
+    config: ProjectConfig = Field(default_factory=ProjectConfig)
 
     created_by: Optional[str] = None
     updated_by: Optional[str] = None

@@ -360,6 +360,12 @@ class MappingEvaluationResponse(BaseModel):
 
     severity_level: Optional[int] = None
     accumulated_points: Optional[Decimal] = None
+    # LD% this SLA's accumulated_points maps to on the project's LD chart
+    # (project_ld_bands: highest tier whose points_threshold <= points). Falls
+    # back to the RFP default chart when the project has none configured. None
+    # when accumulated_points is None. NOT capped here — the 10% cap applies to
+    # the whole-activity total only.
+    ld_percent: Optional[Decimal] = None
 
     # Project resolved from activity (via pmis-project-management). None when
     # project-management is unreachable or doesn't know this activity.
@@ -386,8 +392,14 @@ class ActivityEvaluationResponse(BaseModel):
     period_start: date
     period_end: date
     mapping_results: List[MappingEvaluationResponse] = Field(default_factory=list)
+    # Whole-activity LD roll-up: the total accumulated points across every
+    # evaluated SLA mapping, and the LD% that total maps to on the project's LD
+    # chart — CAPPED at 10% (the maximum LD allowed for the activity total).
+    # None when there are no evaluated mappings / no chart is resolvable.
+    total_points: Optional[Decimal] = None
+    total_ld_percent: Optional[Decimal] = None
     summary: Dict[str, Any] = Field(
         default_factory=dict,
         description="Aggregate counts: mappings_evaluated, mappings_skipped, "
-                    "and per-severity-level breakdown. No LD aggregation here.",
+                    "and per-severity-level breakdown.",
     )

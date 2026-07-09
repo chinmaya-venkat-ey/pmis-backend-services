@@ -33,17 +33,10 @@ _DEFAULT_SEVERITY_LEVELS = [
     (4,  8, "Critical / Severe Deviation"),
 ]
 
-# Standard MSAP scoring: points_threshold → (ld_percent, label).
-# Mirrors DEFAULT_POINTS_TO_LD in point_accumulation.py so a freshly-seeded
-# project produces the exact same output as a project that opts out of
-# customisation.
-_DEFAULT_LD_BANDS = [
-    (Decimal("0"), Decimal("0"),   "On Target"),
-    (Decimal("2"), Decimal("1"),   "Tier 1"),
-    (Decimal("4"), Decimal("2"),   "Tier 2"),
-    (Decimal("6"), Decimal("3"),   "Tier 3"),
-    (Decimal("8"), Decimal("4"),   "Tier 4 / Cap"),
-]
+# Standard MSAP scoring: points_threshold → (ld_percent, label). Single source
+# of truth lives in app.services.ld_bands (used by the LD lookup too) so a
+# freshly-seeded project and the points→LD% derivation never drift.
+from app.services.ld_bands import DEFAULT_LD_BANDS as _DEFAULT_LD_BANDS
 
 
 class MasterService:

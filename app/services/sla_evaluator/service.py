@@ -42,6 +42,7 @@ from app.schemas.sla_evaluation import (
     MetricObservation,
     ScoringSource,
 )
+from app.services.ld_bands import ld_percent_for_points, resolve_band_pairs
 from app.services.sla_evaluator.band_accumulation import BandAccumulationEvaluator
 from app.services.sla_evaluator.base import (
     EvaluatedResult,
@@ -152,11 +153,30 @@ class SlaEvaluatorService:
                 key = f"L{single.severity_level}"
                 severity_breakdown[key] = severity_breakdown.get(key, 0) + 1
 
+        # Change 2: whole-activity LD total — sum accumulated points across every
+        # evaluated SLA, map the total to the project's LD chart, and CAP at 10%
+        # (the maximum LD allowed for the activity total). None when nothing was
+        # evaluated.
+        total_points: Optional[Decimal] = None
+        total_ld_percent: Optional[Decimal] = None
+        if mapping_results:
+            total_points = sum(
+                (m.accumulated_points or Decimal("0") for m in mapping_results),
+                Decimal("0"),
+            )
+            total_ld_percent = ld_percent_for_points(
+                total_points, scoring["ld_band_pairs"],
+            )
+            if total_ld_percent is not None:
+                total_ld_percent = min(total_ld_percent, Decimal("10"))
+
         return ActivityEvaluationResponse(
             activity_id=activity_id,
             period_start=period_start,
             period_end=period_end,
             mapping_results=mapping_results,
+            total_points=total_points,
+            total_ld_percent=total_ld_percent,
             summary={
                 "mappings_evaluated": len(mapping_results),
                 "mappings_skipped": skipped,
@@ -814,13 +834,15 @@ class SlaEvaluatorService:
                                unknown there; we don't know the project so we
                                also fall back to RFP defaults.
 
-        project_ld_bands is intentionally not loaded here — LD computation
-        lives in the dedicated LD API.
+        ``ld_band_pairs`` is the project's points→LD% chart (project_ld_bands),
+        or the RFP default chart when the project has none / is unresolved — it
+        drives the ld_percent on each mapping and the whole-activity total.
         """
         result: Dict[str, Any] = {
             "project_id": None,
             "level_points_map": None,
             "severity_master_source": "default",
+            "ld_band_pairs": resolve_band_pairs([]),  # RFP default until resolved
         }
 
         if self.project_mgmt_client is None:
@@ -845,6 +867,10 @@ class SlaEvaluatorService:
         if level_map:
             result["level_points_map"] = level_map
             result["severity_master_source"] = "project"
+        # LD chart for this project (falls back to RFP default when unconfigured).
+        result["ld_band_pairs"] = resolve_band_pairs(
+            self.master_repo.list_ld_bands_for_project(project_id)
+        )
         return result
 
     def _build_level_points_map(
@@ -929,6 +955,12 @@ class SlaEvaluatorService:
 
         sev_source: ScoringSource = scoring["severity_master_source"]
 
+        # Change 1: derive this SLA's LD% from its accumulated points via the
+        # project's LD chart (uncapped — the 10% cap is a whole-activity concern).
+        ld_percent = ld_percent_for_points(
+            result.accumulated_points, scoring["ld_band_pairs"],
+        )
+
         return MappingEvaluationResponse(
             mapping_id=mapping.id,
             activity_id=mapping.activity_id,
@@ -940,6 +972,7 @@ class SlaEvaluatorService:
             period_end=resolved_end,
             severity_level=result.severity_level,
             accumulated_points=result.accumulated_points,
+            ld_percent=ld_percent,
             project_id=scoring["project_id"],
             severity_master_source=sev_source,
             breaches=result.breaches,

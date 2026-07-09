@@ -531,11 +531,35 @@ ALL_MASTERS_MANAGE_PERMISSIONS: Final[tuple[str, ...]] = (
 )
 
 
+# ---------------------------------------------------------------------------
+# TICKETING — owned by the ticketing service (a separate PEP: it calls
+# /authz/context and enforces these locally). Declared here in the canonical
+# catalog so they are seeded (u1a000000002 on fresh DBs, r029 on existing) and
+# held by the admin tiers. Granted to the `pmis_support` role; scoped GLOBAL
+# (role grants land in the flat `permissions[]` of /authz/context).
+# ---------------------------------------------------------------------------
+TICKETS_ASSIGN: Final[str] = "tickets:assign"                    # PATCH /tickets/{uuid} action=ASSIGN
+TICKETS_REASSIGN: Final[str] = "tickets:reassign"               # PATCH /tickets/{uuid} action=REASSIGN
+TICKETS_SEND_BACK: Final[str] = "tickets:send_back"             # PATCH /tickets/{uuid} action=SEND_BACK
+TICKETS_START_PROGRESS: Final[str] = "tickets:start_progress"   # PATCH /tickets/{uuid} action=START_PROGRESS
+TICKETS_RESOLVE: Final[str] = "tickets:resolve"                 # PATCH /tickets/{uuid} action=RESOLVE
+TICKETS_BULK_UPDATE: Final[str] = "tickets:bulk_update"         # POST  /tickets/_bulk
+ESCALATION_MATRIX_UPDATE: Final[str] = "escalation_matrix:update"  # PATCH /escalation/matrix/{uuid}
+WORKFLOW_UPDATE: Final[str] = "workflow:update"                 # POST  /workflow
+
+ALL_TICKETING_PERMISSIONS: Final[tuple[str, ...]] = (
+    TICKETS_ASSIGN, TICKETS_REASSIGN, TICKETS_SEND_BACK,
+    TICKETS_START_PROGRESS, TICKETS_RESOLVE, TICKETS_BULK_UPDATE,
+    ESCALATION_MATRIX_UPDATE, WORKFLOW_UPDATE,
+)
+
+
 ALL_PERMISSIONS: Final[tuple[str, ...]] = (
     *ALL_USER_DOMAIN_PERMISSIONS,
     *ALL_PROJECT_DOMAIN_PERMISSIONS,
     *ALL_MASTERS_READ_PERMISSIONS,
     *ALL_MASTERS_MANAGE_PERMISSIONS,
+    *ALL_TICKETING_PERMISSIONS,
 )
 
 

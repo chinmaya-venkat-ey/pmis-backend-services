@@ -21,7 +21,7 @@ controller (payment_calc); the service returns the ORM row.
 """
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import List, Optional
 
 from sqlalchemy import select
@@ -53,6 +53,28 @@ RECURRING_COST = "recurring_cost"
 EXPENSE_TYPES = (RESOURCE_COST, TRANSACTION_COST)
 # Cost types that live on a phase, carry milestones and bill via payment terms.
 PHASE_COST_TYPES = (FIXED, RESOURCE_COST, TRANSACTION_COST)
+
+
+def _dec(value) -> Decimal:
+    """Coerce None/int/float/str/Decimal → Decimal (None → 0)."""
+    if value is None:
+        return Decimal("0")
+    return value if isinstance(value, Decimal) else Decimal(str(value))
+
+
+def _tax_base(cost_type, cost, per_txn, planned) -> Decimal:
+    """The amount a tax PERCENT is applied to: transaction rows tax the
+    ``per_transaction_cost × planned_transactions`` value; every other type
+    taxes ``cost``."""
+    if cost_type == TRANSACTION_COST:
+        return _dec(per_txn) * _dec(planned)
+    return _dec(cost)
+
+
+def _amount_from_percent(base: Decimal, percent) -> Decimal:
+    """``base × percent / 100`` rounded to 2dp (paise)."""
+    return (base * _dec(percent) / Decimal("100")).quantize(
+        Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
 class ProjectCostItemService:
@@ -162,14 +184,27 @@ class ProjectCostItemService:
         # Position always server-assigned (append) — see TaskService.create.
         position = self.repo.next_position_for_project(project_id)
 
+        # Tax is stored as an exact amount (the calc uses tax_amount only). When
+        # the client sends a PERCENT instead, derive the amount here so the row
+        # total actually reflects it; keep the percent for the FE round-trip.
+        if payload.tax_percent is not None:
+            tax_amount = _amount_from_percent(
+                _tax_base(cost_type, payload.cost, per_txn, planned),
+                payload.tax_percent,
+            )
+            tax_percent = payload.tax_percent
+        else:
+            tax_amount = payload.tax_amount
+            tax_percent = None
+
         try:
             row = self.repo.create(
                 project_id=project_id,
                 cost_type_code=cost_type,
                 phase=phase,
                 cost=payload.cost,
-                tax_amount=payload.tax_amount,
-                tax_percent=payload.tax_percent,
+                tax_amount=tax_amount,
+                tax_percent=tax_percent,
                 per_transaction_cost=per_txn,
                 planned_transactions=planned,
                 line_label=label,
@@ -277,6 +312,37 @@ class ProjectCostItemService:
                 or "billed_mode" in updates or "billed_value" in updates):
             updates["billed_mode"] = None
             updates["billed_value"] = None
+
+        # Tax normalisation (see create): the calc uses tax_amount only, so keep
+        # it authoritative. If this patch supplied a PERCENT, derive the amount
+        # from the row's post-patch base; if it supplied an AMOUNT, clear any
+        # stale percent; if a percent-mode row's base moved without tax being
+        # re-sent, recompute so the stored amount tracks the new base.
+        if updates.get("tax_percent") is not None:
+            updates["tax_amount"] = _amount_from_percent(
+                _tax_base(
+                    effective_type,
+                    updates.get("cost", row.cost),
+                    updates.get("per_transaction_cost", row.per_transaction_cost),
+                    updates.get("planned_transactions", row.planned_transactions),
+                ),
+                updates["tax_percent"],
+            )
+        elif "tax_amount" in updates:
+            updates["tax_percent"] = None
+        elif row.tax_percent is not None and (
+            "cost" in updates or "per_transaction_cost" in updates
+            or "planned_transactions" in updates or "cost_type_code" in updates
+        ):
+            updates["tax_amount"] = _amount_from_percent(
+                _tax_base(
+                    effective_type,
+                    updates.get("cost", row.cost),
+                    updates.get("per_transaction_cost", row.per_transaction_cost),
+                    updates.get("planned_transactions", row.planned_transactions),
+                ),
+                row.tax_percent,
+            )
 
         if milestone_ids is not None and milestone_ids:
             self._validate_milestones(row.project_id, milestone_ids)

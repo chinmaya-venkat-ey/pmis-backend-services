@@ -146,15 +146,19 @@ class ProjectCostItemService:
             milestone_ids = []
         elif cost_type == RECURRING_COST:
             # Project-level scheduled cost: no phase, no milestones. Needs a cost
-            # amount and a frequency — its ``cost`` is distributed across those
-            # frequency periods as a payment schedule on the payment page.
+            # amount; its ``cost`` is distributed as a payment schedule on the
+            # payment page across the PROJECT's billing frequency
+            # (``project.payment_frequency_code``). A per-row frequency is
+            # OPTIONAL — kept only as a fallback for when the project frequency
+            # isn't set yet — so creating a recurring row no longer requires one.
             phase = None
             milestone_ids = []
             if payload.cost is None:
                 raise ValidationError("A recurring cost row needs a cost amount.")
-            freq = validate_frequency_code(self.db, payload.frequency_code)
-            if freq is None:
-                raise ValidationError("A recurring cost row needs a frequency.")
+            freq = (
+                validate_frequency_code(self.db, payload.frequency_code)
+                if payload.frequency_code else None
+            )
         elif cost_type == FIXED:
             if phase is None:
                 raise ValidationError("Phase is required for a fixed cost row.")
@@ -265,12 +269,11 @@ class ProjectCostItemService:
             effective_cost = updates.get("cost", row.cost)
             if effective_cost is None:
                 raise ValidationError("A recurring cost row needs a cost amount.")
-            if "frequency_code" in updates:
+            # Frequency is OPTIONAL (the schedule uses the project frequency);
+            # validate only if the client sent one.
+            if "frequency_code" in updates and updates["frequency_code"] is not None:
                 updates["frequency_code"] = validate_frequency_code(
                     self.db, updates["frequency_code"])
-            effective_freq = updates.get("frequency_code", row.frequency_code)
-            if effective_freq is None:
-                raise ValidationError("A recurring cost row needs a frequency.")
         elif effective_type == FIXED:
             if effective_phase is None:
                 raise ValidationError("Phase is required for a fixed cost row.")

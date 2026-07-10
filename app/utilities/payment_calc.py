@@ -355,7 +355,13 @@ def _distribute_by_formula(amount: Decimal, recipients, formula, acc: dict,
         v.update(per.get(r, {}))
         raw.append(_round_money(formula_eval.evaluate(formula, v)))
     remainder = _round_money(amount - sum(raw, _ZERO))
-    if remainder != _ZERO:
+    # Only absorb a ROUNDING-scale remainder (≤ 1 paise per recipient) into the
+    # last positive share. A larger gap means the shares intentionally sum to
+    # < 100% — e.g. a stale custom allocation whose recipient dropped out of
+    # "subsequent" — so that un-allocated portion is left with the carrying
+    # phase rather than silently dumped onto the last recipient.
+    rounding_tol = Decimal(n) * Decimal("0.01")
+    if remainder != _ZERO and abs(remainder) <= rounding_tol:
         idx = next((k for k in range(n - 1, -1, -1) if raw[k] > _ZERO), None)
         if idx is not None:  # absorb the rounding remainder into the last positive share
             raw[idx] = _round_money(raw[idx] + remainder)

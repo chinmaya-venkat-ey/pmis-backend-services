@@ -71,11 +71,12 @@ class PaymentPageController:
         )
 
     def update_ccn_cap(
-        self, project_id: str, ccn_cap_percent: Decimal, *,
+        self, project_id: str, ccn_cap_percent: Optional[Decimal], *,
+        additional_cost_type: Optional[str] = None,
         caller_user_id: Optional[str], caller_is_admin: bool = False,
     ) -> PaymentPageResponse:
         return self.service.update_ccn_cap(
-            project_id, ccn_cap_percent,
+            project_id, ccn_cap_percent, additional_cost_type=additional_cost_type,
             caller_user_id=caller_user_id, caller_is_admin=caller_is_admin,
         )
 

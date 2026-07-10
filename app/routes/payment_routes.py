@@ -311,6 +311,7 @@ def update_ccn_cap(
 ):
     return controller.update_ccn_cap(
         project_uuid, payload.ccn_cap_percent,
+        additional_cost_type=payload.additional_cost_type,
         caller_user_id=caller_user_id, caller_is_admin=caller_is_admin,
     )
 

@@ -355,12 +355,36 @@ class CarryForwardResponse(ResponseModel):
 
 # ======================================================================= ccn cap
 
+# Additional-cost kinds the finance panel can send. Only ``ccn`` is wired to
+# backend logic (it sets the CCN cap); ``qgr``/``aqp`` are accepted so their
+# UI works but carry no backend effect yet. Any other value is rejected.
+ADDITIONAL_COST_TYPES = ("ccn", "qgr", "aqp")
+
+
 class CcnCapUpdateRequest(BaseModel):
-    """PATCH /projects/{uuid}/ccn-cap."""
+    """PATCH /projects/{uuid}/ccn-cap.
+
+    The finance panel's additional-cost selector sends ``additionalCostType``
+    plus its input. ``ccn`` sets the cap (``ccnCapPercent`` required); ``qgr``
+    and ``aqp`` are accepted (via ``value``) but not yet acted on; unknown kinds
+    are rejected."""
 
     model_config = _REQUEST_CONFIG
 
-    ccn_cap_percent: Annotated[Decimal, Field(ge=0, le=100)]
+    additional_cost_type: Annotated[Optional[str], Field(default=None, max_length=16)] = None
+    ccn_cap_percent: Annotated[Optional[Decimal], Field(default=None, ge=0, le=100)] = None
+    value: Annotated[Optional[Decimal], Field(default=None, ge=0)] = None
+
+    @model_validator(mode="after")
+    def _validate(self) -> "CcnCapUpdateRequest":
+        if (self.additional_cost_type is not None
+                and self.additional_cost_type not in ADDITIONAL_COST_TYPES):
+            raise ValueError(
+                "additionalCostType must be one of: " + ", ".join(ADDITIONAL_COST_TYPES))
+        # CCN (the default when unspecified) requires a cap percent.
+        if self.additional_cost_type in (None, "ccn") and self.ccn_cap_percent is None:
+            raise ValueError("ccnCapPercent is required for the CCN cap.")
+        return self
 
 
 # ================================================================ phase frequency

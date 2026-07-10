@@ -229,20 +229,16 @@ class PaymentPageService:
                 a = alloc_map.get(r)
                 pct = Decimal(str(a.percent)) if (a is not None and a.percent is not None) else Decimal("0")
                 out[r] = {"recipientPercent": pct}
-            # Re-normalise the still-valid recipients to 100%. A saved custom
-            # allocation can go stale when a milestone-date edit reorders phases
-            # so that a recipient drops out of "subsequent" — the remaining
-            # shares then sum to < 100. Scaling them back to 100 distributes the
-            # leftover PROPORTIONALLY among the valid targets (e.g. 50/30 → 62.5/
-            # 37.5) instead of dumping the missing share onto the last one. It's
-            # a no-op in the normal case (shares already sum to 100). When
-            # nothing valid remains (total 0) it stays 0 and the phase carries
-            # nothing (see _distribute_by_formula).
-            total = sum((v["recipientPercent"] for v in out.values()), Decimal("0"))
-            if total > Decimal("0") and total != Decimal("100"):
-                scale = Decimal("100") / total
-                for v in out.values():
-                    v["recipientPercent"] = v["recipientPercent"] * scale
+            # Use the SAVED shares as-is — do NOT silently rescale to 100%. A
+            # custom allocation can go stale when a milestone-date edit reorders
+            # phases so a recipient drops out of "subsequent"; the remaining
+            # shares then sum to < 100. We deliberately carry only that
+            # explicitly-allocated portion (the dropped share is NOT
+            # redistributed onto the survivors) so the derived payout stays
+            # faithful to what the user saved. Re-saving the allocation
+            # re-normalises it across the current recipients (the write path,
+            # _normalise_cf_allocations). In the normal case shares already sum
+            # to 100 and this is unchanged.
             return out
         return {}
 
@@ -274,11 +270,11 @@ class PaymentPageService:
         """Populate ``schedule`` on each ``recurring_cost`` response row: its
         ``total`` distributed across the PROJECT's billing-frequency periods
         (``project.payment_frequency_code`` — the one frequency applied to the
-        whole project) from the milestone-timeline start over the project
-        duration (last installment absorbs the rounding remainder). The anchor
-        is the earliest live-milestone start (falling back to the project
-        start); the horizon is the project end (falling back to the latest
-        milestone end)."""
+        whole project, defaulting to yearly when the project has none set) from
+        the milestone-timeline start over the project duration (last installment
+        absorbs the rounding remainder). The anchor is the earliest
+        live-milestone start (falling back to the project start); the horizon is
+        the project end (falling back to the latest milestone end)."""
         recurring = [
             (ci, c) for ci, c in zip(cost_items, cost_rows)
             if c.cost_type_code == payment_calc.RECURRING_COST
@@ -289,11 +285,11 @@ class PaymentPageService:
         anchor = ms_start or project.start_date
         horizon = project.end_date or ms_end
         # ONE frequency applied to the whole project drives the recurring
-        # schedule; fall back to the row's own frequency only when the project
-        # has no frequency set yet.
+        # schedule; when the project has no frequency set yet, default to
+        # yearly (annual) rather than the row's own frequency.
         project_freq = project.payment_frequency_code
         for ci, c in recurring:
-            frequency = project_freq or c.frequency_code
+            frequency = project_freq or "yearly"
             ci.schedule = [
                 CfPoolInstallmentResponse(
                     period_index=inst["period_index"],
@@ -939,20 +935,26 @@ class PaymentPageService:
         return self._single_term_response(term_id)
 
     def update_ccn_cap(
-        self, project_id: str, ccn_cap_percent: Decimal, *,
+        self, project_id: str, ccn_cap_percent: Optional[Decimal], *,
+        additional_cost_type: Optional[str] = None,
         caller_user_id: Optional[str], caller_is_admin: bool = False,
     ) -> PaymentPageResponse:
         project = self._require_project(project_id)
         assert_payment_writable(project, caller_is_admin=caller_is_admin)
 
-        before = project.ccn_cap_percent
-        self.projects.update(project, updated_by=caller_user_id, ccn_cap_percent=ccn_cap_percent)
-        self.audit.write(
-            project_id=project_id, target_kind="project", target_id=project_id,
-            action="update_ccn_cap", actor_user_id=caller_user_id,
-            changes={"ccn_cap_percent": {"before": _s(before), "after": _s(ccn_cap_percent)}},
-        )
-        self.db.commit()
+        # Only the CCN kind is wired to backend logic. 'qgr'/'aqp' are accepted
+        # (so the FE selector works) but carry no effect yet — return the page
+        # unchanged. Unknown kinds are rejected at the schema layer.
+        if additional_cost_type in (None, "ccn"):
+            before = project.ccn_cap_percent
+            self.projects.update(
+                project, updated_by=caller_user_id, ccn_cap_percent=ccn_cap_percent)
+            self.audit.write(
+                project_id=project_id, target_kind="project", target_id=project_id,
+                action="update_ccn_cap", actor_user_id=caller_user_id,
+                changes={"ccn_cap_percent": {"before": _s(before), "after": _s(ccn_cap_percent)}},
+            )
+            self.db.commit()
         return self.build_page(project_id)
 
     # --------------------------------------------------------------- helpers

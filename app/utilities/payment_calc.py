@@ -139,13 +139,15 @@ def transaction_total(per_transaction_cost, planned_transactions) -> Decimal:
 
 def line_total(item) -> Decimal:
     """The money a cost row contributes: transaction-cost rows use
-    ``per_transaction_cost × planned_transactions``; every other type uses
-    ``cost + tax_amount``."""
+    ``per_transaction_cost × planned_transactions + tax_amount``; every other
+    type uses ``cost + tax_amount``. Tax is added for every type, so a
+    transaction line's total is inclusive of tax exactly like a fixed line."""
     if _code(item) == TRANSACTION_COST:
-        return transaction_total(
+        sub = transaction_total(
             getattr(item, "per_transaction_cost", None),
             getattr(item, "planned_transactions", None),
         )
+        return _round_money(sub + _to_decimal(getattr(item, "tax_amount", None)))
     return row_total(getattr(item, "cost", None), getattr(item, "tax_amount", None))
 
 

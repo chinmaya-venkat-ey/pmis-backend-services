@@ -272,11 +272,13 @@ class PaymentPageService:
 
     def _attach_recurring_schedules(self, project_id, project, cost_items, cost_rows) -> None:
         """Populate ``schedule`` on each ``recurring_cost`` response row: its
-        ``total`` distributed across its frequency periods from the milestone-
-        timeline start over the project duration (last installment absorbs the
-        rounding remainder). The anchor is the earliest live-milestone start
-        (falling back to the project start); the horizon is the project end
-        (falling back to the latest milestone end)."""
+        ``total`` distributed across the PROJECT's billing-frequency periods
+        (``project.payment_frequency_code`` — the one frequency applied to the
+        whole project) from the milestone-timeline start over the project
+        duration (last installment absorbs the rounding remainder). The anchor
+        is the earliest live-milestone start (falling back to the project
+        start); the horizon is the project end (falling back to the latest
+        milestone end)."""
         recurring = [
             (ci, c) for ci, c in zip(cost_items, cost_rows)
             if c.cost_type_code == payment_calc.RECURRING_COST
@@ -286,7 +288,12 @@ class PaymentPageService:
         ms_start, ms_end = self.milestones.project_date_span(project_id)
         anchor = ms_start or project.start_date
         horizon = project.end_date or ms_end
+        # ONE frequency applied to the whole project drives the recurring
+        # schedule; fall back to the row's own frequency only when the project
+        # has no frequency set yet.
+        project_freq = project.payment_frequency_code
         for ci, c in recurring:
+            frequency = project_freq or c.frequency_code
             ci.schedule = [
                 CfPoolInstallmentResponse(
                     period_index=inst["period_index"],
@@ -294,7 +301,7 @@ class PaymentPageService:
                     period_end=inst["period_end"],
                     amount=payment_calc.to_2dp(inst["amount"]),
                 )
-                for inst in cf_pool.build_schedule(ci.total, anchor, horizon, c.frequency_code)
+                for inst in cf_pool.build_schedule(ci.total, anchor, horizon, frequency)
             ]
 
     def build_page(self, project_id: str) -> PaymentPageResponse:
@@ -328,8 +335,10 @@ class PaymentPageService:
         term_acts = self.term_activities.list_for_terms([t.id for t in term_rows])
         ms_received = cf["milestone_received"]
 
+        # A row's own total = its line total: transaction rows are
+        # perTxn × planned + tax (not the stored cost, which is 0 for them).
         row_total_by_ci = {
-            c.id: payment_calc.row_total(c.cost, c.tax_amount) for c in cost_rows
+            c.id: payment_calc.line_total(c) for c in cost_rows
         }
 
         totals_d = payment_calc.contract_totals(cost_rows)
@@ -497,8 +506,10 @@ class PaymentPageService:
         milestones with their activity split."""
         ordered, _, cf, cost_rows, all_terms = self._load_phase_state(project_id)
         project_freq = self._require_project(project_id).payment_frequency_code
+        # A row's own total = its line total: transaction rows are
+        # perTxn × planned + tax (not the stored cost, which is 0 for them).
         row_total_by_ci = {
-            c.id: payment_calc.row_total(c.cost, c.tax_amount) for c in cost_rows
+            c.id: payment_calc.line_total(c) for c in cost_rows
         }
         ms_dates = self.cost_items.milestone_date_map(project_id)
         term_ms_ids = [t.milestone_id for t in term_rows if t.milestone_id]
@@ -991,7 +1002,14 @@ class PaymentPageService:
 
 def _cost_item_response(row, milestone_ids: List[str]) -> CostItemResponse:
     resp = CostItemResponse.model_validate(row)
-    # Transaction rows total = perTxn × planned; every other type = cost + tax.
+    # Transaction rows carry no stored ``cost`` (the value is perTxn × planned),
+    # so surface that computed subtotal as the row cost — otherwise the finance
+    # page shows 0 for the row.
+    if str(getattr(row, "cost_type_code", None) or "").lower() == payment_calc.TRANSACTION_COST:
+        resp.cost = payment_calc.transaction_total(
+            row.per_transaction_cost, row.planned_transactions
+        )
+    # Transaction rows total = perTxn × planned + tax; every other type = cost + tax.
     resp.total = payment_calc.line_total(row)
     resp.milestone_ids = list(milestone_ids)
     return resp

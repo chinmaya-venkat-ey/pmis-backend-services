@@ -153,10 +153,11 @@ class SlaEvaluatorService:
                 key = f"L{single.severity_level}"
                 severity_breakdown[key] = severity_breakdown.get(key, 0) + 1
 
-        # Change 2: whole-activity LD total — sum accumulated points across every
-        # evaluated SLA, map the total to the project's LD chart, and CAP at 10%
-        # (the maximum LD allowed for the activity total). None when nothing was
-        # evaluated.
+        # Change 2: whole-activity LD total — the LD% is CUMULATIVE across SLAs.
+        # Each evaluated SLA already derived its own ld_percent from its own points
+        # via the project's LD chart; the activity total is the SUM of those per-SLA
+        # percentages, CAPPED at 10% (the maximum LD allowed for the activity total).
+        # total_points is retained for display only. None when nothing was evaluated.
         total_points: Optional[Decimal] = None
         total_ld_percent: Optional[Decimal] = None
         if mapping_results:
@@ -164,11 +165,11 @@ class SlaEvaluatorService:
                 (m.accumulated_points or Decimal("0") for m in mapping_results),
                 Decimal("0"),
             )
-            total_ld_percent = ld_percent_for_points(
-                total_points, scoring["ld_band_pairs"],
-            )
-            if total_ld_percent is not None:
-                total_ld_percent = min(total_ld_percent, Decimal("10"))
+            per_sla_ld = [
+                m.ld_percent for m in mapping_results if m.ld_percent is not None
+            ]
+            if per_sla_ld:
+                total_ld_percent = min(sum(per_sla_ld), Decimal("10"))
 
         return ActivityEvaluationResponse(
             activity_id=activity_id,

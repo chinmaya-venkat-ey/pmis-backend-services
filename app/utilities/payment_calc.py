@@ -216,6 +216,18 @@ def phase_base_total(items, phase) -> Decimal:
     return _round_money(total)
 
 
+def phase_recurring_total(items, phase) -> Decimal:
+    """Σ ``line_total`` of the RECURRING cost rows in ``phase`` — the combined
+    recurring amount that phase spreads across its date span as a schedule
+    (recurring rows do not bill via percentage terms, so this is NOT part of
+    ``phase_base_total``). 2dp."""
+    total = _ZERO
+    for it in items:
+        if _code(it) == RECURRING_COST and getattr(it, "phase", None) == phase:
+            total += line_total(it)
+    return _round_money(total)
+
+
 def one_time_total(items) -> Decimal:
     """Σ ``row_total`` of the ONE-TIME cost rows. Folded into the first phase's
     payment base (see ``phase_payment_base``)."""

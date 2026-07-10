@@ -19,6 +19,11 @@ from app.utilities.positions import lock_position_scope
 # Cost types that live on a phase, carry milestones and bill via payment terms
 # (fixed + the now-first-class resource / transaction lines).
 _PHASE_COST_TYPES = ("fixed", "resource_cost", "transaction_cost")
+# Cost types whose milestones define a phase's DATE SPAN. Recurring rows sit on
+# a phase (with a milestone) and their span drives the recurring schedule, but
+# they do NOT bill via payment terms — so they're included here for date bounds
+# yet excluded from the term-generating maps above.
+_PHASE_DATED_TYPES = _PHASE_COST_TYPES + ("recurring_cost",)
 
 
 class ProjectCostItemRepository:
@@ -141,9 +146,11 @@ class ProjectCostItemRepository:
 
     def phase_milestone_date_bounds(self, project_id: str) -> dict:
         """Return ``{phase: (min_start_date, max_end_date)}`` over the milestones
-        bound to LIVE FIXED cost rows in this project — i.e. each phase's date
-        span (earliest milestone start, latest milestone end). Drives the
-        per-phase cycle-count display. Phases with no live milestone are absent."""
+        bound to LIVE phase-dated cost rows (fixed / resource / transaction /
+        recurring) in this project — i.e. each phase's date span (earliest
+        milestone start, latest milestone end). Drives the per-phase cycle-count
+        display and the recurring schedule span. Phases with no live milestone
+        are absent."""
         rows = self.db.execute(
             select(
                 ProjectCostItem.phase,
@@ -155,7 +162,7 @@ class ProjectCostItemRepository:
             .join(Milestone, Milestone.id == CostItemMilestone.milestone_id)
             .where(ProjectCostItem.project_id == project_id)
             .where(ProjectCostItem.deleted_at.is_(None))
-            .where(ProjectCostItem.cost_type_code.in_(_PHASE_COST_TYPES))
+            .where(ProjectCostItem.cost_type_code.in_(_PHASE_DATED_TYPES))
             .where(ProjectCostItem.phase.is_not(None))
             .where(Milestone.deleted_at.is_(None))
             .group_by(ProjectCostItem.phase)

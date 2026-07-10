@@ -266,40 +266,6 @@ class PaymentPageService:
 
     # ------------------------------------------------------------------ read
 
-    def _attach_recurring_schedules(self, project_id, project, cost_items, cost_rows) -> None:
-        """Populate ``schedule`` on each ``recurring_cost`` response row: its
-        ``total`` distributed across the PROJECT's billing-frequency periods
-        (``project.payment_frequency_code`` — the one frequency applied to the
-        whole project, defaulting to yearly when the project has none set) from
-        the milestone-timeline start over the project duration (last installment
-        absorbs the rounding remainder). The anchor is the earliest
-        live-milestone start (falling back to the project start); the horizon is
-        the project end (falling back to the latest milestone end)."""
-        recurring = [
-            (ci, c) for ci, c in zip(cost_items, cost_rows)
-            if c.cost_type_code == payment_calc.RECURRING_COST
-        ]
-        if not recurring:
-            return
-        ms_start, ms_end = self.milestones.project_date_span(project_id)
-        anchor = ms_start or project.start_date
-        horizon = project.end_date or ms_end
-        # ONE frequency applied to the whole project drives the recurring
-        # schedule; when the project has no frequency set yet, default to
-        # yearly (annual) rather than the row's own frequency.
-        project_freq = project.payment_frequency_code
-        for ci, c in recurring:
-            frequency = project_freq or "yearly"
-            ci.schedule = [
-                CfPoolInstallmentResponse(
-                    period_index=inst["period_index"],
-                    period_start=inst["period_start"],
-                    period_end=inst["period_end"],
-                    amount=payment_calc.to_2dp(inst["amount"]),
-                )
-                for inst in cf_pool.build_schedule(ci.total, anchor, horizon, frequency)
-            ]
-
     def build_page(self, project_id: str) -> PaymentPageResponse:
         project = self._require_project(project_id)
         project_freq = project.payment_frequency_code  # ONE frequency per project
@@ -350,11 +316,9 @@ class PaymentPageService:
         cost_items = [
             _cost_item_response(c, ms_map.get(c.id, [])) for c in cost_rows
         ]
-        # recurring_cost rows: attach the dated installment schedule — the row's
-        # total spread across its frequency periods from the milestone-timeline
-        # start over the project duration (mirrors the carry-forward pool). The
-        # schedule is derived (never stored) so it stays reactive to date edits.
-        self._attach_recurring_schedules(project_id, project, cost_items, cost_rows)
+        # Recurring costs are now summed PER PHASE and shown as a phase-level
+        # schedule (see the phase loop below), not per cost-item over the project
+        # duration — so the per-row schedule stays empty.
 
         # Last-phase strict full utilisation: null milestones split the
         # remaining (100 − Σ explicit) evenly so the phase always totals 100%
@@ -394,6 +358,23 @@ class PaymentPageService:
                 term_responses.append(resp)
 
             start_date, end_date = phase_dates.get(phase, (None, None))
+            # Recurring costs on this phase: their combined total spread across
+            # the phase's date span at the project frequency (default yearly) —
+            # a dropdown schedule like the carry-forward pool. Not billed via the
+            # percentage terms, so it's a separate overlay on top of the base.
+            recurring_total = payment_calc.phase_recurring_total(cost_rows, phase)
+            recurring_sched = cf_pool.build_schedule(
+                recurring_total, start_date, end_date, project_freq or "yearly",
+            ) if recurring_total > Decimal("0") else []
+            recurring_pool = [
+                CfPoolInstallmentResponse(
+                    period_index=inst["period_index"],
+                    period_start=inst["period_start"],
+                    period_end=inst["period_end"],
+                    amount=payment_calc.to_2dp(inst["amount"]),
+                )
+                for inst in recurring_sched
+            ]
             # Milestone-wise inflow to THIS phase = Σ add-ons paid to its
             # milestones (proportional to its milestone count).
             received_ms = sum(
@@ -438,10 +419,15 @@ class PaymentPageService:
                 one_time_mode=getattr(cfg, "one_time_mode", None),
                 one_time_value=getattr(cfg, "one_time_value", None),
                 expense_total=expense_total,
-                # Full billable base of the phase: fixed + resource + transaction
-                # (+ any one-time allocation + carry-forward received). Milestone
-                # %s pay out of this, and its unallocated remainder carries forward.
-                phase_total=payment_calc.to_2dp(effective_total),
+                # Full value of the phase: the billable base (fixed + resource +
+                # transaction + one-time allocated + carry-forward received) that
+                # milestone %s pay out of, PLUS the phase's recurring total (which
+                # pays via its own schedule below).
+                phase_total=payment_calc.to_2dp(effective_total + recurring_total),
+                recurring_total=recurring_total,
+                recurring_per_period=(recurring_pool[0].amount
+                                      if recurring_pool else Decimal("0.00")),
+                recurring_schedule=recurring_pool,
                 start_date=start_date,
                 end_date=end_date,
                 cycle_count=_safe_cycle_count(start_date, end_date, project_freq),

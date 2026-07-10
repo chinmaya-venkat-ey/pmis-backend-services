@@ -145,14 +145,16 @@ class ProjectCostItemService:
             phase = None
             milestone_ids = []
         elif cost_type == RECURRING_COST:
-            # Project-level scheduled cost: no phase, no milestones. Needs a cost
-            # amount; its ``cost`` is distributed as a payment schedule on the
-            # payment page across the PROJECT's billing frequency
-            # (``project.payment_frequency_code``). A per-row frequency is
-            # OPTIONAL — kept only as a fallback for when the project frequency
-            # isn't set yet — so creating a recurring row no longer requires one.
-            phase = None
-            milestone_ids = []
+            # Recurring cost now lives ON A PHASE with exactly one milestone (like
+            # a fixed row). Its value is added to that phase and its ``cost`` is
+            # distributed across the phase's date span as a schedule (shown at the
+            # phase level), NOT via percentage payment terms. A per-row frequency
+            # is OPTIONAL — the schedule uses the project frequency (default
+            # yearly when the project has none set).
+            if phase is None:
+                raise ValidationError("Phase is required for a recurring cost row.")
+            if len(milestone_ids) != 1:
+                raise ValidationError("A recurring cost row needs exactly one milestone.")
             if payload.cost is None:
                 raise ValidationError("A recurring cost row needs a cost amount.")
             freq = (
@@ -261,11 +263,14 @@ class ProjectCostItemService:
             effective_phase = None
             milestone_ids = []  # one-time clears its bundle
         elif effective_type == RECURRING_COST:
-            # Project-level scheduled cost: no phase, no milestones; needs a cost
-            # amount + a frequency (its schedule is computed on the payment page).
-            updates["phase"] = None
-            effective_phase = None
-            milestone_ids = []
+            # Recurring cost lives on a phase with exactly one milestone (its
+            # schedule spans the phase's date span). Needs a cost amount;
+            # frequency is optional (schedule uses the project frequency).
+            if effective_phase is None:
+                raise ValidationError("Phase is required for a recurring cost row.")
+            effective_ms = milestone_ids if milestone_ids is not None else self.repo.list_milestone_ids(row.id)
+            if len(effective_ms) != 1:
+                raise ValidationError("A recurring cost row needs exactly one milestone.")
             effective_cost = updates.get("cost", row.cost)
             if effective_cost is None:
                 raise ValidationError("A recurring cost row needs a cost amount.")

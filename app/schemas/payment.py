@@ -443,9 +443,17 @@ class PhaseBlock(ResponseModel):
     # Resource + transaction subtotal in this phase (informational — already part
     # of phaseBaseTotal / effectivePhaseTotal, billed via the milestone terms).
     expense_total: Decimal = Decimal("0.00")
-    # The phase's full billable base = effectivePhaseTotal (fixed + resource +
-    # transaction + one-time allocated + carry-forward received).
+    # The phase's full value = effectivePhaseTotal (fixed + resource +
+    # transaction + one-time allocated + carry-forward received) PLUS the phase's
+    # recurring total (see recurring_total).
     phase_total: Decimal = Decimal("0.00")
+    # Recurring costs added to this phase: their combined total, and that total
+    # distributed across the phase's date span at the project frequency — shown
+    # as a dropdown schedule like the carry-forward pool. Recurring rows do NOT
+    # bill via percentage payment terms; they pay out as this schedule.
+    recurring_total: Decimal = Decimal("0.00")
+    recurring_per_period: Decimal = Decimal("0.00")
+    recurring_schedule: List[CfPoolInstallmentResponse] = Field(default_factory=list)
     # Phase date span — earliest milestone start / latest milestone end in the
     # phase (null if the phase has no live milestone). Inputs to the cycle count.
     start_date: Optional[datetime] = None

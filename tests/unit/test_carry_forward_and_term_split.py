@@ -214,16 +214,19 @@ def test_custom_all_zero_recipients_carries_nothing():
 
 # ------------------------- custom re-normalisation (stale-after-reorder) -----
 
-def test_cf_recipient_vars_renormalises_stale_custom():
+def test_cf_recipient_vars_keeps_stale_custom_as_saved():
     # Carrying from 'A' (idx 0); subsequent = [B, C]. A 3rd recipient dropped out
-    # of "subsequent" after a reorder, so the stored shares now sum to 80 — they
-    # are scaled back to 100 (50/30 -> 62.5/37.5), not dumped on the last one.
+    # of "subsequent" after a reorder, so the stored shares now sum to 80. We
+    # KEEP them exactly as saved (50/30) — NOT silently rescaled to 100 — so the
+    # payout stays faithful to what the user configured; the dropped recipient's
+    # share is simply not carried (see _distribute_by_formula's rounding-only
+    # remainder absorption).
     svc = PaymentPageService(MagicMock())
     alloc_map = {"B": SimpleNamespace(percent=Decimal("50")),
                  "C": SimpleNamespace(percent=Decimal("30"))}
     out = svc._build_cf_recipient_vars("phase", "custom", 0, ["A", "B", "C"], {}, {}, alloc_map)
-    assert out["B"]["recipientPercent"] == Decimal("62.5")
-    assert out["C"]["recipientPercent"] == Decimal("37.5")
+    assert out["B"]["recipientPercent"] == Decimal("50")
+    assert out["C"]["recipientPercent"] == Decimal("30")
 
 
 def test_cf_recipient_vars_custom_noop_when_full():

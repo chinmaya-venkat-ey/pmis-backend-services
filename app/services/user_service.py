@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from app.core.errors import (
     CallerCannotModifyTargetError,
+    ConflictError,
     ForbiddenError,
     LastSuperAdminLockoutError,
     UserEmailAlreadyInUseError,
@@ -270,6 +271,11 @@ class UserService:
                 touched_fields=touched,
             )
 
+        # Bug #139: block DEACTIVATION (status -> inactive) while the user is
+        # still assigned to active projects — the caller must unassign them first.
+        if updates.get("status") == "inactive" and target.status != "inactive":
+            self._assert_not_on_active_projects(target.id, "deactivate")
+
         if "email" in updates and updates["email"] is not None:
             email = str(updates["email"])
             existing = self.repo.get_by_email(email, include_deleted=True)
@@ -469,6 +475,21 @@ class UserService:
 
     # ------------------------------------------------------------------ delete / restore
 
+    def _assert_not_on_active_projects(self, user_id: str, action: str) -> None:
+        """Bug #139: a user cannot be deleted or deactivated while still holding
+        a role assignment on an active (non-closed/completed, non-deleted)
+        project. Block and name the projects so the caller can unassign first."""
+        projects = self.assignments.list_active_projects_for_user(user_id)
+        if projects:
+            names = ", ".join(p.name for p in projects[:10])
+            more = "" if len(projects) <= 10 else f" (+{len(projects) - 10} more)"
+            raise ConflictError(
+                f"Cannot {action} this user — they are assigned to "
+                f"{len(projects)} active project(s): {names}{more}. Remove their "
+                f"project assignments first.",
+                details={"projects": [{"id": p.id, "name": p.name} for p in projects]},
+            )
+
     def delete(self, user_id: str, *, caller_user_id: str, caller_is_admin: bool, request=None):
         """Doc-44 Flow 3 (round-7): admin/super_admin globally OR
         org_admin scoped to the target's vendor.
@@ -483,6 +504,8 @@ class UserService:
             raise LastSuperAdminLockoutError(
                 "Cannot delete the only remaining super_admin",
             )
+        # Bug #139: block DELETE while the user is on active projects.
+        self._assert_not_on_active_projects(target.id, "delete")
         self.repo.soft_delete(target, deleted_by_user_id=caller_user_id)
         # Revoke refresh tokens
         self.refresh_repo.revoke_all_for_user(target.id)

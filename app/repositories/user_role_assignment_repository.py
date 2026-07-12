@@ -11,12 +11,31 @@ from app.models.role import Role
 from app.models.user import User
 from app.models.user_role_assignment import UserRoleAssignment
 
+# Bug #139: projects in these statuses (or soft-deleted) don't block a
+# user's delete/deactivate — only "active" projects do.
+_HIDDEN_PROJECT_STATUSES = {"closed", "completed"}
+
 
 class UserRoleAssignmentRepository:
     def __init__(self, db: Session):
         self.db = db
 
     # ------------------------------------------------------------------ reads
+
+    def list_active_projects_for_user(self, user_id: str) -> List[Project]:
+        """Bug #139: distinct ACTIVE projects (non-closed/completed, non-deleted)
+        the user holds a project-scoped role assignment on. Used to BLOCK
+        delete/deactivate while the user is still assigned to active projects."""
+        stmt = (
+            select(Project)
+            .join(UserRoleAssignment, UserRoleAssignment.project_id == Project.id)
+            .where(UserRoleAssignment.user_id == user_id)
+            .where(UserRoleAssignment.project_id.is_not(None))
+            .where(Project.deleted_at.is_(None))
+            .where(Project.status.notin_(_HIDDEN_PROJECT_STATUSES))
+            .distinct()
+        )
+        return list(self.db.execute(stmt).scalars().all())
 
     def get_by_id(self, assignment_id: int) -> Optional[UserRoleAssignment]:
         return self.db.get(UserRoleAssignment, assignment_id)

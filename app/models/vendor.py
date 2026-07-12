@@ -23,7 +23,7 @@ from datetime import datetime
 from typing import Optional
 from uuid import uuid4
 
-from sqlalchemy import Boolean, DateTime, Index, String, Text
+from sqlalchemy import Boolean, DateTime, Index, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -32,8 +32,14 @@ from app.db import Base
 class Vendor(Base):
     __tablename__ = "vendors"
     __table_args__ = (
-        Index("ix_vendors_name", "name", unique=True),
-        Index("ix_vendors_vendor_code", "vendor_code", unique=True),
+        # Bug #138 (org side): name/vendor_code are unique among LIVE rows only
+        # — a deleted vendor (deleted_at set) frees its value for reuse; a
+        # deactivated vendor (active=false, deleted_at NULL) keeps it reserved.
+        # See migration m1a000000012 (mirrors user-svc r020).
+        Index("ix_vendors_name", "name", unique=True,
+              postgresql_where=text("deleted_at IS NULL")),
+        Index("ix_vendors_vendor_code", "vendor_code", unique=True,
+              postgresql_where=text("deleted_at IS NULL")),
         Index("ix_vendors_active", "active"),
         Index("ix_vendors_email", "email"),
         Index("ix_vendors_deleted_at", "deleted_at"),

@@ -42,6 +42,14 @@ class VendorRepository:
         stmt = select(Vendor).where(Vendor.vendor_code == vendor_code)
         return self.db.execute(stmt).scalars().first()
 
+    def get_live_by_vendor_code(self, vendor_code: str) -> Optional[Vendor]:
+        """Live-only (non-deleted) lookup by code — used by the restore
+        conflict check (Bug #138 org side)."""
+        stmt = select(Vendor).where(
+            Vendor.vendor_code == vendor_code, Vendor.deleted_at.is_(None),
+        )
+        return self.db.execute(stmt).scalars().first()
+
     def list_(
         self,
         *,

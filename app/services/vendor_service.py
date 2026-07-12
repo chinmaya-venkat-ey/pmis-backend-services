@@ -104,9 +104,27 @@ class VendorService:
         self.db.commit()
         return row
 
+    def _assert_not_on_active_projects(self, vendor_id: str, action: str) -> None:
+        """Bug #139: an organization cannot be deleted or deactivated while it
+        is still assigned to active (non-closed/completed, non-deleted) projects.
+        Block the action and name the projects so the user can unassign first."""
+        projects = self.repo.list_projects_for_vendor(vendor_id)
+        if projects:
+            names = ", ".join(p.name for p in projects[:10])
+            more = "" if len(projects) <= 10 else f" (+{len(projects) - 10} more)"
+            raise CatalogEntryConflictError(
+                f"Cannot {action} this organization — it is assigned to "
+                f"{len(projects)} active project(s): {names}{more}. Remove it "
+                f"from these projects first.",
+                details={"projects": [{"id": p.id, "name": p.name} for p in projects]},
+            )
+
     def update(self, vendor_id: str, payload: VendorUpdateRequest) -> Vendor:
         row = self._get_editable(vendor_id)
         updates = payload.model_dump(exclude_unset=True, exclude={"project_ids"})
+        # Bug #139: block DEACTIVATION (active -> false) while on active projects.
+        if updates.get("active") is False and row.active:
+            self._assert_not_on_active_projects(vendor_id, "deactivate")
         if updates.get("name") and updates["name"] != row.name:
             clash = self.repo.get_by_name(updates["name"])
             if clash is not None and clash.id != row.id:
@@ -132,6 +150,8 @@ class VendorService:
 
     def delete(self, vendor_id: str, *, deleted_by_user_id: str) -> Vendor:
         row = self._get_editable(vendor_id)
+        # Bug #139: block DELETE while the org is on active projects.
+        self._assert_not_on_active_projects(vendor_id, "delete")
         self.repo.soft_delete(row, deleted_by_user_id=deleted_by_user_id)
         self.db.commit()
         return row
@@ -141,6 +161,32 @@ class VendorService:
         row = self.repo.get_by_id_any(vendor_id)
         if row is None:
             raise CatalogEntryNotFoundError(f"Vendor {vendor_id!r} not found")
-        self.repo.restore(row)
-        self.db.commit()
+        # Bug #138 (org side): a deleted vendor freed its name/code, so a NEW
+        # live vendor may have taken them. In that case it cannot be restored
+        # until the conflict is resolved — surface a clean 409, not a raw DB
+        # error. (get_by_name is live-only; add a live-only vendor_code check.)
+        name_clash = self.repo.get_by_name(row.name)
+        if name_clash is not None and name_clash.id != row.id:
+            raise CatalogEntryConflictError(
+                f"Vendor cannot be restored — the name {row.name!r} is already "
+                f"in use by another vendor. Rename or remove that vendor first.",
+                details={"name": row.name},
+            )
+        code_clash = self.repo.get_live_by_vendor_code(row.vendor_code)
+        if code_clash is not None and code_clash.id != row.id:
+            raise CatalogEntryConflictError(
+                f"Vendor cannot be restored — the code {row.vendor_code!r} is "
+                f"already in use by another vendor.",
+                details={"vendor_code": row.vendor_code},
+            )
+        try:
+            self.repo.restore(row)
+            self.db.commit()
+        except IntegrityError:  # pragma: no cover - defensive (race with a concurrent create)
+            self.db.rollback()
+            raise CatalogEntryConflictError(
+                f"Vendor cannot be restored — a unique field (name/code) is "
+                f"already in use by another vendor.",
+                details={"vendor_id": vendor_id},
+            )
         return row

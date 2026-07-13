@@ -67,7 +67,11 @@ class ProjectConfig(BaseModel):
     camelizes on the wire (HAL layer) on read.
 
     Known checks:
-      * ``half_day_hours`` — definition of a half day, in hours (e.g. 4).
+      * ``half_day`` — definition of a half day, in hours. Integer only,
+        strictly ``> 0`` and ``< 24`` (e.g. 4).
+      * ``full_day`` — definition of a full working day, in hours. Integer
+        only, strictly ``> 0`` and ``< 24`` (e.g. 8).
+      * ``saturday_working`` — whether Saturday is a working day.
       * ``attendance_captured`` — whether attendance is captured for the project.
       * ``sandwich_leave_applied`` — whether the sandwich-leave policy applies
         (the calendar-date evaluation is a downstream concern; this is the flag).
@@ -83,7 +87,11 @@ class ProjectConfig(BaseModel):
         extra="allow",
     )
 
-    half_day_hours: Annotated[Optional[Decimal], Field(default=None, ge=0, le=24)] = None
+    # Integer-hours definitions of a half / full working day. Both are
+    # constrained to positive integers strictly between 0 and 24.
+    half_day: Annotated[Optional[int], Field(default=None, gt=0, lt=24)] = None
+    full_day: Annotated[Optional[int], Field(default=None, gt=0, lt=24)] = None
+    saturday_working: Optional[bool] = None
     attendance_captured: Optional[bool] = None
     sandwich_leave_applied: Optional[bool] = None
     leaves_per_frequency_count: Annotated[Optional[int], Field(default=None, ge=0)] = None
@@ -136,12 +144,17 @@ class ProjectResponse(ResponseModel):
     total_project_value_incl_tax: Optional[Decimal] = None
     ccn_cap_percent: Optional[Decimal] = None
 
-    # Project-specific config/checks bag — grouped into ONE object and returned
-    # on every project response so the FE can read all per-project settings
-    # (half-day hours, attendance/leave policy flags, etc.) without a separate
-    # call. Set via ``PUT /projects/{uuid}/config``. Defaults to {} for rows
-    # that never configured it.
-    config: ProjectConfig = Field(default_factory=ProjectConfig)
+    # Project-specific leave/attendance config bag — grouped into ONE object and
+    # returned on every project response as ``leaveConfig`` so the FE can read all
+    # per-project settings (half/full-day hours, attendance/leave policy flags,
+    # etc.) without a separate call. Set via ``PUT /projects/{uuid}/config``.
+    # Defaults to {} for rows that never configured it. The underlying JSONB
+    # column / config endpoints keep the name ``config``; only this response
+    # field is exposed as ``leaveConfig`` (populated from ``row.config`` via the
+    # validation alias).
+    leave_config: ProjectConfig = Field(
+        default_factory=ProjectConfig, validation_alias="config",
+    )
 
     created_by: Optional[str] = None
     updated_by: Optional[str] = None

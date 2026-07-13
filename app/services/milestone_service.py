@@ -171,6 +171,8 @@ class MilestoneService:
             position=position,
             category=category,
             ccn_value=ccn_value,
+            is_resource_based=payload.is_resource_based,
+            is_transaction_based=payload.is_transaction_based,
             created_by=caller_user_id,
             updated_by=caller_user_id,
         )

@@ -82,6 +82,10 @@ class MilestoneResponse(ResponseModel):
     # backfilled rows surface as ``category='original'`` / ``ccnValue=0``.
     category: str = "original"
     ccn_value: Decimal = Decimal("0")
+    # Delivery-model flags. Returned on every milestone response; backfilled
+    # rows surface as ``isResourceBased=false`` / ``isTransactionBased=false``.
+    is_resource_based: bool = False
+    is_transaction_based: bool = False
     # Inline first comment that the MULTIPART arm of /create creates when
     # ``body`` and/or ``files`` are supplied alongside the entity fields.
     # ``None`` (and the wrap layer drops the key) on the JSON arm and on
@@ -119,6 +123,11 @@ class MilestoneCreateRequest(BaseModel):
     # rejects unknown category strings (422 raw FastAPI shape).
     category: Annotated[Optional[str], Field(default=None, max_length=16)]
     ccn_value: Annotated[Optional[Decimal], Field(default=None, ge=0)]
+    # Delivery-model flags. ``is_resource_based`` (isResourceBased) is
+    # MANDATORY on create; ``is_transaction_based`` (isTransactionBased) is
+    # optional and defaults to false. Both persist to the milestone row.
+    is_resource_based: bool
+    is_transaction_based: bool = False
 
     @field_validator("priority", mode="before")
     @classmethod
@@ -197,6 +206,10 @@ class MilestoneUpdateRequest(BaseModel):
     # updates only when the existing row's category is 'ccn'.
     category: Annotated[Optional[str], Field(default=None, max_length=16)]
     ccn_value: Annotated[Optional[Decimal], Field(default=None, ge=0)]
+    # Delivery-model flags — both optional on PATCH (partial update). Omitted
+    # keys leave the stored value untouched.
+    is_resource_based: Optional[bool] = None
+    is_transaction_based: Optional[bool] = None
 
     @field_validator("priority", mode="before")
     @classmethod

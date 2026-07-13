@@ -40,6 +40,10 @@ def _multipart_int_prop(description: str = "") -> Dict[str, Any]:
     return {"type": "integer", "minimum": 0, "description": description}
 
 
+def _multipart_bool_prop(description: str = "") -> Dict[str, Any]:
+    return {"type": "boolean", "description": description}
+
+
 def _multipart_json_array_prop(description: str) -> Dict[str, Any]:
     """Multipart can't carry typed arrays — FE JSON-encodes them as a string."""
     return {"type": "string", "description": description}
@@ -142,6 +146,12 @@ MILESTONE_MULTIPART_PROPERTIES: Dict[str, Dict[str, Any]] = {
     "position": _multipart_int_prop("Sibling position (1-indexed)."),
     "status": _multipart_string_prop("not_completed / completed (or catalog code)."),
     "priority": _multipart_string_prop(),
+    "isResourceBased": _multipart_bool_prop(
+        "Mandatory. Resource/man-month driven milestone (true/false)."
+    ),
+    "isTransactionBased": _multipart_bool_prop(
+        "Optional (default false). Per-transaction driven milestone (true/false)."
+    ),
     "dependsOn": _multipart_json_array_prop(
         "JSON-encoded array of milestone UUIDs this depends on."
     ),

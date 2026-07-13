@@ -101,6 +101,20 @@ class Milestone(Base):
         server_default=text("false"), default=False,
     )
 
+    # Delivery-model flags (see migration p1a000000027). ``is_resource_based``
+    # marks the milestone as resource/man-month driven; ``is_transaction_based``
+    # marks it as per-transaction driven. Both are non-nullable booleans that
+    # default to false. On the wire ``isResourceBased`` is mandatory (client must
+    # send it on create) and ``isTransactionBased`` is optional.
+    is_resource_based: Mapped[bool] = mapped_column(
+        Boolean, nullable=False,
+        server_default=text("false"), default=False,
+    )
+    is_transaction_based: Mapped[bool] = mapped_column(
+        Boolean, nullable=False,
+        server_default=text("false"), default=False,
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=datetime.utcnow
     )

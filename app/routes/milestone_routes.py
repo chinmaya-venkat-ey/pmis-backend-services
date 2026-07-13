@@ -72,6 +72,7 @@ async def _create_multipart(
                 "description", "startDate", "endDate",
                 "actualStartDate", "actualEndDate",
                 "status", "priority", "paymentType",
+                "isResourceBased", "isTransactionBased",
             ),
             int_keys=("position",),
             array_keys=("dependsOn", "vendors", "vendorIds"),
@@ -92,6 +93,11 @@ async def _create_multipart(
         "priority": fields.get("priority"),
         "payment_type": fields.get("paymentType"),
         "position": fields.get("position"),
+        # Delivery-model flags — passed through as strings; Pydantic coerces
+        # "true"/"false" to bool. ``isResourceBased`` is mandatory, so when it
+        # is absent the (dropped) key makes MilestoneCreateRequest raise 422.
+        "is_resource_based": fields.get("isResourceBased"),
+        "is_transaction_based": fields.get("isTransactionBased"),
         "depends_on": fields.get("dependsOn") or [],
         # Multipart wire used ``vendors`` in monolith; accept either alias.
         "vendor_ids": fields.get("vendorIds") or fields.get("vendors") or [],
@@ -126,7 +132,7 @@ async def _create_multipart(
     dependencies=[Depends(require_project_permission(MILESTONES_CREATE))],
     openapi_extra=dual_mode_request_body(
         MilestoneCreateRequest,
-        multipart_required=("name", "startDate", "endDate"),
+        multipart_required=("name", "startDate", "endDate", "isResourceBased"),
         multipart_properties=MILESTONE_MULTIPART_PROPERTIES,
     ),
 )

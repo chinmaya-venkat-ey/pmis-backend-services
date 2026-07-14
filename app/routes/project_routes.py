@@ -304,17 +304,18 @@ def get_project(
 
 
 @router.get(
-    "/{project_uuid}/config",
+    "/{project_uuid}/leave-policies",
     response_model=ProjectConfig,
-    summary="Get the per-project config/checks bag",
+    summary="Get the per-project leave/attendance policies",
     description=(
-        "Returns the grouped, per-project config object (half-day hours, "
-        "attendance/leave policy flags, etc.). These values are NOT master-"
-        "driven — they are set per project via PUT. Unset projects return {}."
+        "Returns the grouped, per-project leave/attendance policy object "
+        "(half/full-day hours, weekend working, attendance/leave policy flags, "
+        "etc.). These values are NOT master-driven — they are set per project "
+        "via PUT. Unset projects return {}."
     ),
     dependencies=[Depends(require_project_permission(PROJECTS_READ))],
 )
-def get_project_config(
+def get_project_leave_policies(
     project_uuid: str,
     controller: Annotated[ProjectController, Depends(get_project_controller)],
 ):
@@ -322,17 +323,17 @@ def get_project_config(
 
 
 @router.put(
-    "/{project_uuid}/config",
+    "/{project_uuid}/leave-policies",
     response_model=ProjectConfig,
-    summary="Set (merge) the per-project config/checks bag",
+    summary="Set (merge) the per-project leave/attendance policies",
     description=(
         "MERGE semantics: only the keys present in the body change; existing "
-        "keys are preserved, so new checks can be added without wiping others. "
-        "Returns the merged config."
+        "keys are preserved, so new policies can be added without wiping others. "
+        "Returns the merged leave-policy object."
     ),
     dependencies=[Depends(require_project_permission(PROJECTS_UPDATE_CONFIG))],
 )
-def put_project_config(
+def put_project_leave_policies(
     project_uuid: str,
     payload: ProjectConfig,
     controller: Annotated[ProjectController, Depends(get_project_controller)],

@@ -191,7 +191,7 @@ class ProjectResponse(ResponseModel):
     # Project-specific leave/attendance config bag — grouped into ONE object and
     # returned on every project response as ``leaveConfig`` so the FE can read all
     # per-project settings (half/full-day hours, attendance/leave policy flags,
-    # etc.) without a separate call. Set via ``PUT /projects/{uuid}/config``.
+    # etc.) without a separate call. Set via ``PUT /projects/{uuid}/leave-policies``.
     # Defaults to {} for rows that never configured it. The underlying JSONB
     # column / config endpoints keep the name ``config``; only this response
     # field is exposed as ``leaveConfig`` (populated from ``row.config`` via the

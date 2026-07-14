@@ -29,6 +29,29 @@ from app.schemas.attachment import AttachmentRow
 _PROJECT_STATUS_CHOICES = ("new", "draft", "published", "closed")
 _ERR_END_BEFORE_START = "end_date cannot be before start_date"
 
+# ---------------------------------------------------------------------------
+# leaveConfig — hard-coded enum values (for now). Tokens are normalised on
+# write (upper-cased, ``-``/space → ``_``) so ``"half day"`` is accepted; the
+# canonical stored/wire form is the value below. ``leaves_frequency`` is left
+# free-form intentionally (not restricted for now).
+# ---------------------------------------------------------------------------
+_WORKING_DAY_CHOICES = ("HALF_DAY", "FULL_DAY")
+
+
+def _normalise_enum_token(v):
+    """Upper-case + collapse ``-``/whitespace to ``_`` for enum matching.
+
+    Returns ``None`` for ``None`` / empty-or-whitespace strings (so an
+    omitted or blank weekend value means "not set"). Non-strings are passed
+    through untouched to let Pydantic raise its own type error.
+    """
+    if v is None:
+        return None
+    if isinstance(v, str):
+        token = v.strip().upper().replace("-", "_").replace(" ", "_")
+        return token or None
+    return v
+
 
 # ---------------------------------------------------------------------------
 # Shared config for request bodies — accept camelCase OR snake_case.
@@ -71,13 +94,19 @@ class ProjectConfig(BaseModel):
         strictly ``> 0`` and ``< 24`` (e.g. 4).
       * ``full_day`` — definition of a full working day, in hours. Integer
         only, strictly ``> 0`` and ``< 24`` (e.g. 8).
-      * ``saturday_working`` — whether Saturday is a working day.
+      * ``saturday_working`` / ``sunday_working`` — how the weekend day is
+        worked. One of ``"HALF_DAY"`` / ``"FULL_DAY"`` or ``null`` (not a
+        working day). Case/separator-insensitive on write (``"half day"`` →
+        ``"HALF_DAY"``).
       * ``attendance_captured`` — whether attendance is captured for the project.
       * ``sandwich_leave_applied`` — whether the sandwich-leave policy applies
         (the calendar-date evaluation is a downstream concern; this is the flag).
       * ``leaves_per_frequency_count`` + ``leaves_frequency`` — how many leave
         days are granted per period, and the period (e.g. 2 per ``"quarterly"``).
+        Frequency is free-form for now (not restricted to a fixed set).
       * ``prorated_leaves_applied`` — whether leaves are prorated.
+
+    Validation values are hard-coded here for now.
     """
 
     model_config = ConfigDict(
@@ -91,12 +120,27 @@ class ProjectConfig(BaseModel):
     # constrained to positive integers strictly between 0 and 24.
     half_day: Annotated[Optional[int], Field(default=None, gt=0, lt=24)] = None
     full_day: Annotated[Optional[int], Field(default=None, gt=0, lt=24)] = None
-    saturday_working: Optional[bool] = None
+    # Weekend working pattern. ``None`` = not a working day.
+    saturday_working: Optional[str] = None
+    sunday_working: Optional[str] = None
     attendance_captured: Optional[bool] = None
     sandwich_leave_applied: Optional[bool] = None
     leaves_per_frequency_count: Annotated[Optional[int], Field(default=None, ge=0)] = None
+    # Free-form for now — intentionally NOT restricted to a fixed set.
     leaves_frequency: Annotated[Optional[str], Field(default=None, max_length=32)] = None
     prorated_leaves_applied: Optional[bool] = None
+
+    @field_validator("saturday_working", "sunday_working", mode="before")
+    @classmethod
+    def _validate_working_day(cls, v):
+        token = _normalise_enum_token(v)
+        if token is None:
+            return None
+        if token not in _WORKING_DAY_CHOICES:
+            raise ValueError(
+                "must be one of: " + ", ".join(_WORKING_DAY_CHOICES) + " (or null)"
+            )
+        return token
 
 
 class ProjectResponse(ResponseModel):

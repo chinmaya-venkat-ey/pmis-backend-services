@@ -137,10 +137,13 @@ class SlaOnboardRequest(BaseModel):
     # one project = one SLA bundle), this is the primary scoping field.
     # SLAs are owned by a project from pmis-project-management — no longer
     # by a free-floating contract type. Required on every new SLA.
-    project_id: str = Field(
-        ..., max_length=36,
+    project_id: Optional[str] = Field(
+        None, max_length=36,
         description="UUID of the project (from pmis-project-management) that "
-                    "owns this SLA. Required.",
+                    "owns this SLA. Optional — an SLA may be onboarded as a "
+                    "project-agnostic template and scoped later (the model "
+                    "column is nullable). Blocking onboarding on it also made "
+                    "the flow hostage to the project-dropdown load (bug #256).",
     )
     # contract_type is now optional. When unset the service tries to derive
     # it from the project; when that fails the column stays NULL on the row.
@@ -514,12 +517,19 @@ class SlaSimpleTargetRow(BaseModel):
     row falls back to the SLA's primary measurement, which is the
     correct default for single-metric SLAs (PMU-SLA005 et al).
     """
-    severity: int = Field(
-        ..., ge=0, le=10,
+    severity: Optional[int] = Field(
+        None, ge=0, le=10,
         description='Severity level the row corresponds to. The PMU / MSAP / '
                     'BSP / MSIP RFPs use 0-4, but the schema permits up to 10 '
                     'so future contracts with finer-grained severity grids '
-                    '(e.g. L0..L7) can onboard without a schema bump.',
+                    '(e.g. L0..L7) can onboard without a schema bump. NULL for '
+                    'band_accumulation SLAs, whose bands carry a penalty rate '
+                    'instead of a severity — see ``rate_percent``.',
+    )
+    rate_percent: Optional[Decimal] = Field(
+        None, ge=0,
+        description='LD / penalty rate for this band (band_accumulation SLAs, e.g. '
+                    '0.5 = 0.5% per day-in-band). NULL for severity-graded SLAs.',
     )
     threshold_label: Optional[str] = Field(
         None, max_length=100,
@@ -607,10 +617,11 @@ class SlaFromRfpRequest(BaseModel):
                          description='RFP "SLA number", e.g. "PMU-SLA004".')
     title: str = Field(..., min_length=1, max_length=500,
                        description='Title shown above the RFP table.')
-    project_id: str = Field(
-        ..., max_length=36,
+    project_id: Optional[str] = Field(
+        None, max_length=36,
         description='UUID of the project (from pmis-project-management) that '
-                    'owns this SLA. Required.',
+                    'owns this SLA. Optional — may be onboarded as a '
+                    'project-agnostic template and scoped later.',
     )
     # contract_type is now optional. Derived from the project when omitted.
     contract_type: Optional[str] = Field(

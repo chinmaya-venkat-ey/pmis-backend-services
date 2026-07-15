@@ -904,6 +904,7 @@ class SlaService:
             for b in sorted(bands, key=lambda x: x.sort_order or 0):
                 target_rows.append(SlaSimpleTargetRow(
                     severity=b.severity_level,
+                    rate_percent=(str(b.rate_percent) if b.rate_percent is not None else None),
                     threshold_label=b.band_label or "",
                     from_value=str(b.range_min) if b.range_min is not None else None,
                     to_value=str(b.range_max) if b.range_max is not None else None,

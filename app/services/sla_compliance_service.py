@@ -257,26 +257,11 @@ class SlaComplianceService:
             points = result.accumulated_points
             p_start, p_end = result.period_start, result.period_end
 
-        # Normalise severity_level + accumulated_points so linear-LD
-        # (``fixed_escalation``) rows carry FE-renderable numbers.
-        #
-        # Point-accumulation / band-accumulation / wac evaluators emit
-        # these natively — this block does nothing for them. But the
-        # fixed_escalation evaluator only reports a per-tier
-        # ``rate_percent`` inside ``breaches[]``; ``severity_level`` and
-        # ``accumulated_points`` come back as None, and the dashboard
-        # renders them as blank cells (the "Severity Point / Point
-        # Accumulation missing" bug filed against the compliance table).
-        #
-        # We derive:
-        #   severity_level     = 0 when met, else bucketed from ld_pct
-        #                        (≤1% → 1, ≤2% → 2, ≤5% → 3, >5% → 4)
-        #   accumulated_points = ld_pct itself (reads as "how much LD
-        #                        has this SLA accumulated so far")
-        #
-        # Semantics for the two shapes deliberately land on the same
-        # column so the FE can render one uniform "Severity / Points"
-        # column across every SLA type.
+        # As of the shared-normaliser fix, severity_level and
+        # accumulated_points are guaranteed populated by SlaEvaluatorService
+        # for every formula type — this block is a defensive re-run of the
+        # same bucketing in case the caller passed a hand-built result (e.g.
+        # tests) that skipped the normaliser.
         if severity is None:
             if met:
                 severity = 0

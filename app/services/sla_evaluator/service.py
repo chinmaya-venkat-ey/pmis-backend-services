@@ -62,6 +62,21 @@ _EVALUATORS: Dict[str, FormulaEvaluator] = {
 }
 
 
+def _severity_from_ld_pct(ld_pct: Decimal) -> int:
+    """Bucket an effective LD % into the 0-4 severity scale banded SLAs use.
+
+    Applied to linear-LD (fixed_escalation) results so the response's
+    ``severity_level`` matches the shape point_accumulation SLAs emit
+    natively. Thresholds track the PMU RFP severity progression:
+    ≤ 1% → 1, ≤ 2% → 2, ≤ 5% → 3, > 5% → 4.
+    """
+    if ld_pct <= 0:      return 0
+    if ld_pct <= 1:      return 1
+    if ld_pct <= 2:      return 2
+    if ld_pct <= 5:      return 3
+    return 4
+
+
 class SlaEvaluatorService:
     def __init__(
         self,
@@ -962,6 +977,41 @@ class SlaEvaluatorService:
             result.accumulated_points, scoring["ld_band_pairs"],
         )
 
+        # For linear-LD (fixed_escalation) SLAs the evaluator only reports
+        # per-tier rate_percent inside breaches[]; it doesn't set
+        # severity_level or accumulated_points. The FE renders those fields
+        # as blank cells, which reads as "not measured" even though the SLA
+        # WAS evaluated. Normalise here so the "click Evaluate" path
+        # (this method) and the cron-persist path both surface consistent
+        # numbers. Point-accumulation / band-accumulation / wac results
+        # come through untouched — the block only fires when the evaluator
+        # returned None.
+        severity_out = result.severity_level
+        points_out = result.accumulated_points
+        breached_flag = bool(result.breaches) and any(
+            (b.rate_percent and b.rate_percent > 0)
+            or (b.severity_level is not None and b.severity_level >= 1)
+            or (b.points_contribution and b.points_contribution > 0)
+            for b in (result.breaches or [])
+        )
+        # Effective LD % for fixed_escalation = max tier rate; for
+        # point_accumulation = ld_percent from the project's LD chart.
+        effective_ld = ld_percent
+        if effective_ld is None and result.breaches:
+            rates = [
+                b.rate_percent for b in result.breaches
+                if getattr(b, "rate_percent", None) is not None
+            ]
+            if rates:
+                effective_ld = max(rates)
+        if severity_out is None:
+            if not breached_flag:
+                severity_out = 0
+            elif effective_ld is not None:
+                severity_out = _severity_from_ld_pct(effective_ld)
+        if points_out is None and effective_ld is not None:
+            points_out = effective_ld
+
         return MappingEvaluationResponse(
             mapping_id=mapping.id,
             activity_id=mapping.activity_id,
@@ -971,9 +1021,9 @@ class SlaEvaluatorService:
             formula_type=formula_type,
             period_start=resolved_start,
             period_end=resolved_end,
-            severity_level=result.severity_level,
-            accumulated_points=result.accumulated_points,
-            ld_percent=ld_percent,
+            severity_level=severity_out,
+            accumulated_points=points_out,
+            ld_percent=ld_percent if ld_percent is not None else effective_ld,
             project_id=scoring["project_id"],
             severity_master_source=sev_source,
             breaches=result.breaches,

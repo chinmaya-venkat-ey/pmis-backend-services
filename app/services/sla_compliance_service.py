@@ -46,6 +46,24 @@ from app.services.sla_evaluator.service import SlaEvaluatorService
 _DATE_DERIVABLE = {"fixed_escalation"}
 
 
+# Severity bucketing for linear-LD (fixed_escalation) results — the
+# formula doesn't emit severity_level natively, so we bucket the
+# effective LD % into the same 0-4 scale banded SLAs use, so the FE
+# renders a uniform "Severity" column across every SLA type. Thresholds
+# roughly track the PMU RFP's severity progression:
+#   ≤ 0%   → 0 (no breach; met=true takes this path)
+#   ≤ 1%   → 1
+#   ≤ 2%   → 2
+#   ≤ 5%   → 3
+#   >  5%  → 4 (capped tier / significant breach)
+def _severity_from_ld_pct(ld_pct: Decimal) -> int:
+    if ld_pct <= 0:      return 0
+    if ld_pct <= 1:      return 1
+    if ld_pct <= 2:      return 2
+    if ld_pct <= 5:      return 3
+    return 4
+
+
 def _parse_date(v: Any) -> Optional[_date]:
     if not v:
         return None
@@ -238,6 +256,34 @@ class SlaComplianceService:
             severity = result.severity_level
             points = result.accumulated_points
             p_start, p_end = result.period_start, result.period_end
+
+        # Normalise severity_level + accumulated_points so linear-LD
+        # (``fixed_escalation``) rows carry FE-renderable numbers.
+        #
+        # Point-accumulation / band-accumulation / wac evaluators emit
+        # these natively — this block does nothing for them. But the
+        # fixed_escalation evaluator only reports a per-tier
+        # ``rate_percent`` inside ``breaches[]``; ``severity_level`` and
+        # ``accumulated_points`` come back as None, and the dashboard
+        # renders them as blank cells (the "Severity Point / Point
+        # Accumulation missing" bug filed against the compliance table).
+        #
+        # We derive:
+        #   severity_level     = 0 when met, else bucketed from ld_pct
+        #                        (≤1% → 1, ≤2% → 2, ≤5% → 3, >5% → 4)
+        #   accumulated_points = ld_pct itself (reads as "how much LD
+        #                        has this SLA accumulated so far")
+        #
+        # Semantics for the two shapes deliberately land on the same
+        # column so the FE can render one uniform "Severity / Points"
+        # column across every SLA type.
+        if severity is None:
+            if met:
+                severity = 0
+            elif breached and ld_pct is not None:
+                severity = _severity_from_ld_pct(ld_pct)
+        if points is None and ld_pct is not None:
+            points = ld_pct
 
         existing = self.db.execute(
             select(SlaEvaluationResult).where(

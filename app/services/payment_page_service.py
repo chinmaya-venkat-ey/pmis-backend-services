@@ -313,12 +313,16 @@ class PaymentPageService:
             recurring_cost=totals_d["recurring_cost"],
         )
 
+        # Recurring schedules honour each row's OWN frequency (falling back to
+        # the project frequency). Built once here: per-row for the cost-item
+        # response, and merged per-phase for the phase overlay below.
+        rec_by_ci, rec_by_phase = _build_recurring_schedules(
+            cost_rows, phase_dates, project_freq,
+        )
         cost_items = [
-            _cost_item_response(c, ms_map.get(c.id, [])) for c in cost_rows
+            _cost_item_response(c, ms_map.get(c.id, []), rec_by_ci.get(c.id, []))
+            for c in cost_rows
         ]
-        # Recurring costs are now summed PER PHASE and shown as a phase-level
-        # schedule (see the phase loop below), not per cost-item over the project
-        # duration — so the per-row schedule stays empty.
 
         # Last-phase strict full utilisation: null milestones split the
         # remaining (100 − Σ explicit) evenly so the phase always totals 100%
@@ -358,14 +362,12 @@ class PaymentPageService:
                 term_responses.append(resp)
 
             start_date, end_date = phase_dates.get(phase, (None, None))
-            # Recurring costs on this phase: their combined total spread across
-            # the phase's date span at the project frequency (default yearly) —
-            # a dropdown schedule like the carry-forward pool. Not billed via the
+            # Recurring costs on this phase: each row's schedule is built from
+            # its OWN frequency (see _build_recurring_schedules) and the rows are
+            # merged into one calendar overlay here. Not billed via the
             # percentage terms, so it's a separate overlay on top of the base.
             recurring_total = payment_calc.phase_recurring_total(cost_rows, phase)
-            recurring_sched = cf_pool.build_schedule(
-                recurring_total, start_date, end_date, project_freq or "yearly",
-            ) if recurring_total > Decimal("0") else []
+            recurring_sched = rec_by_phase.get(phase, [])
             recurring_pool = [
                 CfPoolInstallmentResponse(
                     period_index=inst["period_index"],
@@ -988,7 +990,7 @@ class PaymentPageService:
         return project
 
 
-def _cost_item_response(row, milestone_ids: List[str]) -> CostItemResponse:
+def _cost_item_response(row, milestone_ids: List[str], schedule=None) -> CostItemResponse:
     resp = CostItemResponse.model_validate(row)
     # Transaction rows carry no stored ``cost`` (the value is perTxn × planned),
     # so surface that computed subtotal as the row cost — otherwise the finance
@@ -1000,7 +1002,100 @@ def _cost_item_response(row, milestone_ids: List[str]) -> CostItemResponse:
     # Transaction rows total = perTxn × planned + tax; every other type = cost + tax.
     resp.total = payment_calc.line_total(row)
     resp.milestone_ids = list(milestone_ids)
+    # Recurring rows carry their own dated installment schedule (built from the
+    # row's OWN frequency); every other type leaves it empty.
+    resp.schedule = [
+        CfPoolInstallmentResponse(
+            period_index=inst["period_index"],
+            period_start=inst["period_start"],
+            period_end=inst["period_end"],
+            amount=payment_calc.to_2dp(inst["amount"]),
+        )
+        for inst in (schedule or [])
+    ]
     return resp
+
+
+def _build_recurring_schedules(cost_rows, phase_dates, project_freq):
+    """Build every recurring row's dated installment schedule using the row's
+    OWN ``frequency_code`` (falling back to the project frequency, then yearly).
+
+    Returns ``(by_cost_item, by_phase)``:
+      * ``by_cost_item[ci_id]`` — that row's raw installment list at the row's
+        own frequency (for the per-row ``schedule`` on the cost-item response).
+      * ``by_phase[phase]``     — the phase's recurring rows merged into ONE
+        overlay schedule (see :func:`_merge_phase_recurring`).
+    """
+    by_ci: dict = {}
+    phase_entries: dict = {}
+    for r in cost_rows:
+        if not payment_calc.is_recurring(r):
+            continue
+        phase = getattr(r, "phase", None)
+        start_date, end_date = phase_dates.get(phase, (None, None))
+        r_total = payment_calc.line_total(r)
+        # Per-row frequency wins; project frequency, then yearly, are fallbacks.
+        freq = getattr(r, "frequency_code", None) or project_freq or "yearly"
+        sched = (cf_pool.build_schedule(r_total, start_date, end_date, freq)
+                 if r_total > Decimal("0") else [])
+        by_ci[r.id] = sched
+        phase_entries.setdefault(phase, {"scheds": [], "freqs": [],
+                                         "start": start_date, "end": end_date})
+        phase_entries[phase]["scheds"].append(sched)
+        phase_entries[phase]["freqs"].append(freq)
+    by_phase = {phase: _merge_phase_recurring(e) for phase, e in phase_entries.items()}
+    return by_ci, by_phase
+
+
+def _merge_phase_recurring(entry) -> list:
+    """Merge a phase's recurring rows into one overlay schedule.
+
+    Frequencies are hierarchical (a year holds 12 months, 4 quarters, 2
+    half-years), so the overlay is rendered on the FINEST cadence present in the
+    phase. Each row's own-frequency installments are placed onto the granular
+    bucket that contains the installment's period END (its due date): a coarser
+    row (e.g. yearly) shows up as a single lump on the granular timeline while a
+    finer row (e.g. monthly) fills every bucket. Amounts are summed per bucket
+    and the phase total is conserved exactly.
+
+    Falls back to a date-union merge when there is no recognised cadence to
+    align on (e.g. an unknown frequency), or the phase span is unknown."""
+    scheds = entry["scheds"]
+    granular = cf_pool.finest_frequency(entry["freqs"])
+    span_start, span_end = entry.get("start"), entry.get("end")
+
+    if granular is not None and span_start and span_end:
+        start_i = cf_pool.bucket_index(span_start, granular)
+        end_i = cf_pool.bucket_index(span_end, granular)
+        if start_i is not None and end_i is not None and end_i >= start_i:
+            # Seed the full granular timeline over the phase span, then drop each
+            # row's installments onto the bucket holding their period end.
+            amounts = {i: Decimal("0") for i in range(start_i, end_i + 1)}
+            for sched in scheds:
+                for inst in sched:
+                    gi = cf_pool.bucket_index(inst["period_end"], granular)
+                    if gi is None:
+                        continue
+                    gi = min(max(gi, start_i), end_i)
+                    amounts[gi] = payment_calc.to_2dp(amounts[gi] + inst["amount"])
+            out = []
+            for i in range(start_i, end_i + 1):
+                s, e = cf_pool.bucket_bounds(i, granular)
+                out.append({"period_index": i, "period_start": s,
+                            "period_end": e, "amount": amounts[i]})
+            return out
+
+    # Fallback: union distinct calendar buckets, summing overlaps.
+    buckets: dict = {}
+    for sched in scheds:
+        for inst in sched:
+            key = (inst["period_start"], inst["period_end"])
+            slot = buckets.get(key)
+            if slot is None:
+                buckets[key] = dict(inst)
+            else:
+                slot["amount"] = payment_calc.to_2dp(slot["amount"] + inst["amount"])
+    return sorted(buckets.values(), key=lambda x: x["period_start"])
 
 
 def _even_split(total: Decimal, n: int) -> List[Decimal]:

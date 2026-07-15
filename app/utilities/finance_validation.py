@@ -77,6 +77,12 @@ def run_finance_validation(page, active_milestone_ids: Iterable[str]) -> dict:
     n = len(phases)
     for i, p in enumerate(phases):
         terms = p.payment_terms or []
+        # Recurring money is billed via its own dated frequency schedule, not
+        # via milestone payment-term %s, so a phase whose cost is entirely
+        # recurring has NO payment terms. Exempt it from the "% must total 100"
+        # rule instead of flagging a phantom 0% shortfall on it.
+        if not terms:
+            continue
         tot = sum((_d(t.percent_of_payment) for t in terms), _ZERO)
         is_last = i == n - 1
         cf_on = bool(getattr(p.carry_forward, "enabled", False))

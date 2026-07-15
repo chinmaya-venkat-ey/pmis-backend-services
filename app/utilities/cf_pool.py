@@ -54,6 +54,30 @@ def remaining_periods(project_end, phase_end, frequency):
     return r if r > 0 else 0
 
 
+# Frequency granularity, finest → coarsest. Periods nest exactly (1 quarter =
+# 3 months, 1 half-year = 6 months, 1 year = 12 months), so when a phase mixes
+# frequencies its recurring overlay is rendered on the FINEST cadence present
+# and each coarser row lands as a lump on that timeline.
+_GRANULARITY = {"monthly": 0, "quarterly": 1, "half_yearly": 2, "yearly": 3}
+
+
+def finest_frequency(frequencies):
+    """The most granular (finest) of ``frequencies``; None if none are
+    recognised. Duplicates / unknown values are ignored."""
+    known = [f for f in frequencies if f in _GRANULARITY]
+    return min(known, key=_GRANULARITY.get) if known else None
+
+
+def bucket_index(d, frequency):
+    """The monotonic calendar-bucket index of date ``d`` at ``frequency`` (the
+    same index space :func:`bucket_bounds` uses). None if the frequency is
+    unsupported or ``d`` is missing."""
+    indexer = _INDEXERS.get(frequency)
+    if indexer is None or not d:
+        return None
+    return indexer(_as_date(d))
+
+
 def _month_bounds(year: int, month: int):
     return date(year, month, 1), date(year, month, calendar.monthrange(year, month)[1])
 

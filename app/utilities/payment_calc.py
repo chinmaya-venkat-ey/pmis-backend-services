@@ -127,6 +127,12 @@ def _code(item) -> str:
     return str(getattr(item, "cost_type_code", None) or "").lower()
 
 
+def is_recurring(item) -> bool:
+    """True when a cost row is a ``recurring_cost`` line — billed via its own
+    dated frequency schedule, NOT via milestone payment-term %s."""
+    return _code(item) == RECURRING_COST
+
+
 def transaction_total(per_transaction_cost, planned_transactions) -> Decimal:
     """A transaction-cost line's total: ``per_transaction_cost × planned_transactions``.
     Either input NULL/≤0 → 0."""

@@ -34,6 +34,11 @@ class Settings(BaseSettings):
 
     # === JWT (verify only) ===
     secret_key: str = Field(default="replace-me-with-a-256-bit-secret")
+
+    # Shared secret the scheduler sends as ``X-Cron-Secret`` to trigger the
+    # daily SLA evaluation (POST /api/v3/sla-compliance/cron/run). Blank
+    # disables the endpoint (403) so it can't be triggered anonymously.
+    cron_shared_secret: str = Field(default="")
     algorithm: str = Field(default="HS256")
 
     # === Pagination ===

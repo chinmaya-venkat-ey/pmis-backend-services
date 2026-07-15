@@ -12,8 +12,10 @@ from app.routes import master_routes  # noqa: E402
 from app.routes import sla_routes  # noqa: E402
 from app.routes import sla_activity_mapping_routes  # noqa: E402
 from app.routes import sla_attachment_routes  # noqa: E402
+from app.routes import sla_compliance_routes  # noqa: E402
 
 contract_router.include_router(master_routes.router)
 contract_router.include_router(sla_routes.router)
 contract_router.include_router(sla_activity_mapping_routes.router)
 contract_router.include_router(sla_attachment_routes.router)
+contract_router.include_router(sla_compliance_routes.router)

@@ -61,6 +61,60 @@ def run_daily_sla(
     return api_response(data=summary)
 
 
+# ------------------------------------------------------------------ manual evaluation
+#
+# The daily cron requires X-Cron-Secret so schedulers can call it, but that
+# locked out admins + the FE. Result: fresh installs showed "0% compliance"
+# on the dashboard until the scheduler fired for the first time, and no
+# manual "run this now" path existed.
+#
+# These two endpoints reuse the same evaluate_and_persist path as the cron,
+# gated by regular bearer auth. That means:
+#   * The FE observation-entry screen can trigger evaluation right after a
+#     new observation is recorded (feedback is immediate).
+#   * Admins can flush compliance for one mapping / the whole system.
+#   * Tests can seed sla_evaluation_result without a shared secret.
+# ------------------------------------------------------------------
+
+@router.post(
+    "/sla-compliance/evaluate-all",
+    summary="Run SLA evaluation across every ACTIVE mapping (admin, auth-required)",
+    description=(
+        "Same code path as /sla-compliance/cron/run, but gated by the "
+        "regular bearer instead of the cron shared secret. Use this to "
+        "seed sla_evaluation_result on a fresh deploy or flush after "
+        "an SLA config change. Returns a per-status count summary."
+    ),
+)
+def evaluate_all_now(
+    db: Annotated[Session, Depends(get_db)],
+    user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
+):
+    summary = SlaComplianceService(db).run_daily()
+    return api_response(data=summary)
+
+
+@router.post(
+    "/sla-compliance/mappings/{mapping_id}/evaluate",
+    summary="Evaluate one mapping now (admin, auth-required)",
+    description=(
+        "Runs evaluate_and_persist for a single mapping — used by the FE "
+        "observation-entry screen so recording a value immediately flips "
+        "the mapping's compliance status instead of waiting for the cron."
+    ),
+)
+def evaluate_mapping_now(
+    mapping_id: str,
+    db: Annotated[Session, Depends(get_db)],
+    user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
+):
+    from datetime import datetime, timezone
+    status = SlaComplianceService(db).evaluate_and_persist(
+        mapping_id, datetime.now(timezone.utc).date(),
+    )
+    return api_response(data={"mapping_id": mapping_id, "status": status})
+
+
 # ------------------------------------------------------------------ aggregates
 
 def _latest_per_mapping():

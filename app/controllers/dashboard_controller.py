@@ -18,6 +18,7 @@ from typing import Any, Dict, Optional
 from sqlalchemy.orm import Session
 
 from app.services.dashboard_service import DashboardService
+from app.services.dashboard_view_service import DashboardViewService
 
 
 def _bare(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -32,6 +33,31 @@ class DashboardController:
     def __init__(self, db: Session):
         self.db = db
         self.service = DashboardService(db)
+        # The four new aggregated "view" payloads (summary-view, project
+        # /full, organisation-view, single org /view). Ticket / meeting
+        # providers are injected in a later phase; None => degrade to
+        # available:false so the endpoints work without the Java services.
+        self.view_service = DashboardViewService(db)
+
+    # ---- new aggregated view endpoints ---------------------------------
+
+    def summary_view(self, *, delay_min_days: int, top_n: int) -> Dict[str, Any]:
+        return _bare(self.view_service.get_summary_view(
+            delay_min_days=delay_min_days, top_n=top_n,
+        ))
+
+    def project_full(self, *, project_id: str) -> Dict[str, Any]:
+        return _bare(self.view_service.get_project_full(project_id=project_id))
+
+    def organisation_view(self, *, top_n: int) -> Dict[str, Any]:
+        return _bare(self.view_service.get_organisation_view(top_n=top_n))
+
+    def organisation_single(self, *, organisation_id: str) -> Dict[str, Any]:
+        return _bare(self.view_service.get_organisation_single(
+            organisation_id=organisation_id,
+        ))
+
+    # ---- original endpoints --------------------------------------------
 
     def summary(self, *, delay_min_days: int) -> Dict[str, Any]:
         return _bare(self.service.get_summary(delay_min_days=delay_min_days))

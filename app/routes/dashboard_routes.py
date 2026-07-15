@@ -142,6 +142,84 @@ def list_dashboard_organisations(
     return controller.organisations()
 
 
+# =========================================================================
+# Aggregated "view" endpoints (new FE dashboard). Additive — the six
+# endpoints above are unchanged. Payload shapes match the frontend spec;
+# sla/tickets/meetings degrade to available:false until wired.
+# =========================================================================
+
+
+@router.get(
+    "/summary-view",
+    summary="Summary dashboard view (KPIs, finance, approvals, trends, top org/division)",
+    description=(
+        "Single aggregated payload for the Summary dashboard: KPI tiles, "
+        "project-status split, payment-by-phase, cost composition, "
+        "payment-by-organisation, approval-workflow stages, monthly trend, "
+        "top organisations/divisions and the delayed-project track. "
+        "`sla`, `tickets`, `meetings` carry `available` flags. "
+        "Admin-tier (projects:read_all)."
+    ),
+)
+def get_dashboard_summary_view(
+    controller: Annotated[DashboardController, Depends(get_dashboard_controller)],
+    delay_min_days: Annotated[int, Query(ge=1, le=365, alias="delayMinDays")] = 1,
+    top_n: Annotated[int, Query(ge=1, le=50, alias="topN")] = 5,
+) -> Dict[str, Any]:
+    return controller.summary_view(delay_min_days=delay_min_days, top_n=top_n)
+
+
+@router.get(
+    "/projects/{project_uuid}/full",
+    summary="Full project dashboard view (header + KPIs + finance + approvals + items)",
+    description=(
+        "Single aggregated payload for one project's dashboard: header, "
+        "KPI tiles, status counts, finance (contract/scheduled/cost split "
+        "+ by-phase), approval workflow, delayed track and the flat "
+        "milestone/activity item list. `sla` degrades to available:false."
+    ),
+)
+def get_dashboard_project_full(
+    project_uuid: str,
+    controller: Annotated[DashboardController, Depends(get_dashboard_controller)],
+) -> Dict[str, Any]:
+    return controller.project_full(project_id=project_uuid)
+
+
+@router.get(
+    "/organisation-view",
+    summary="Organisation dashboard view — all organisations (mode=all)",
+    description=(
+        "Aggregated payload across all organisations: KPI tiles, project "
+        "status split, leaderboard, payment-by-organisation and the full "
+        "organisation grid (per-org project buckets + contract/scheduled "
+        "value). `slaByOrganization` is empty until SLA is wired."
+    ),
+)
+def get_dashboard_organisation_view(
+    controller: Annotated[DashboardController, Depends(get_dashboard_controller)],
+    top_n: Annotated[int, Query(ge=1, le=50, alias="topN")] = 8,
+) -> Dict[str, Any]:
+    return controller.organisation_view(top_n=top_n)
+
+
+@router.get(
+    "/organisations/{organisation_id}/view",
+    summary="Organisation dashboard view — single organisation (mode=single)",
+    description=(
+        "Aggregated payload for one organisation: KPI tiles, project "
+        "status split & overview, payment-by-project, contract-vs-"
+        "scheduled, top delayed projects, tickets/meetings blocks and the "
+        "organisation's project cards."
+    ),
+)
+def get_dashboard_organisation_single(
+    organisation_id: str,
+    controller: Annotated[DashboardController, Depends(get_dashboard_controller)],
+) -> Dict[str, Any]:
+    return controller.organisation_single(organisation_id=organisation_id)
+
+
 @router.get(
     "/organisations/{vendor_id}",
     summary="Vendor detail page (KPI counts + project pie + project list)",

@@ -45,6 +45,16 @@ _KEEP_KEYS = frozenset({
     "data", "message", "error", "status",
 })
 
+# Approval-state enum TOKENS that appear as object KEYS in the dashboard
+# ``statusByItems`` map (e.g. ``{"pending_division": 6, ...}``). These are
+# data codes, not field names — the same tokens are used as ``approvalState``
+# VALUES on item rows (values are never camelized), so the keys must stay
+# snake_case too to keep the contract self-consistent and match the FE spec.
+# No other endpoint emits these as keys, so preserving them globally is safe.
+_PRESERVE_KEYS = frozenset({
+    "pending_division", "pending_owner", "division_approved",
+})
+
 
 def _to_camel(name: str) -> str:
     """Convert ``snake_case_field`` → ``snakeCaseField``.
@@ -96,7 +106,7 @@ def _camelize(value: Any) -> Any:
             # the wire to match monolith's flat shape.
             if k in ("attachments", "subtasks", "comment") and v is None:
                 continue
-            new_key = k if k in _KEEP_KEYS else _to_camel(k)
+            new_key = k if (k in _KEEP_KEYS or k in _PRESERVE_KEYS) else _to_camel(k)
             out[new_key] = _camelize(v)
         return out
     if isinstance(value, list):

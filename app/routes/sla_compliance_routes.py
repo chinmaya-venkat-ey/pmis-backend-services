@@ -88,15 +88,47 @@ def _latest_results(db: Session, *, project_ids: Optional[List[str]] = None) -> 
 
 
 def _summarise(rows: List[SlaEvaluationResult]) -> Dict[str, Any]:
-    met = sum(1 for r in rows if r.met)
+    """Roll SlaEvaluationResult rows into the dashboard-friendly shape.
+
+    Also emits a ``data_state`` classification so the dashboard can
+    distinguish "0% compliant" (real breach) from "no data yet" (nothing
+    to compute against). Without this, an empty table reads on the FE
+    as "we're failing everything" — misleading enough that users
+    called it broken.
+
+    data_state values:
+      no_data                — table is empty for this scope
+      awaiting_observations  — rows exist but every one is
+                                pending_observation / excluded /
+                                not_due (met + breached == 0)
+      partial                — some rows evaluated, some still pending
+      ready                  — every row has flipped to compliant /
+                                breached / excluded (nothing pending)
+    """
+    met      = sum(1 for r in rows if r.met)
     breached = sum(1 for r in rows if r.breached)
-    denom = met + breached
+    pending  = sum(1 for r in rows if r.status == "pending_observation")
+    excluded = sum(1 for r in rows if r.status == "excluded")
+    denom    = met + breached
+    if not rows:
+        data_state = "no_data"
+    elif denom == 0:
+        data_state = "awaiting_observations"
+    elif pending > 0:
+        data_state = "partial"
+    else:
+        data_state = "ready"
     return {
-        "available": True,
-        "compliance": round(met * 100 / denom) if denom else 0,
-        "met": met, "breached": breached,
-        "evaluated": len(rows),
-        "pending": sum(1 for r in rows if r.status == "pending_observation"),
+        "available":  True,
+        "data_state": data_state,
+        # ``None`` when there's nothing to divide against — the FE renders
+        # a "No SLA data yet" banner instead of "0% compliance".
+        "compliance": round(met * 100 / denom) if denom else None,
+        "met":        met,
+        "breached":   breached,
+        "evaluated":  len(rows),
+        "pending":    pending,
+        "excluded":   excluded,
     }
 
 

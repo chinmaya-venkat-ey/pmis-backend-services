@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Header, Query
 
 from app.controllers.dashboard_controller import DashboardController
 from app.core.permissions import PROJECTS_READ_ALL
@@ -165,8 +165,11 @@ def get_dashboard_summary_view(
     controller: Annotated[DashboardController, Depends(get_dashboard_controller)],
     delay_min_days: Annotated[int, Query(ge=1, le=365, alias="delayMinDays")] = 1,
     top_n: Annotated[int, Query(ge=1, le=50, alias="topN")] = 5,
+    authorization: Annotated[Optional[str], Header()] = None,
 ) -> Dict[str, Any]:
-    return controller.summary_view(delay_min_days=delay_min_days, top_n=top_n)
+    return controller.summary_view(
+        delay_min_days=delay_min_days, top_n=top_n, bearer=authorization,
+    )
 
 
 @router.get(
@@ -216,8 +219,11 @@ def get_dashboard_organisation_view(
 def get_dashboard_organisation_single(
     organisation_id: str,
     controller: Annotated[DashboardController, Depends(get_dashboard_controller)],
+    authorization: Annotated[Optional[str], Header()] = None,
 ) -> Dict[str, Any]:
-    return controller.organisation_single(organisation_id=organisation_id)
+    return controller.organisation_single(
+        organisation_id=organisation_id, bearer=authorization,
+    )
 
 
 @router.get(

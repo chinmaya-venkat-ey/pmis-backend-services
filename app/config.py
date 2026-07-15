@@ -102,6 +102,32 @@ class Settings(BaseSettings):
     user_management_service_timeout_seconds: float = Field(default=5.0)
     user_management_client: Optional[str] = Field(default=None)
 
+    # === Ticket service (PMIS-Ticket-service, Java) ===
+    # Read-only source for the dashboard's tickets block. Leave the URL
+    # blank to degrade tickets to available:false. Base must include the
+    # service context path, e.g. "http://pmis-ticket-service:8081/ticket-service".
+    # The caller's bearer token is forwarded (the Java service validates it
+    # via user-svc introspect).
+    ticket_service_url: Optional[str] = Field(default=None)
+    ticket_service_timeout_seconds: float = Field(default=6.0)
+    # Max tickets pulled in one list call for client-side aggregation.
+    ticket_service_list_cap: int = Field(default=2000)
+
+    # === Meeting/MoM governance service (PMIS-meeting-mom-governance, Java) ===
+    # Read-only source for the dashboard's meetings block. Blank => degrade
+    # to available:false. Base must include the context path, e.g.
+    # "http://pmis-meeting-mom:8080/meetings".
+    meeting_service_url: Optional[str] = Field(default=None)
+    meeting_service_timeout_seconds: float = Field(default=6.0)
+    meeting_service_list_cap: int = Field(default=2000)
+
+    # === Dashboard snapshot cron ===
+    # Shared secret the scheduler must send as the ``X-Cron-Secret`` header
+    # to POST /api/v3/dashboard/cron/snapshot (which persists the day's KPI
+    # values for delta/spark derivation). Blank => the endpoint is disabled
+    # (returns 403) so it can never be triggered anonymously in prod.
+    cron_shared_secret: str = Field(default="")
+
     # === Frontend reference (HAL link builder) ===
     frontend_base_url: Optional[str] = Field(default=None)
 

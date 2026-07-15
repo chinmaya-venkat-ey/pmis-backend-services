@@ -105,6 +105,12 @@ class ProjectConfig(BaseModel):
         days are granted per period, and the period (e.g. 2 per ``"quarterly"``).
         Frequency is free-form for now (not restricted to a fixed set).
       * ``prorated_leaves_applied`` — whether leaves are prorated.
+      * ``carry_forward_allowed`` — whether unused leave carries forward to
+        the next period.
+      * ``leave_lapse_at_quarter_end`` — whether accrued leave lapses at the
+        end of each quarter.
+      * ``automatic_balance_reset`` — whether the leave balance resets
+        automatically (e.g. at the cycle boundary).
 
     Validation values are hard-coded here for now.
     """
@@ -129,6 +135,9 @@ class ProjectConfig(BaseModel):
     # Free-form for now — intentionally NOT restricted to a fixed set.
     leaves_frequency: Annotated[Optional[str], Field(default=None, max_length=32)] = None
     prorated_leaves_applied: Optional[bool] = None
+    carry_forward_allowed: Optional[bool] = None
+    leave_lapse_at_quarter_end: Optional[bool] = None
+    automatic_balance_reset: Optional[bool] = None
 
     @field_validator("saturday_working", "sunday_working", mode="before")
     @classmethod

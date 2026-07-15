@@ -34,7 +34,7 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import date as _date
 from decimal import Decimal
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import func, select
 
@@ -49,6 +49,9 @@ from app.services.dashboard_service import (
     DashboardService,
     _ist_today,
 )
+from app.services.dashboard_snapshot_service import DashboardSnapshotService
+from app.services.meeting_client import MeetingClient
+from app.services.ticket_client import TicketClient
 from app.utilities.workflow_state import (
     STATE_ACTIVITY_COMPLETED,
     STATE_APPROVED,
@@ -107,39 +110,22 @@ def _sla_unavailable() -> Dict[str, Any]:
     return {"available": False, "compliance": 0, "met": 0, "breached": 0}
 
 
-def _tickets_unavailable() -> Dict[str, Any]:
-    return {
-        "available": False, "total": 0, "open": 0,
-        "byPriority": [], "escalations": [],
-    }
-
-
-def _meetings_unavailable() -> Dict[str, Any]:
-    return {
-        "available": False, "total": 0, "today": 0,
-        "thisWeek": 0, "upcoming": 0, "pendingMom": 0,
-    }
-
-
 class DashboardViewService(DashboardService):
     """The four ``*-view`` / ``/full`` payloads. Read-only.
 
-    ``ticket_provider`` / ``meeting_provider`` are optional callables that,
-    when supplied (later phase), return the real tickets / meetings blocks;
-    when absent the blocks degrade to ``available: false`` so the endpoints
-    ship and verify locally without the Java services.
+    The tickets / meetings blocks are sourced live from the Java
+    ticket + meeting services via ``TicketClient`` / ``MeetingClient``.
+    Both self-configure from settings and degrade to ``available: false``
+    when their service URL is unset or a call fails — so the endpoints
+    still work (with those blocks degraded) when the Java services aren't
+    reachable. The caller's bearer token is threaded through so those
+    services can validate it.
     """
 
-    def __init__(
-        self,
-        db,
-        *,
-        ticket_provider: Optional[Callable[..., Dict[str, Any]]] = None,
-        meeting_provider: Optional[Callable[..., Dict[str, Any]]] = None,
-    ):
+    def __init__(self, db):
         super().__init__(db)
-        self._ticket_provider = ticket_provider
-        self._meeting_provider = meeting_provider
+        self._ticket_client = TicketClient()
+        self._meeting_client = MeetingClient()
 
     # =====================================================================
     # Real aggregations sourced from schema ``project``
@@ -148,15 +134,37 @@ class DashboardViewService(DashboardService):
     def _project_values(
         self, project_ids: List[str],
     ) -> Dict[str, Decimal]:
-        """``{project_id: total_project_value_excl_tax}`` for the given live
-        projects (contract value)."""
+        """``{project_id: contractValue}`` for the given live projects.
+
+        Contract value = the project's ``total_project_value_excl_tax`` (TPV,
+        the explicitly-agreed contract figure) when it has been set (> 0),
+        otherwise a fallback to the sum of the project's cost-item lines.
+        Rationale: TPV is entered separately from the cost breakdown and is
+        frequently left at 0 while the cost lines are populated — the
+        fallback keeps the KPI meaningful instead of showing 0. A properly
+        configured project (TPV set) always shows the true contractual value.
+        """
         if not project_ids:
             return {}
-        rows = self.db.execute(
+        tpv_rows = self.db.execute(
             select(Project.id, Project.total_project_value_excl_tax)
             .where(Project.id.in_(project_ids))
         ).all()
-        return {pid: (val or Decimal("0")) for pid, val in rows}
+        cost_rows = self.db.execute(
+            select(
+                ProjectCostItem.project_id,
+                func.coalesce(func.sum(ProjectCostItem.cost), 0),
+            )
+            .where(ProjectCostItem.project_id.in_(project_ids))
+            .where(ProjectCostItem.deleted_at.is_(None))
+            .group_by(ProjectCostItem.project_id)
+        ).all()
+        cost_by_pid = {pid: Decimal(total or 0) for pid, total in cost_rows}
+        out: Dict[str, Decimal] = {}
+        for pid, tpv in tpv_rows:
+            tpv = tpv or Decimal("0")
+            out[pid] = tpv if tpv > 0 else cost_by_pid.get(pid, Decimal("0"))
+        return out
 
     def _cost_composition(
         self, project_ids: List[str],
@@ -340,27 +348,44 @@ class DashboardViewService(DashboardService):
     def _max_delay_over(counters: Dict[str, Dict[str, int]], project_ids: List[str]) -> int:
         return max((counters[pid]["maxDelayDays"] for pid in project_ids), default=0)
 
-    def _tickets_block(self, **kw) -> Dict[str, Any]:
-        if self._ticket_provider is None:
-            return _tickets_unavailable()
-        try:
-            return self._ticket_provider(**kw)
-        except Exception:
-            return _tickets_unavailable()
+    def _tickets_block(
+        self, *, bearer: Optional[str] = None, project_ids: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        return self._ticket_client.summary(bearer=bearer, project_ids=project_ids)
 
-    def _meetings_block(self, **kw) -> Dict[str, Any]:
-        if self._meeting_provider is None:
-            return _meetings_unavailable()
-        try:
-            return self._meeting_provider(**kw)
-        except Exception:
-            return _meetings_unavailable()
+    def _meetings_block(
+        self, *, bearer: Optional[str] = None, project_ids: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        return self._meeting_client.summary(bearer=bearer, project_ids=project_ids)
+
+    # =====================================================================
+    # Snapshot-backed metrics (delta / spark)
+    # =====================================================================
+
+    def current_global_metrics(self) -> Dict[str, Decimal]:
+        """The current global KPI values the snapshot cron persists. Same
+        numbers get_summary_view surfaces, as raw Decimals."""
+        today = _ist_today()
+        projects, _counters, _vbp, derived = self._fetch_projects_with_buckets(today_ist=today)
+        pids = [p.id for p in projects]
+        status = self._status_block([derived[p.id][1] for p in projects])
+        contract_total = sum(self._project_values(pids).values(), Decimal("0"))
+        return {
+            "total_projects": Decimal(status["total"]),
+            "ontrack_pct": Decimal(_pct(status["ontrack"], status["total"])),
+            "delayed_projects": Decimal(status["delayed"]),
+            "contract_value": contract_total,
+            "released": Decimal("0"),
+            "sla_compliance": Decimal("0"),
+        }
 
     # =====================================================================
     # Endpoint 1 — GET /api/v3/dashboard/summary-view
     # =====================================================================
 
-    def get_summary_view(self, *, delay_min_days: int = 1, top_n: int = 5) -> Dict[str, Any]:
+    def get_summary_view(
+        self, *, delay_min_days: int = 1, top_n: int = 5, bearer: Optional[str] = None,
+    ) -> Dict[str, Any]:
         today = _ist_today()
         projects, counters, vendors_by_pid, derived = (
             self._fetch_projects_with_buckets(today_ist=today)
@@ -419,25 +444,40 @@ class DashboardViewService(DashboardService):
         approvals = self._approval_stage_counts()
         max_delay = self._max_delay_over(counters, pids)
 
+        # delta/spark come from persisted snapshots (see DashboardSnapshotService);
+        # with no history yet they degrade to (None, []).
+        snap = DashboardSnapshotService(self.db)
+        ontrack_pct = _pct(status["ontrack"], status["total"])
+
+        def ds(metric: str, current) -> Tuple[Optional[str], List]:
+            return snap.delta_spark(metric, Decimal(current), today=today)
+
+        tp_delta, tp_spark = ds("total_projects", status["total"])
+        ot_delta, _ = ds("ontrack_pct", ontrack_pct)
+        dl_delta, dl_spark = ds("delayed_projects", status["delayed"])
+        cv_delta, cv_spark = ds("contract_value", contract_total)
+        rl_delta, rl_spark = ds("released", 0)
+        sla_delta, _ = ds("sla_compliance", 0)
+
         kpis = {
             "totalProjects": {
                 "value": status["total"], "active": status["active"],
-                "completed": status["completed"], "delta": None, "spark": [],
+                "completed": status["completed"], "delta": tp_delta, "spark": tp_spark,
             },
-            "onTrackPct": {"value": _pct(status["ontrack"], status["total"]), "delta": None},
+            "onTrackPct": {"value": ontrack_pct, "delta": ot_delta},
             "delayedProjects": {
                 "value": status["delayed"], "maxDelayDays": max_delay,
-                "delta": None, "spark": [],
+                "delta": dl_delta, "spark": dl_spark,
             },
             "contractValue": {
                 "value": _to_num(contract_total), "withFinance": with_finance,
-                "projectCount": status["total"], "delta": None, "spark": [],
+                "projectCount": status["total"], "delta": cv_delta, "spark": cv_spark,
             },
-            "released": {"value": 0, "pctOfContract": 0, "delta": None, "spark": []},
-            "slaCompliance": {"value": 0, "met": 0, "breached": 0, "delta": None},
+            "released": {"value": 0, "pctOfContract": 0, "delta": rl_delta, "spark": rl_spark},
+            "slaCompliance": {"value": 0, "met": 0, "breached": 0, "delta": sla_delta},
         }
 
-        tickets = self._tickets_block(project_ids=pids)
+        tickets = self._tickets_block(bearer=bearer, project_ids=pids)
         return {
             "kpis": kpis,
             "projectStatus": status,
@@ -450,7 +490,7 @@ class DashboardViewService(DashboardService):
             },
             "monthlyTrend": self._monthly_trend(),
             "tickets": tickets,
-            "meetings": self._meetings_block(project_ids=pids),
+            "meetings": self._meetings_block(bearer=bearer, project_ids=pids),
             "topOrganizations": [
                 {"name": o["name"], "total": o["total"],
                  "value": _to_num(o["value"]), "delayed": o["delayed"]}
@@ -754,7 +794,9 @@ class DashboardViewService(DashboardService):
     # Endpoint 4 — GET /api/v3/dashboard/organisations/{id}/view (mode=single)
     # =====================================================================
 
-    def get_organisation_single(self, *, organisation_id: str) -> Dict[str, Any]:
+    def get_organisation_single(
+        self, *, organisation_id: str, bearer: Optional[str] = None,
+    ) -> Dict[str, Any]:
         today = _ist_today()
         vendor = self._get_vendor(organisation_id)
         if vendor is None:
@@ -803,8 +845,8 @@ class DashboardViewService(DashboardService):
             for p in projects
         ]
 
-        tickets = self._tickets_block(project_ids=pids)
-        meetings = self._meetings_block(project_ids=pids)
+        tickets = self._tickets_block(bearer=bearer, project_ids=pids)
+        meetings = self._meetings_block(bearer=bearer, project_ids=pids)
 
         return {
             "mode": "single",

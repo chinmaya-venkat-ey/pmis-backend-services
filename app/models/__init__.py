@@ -26,6 +26,7 @@ from app.models.project_ownership import ProjectOwnership  # noqa: F401
 from app.models.activity_assignment import ActivityAssignment  # noqa: F401
 from app.models.activity_workflow_tracker import ActivityWorkflowTracker  # noqa: F401
 from app.models.project_cf_pool_installment import ProjectCfPoolInstallment  # noqa: F401
+from app.models.dashboard_metric_snapshot import DashboardMetricSnapshot  # noqa: F401
 
 # Mirror declarations (read-only)
 from app.models import _cross_schema  # noqa: F401

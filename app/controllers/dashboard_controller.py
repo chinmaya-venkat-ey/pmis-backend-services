@@ -41,9 +41,11 @@ class DashboardController:
 
     # ---- new aggregated view endpoints ---------------------------------
 
-    def summary_view(self, *, delay_min_days: int, top_n: int) -> Dict[str, Any]:
+    def summary_view(
+        self, *, delay_min_days: int, top_n: int, bearer: Optional[str] = None,
+    ) -> Dict[str, Any]:
         return _bare(self.view_service.get_summary_view(
-            delay_min_days=delay_min_days, top_n=top_n,
+            delay_min_days=delay_min_days, top_n=top_n, bearer=bearer,
         ))
 
     def project_full(self, *, project_id: str) -> Dict[str, Any]:
@@ -52,9 +54,11 @@ class DashboardController:
     def organisation_view(self, *, top_n: int) -> Dict[str, Any]:
         return _bare(self.view_service.get_organisation_view(top_n=top_n))
 
-    def organisation_single(self, *, organisation_id: str) -> Dict[str, Any]:
+    def organisation_single(
+        self, *, organisation_id: str, bearer: Optional[str] = None,
+    ) -> Dict[str, Any]:
         return _bare(self.view_service.get_organisation_single(
-            organisation_id=organisation_id,
+            organisation_id=organisation_id, bearer=bearer,
         ))
 
     # ---- original endpoints --------------------------------------------

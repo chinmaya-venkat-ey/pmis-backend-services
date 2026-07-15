@@ -15,6 +15,7 @@ from app.routes import (
     catalog_routes,
     comment_routes,
     critical_path_routes,
+    dashboard_cron_routes,
     dashboard_routes,
     finance_routes,
     health_routes,
@@ -53,6 +54,8 @@ project_router.include_router(attachment_routes.router)
 
 # Read-only surfaces.
 project_router.include_router(dashboard_routes.router)
+# Dashboard snapshot cron (shared-secret gated, NOT user-auth gated).
+project_router.include_router(dashboard_cron_routes.router)
 project_router.include_router(tree_routes.router)
 project_router.include_router(critical_path_routes.router)
 

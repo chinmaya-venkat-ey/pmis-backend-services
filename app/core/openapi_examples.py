@@ -78,7 +78,7 @@ SAMPLE_SLA_FROM_RFP_PAYLOAD: Dict[str, Any] = {
     "measurement": {"display_name": "Weeks delayed", "unit": "weeks"},
     "secondary_measurement": None,
     "target_rows": [],
-    "linear_escalation": {"rate_percent": "0.5", "unit": "week", "grace": 0},
+    "linear_escalation": {"rate_per_unit_percent": "0.5", "unit": "week", "grace_units": 0, "max_units": 20},
     "placeholders": [
         {
             "key": "ld_base_amount",

@@ -5,7 +5,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field
 
 
 # ---------------------------------------------------------------------------
@@ -556,15 +556,32 @@ class SlaSimpleLinearEscalation(BaseModel):
     Examples:
       * Deliverable Submission RFP §5.28.2.b: 0.5% per week, no grace.
       * Query Resolution      RFP §5.28.3.a: 0.1% per day, 3-day grace.
+
+    Field aliasing: the canonical rate field is ``rate_per_unit_percent``,
+    but every published example (Swagger, OpenAPI schema) historically
+    showed the shorter ``rate_percent`` — so clients built from the docs
+    sent that name and got a 422 "Field required" on exactly the
+    deliverable / query SLAs that need this block (SLA001-type). We accept
+    both spellings (``rate_percent`` → ``rate_per_unit_percent``, ``grace``
+    → ``grace_units``) so onboarding no longer depends on which name the
+    caller copied. ``populate_by_name`` keeps the canonical names working.
     """
+    model_config = {"populate_by_name": True}
+
     rate_per_unit_percent: Decimal = Field(
         ..., gt=0, le=10,
-        description='LD% applied per unit of delay. 0.5 means 0.5% per week.',
+        validation_alias=AliasChoices("rate_per_unit_percent", "rate_percent"),
+        description='LD% applied per unit of delay. 0.5 means 0.5% per week. '
+                    'Alias: rate_percent.',
     )
     unit: str = Field(..., pattern=r"^(day|week|month)$",
                       description='Time unit. Determines unit label and tier count.')
-    grace_units: int = Field(0, ge=0, le=365,
-                             description='Number of units allowed before LD kicks in (e.g. 3 days).')
+    grace_units: int = Field(
+        0, ge=0, le=365,
+        validation_alias=AliasChoices("grace_units", "grace"),
+        description='Number of units allowed before LD kicks in (e.g. 3 days). '
+                    'Alias: grace.',
+    )
     max_units: int = Field(
         20, ge=1, le=365,
         description='How many tiers to seed in the lookup table. Default 20 covers the typical cap.',
@@ -600,7 +617,7 @@ class SlaFromRfpRequest(BaseModel):
                 "measurement": {"display_name": "Weeks delayed", "unit": "weeks"},
                 "target_rows": [],
                 "linear_escalation": {
-                    "rate_percent": "0.5", "unit": "week", "grace_units": 0, "max_units": 20,
+                    "rate_per_unit_percent": "0.5", "unit": "week", "grace_units": 0, "max_units": 20,
                 },
                 "placeholders": [
                     {"key": "ld_base_amount",

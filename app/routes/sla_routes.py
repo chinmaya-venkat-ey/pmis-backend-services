@@ -463,7 +463,7 @@ async def onboard_sla_from_rfp(
             "measurement": {"display_name": "Weeks delayed", "unit": "weeks"},
             "target_rows": [],
             "linear_escalation": {
-                "rate_percent": "0.5", "unit": "week",
+                "rate_per_unit_percent": "0.5", "unit": "week",
                 "grace_units": 0, "max_units": 20,
             },
             "placeholders": [

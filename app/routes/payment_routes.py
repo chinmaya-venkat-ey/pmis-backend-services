@@ -22,12 +22,14 @@ from datetime import datetime
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, Path, Query, status
+from sqlalchemy.orm import Session
 
 from app.controllers.payment_page_controller import PaymentPageController
 from app.controllers.project_cost_item_controller import ProjectCostItemController
 from app.controllers.project_payment_term_controller import ProjectPaymentTermController
 from app.core.permissions import PAYMENT_READ, PROJECTS_UPDATE_FINANCE
 from app.core.rbac import require_authenticated, require_permission, require_project_permission
+from app.db import get_db
 from app.dependencies import (
     get_caller_is_admin,
     get_optional_current_user_id,
@@ -281,6 +283,20 @@ def get_payment_page(
     controller: Annotated[PaymentPageController, Depends(get_payment_page_controller)],
 ):
     return controller.get_page(project_uuid)
+
+
+@payment_page_router.get(
+    "/{project_uuid}/payment-page/sla-ld",
+    summary="Per-milestone SLA compliance + liquidated-damages overlay for the "
+            "cost page (scheduled → LD deduction → net payable).",
+    dependencies=[Depends(require_project_permission(PAYMENT_READ))],
+)
+def get_payment_page_sla_ld(
+    project_uuid: str,
+    db: Annotated[Session, Depends(get_db)],
+):
+    from app.services.sla_ld_overlay_service import SlaLdOverlayService
+    return SlaLdOverlayService(db).build(project_uuid)
 
 
 @payment_page_router.get(

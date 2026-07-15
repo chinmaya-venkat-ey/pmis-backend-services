@@ -121,6 +121,13 @@ class Settings(BaseSettings):
     meeting_service_timeout_seconds: float = Field(default=6.0)
     meeting_service_list_cap: int = Field(default=2000)
 
+    # === Contract management (PMIS-contract-management) ===
+    # Source for the dashboard's SLA compliance blocks. Blank => SLA degrades
+    # to available:false. Base must include the service's /api/v3 host, e.g.
+    # "http://pmis-contract-management:8005".
+    contract_management_base_url: Optional[str] = Field(default=None)
+    contract_management_timeout_seconds: float = Field(default=6.0)
+
     # === Dashboard snapshot cron ===
     # Shared secret the scheduler must send as the ``X-Cron-Secret`` header
     # to POST /api/v3/dashboard/cron/snapshot (which persists the day's KPI

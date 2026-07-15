@@ -51,6 +51,7 @@ from app.services.dashboard_service import (
 )
 from app.services.dashboard_snapshot_service import DashboardSnapshotService
 from app.services.meeting_client import MeetingClient
+from app.services.sla_client import SlaClient
 from app.services.ticket_client import TicketClient
 from app.utilities.workflow_state import (
     STATE_ACTIVITY_COMPLETED,
@@ -106,10 +107,6 @@ def _pct(part: float, whole: float) -> int:
     return int(round(part * 100.0 / whole)) if whole else 0
 
 
-def _sla_unavailable() -> Dict[str, Any]:
-    return {"available": False, "compliance": 0, "met": 0, "breached": 0}
-
-
 class DashboardViewService(DashboardService):
     """The four ``*-view`` / ``/full`` payloads. Read-only.
 
@@ -126,6 +123,7 @@ class DashboardViewService(DashboardService):
         super().__init__(db)
         self._ticket_client = TicketClient()
         self._meeting_client = MeetingClient()
+        self._sla_client = SlaClient()
 
     # =====================================================================
     # Real aggregations sourced from schema ``project``
@@ -358,6 +356,40 @@ class DashboardViewService(DashboardService):
     ) -> Dict[str, Any]:
         return self._meeting_client.summary(bearer=bearer, project_ids=project_ids)
 
+    def _org_sla_rollup(self, projects, vendors_by_pid, pids) -> List[Dict[str, Any]]:
+        """slaByOrganization — group per-project SLA summaries by vendor
+        (project-mgmt owns project→org). Empty when SLA is unavailable."""
+        sla_by_pid = self._sla_client.by_projects(pids)
+        if not sla_by_pid:
+            return []
+        vendor_pids: Dict[str, List[str]] = defaultdict(list)
+        vendor_name: Dict[str, str] = {}
+        for p in projects:
+            for vid, vname, _a in vendors_by_pid.get(p.id, []):
+                vendor_pids[vid].append(p.id)
+                vendor_name[vid] = vname
+        out: List[Dict[str, Any]] = []
+        for vid, vpids in vendor_pids.items():
+            summaries = [sla_by_pid[pp] for pp in vpids if pp in sla_by_pid]
+            if not summaries:
+                continue
+            c = self._sla_client.combine(summaries)
+            out.append({"name": vendor_name[vid], "met": c["met"], "breached": c["breached"]})
+        return out
+
+    def _project_sla_block(self, project_id: str, items: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Per-project SLA for /full — enriches contract-mgmt's breach rows
+        (keyed by activityId) with the activity's wbs + name from the item
+        list, matching the dashboard's breach shape."""
+        d = self._sla_client.project_detail(project_id)
+        by_id = {i["id"]: i for i in items}
+        for b in d.get("breaches", []) or []:
+            it = by_id.get(b.get("activityId"))
+            if it:
+                b["wbs"] = it.get("wbs")
+                b["activity"] = it.get("name")
+        return d
+
     # =====================================================================
     # Snapshot-backed metrics (delta / spark)
     # =====================================================================
@@ -459,6 +491,8 @@ class DashboardViewService(DashboardService):
         rl_delta, rl_spark = ds("released", 0)
         sla_delta, _ = ds("sla_compliance", 0)
 
+        sla_health = self._sla_client.global_summary()
+
         kpis = {
             "totalProjects": {
                 "value": status["total"], "active": status["active"],
@@ -474,7 +508,11 @@ class DashboardViewService(DashboardService):
                 "projectCount": status["total"], "delta": cv_delta, "spark": cv_spark,
             },
             "released": {"value": 0, "pctOfContract": 0, "delta": rl_delta, "spark": rl_spark},
-            "slaCompliance": {"value": 0, "met": 0, "breached": 0, "delta": sla_delta},
+            "slaCompliance": {
+                "value": sla_health.get("compliance", 0),
+                "met": sla_health.get("met", 0), "breached": sla_health.get("breached", 0),
+                "delta": sla_delta,
+            },
         }
 
         tickets = self._tickets_block(bearer=bearer, project_ids=pids)
@@ -484,7 +522,7 @@ class DashboardViewService(DashboardService):
             "paymentByPhase": self._payment_by_phase(pids),
             "costComposition": self._cost_composition(pids),
             "paymentByOrganization": payment_by_org,
-            "slaHealth": _sla_unavailable(),
+            "slaHealth": sla_health,
             "approvalWorkflow": {
                 "available": True, "total": approvals["total"], "stages": approvals["stages"],
             },
@@ -617,7 +655,7 @@ class DashboardViewService(DashboardService):
             "statusCounts": status_counts,
             "finance": finance,
             "paymentTimeline": self._payment_timeline(project_id),
-            "sla": {"available": False, "compliance": 0, "met": 0, "breached": 0, "breaches": []},
+            "sla": self._project_sla_block(project_id, items),
             "approvals": {
                 "available": True,
                 "pending": approvals["pending"],
@@ -763,6 +801,7 @@ class DashboardViewService(DashboardService):
             for m in sorted(org_rows.values(), key=lambda r: -r["contractValue"])[:top_n]
         ]
 
+        ov_sla = self._sla_client.global_summary()
         return {
             "mode": "all",
             "kpis": {
@@ -781,12 +820,12 @@ class DashboardViewService(DashboardService):
                 },
                 "released": {"value": 0, "pctOfContract": 0},
                 "delayedProjects": {"value": status["delayed"]},
-                "slaCompliance": {"value": 0},
+                "slaCompliance": {"value": ov_sla.get("compliance", 0)},
             },
             "projectStatus": status,
             "leaderboard": leaderboard,
             "paymentByOrganization": payment_by_org,
-            "slaByOrganization": [],
+            "slaByOrganization": self._org_sla_rollup(projects, vendors_by_pid, pids),
             "organizations": organizations,
         }
 
@@ -847,6 +886,7 @@ class DashboardViewService(DashboardService):
 
         tickets = self._tickets_block(bearer=bearer, project_ids=pids)
         meetings = self._meetings_block(bearer=bearer, project_ids=pids)
+        org_sla = self._sla_client.combine(list(self._sla_client.by_projects(pids).values()))
 
         return {
             "mode": "single",
@@ -866,7 +906,7 @@ class DashboardViewService(DashboardService):
                     "pctOfValue": _pct(float(scheduled), float(total_value)),
                 },
                 "delayedProjects": {"value": status["delayed"]},
-                "slaCompliance": {"value": 0},
+                "slaCompliance": {"value": org_sla.get("compliance", 0)},
                 "openTickets": {
                     "value": tickets.get("open", 0),
                     "highPriority": tickets.get("highPriority", 0),
@@ -884,7 +924,7 @@ class DashboardViewService(DashboardService):
                 "remaining": _to_num(total_value - scheduled),
             },
             "topDelayedProjects": top_delayed,
-            "sla": {"available": False, "compliance": 0, "met": 0, "breached": 0},
+            "sla": org_sla,
             "tickets": tickets,
             "meetings": meetings,
             "projects": project_cards,

@@ -509,9 +509,18 @@ class DashboardViewService(DashboardService):
             },
             "released": {"value": 0, "pctOfContract": 0, "delta": rl_delta, "spark": rl_spark},
             "slaCompliance": {
-                "value": sla_health.get("compliance", 0),
-                "met": sla_health.get("met", 0), "breached": sla_health.get("breached", 0),
-                "delta": sla_delta,
+                # Value is None when no rows have been evaluated — the FE
+                # renders a "not yet available" state instead of "0%".
+                # data_state carries the reason ("no_data" /
+                # "awaiting_observations" / "partial" / "ready" /
+                # "service_down") so the FE picks the right banner.
+                "value":     sla_health.get("compliance"),
+                "dataState": sla_health.get("data_state"),
+                "met":       sla_health.get("met", 0),
+                "breached":  sla_health.get("breached", 0),
+                "pending":   sla_health.get("pending", 0),
+                "evaluated": sla_health.get("evaluated", 0),
+                "delta":     sla_delta,
             },
         }
 
@@ -820,7 +829,12 @@ class DashboardViewService(DashboardService):
                 },
                 "released": {"value": 0, "pctOfContract": 0},
                 "delayedProjects": {"value": status["delayed"]},
-                "slaCompliance": {"value": ov_sla.get("compliance", 0)},
+                "slaCompliance": {
+                    "value":     ov_sla.get("compliance"),
+                    "dataState": ov_sla.get("data_state"),
+                    "met":       ov_sla.get("met", 0),
+                    "breached":  ov_sla.get("breached", 0),
+                },
             },
             "projectStatus": status,
             "leaderboard": leaderboard,
@@ -906,7 +920,12 @@ class DashboardViewService(DashboardService):
                     "pctOfValue": _pct(float(scheduled), float(total_value)),
                 },
                 "delayedProjects": {"value": status["delayed"]},
-                "slaCompliance": {"value": org_sla.get("compliance", 0)},
+                "slaCompliance": {
+                    "value":     org_sla.get("compliance"),
+                    "dataState": org_sla.get("data_state"),
+                    "met":       org_sla.get("met", 0),
+                    "breached":  org_sla.get("breached", 0),
+                },
                 "openTickets": {
                     "value": tickets.get("open", 0),
                     "highPriority": tickets.get("highPriority", 0),

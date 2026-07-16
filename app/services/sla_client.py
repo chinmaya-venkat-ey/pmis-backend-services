@@ -26,7 +26,21 @@ logger = get_logger(__name__)
 
 
 def _sla_unavailable() -> Dict[str, Any]:
-    return {"available": False, "compliance": 0, "met": 0, "breached": 0}
+    """Fallback when contract-mgmt is unreachable or returns an error.
+
+    ``compliance: None`` — same convention the upstream `_summarise` now
+    uses when there's no data — so the FE renders a distinct "not
+    available" state instead of a misleading "0% compliance."
+    """
+    return {
+        "available":  False,
+        "data_state": "service_down",
+        "compliance": None,
+        "met":        0,
+        "breached":   0,
+        "evaluated":  0,
+        "pending":    0,
+    }
 
 
 class SlaClient:
@@ -77,12 +91,30 @@ class SlaClient:
 
     @staticmethod
     def combine(summaries: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Roll several per-project summaries into one (org / single-org)."""
-        met = sum(int(s.get("met") or 0) for s in summaries)
+        """Roll several per-project summaries into one (org / single-org).
+
+        Mirrors contract-mgmt's ``_summarise`` — emits ``data_state`` and
+        ``compliance: None`` when nothing has been evaluated, so the
+        organisation rollup card can render "No SLA data yet" instead
+        of "0% compliant".
+        """
+        met      = sum(int(s.get("met") or 0) for s in summaries)
         breached = sum(int(s.get("breached") or 0) for s in summaries)
-        denom = met + breached
+        pending  = sum(int(s.get("pending") or 0) for s in summaries)
+        denom    = met + breached
+        if not summaries:
+            data_state = "no_data"
+        elif denom == 0:
+            data_state = "awaiting_observations"
+        elif pending > 0:
+            data_state = "partial"
+        else:
+            data_state = "ready"
         return {
-            "available": any(s.get("available") for s in summaries),
-            "compliance": round(met * 100 / denom) if denom else 0,
-            "met": met, "breached": breached,
+            "available":  any(s.get("available") for s in summaries),
+            "data_state": data_state,
+            "compliance": round(met * 100 / denom) if denom else None,
+            "met":        met,
+            "breached":   breached,
+            "pending":    pending,
         }

@@ -960,7 +960,7 @@ class ProjectService:
                 .join(ProjectCostItem, ProjectCostItem.id == CostItemMilestone.cost_item_id)
                 .where(ProjectCostItem.project_id == project_id)
                 .where(ProjectCostItem.deleted_at.is_(None))
-                .where(ProjectCostItem.cost_type_code == "fixed")
+                .where(ProjectCostItem.cost_type_code != "one_time")
                 .distinct()
             ).all()
         }

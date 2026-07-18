@@ -392,14 +392,28 @@ class SlaComplianceService:
 
             if status == "pending_observation":
                 # Manual input needed — email the owners so they can record it.
-                emails_sent = self._notify_manual_review(
-                    notifier=notifier,
-                    activity_id=activity_id,
-                    activity_ctx=activity_ctx,
-                    mapping=mapping,
-                    sla=sla,
-                    project_id=project_id,
-                )
+                # Wrapped in try/except so any notifier bug (NameError,
+                # network glitch, template missing) NEVER 500s the whole
+                # endpoint. The DB row already exists at
+                # pending_observation status; a failure here just leaves
+                # notification_sent_to empty for that entry.
+                try:
+                    emails_sent = self._notify_manual_review(
+                        notifier=notifier,
+                        activity_id=activity_id,
+                        activity_ctx=activity_ctx,
+                        mapping=mapping,
+                        sla=sla,
+                        project_id=project_id,
+                    )
+                except Exception as _exc:  # noqa: BLE001
+                    from app.utilities.logger import get_logger
+                    get_logger(__name__).warning(
+                        "SLA manual-review notification raised for "
+                        "activity=%s sla=%s: %s",
+                        activity_id, sla.sla_ref, _exc,
+                    )
+                    emails_sent = []
                 entry["notification_sent_to"] = emails_sent
                 manual_needed.append(entry)
             else:
@@ -496,6 +510,10 @@ class SlaComplianceService:
         # the template isn't installed yet on notification-svc. Template
         # dispatch is best-effort — a "template missing" from
         # notification-svc still returns 2xx.
+        # Import here so this method is self-contained (called from
+        # on_activity_complete but named referenced inside its own body
+        # was NameError-ing on the first live test).
+        from app.clients.notification_client import TEMPLATE_SLA_MANUAL_REVIEW
         for recipient in recipients:
             notifier.dispatch(
                 template_kind=TEMPLATE_SLA_MANUAL_REVIEW,

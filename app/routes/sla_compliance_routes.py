@@ -195,14 +195,33 @@ def sla_summary(db: Annotated[Session, Depends(get_db)]):
 def sla_for_project(project_id: str, db: Annotated[Session, Depends(get_db)]):
     rows = _latest_results(db, project_ids=[project_id])
     out = _summarise(rows)
+    # A2 audit fix — surface severity_level, accumulated_points, and the
+    # underlying formula_type on every breach row so the FE cost /
+    # compliance detail views don't render blank cells for those columns.
+    # Every field is guarded against NULL (fixed_escalation rows written
+    # before commit 7912946 still have None severity_level even after the
+    # 2026-07-17 backfill).
+    def _f(x):
+        return float(x) if x is not None else None
     out["breaches"] = [
-        {"activityId": r.activity_id, "milestoneId": r.milestone_id, "slaRef": r.sla_ref,
-         "sla": float(r.target_days) if r.target_days is not None else None,
-         "actual": float(r.actual_days) if r.actual_days is not None else None,
-         "delay": float(r.delay_days) if r.delay_days is not None else None,
-         "ldPercent": float(r.ld_percent) if r.ld_percent is not None else None,
-         "ldAmount": float(r.ld_amount) if r.ld_amount is not None else None,
-         "status": r.status}
+        {
+            "activityId":        r.activity_id,
+            "milestoneId":       r.milestone_id,
+            "slaRef":            r.sla_ref,
+            "slaId":             r.sla_id,
+            "formulaType":       r.formula_type,
+            "sla":               _f(r.target_days),
+            "actual":            _f(r.actual_days),
+            "delay":             _f(r.delay_days),
+            "severityLevel":     r.severity_level,
+            "accumulatedPoints": _f(r.accumulated_points),
+            "ldPercent":         _f(r.ld_percent),
+            "ldAmount":          _f(r.ld_amount),
+            "ldBaseAmount":      _f(r.ld_base_amount),
+            "ldBaseKind":        r.ld_base_kind,
+            "observedValue":     r.observed_value,
+            "status":            r.status,
+        }
         for r in rows if r.breached
     ]
     return api_response(data=out)

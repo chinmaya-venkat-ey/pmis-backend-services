@@ -425,36 +425,43 @@ class SlaComplianceService:
         pending_observation row stays in the DB either way, so a later
         cron / manual cleanup will retry.
         """
-        # Recipient discovery — project.projects and project.activities
-        # live in the project schema on the same DB. Cross-schema query
-        # avoids an HTTP hop back to project-mgmt just for email lookup.
+        # Recipient discovery — cross-schema query into project.*, no HTTP
+        # hop back to project-mgmt just for emails. Ownership tables
+        # discovered live on the VM:
+        #   project.project_ownership     (role = 'project_owner' / 'owner')
+        #   project.activity_assignments  (role = 'owner')
+        # (Earlier code queried the wrong columns — projects.owner is a
+        # division code, not a user_id. Fixed after live debug 2026-07-18.)
         from sqlalchemy import text as _sql_text
         recipients: List[str] = []
         try:
             if project_id:
-                row = self.db.execute(
+                for r in self.db.execute(
                     _sql_text(
                         "SELECT DISTINCT u.email "
-                        "FROM users.users u "
-                        "JOIN project.projects p ON p.owner = u.id::text "
-                        "WHERE p.id = :pid AND u.email IS NOT NULL"
+                        "FROM project.project_ownership po "
+                        "JOIN users.users u ON u.id = po.user_id "
+                        "WHERE po.project_id = :pid "
+                        "  AND po.role IN ('project_owner', 'owner', 'owner_approver') "
+                        "  AND po.deleted_at IS NULL "
+                        "  AND u.email IS NOT NULL"
                     ),
                     {"pid": project_id},
-                ).all()
-                for r in row:
-                    if r[0]:
+                ).all():
+                    if r[0] and r[0] not in recipients:
                         recipients.append(r[0])
-            # Activity owner (if the activities table carries one)
-            row2 = self.db.execute(
+            for r in self.db.execute(
                 _sql_text(
                     "SELECT DISTINCT u.email "
-                    "FROM users.users u "
-                    "JOIN project.activities a ON a.owner = u.id::text "
-                    "WHERE a.id = :aid AND u.email IS NOT NULL"
+                    "FROM project.activity_assignments aa "
+                    "JOIN users.users u ON u.id = aa.user_id "
+                    "WHERE aa.activity_id = :aid "
+                    "  AND aa.role IN ('owner', 'owner_approver') "
+                    "  AND aa.deleted_at IS NULL "
+                    "  AND u.email IS NOT NULL"
                 ),
                 {"aid": activity_id},
-            ).all()
-            for r in row2:
+            ).all():
                 if r[0] and r[0] not in recipients:
                     recipients.append(r[0])
         except Exception as exc:  # noqa: BLE001

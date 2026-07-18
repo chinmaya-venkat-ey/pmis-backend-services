@@ -76,6 +76,104 @@ def run_daily_sla(
 #   * Tests can seed sla_evaluation_result without a shared secret.
 # ------------------------------------------------------------------
 
+# ------------------------------------------------------------------ activity completion
+#
+# Called by project-management when an activity moves to COMPLETED (or
+# actual_end_date is set). Runs SLA evaluation for every ACTIVE mapping
+# on the activity:
+#
+#   * fixed_escalation (date-derivable) → auto-evaluate immediately; a
+#     row lands in contract.sla_evaluation_results.
+#   * point_accumulation / band_accumulation / wac → mark as
+#     pending_observation, then email + notify project + activity
+#     owners so they know to record the observed value.
+#
+# Response summarises what happened per mapping so the caller (usually
+# project-mgmt) can log it and the FE can display "SLAs evaluated on
+# completion" on the activity detail page.
+# ------------------------------------------------------------------
+
+@router.post(
+    "/sla-compliance/activities/{activity_id}/on-complete",
+    summary="Evaluate all SLAs on this activity now (called on completion)",
+    description=(
+        "Triggered by project-management when the activity moves to "
+        "COMPLETED. Auto-evaluates every date-derivable SLA (linear-LD "
+        "shape) on the activity, and for each SLA that needs a manual "
+        "observation, emails the project + activity owners via the "
+        "notification service so they can record the value. Response "
+        "returns per-mapping outcomes: autoEvaluated / manualNeeded / "
+        "errors. Safe to re-invoke (idempotent on evaluated_on)."
+    ),
+)
+def on_activity_complete(
+    activity_id: str,
+    db: Annotated[Session, Depends(get_db)],
+    user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
+):
+    summary = SlaComplianceService(db).on_activity_complete(activity_id)
+    return api_response(data=summary)
+
+
+@router.get(
+    "/sla-compliance/activities/{activity_id}",
+    summary="All SLA evaluation results for one activity",
+    description=(
+        "Returns every latest-per-mapping row in sla_evaluation_results "
+        "that belongs to this activity, plus the summary block used on "
+        "the activity detail page (compliance %, met, breached, pending, "
+        "excluded, data_state). Empty results list on activities with no "
+        "SLA mappings — the summary still returns available:true so the "
+        "FE renders 'no SLAs mapped' rather than 'not available'."
+    ),
+)
+def sla_for_activity(
+    activity_id: str,
+    db: Annotated[Session, Depends(get_db)],
+):
+    from app.models.sla_evaluation_result import SlaEvaluationResult
+    sub = _latest_per_mapping()
+    stmt = (
+        select(SlaEvaluationResult)
+        .join(sub, (SlaEvaluationResult.mapping_id == sub.c.mapping_id)
+              & (SlaEvaluationResult.evaluated_on == sub.c.d))
+        .where(SlaEvaluationResult.activity_id == activity_id)
+    )
+    rows = list(db.execute(stmt).scalars().all())
+    summary = _summarise(rows)
+
+    def _f(x):
+        return float(x) if x is not None else None
+    results = [
+        {
+            "mappingId":         r.mapping_id,
+            "slaId":             r.sla_id,
+            "slaRef":            r.sla_ref,
+            "formulaType":       r.formula_type,
+            "evaluatedOn":       r.evaluated_on.isoformat() if r.evaluated_on else None,
+            "status":            r.status,
+            "met":               r.met,
+            "breached":          r.breached,
+            "severityLevel":     r.severity_level,
+            "accumulatedPoints": _f(r.accumulated_points),
+            "targetDays":        _f(r.target_days),
+            "actualDays":        _f(r.actual_days),
+            "delayDays":         _f(r.delay_days),
+            "ldPercent":         _f(r.ld_percent),
+            "ldAmount":          _f(r.ld_amount),
+            "ldBaseAmount":      _f(r.ld_base_amount),
+            "ldBaseKind":        r.ld_base_kind,
+            "observedValue":     r.observed_value,
+        }
+        for r in rows
+    ]
+    return api_response(data={
+        "activityId": activity_id,
+        **summary,
+        "results":    results,
+    })
+
+
 @router.post(
     "/sla-compliance/evaluate-all",
     summary="Run SLA evaluation across every ACTIVE mapping (admin, auth-required)",

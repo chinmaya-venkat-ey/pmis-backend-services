@@ -310,3 +310,210 @@ class SlaComplianceService:
             except Exception:  # noqa: BLE001 — one bad mapping must not stop the run
                 counts["error"] += 1
         return {"evaluatedOn": on_date.isoformat(), "activeMappings": len(active), "outcomes": dict(counts)}
+
+    # ================================================================= activity completion
+    #
+    # Called by project-management when an activity moves to COMPLETED
+    # (or actual_end_date is set). For each active mapping on the
+    # activity:
+    #   * date-derivable formula (``fixed_escalation``)  → auto-evaluate.
+    #     A row lands in sla_evaluation_results immediately.
+    #   * non-date-derivable formula                     → mark as
+    #     pending_observation, then email project + activity owners so
+    #     they know a manual value has to be recorded.
+    #
+    # This method is idempotent — re-running the same activity's flow
+    # replaces its row for the current on_date (the (mapping_id,
+    # evaluated_on) unique key in _persist takes care of that).
+
+    def on_activity_complete(
+        self,
+        activity_id: str,
+        *,
+        on_date: Optional[_date] = None,
+    ) -> Dict[str, Any]:
+        """Run SLA evaluation for every active mapping on this activity.
+
+        Auto-evaluates date-derivable SLAs, emails owners for the rest.
+        Returns a per-mapping summary the caller can log / display.
+        """
+        on_date = on_date or datetime.now(timezone.utc).date()
+
+        # Local imports keep module-load time small when the flow is unused.
+        from app.clients.notification_client import (
+            NotificationClient, TEMPLATE_SLA_MANUAL_REVIEW,
+        )
+        from app.repositories.sla_activity_mapping_repository import (
+            SlaActivityMappingRepository,
+        )
+
+        mapping_repo = SlaActivityMappingRepository(self.db)
+        active_rows = mapping_repo.list_for_activity(activity_id, active_only=True)
+
+        auto_evaluated: List[Dict[str, Any]] = []
+        manual_needed: List[Dict[str, Any]] = []
+        errors: List[Dict[str, Any]] = []
+
+        # Pull activity + project context once — needed for the email payload.
+        # Fetch via the resolver (which uses either project-mgmt HTTP or the
+        # cross-schema mirror). Best-effort — missing context degrades to
+        # "unknown" strings in the email rather than an exception.
+        activity_ctx = self.resolver.get_activity(activity_id) or {}
+        project_id = (
+            activity_ctx.get("projectId")
+            or activity_ctx.get("project_id")
+        )
+
+        notifier = NotificationClient()
+
+        for mapping, sla, formula_type in active_rows:
+            if formula_type is None:
+                errors.append({
+                    "mapping_id": mapping.id, "sla_ref": sla.sla_ref,
+                    "reason": "formula_type not resolved",
+                })
+                continue
+            try:
+                status = self.evaluate_and_persist(mapping.id, on_date)
+            except Exception as exc:  # noqa: BLE001
+                errors.append({
+                    "mapping_id": mapping.id, "sla_ref": sla.sla_ref,
+                    "reason": f"{type(exc).__name__}: {exc}",
+                })
+                continue
+
+            entry = {
+                "mapping_id": mapping.id,
+                "sla_id": sla.id,
+                "sla_ref": sla.sla_ref,
+                "formula_type": formula_type,
+                "status": status,
+            }
+
+            if status == "pending_observation":
+                # Manual input needed — email the owners so they can record it.
+                emails_sent = self._notify_manual_review(
+                    notifier=notifier,
+                    activity_id=activity_id,
+                    activity_ctx=activity_ctx,
+                    mapping=mapping,
+                    sla=sla,
+                    project_id=project_id,
+                )
+                entry["notification_sent_to"] = emails_sent
+                manual_needed.append(entry)
+            else:
+                auto_evaluated.append(entry)
+
+        return {
+            "activityId":      activity_id,
+            "projectId":       project_id,
+            "evaluatedOn":     on_date.isoformat(),
+            "totalMappings":   len(active_rows),
+            "autoEvaluated":   auto_evaluated,
+            "manualNeeded":    manual_needed,
+            "errors":          errors,
+        }
+
+    def _notify_manual_review(
+        self, *, notifier, activity_id, activity_ctx, mapping, sla, project_id,
+    ) -> List[str]:
+        """Email + template dispatch to project + activity owners.
+
+        Returns the list of email addresses we actually sent to. Empty
+        list is fine (means we had no addresses to contact) — the
+        pending_observation row stays in the DB either way, so a later
+        cron / manual cleanup will retry.
+        """
+        # Recipient discovery — project.projects and project.activities
+        # live in the project schema on the same DB. Cross-schema query
+        # avoids an HTTP hop back to project-mgmt just for email lookup.
+        from sqlalchemy import text as _sql_text
+        recipients: List[str] = []
+        try:
+            if project_id:
+                row = self.db.execute(
+                    _sql_text(
+                        "SELECT DISTINCT u.email "
+                        "FROM users.users u "
+                        "JOIN project.projects p ON p.owner = u.id::text "
+                        "WHERE p.id = :pid AND u.email IS NOT NULL"
+                    ),
+                    {"pid": project_id},
+                ).all()
+                for r in row:
+                    if r[0]:
+                        recipients.append(r[0])
+            # Activity owner (if the activities table carries one)
+            row2 = self.db.execute(
+                _sql_text(
+                    "SELECT DISTINCT u.email "
+                    "FROM users.users u "
+                    "JOIN project.activities a ON a.owner = u.id::text "
+                    "WHERE a.id = :aid AND u.email IS NOT NULL"
+                ),
+                {"aid": activity_id},
+            ).all()
+            for r in row2:
+                if r[0] and r[0] not in recipients:
+                    recipients.append(r[0])
+        except Exception as exc:  # noqa: BLE001
+            # Owner-lookup failures shouldn't derail the completion flow —
+            # log + fall through to send whatever we have (possibly nothing).
+            from app.utilities.logger import get_logger
+            get_logger(__name__).warning(
+                "SLA manual-review owner lookup failed for activity %s: %s",
+                activity_id, exc,
+            )
+
+        if not recipients:
+            return []
+
+        activity_name = (
+            activity_ctx.get("name")
+            or activity_ctx.get("activityName")
+            or activity_id[:8]
+        )
+        payload = {
+            "activity_id":   activity_id,
+            "activity_name": activity_name,
+            "project_id":    project_id,
+            "sla_ref":       sla.sla_ref,
+            "sla_title":     sla.title,
+            "mapping_id":    mapping.id,
+            "formula_type":  getattr(mapping, "formula_type", None),
+        }
+
+        # Two dispatches: (1) template-based (structured — notification-svc
+        # renders + logs an audit trail), (2) direct email as fallback if
+        # the template isn't installed yet on notification-svc. Template
+        # dispatch is best-effort — a "template missing" from
+        # notification-svc still returns 2xx.
+        for recipient in recipients:
+            notifier.dispatch(
+                template_kind=TEMPLATE_SLA_MANUAL_REVIEW,
+                recipient=recipient,
+                payload=payload,
+                channel="email",
+            )
+
+        # Direct-email fallback so the operator sees a real message even
+        # when the template doesn't exist in the notification catalog yet.
+        subject = f"SLA needs manual evaluation — {sla.sla_ref} on {activity_name}"
+        body = (
+            f"Activity '{activity_name}' has been completed and one of its "
+            f"SLAs ({sla.sla_ref} — {sla.title}) requires a manual "
+            f"observation before it can be evaluated.\n\n"
+            f"Activity ID: {activity_id}\n"
+            f"Mapping ID:  {mapping.id}\n"
+            f"SLA:         {sla.sla_ref}\n\n"
+            f"Record the observation via:\n"
+            f"  POST /api/v3/sla-compliance/observations\n"
+            f"  body: {{\"mapping_id\": \"{mapping.id}\", "
+            f"\"observed_value\": <value>, \"period_start\": <YYYY-MM-DD>, "
+            f"\"period_end\": <YYYY-MM-DD>}}\n\n"
+            f"Then trigger evaluation via:\n"
+            f"  POST /api/v3/sla-compliance/mappings/{mapping.id}/evaluate\n"
+        )
+        notifier.send_email(to=recipients, subject=subject, body=body)
+        return recipients

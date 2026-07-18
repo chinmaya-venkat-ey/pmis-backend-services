@@ -56,7 +56,14 @@ class ProjectManagementClient:
         base_url: Optional[str] = None,
         timeout_seconds: Optional[float] = None,
     ) -> None:
-        self._base_url = (base_url or settings.project_management_base_url).rstrip("/")
+        # Tolerate an unset base URL — deployments that resolve
+        # activities via the DB-direct resolver never need this client's
+        # HTTP path, so refusing to construct here would break every
+        # code path that instantiates the class defensively (e.g. the
+        # SLA-evaluator DI wiring). When _base_url is empty, get_activity
+        # returns None immediately.
+        raw = base_url or settings.project_management_base_url or ""
+        self._base_url = raw.rstrip("/") if raw else ""
         self._timeout = timeout_seconds or settings.project_management_timeout_seconds
         self._cache: Dict[str, tuple[float, Optional[Dict[str, Any]]]] = {}
         self._lock = threading.Lock()
@@ -77,6 +84,13 @@ class ProjectManagementClient:
         cached = self._cache_get(activity_id)
         if cached is not None:
             return cached
+
+        # No base_url configured — the caller either uses the DB-direct
+        # resolver (DbActivityResolver) or is in a dev env without
+        # project-mgmt reachable. Return None so upstream code degrades
+        # gracefully to "no activity context available."
+        if not self._base_url:
+            return None
 
         # The pmis-project-management service mounts its routers under /api/v3.
         # When fronted by the VM's nginx the path is /projects/api/v3/activities/{id};

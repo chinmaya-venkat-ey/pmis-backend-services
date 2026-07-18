@@ -25,9 +25,11 @@ os.environ.setdefault(
     "DATABASE_URL",
     "postgresql+psycopg2://pmis_user:aadhaarpmis2026@10.1.131.199:5432/pmis_db",
 )
-# Notification client stays mock — we only test that the flow builds
-# the right recipient list + doesn't crash.
-os.environ.setdefault("NOTIFICATION_CLIENT", "mock")
+# Reproduces the deployed VM misconfig — NOTIFICATION_CLIENT=real but
+# NOTIFICATION_SERVICE_URL unset. The client should auto-downgrade to
+# mock so we don't 500 on an unreachable dispatch. Verified by
+# _assert_no_notif_dispatch_errors below.
+os.environ.setdefault("NOTIFICATION_CLIENT", "real")
 os.environ.setdefault("USER_MANAGEMENT_SERVICE_URL", "http://user-svc.test")
 
 from app.db import SessionLocal  # noqa: E402
@@ -51,6 +53,24 @@ def main() -> int:
     print("=" * 76)
     print(f"activity: {ACTIVITY_ID}")
     print()
+
+    # Capture WARN/ERROR logs from the notifier so a "dispatch failed"
+    # (real mode with no URL) is caught by the smoke test instead of
+    # only surfacing in the deployed container's log.
+    import logging
+    _bad_logs: list = []
+    class _CaptureHandler(logging.Handler):
+        def emit(self, record):
+            if record.levelno >= logging.WARNING and record.name.startswith(
+                "app.clients.notification_client"
+            ):
+                # Fine to see the "forcing mock mode" downgrade — treat
+                # only actual failures (dispatch failed / send failed) as
+                # smoke-test failures.
+                msg = record.getMessage()
+                if "dispatch failed" in msg.lower() or "send failed" in msg.lower():
+                    _bad_logs.append(msg)
+    logging.getLogger().addHandler(_CaptureHandler())
 
     db = SessionLocal()
     try:
@@ -109,6 +129,13 @@ def main() -> int:
         print(f"     * {e.get('sla_ref')} [{e.get('formula_type')}] -> {e.get('status')}")
         print(f"       emails: {emails}")
     print(f"  errors:         {len(errors)}")
+
+    ok &= _log(
+        "no notifier dispatch/send failures",
+        not _bad_logs,
+        f"{len(_bad_logs)} failure lines"
+        + (f": {_bad_logs[0][:120]}" if _bad_logs else ""),
+    )
 
     if manual:
         # Manual entries should carry the notification_sent_to list.

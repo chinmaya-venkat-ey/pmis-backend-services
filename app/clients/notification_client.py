@@ -58,6 +58,19 @@ class NotificationClient:
             self.mode = configured_mode
         else:
             self.mode = "real" if self.base_url else "mock"
+        # Safety net: even when the config asked for "real", we can't
+        # POST anywhere without a URL. Downgrade to mock so the caller
+        # gets a cleanly-logged send instead of an httpx exception:
+        #     "Request URL is missing an 'http://' or 'https://' protocol"
+        # (Live 2026-07-18 — the VM container has NOTIFICATION_CLIENT=real
+        # but NOTIFICATION_SERVICE_URL unset; without this guard every
+        # dispatch would fail visibly in container logs.)
+        if self.mode == "real" and not self.base_url:
+            logger.warning(
+                "NotificationClient: configured mode='real' but no "
+                "notification_service_url set — forcing mock mode."
+            )
+            self.mode = "mock"
 
     def dispatch(
         self,

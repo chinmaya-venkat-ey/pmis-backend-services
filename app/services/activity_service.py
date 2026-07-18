@@ -817,6 +817,13 @@ class ActivityService:
                 "by_child": triggering_child_id,
             },
         )
+        # SLA on-complete hook — same treatment as complete_from_workflow.
+        # Best-effort HTTP call to contract-mgmt; failure never rolls back.
+        try:
+            from app.services.sla_client import SlaClient
+            SlaClient().trigger_activity_completion(row.id)
+        except Exception:  # noqa: BLE001
+            pass
         self._cascade_to_parent(row, caller_user_id=caller_user_id)
 
     def _cascade_to_parent(self, row, *, caller_user_id: Optional[str]) -> None:
@@ -871,6 +878,18 @@ class ActivityService:
                 "by_workflow": True,
             },
         )
+        # Fire the "activity completed → evaluate its SLAs" workflow on
+        # contract-management. Best-effort — SLA-eval failure MUST NOT
+        # roll back the completion. When contract-mgmt is unreachable
+        # the daily cron picks the SLA up anyway; the on-complete call
+        # is just an immediacy optimisation + the email trigger for
+        # SLAs that need manual observation.
+        try:
+            from app.services.sla_client import SlaClient
+            SlaClient().trigger_activity_completion(row.id)
+        except Exception as _exc:  # noqa: BLE001
+            # Already logged inside the client; keep completion transactional.
+            pass
         self._cascade_to_parent(row, caller_user_id=caller_user_id)
         return True
 

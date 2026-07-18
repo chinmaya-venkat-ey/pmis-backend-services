@@ -89,6 +89,41 @@ class SlaClient:
         d = self._get(f"/api/v3/sla-compliance/projects/{project_id}/milestones")
         return d if isinstance(d, dict) else {}
 
+    def trigger_activity_completion(self, activity_id: str) -> Optional[Dict[str, Any]]:
+        """Fire the "activity completed → evaluate all its SLAs" workflow
+        on contract-management.
+
+        Best-effort — a failure here MUST NOT block the activity's own
+        completion. The contract-mgmt endpoint auto-evaluates every
+        date-derivable SLA and emails project + activity owners for the
+        rest (SLAs that need manually-recorded observations).
+
+        Returns the per-mapping summary contract-mgmt produced, or None
+        if the call failed / the client is disabled.
+        """
+        if not self.enabled:
+            return None
+        try:
+            with httpx.Client(timeout=self.timeout) as client:
+                resp = client.post(
+                    f"{self.base_url}/api/v3/sla-compliance/"
+                    f"activities/{activity_id}/on-complete",
+                )
+        except httpx.HTTPError as exc:
+            logger.warning(
+                "SLA on-complete trigger failed for activity %s: %s",
+                activity_id, exc,
+            )
+            return None
+        if resp.status_code >= 400:
+            logger.warning(
+                "SLA on-complete non-2xx for %s: %s %s",
+                activity_id, resp.status_code, resp.text[:200],
+            )
+            return None
+        body = resp.json()
+        return body.get("data", body) if isinstance(body, dict) else body
+
     @staticmethod
     def combine(summaries: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Roll several per-project summaries into one (org / single-org).

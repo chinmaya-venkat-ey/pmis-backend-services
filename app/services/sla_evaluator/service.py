@@ -900,6 +900,28 @@ class SlaEvaluatorService:
             return None
         return {row.level: Decimal(row.points) for row in rows}
 
+    def _load_contract_ld_rules(
+        self, contract_type: Optional[str],
+    ) -> Dict[str, Decimal]:
+        """Pre-load contract.contract_ld_rules rows into a dict keyed on
+        rule_key. Returns {} when contract_type is None or the SELECT
+        yields nothing — evaluators fall back to their defaults."""
+        if not contract_type:
+            return {}
+        from sqlalchemy import text as _text
+        try:
+            rows = self.db.execute(
+                _text("""
+                    SELECT rule_key, rule_value
+                      FROM contract.contract_ld_rules
+                     WHERE contract_type = :ct
+                """),
+                {"ct": contract_type},
+            ).all()
+        except Exception:  # noqa: BLE001
+            return {}
+        return {r.rule_key: Decimal(str(r.rule_value)) for r in rows}
+
     # ------------------------------------------------------------------ internal
 
     def _evaluate(
@@ -945,6 +967,10 @@ class SlaEvaluatorService:
         bands = self.sla_repo.list_bands(sla.id)
         lookup_rows = self.sla_repo.list_lookup_rows(sla.id)
         guards = self.sla_repo.list_guards(sla.id)
+        # Phase F1 — pre-load contract-wide LD rules (per-week rate,
+        # per-day rate, cap %, etc.) so the fixed_escalation evaluator
+        # can compute LD % without hitting the DB itself.
+        contract_ld_rules = self._load_contract_ld_rules(sla.contract_type)
 
         ctx = EvaluationContext(
             mapping=mapping,
@@ -961,6 +987,7 @@ class SlaEvaluatorService:
             overrides_applied=applied,
             project_id=scoring["project_id"],
             level_points_map=scoring["level_points_map"],
+            contract_ld_rules=contract_ld_rules,
         )
 
         evaluator = _EVALUATORS.get(formula_type)

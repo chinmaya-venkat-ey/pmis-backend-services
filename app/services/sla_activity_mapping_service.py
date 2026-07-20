@@ -86,6 +86,19 @@ class SlaActivityMappingService:
                 code="duplicate_mapping",
             )
 
+        # Phase F1 — RFP §5.28.2.a phase-gate. Raises ValidationError(422)
+        # when the SLA's phase classifier disagrees with the activity's
+        # deliverable's configured phase. Fails-open (logs, allows) on
+        # missing config / un-extractable deliverable code — see the
+        # PhaseGateService docstring for the failure-open cases.
+        from app.services.phase_gate_service import PhaseGateService
+        PhaseGateService(self.db).assert_phase_matches(
+            contract_type=sla.contract_type,
+            sla_phase=getattr(sla, "phase", None),
+            sla_ref=sla.sla_ref,
+            activity_id=payload.activity_id,
+        )
+
         row = SlaActivityMapping(
             id=str(uuid4()),
             activity_id=payload.activity_id,

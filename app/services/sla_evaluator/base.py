@@ -52,6 +52,13 @@ class EvaluationContext:
     project_id: Optional[str] = None
     level_points_map: Optional[Dict[int, Decimal]] = None  # severity_master
 
+    # Phase F1 — pre-loaded contract-level LD rules
+    # (rate-per-week / rate-per-day / cap %). Populated by
+    # SlaEvaluatorService before dispatch so evaluators stay pure
+    # (no direct DB access). Values are keyed by
+    # ``contract_ld_rules.rule_key`` — e.g. ``sla_001_rate_pct_per_week``.
+    contract_ld_rules: Dict[str, Decimal] = field(default_factory=dict)
+
 
 @dataclass
 class EvaluatedResult:

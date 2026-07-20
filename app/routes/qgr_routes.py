@@ -37,6 +37,19 @@ from app.services.qgr_service import QgrService
 router = APIRouter(prefix="/projects", tags=["qgr"])
 
 
+_QGR_ROW_EXAMPLE = {
+    "id": "a32733a7-6235-4a19-878b-6875f3c05d14",
+    "projectId": "60c67666-895f-4138-bd99-c907b571e933",
+    "phase": "PHASE_1",
+    "qgrAmountPerQuarter": "100000.00",
+    "effectiveFrom": "2026-01-01",
+    "effectiveUntil": None,
+    "notes": "Initial contract QGR",
+    "createdAt": "2026-07-20T09:00:28Z",
+    "updatedAt": "2026-07-20T09:00:28Z",
+}
+
+
 @router.get(
     "/{project_uuid}/qgr",
     response_model=ProjectQgrConfigList,
@@ -46,8 +59,14 @@ router = APIRouter(prefix="/projects", tags=["qgr"])
         "phase then effective_from DESC. NpqpService reads the row "
         "active on the settlement quarter's end date; historical rows "
         "let past quarters settle with the QGR that was actually in "
-        "force at the time."
+        "force at the time.\n\n"
+        "Empty items[] when the project has no QGR configured (project "
+        "will settle with QGR=0)."
     ),
+    responses={200: {"content": {"application/json": {"example": {
+        "projectId": "60c67666-895f-4138-bd99-c907b571e933",
+        "items": [_QGR_ROW_EXAMPLE],
+    }}}}},
     dependencies=[Depends(require_project_permission(PROJECTS_READ))],
 )
 def list_project_qgr(
@@ -71,8 +90,15 @@ def list_project_qgr(
         "forward, POST a new row with a later effective_from — the "
         "settlement service picks whichever row's window covers the "
         "quarter's end date. Duplicate (project_id, phase, "
-        "effective_from) is refused by the unique constraint."
+        "effective_from) is refused by the unique constraint.\n\n"
+        "Body accepts snake_case field names (`qgr_amount_per_quarter`, "
+        "`effective_from`, `effective_until`). Response uses camelCase."
     ),
+    responses={
+        201: {"content": {"application/json": {"example": _QGR_ROW_EXAMPLE}}},
+        409: {"description": "Duplicate (project, phase, effective_from)"},
+        422: {"description": "effective_until earlier than effective_from"},
+    },
     dependencies=[Depends(require_project_permission(PROJECTS_UPDATE_CONFIG))],
 )
 def create_project_qgr(

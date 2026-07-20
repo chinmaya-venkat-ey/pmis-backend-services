@@ -58,6 +58,25 @@ class SlaDefinition(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="ACTIVE")
     effective_from: Mapped[date] = mapped_column(Date, nullable=False)
     effective_until: Mapped[Optional[date]] = mapped_column(Date)
+    # ── Phase A additions (migration 0021) ──────────────────────────────
+    # phase: RFP §5.28.2.a phase-gating classifier. Values:
+    #   PHASE_1 (D1-D8 milestone deliverables),
+    #   PHASE_2_3 (D9/D10 quarterly staff-cost SLAs),
+    #   GOVERNANCE_TOOL (D11 annual),
+    #   NONE (contract-wide, not tied to a phase).
+    # NULL during rollout — Step 2 backfills.
+    phase: Mapped[Optional[str]] = mapped_column(String(24))
+    # RFP §5.28.3.f/g — SLA 008/009 carry severity across quarters until
+    # onboarding lands. Rollup honours this by re-emitting the previous
+    # quarter's severity into the current quarter's aggregate.
+    carry_forward_severity: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false"),
+    )
+    # Which LD-arithmetic family this SLA uses. Full set from day one so
+    # BSP/MSIP evaluators land without an ALTER TYPE — see plan tweak 1.
+    # NULL during rollout means the current per-observation LD path is
+    # used unchanged (backward-compatible).
+    ld_formula_rule: Mapped[Optional[str]] = mapped_column(String(32))
     dsl_source: Mapped[Optional[str]] = mapped_column(Text)
     dsl_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
     created_by: Mapped[Optional[str]] = mapped_column(String(36))

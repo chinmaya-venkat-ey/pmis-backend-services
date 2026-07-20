@@ -26,6 +26,12 @@ from app.models.sla_attachment import SlaAttachment  # noqa: F401
 from app.models.sla_observation import SlaObservation  # noqa: F401
 from app.models.sla_evaluation_result import SlaEvaluationResult  # noqa: F401
 
+# Phase A — settlement/quarter aggregation + phase gating + contract-level rules.
+from app.models.sla_quarterly_aggregate import SlaQuarterlyAggregate  # noqa: F401
+from app.models.sla_settlement_period import SlaSettlementPeriod  # noqa: F401
+from app.models.contract_phase_config import ContractPhaseConfig  # noqa: F401
+from app.models.contract_ld_rules import ContractLdRules  # noqa: F401
+
 # Cross-schema users.* mirrors removed: RBAC is now resolved by calling
 # user-management's /authz/context (see app/middleware/auth_middleware.py),
 # so this service no longer declares read-only mirrors of the users schema.

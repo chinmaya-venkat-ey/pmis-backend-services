@@ -472,11 +472,13 @@ def sla_quarterly_aggregate(
             item.ld_track = "A"
         return item
 
-    # Uncapped total sums ONLY Track B — Track A doesn't contribute to
-    # the NPQP-cap math (per RFP §5.28.2 vs §5.28.3 separation).
+    # Uncapped total sums ONLY explicitly-classified Track B rows.
+    # Track A and unclassified rows are excluded — the settlement layer
+    # uses the same rule, so this stays in sync with what actually
+    # flows into the money math.
     uncapped = sum(
         (r.ld_percent or _D("0")) for r in rows
-        if (rule_by_sla.get(r.sla_id) or "LADDER") in _TRACK_B_RULES
+        if (rule_by_sla.get(r.sla_id) or "") in _TRACK_B_RULES
     ) or _D("0")
 
     resp = QuarterlyAggregateResponse(

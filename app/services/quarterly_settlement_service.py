@@ -128,9 +128,25 @@ class QuarterlySettlementService:
         rule_by_sla_id = self._load_rule_by_sla_id(
             {a.sla_id for a in all_aggregates}
         )
+        # Only rules explicitly classified as Track B participate in the
+        # settlement. Unclassified SLAs (ld_formula_rule IS NULL) are
+        # EXCLUDED — safer than assuming a default, since we can't know
+        # whether an unclassified SLA is per-deliverable (Track A) or
+        # NPQP-based (Track B). Ops sees them in the audit endpoint but
+        # they don't contribute to the money math.
+        unclassified = [a for a in all_aggregates if rule_by_sla_id.get(a.sla_id) is None]
+        if unclassified:
+            logger.info(
+                "Settlement close for %s %s: %d aggregate rows have "
+                "unclassified ld_formula_rule and are excluded from the "
+                "quarter cap math (sla_ids=%s). Classify via "
+                "sla_definitions.ld_formula_rule to include.",
+                project_id, qk.label(), len(unclassified),
+                sorted({a.sla_id for a in unclassified})[:5],
+            )
         aggregates = [
             a for a in all_aggregates
-            if (rule_by_sla_id.get(a.sla_id) or "LADDER") in _TRACK_B_RULES
+            if (rule_by_sla_id.get(a.sla_id) or "") in _TRACK_B_RULES
         ]
 
         # 3. Sum per-SLA LD % (uncapped) → cap at the RFP quarter cap.

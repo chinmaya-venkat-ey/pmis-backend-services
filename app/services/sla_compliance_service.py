@@ -147,6 +147,21 @@ class SlaComplianceService:
         )
         self.db.add(row)
         self.db.commit()
+
+        # P2a — event-driven: evaluate this mapping IMMEDIATELY on
+        # observation record. Previously the daily cron would pick it up
+        # on the next run; in the no-cron model, that never happens
+        # unless something else triggers a rollup. Failures are logged,
+        # never raised — the observation is already saved.
+        try:
+            self.evaluate_and_persist(mapping_id, datetime.now(timezone.utc).date())
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "record_observation: auto-eval failed for mapping=%s: %s "
+                "(observation was saved; ops can re-trigger via "
+                "POST /sla-compliance/mappings/{id}/evaluate)",
+                mapping_id, exc,
+            )
         return row
 
     def _latest_observation(self, mapping_id: str) -> Optional[SlaObservation]:

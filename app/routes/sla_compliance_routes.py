@@ -121,6 +121,210 @@ def on_activity_complete(
 
 
 @router.get(
+    "/sla-compliance/projects/{project_id}/deliverable-lds",
+    summary="Track A LDs for every activity on this project (bulk)",
+    description=(
+        "Same shape as the per-activity endpoint but keyed by "
+        "``activityId`` — one HTTP call returns every activity's Track A "
+        "summary. Payment page uses this to attach LDs to cost items "
+        "without an N+1 round trip per activity.\n\n"
+        "Returns ``{items: {activityId: {totalLdAmount, items: [...]}}}``. "
+        "Activities with no Track A SLAs are simply absent from the dict."
+    ),
+    responses={200: {"content": {"application/json": {"example": {
+        "data": {
+            "projectId": "60c67666-...",
+            "byActivity": {
+                "3f49f1ab-...": {
+                    "activityId": "3f49f1ab-...",
+                    "totalLdAmount": "1500.00",
+                    "items": [{
+                        "slaRef": "PMU-SLA001",
+                        "ldFormulaRule": "PER_UNIT_TIME_DELIVERABLE",
+                        "ldPercent": "1.5000",
+                        "ldAmount": "1500.00",
+                        "ldBaseAmount": "100000.00",
+                        "observedValue": 3,
+                        "status": "breached"
+                    }]
+                }
+            }
+        }, "message": None, "error": None, "status": 200
+    }}}}},
+)
+def deliverable_lds_for_project(
+    project_id: str,
+    db: Annotated[Session, Depends(get_db)],
+):
+    """Bulk per-activity Track A LDs — one call per project."""
+    from collections import defaultdict
+    from decimal import Decimal as _D
+    from app.models.sla_evaluation_result import SlaEvaluationResult
+    from app.models.sla_activity_mapping import SlaActivityMapping
+    from app.models.sla_definition import SlaDefinition
+
+    sub = _latest_per_mapping()
+    stmt = (
+        select(
+            SlaEvaluationResult,
+            SlaActivityMapping.overrides,
+            SlaDefinition.sla_ref,
+            SlaDefinition.ld_formula_rule,
+        )
+        .join(sub, (SlaEvaluationResult.mapping_id == sub.c.mapping_id)
+              & (SlaEvaluationResult.evaluated_on == sub.c.d))
+        .join(SlaActivityMapping, SlaActivityMapping.id == SlaEvaluationResult.mapping_id)
+        .join(SlaDefinition, SlaDefinition.id == SlaActivityMapping.sla_id)
+        .where(SlaEvaluationResult.project_id == project_id)
+        .where(SlaDefinition.ld_formula_rule == "PER_UNIT_TIME_DELIVERABLE")
+    )
+    rows = list(db.execute(stmt).all())
+
+    def _num(v):
+        return _D(str(v)) if v is not None else None
+
+    by_activity: Dict[str, Dict[str, Any]] = defaultdict(
+        lambda: {"activityId": "", "totalLdAmount": _D("0"), "items": []}
+    )
+    for eval_row, overrides, sla_ref, rule in rows:
+        aid = eval_row.activity_id
+        base = _num((overrides or {}).get("ld_base_amount"))
+        pct = _num(eval_row.ld_percent)
+        amt = _num(eval_row.ld_amount)
+        if amt is None and pct is not None and base is not None:
+            amt = (pct / _D("100")) * base
+        entry = by_activity[aid]
+        entry["activityId"] = aid
+        if amt is not None:
+            entry["totalLdAmount"] = entry["totalLdAmount"] + amt
+        entry["items"].append({
+            "mappingId": eval_row.mapping_id,
+            "slaId": eval_row.sla_id,
+            "slaRef": sla_ref,
+            "ldFormulaRule": rule,
+            "ldPercent": str(pct) if pct is not None else None,
+            "ldAmount": str(amt) if amt is not None else None,
+            "ldBaseAmount": str(base) if base is not None else None,
+            "observedValue": (
+                float(eval_row.observed_value)
+                if isinstance(eval_row.observed_value, (int, float)) else None
+            ),
+            "evaluatedOn": eval_row.evaluated_on.isoformat() if eval_row.evaluated_on else None,
+            "status": eval_row.status,
+        })
+
+    # Stringify totals for JSON.
+    for v in by_activity.values():
+        v["totalLdAmount"] = str(v["totalLdAmount"])
+
+    return api_response(data={
+        "projectId": project_id,
+        "byActivity": dict(by_activity),
+    })
+
+
+@router.get(
+    "/sla-compliance/activities/{activity_id}/deliverable-lds",
+    summary="Track A (per-deliverable) LD summary for one activity",
+    description=(
+        "Returns per-mapping Track A LDs — SLAs classified as "
+        "PER_UNIT_TIME_DELIVERABLE (SLA 001/002 per RFP §5.28.2.b/c). "
+        "Each item is the latest evaluation for that mapping, with "
+        "ldAmount computed as ldPercent × ldBaseAmount (deliverable "
+        "cost from the mapping's overrides).\n\n"
+        "Consumed by project-mgmt's payment page to render the "
+        "deduction on the deliverable's own invoice line. Track B "
+        "(NPQP-based) LDs are NOT included here — they live in the "
+        "quarterly settlement instead."
+    ),
+    responses={200: {"content": {"application/json": {"example": {
+        "data": {
+            "activityId": "3f49f1ab-...",
+            "totalLdAmount": "1500.00",
+            "items": [{
+                "mappingId": "902d961f-...",
+                "slaId": "0fd038e1-...",
+                "slaRef": "PMU-SLA001",
+                "ldFormulaRule": "PER_UNIT_TIME_DELIVERABLE",
+                "ldPercent": "1.5000",
+                "ldAmount": "1500.00",
+                "ldBaseAmount": "100000.00",
+                "observedValue": 3,
+                "evaluatedOn": "2026-07-20",
+                "status": "breached",
+                "note": "LD% = 0.5000 × 3 = 1.5000",
+            }],
+        },
+        "message": None, "error": None, "status": 200,
+    }}}}},
+)
+def deliverable_lds_for_activity(
+    activity_id: str,
+    db: Annotated[Session, Depends(get_db)],
+):
+    """One-shot Track A summary for a specific activity."""
+    from decimal import Decimal as _D
+    from app.models.sla_evaluation_result import SlaEvaluationResult
+    from app.models.sla_activity_mapping import SlaActivityMapping
+    from app.models.sla_definition import SlaDefinition
+    from app.schemas.sla_deliverable_ld import DeliverableLdItem, DeliverableLdResponse
+
+    # Latest-per-mapping subquery, filtered to this activity + Track A rules.
+    sub = _latest_per_mapping()
+    stmt = (
+        select(
+            SlaEvaluationResult,
+            SlaActivityMapping.overrides,
+            SlaDefinition.sla_ref,
+            SlaDefinition.ld_formula_rule,
+        )
+        .join(sub, (SlaEvaluationResult.mapping_id == sub.c.mapping_id)
+              & (SlaEvaluationResult.evaluated_on == sub.c.d))
+        .join(SlaActivityMapping, SlaActivityMapping.id == SlaEvaluationResult.mapping_id)
+        .join(SlaDefinition, SlaDefinition.id == SlaActivityMapping.sla_id)
+        .where(SlaEvaluationResult.activity_id == activity_id)
+        .where(SlaDefinition.ld_formula_rule == "PER_UNIT_TIME_DELIVERABLE")
+    )
+    rows = list(db.execute(stmt).all())
+
+    def _num(v):
+        return _D(str(v)) if v is not None else None
+
+    items = []
+    total = _D("0")
+    for eval_row, overrides, sla_ref, rule in rows:
+        base = _num((overrides or {}).get("ld_base_amount"))
+        pct = _num(eval_row.ld_percent)
+        # Compute ldAmount from stored ld_amount when available; otherwise
+        # from pct × base. Stored value may be null if the evaluator ran
+        # before the FIXED_AMOUNT resolver knew the base.
+        amt = _num(eval_row.ld_amount)
+        if amt is None and pct is not None and base is not None:
+            amt = (pct / _D("100")) * base
+        item = DeliverableLdItem(
+            mapping_id=eval_row.mapping_id,
+            sla_id=eval_row.sla_id,
+            sla_ref=sla_ref,
+            ld_formula_rule=rule,
+            ld_percent=pct,
+            ld_amount=amt,
+            ld_base_amount=base,
+            observed_value=_num(eval_row.observed_value) if isinstance(eval_row.observed_value, (int, float)) else None,
+            evaluated_on=eval_row.evaluated_on,
+            status=eval_row.status,
+            note=None,
+        )
+        items.append(item)
+        if amt is not None:
+            total += amt
+
+    resp = DeliverableLdResponse(
+        activity_id=activity_id, total_ld_amount=total, items=items,
+    )
+    return api_response(data=resp.model_dump(by_alias=True))
+
+
+@router.get(
     "/sla-compliance/activities/{activity_id}",
     summary="All SLA evaluation results for one activity",
     description=(

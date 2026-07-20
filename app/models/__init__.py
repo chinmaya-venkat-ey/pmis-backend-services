@@ -28,5 +28,10 @@ from app.models.activity_workflow_tracker import ActivityWorkflowTracker  # noqa
 from app.models.project_cf_pool_installment import ProjectCfPoolInstallment  # noqa: F401
 from app.models.dashboard_metric_snapshot import DashboardMetricSnapshot  # noqa: F401
 
+# Phase A — staffing plan + attendance + QGR config for NPQP.
+from app.models.resource_deployment_plan import ResourceDeploymentPlan  # noqa: F401
+from app.models.resource_attendance_month import ResourceAttendanceMonth  # noqa: F401
+from app.models.project_qgr_config import ProjectQgrConfig  # noqa: F401
+
 # Mirror declarations (read-only)
 from app.models import _cross_schema  # noqa: F401

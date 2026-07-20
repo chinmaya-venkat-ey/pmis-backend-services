@@ -51,9 +51,15 @@ New tables (all in ``contract.*``):
                               etc. Data-driven so contract variations are
                               config, not code.
 
-Revision ID: 0021_phase_a_settlement_foundation
+Revision ID: 0021_settlement_foundation
 Revises: 0020_sla_automated_evaluation
 Create Date: 2026-07-20
+
+NOTE: the revision string must fit in ``alembic_version_contract.version_num``
+which is VARCHAR(32). Descriptive filename is fine — alembic only reads the
+``revision`` variable below. Prior migrations follow the same convention
+(0019's file is ``0019_data_field_direction_and_full_seed.py`` but its
+revision string is ``0019_dsl_seed``).
 """
 from __future__ import annotations
 
@@ -62,7 +68,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 
-revision = "0021_phase_a_settlement_foundation"
+revision = "0021_settlement_foundation"       # 26 chars — fits VARCHAR(32)
 down_revision = "0020_sla_automated_evaluation"
 branch_labels = None
 depends_on = None

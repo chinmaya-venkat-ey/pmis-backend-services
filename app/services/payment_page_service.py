@@ -44,6 +44,8 @@ from app.schemas.payment import (
     CfPoolInstallmentResponse,
     CcnBlock,
     CostItemResponse,
+    CostItemSlaLdBlock,
+    CostItemSlaLdDetail,
     PaymentPageResponse,
     PaymentTermActivityResponse,
     PaymentTermResponse,
@@ -452,11 +454,19 @@ class PaymentPageService:
             value=payment_calc.ccn_value(totals.total_contract_cost, cap_pct),
         )
 
-        # Phase E — SLA quarterly LD deductions from contract-mgmt.
+        # Phase E — SLA quarterly LD deductions from contract-mgmt (Track B).
         # Soft-fail: any HTTP / parse issue returns [] so the payment page
         # renders without the block rather than 5xxing.
         sla_ld_deductions = self._build_sla_ld_deductions(
             project_id, bearer_token,
+        )
+
+        # P1b — Track A (per-deliverable) LDs on cost items.
+        # Bulk-fetch per-activity Track A LDs, then attach to each cost
+        # item via its linked milestones → activities. Soft-fails to a
+        # no-op when contract-mgmt is unreachable.
+        self._inject_track_a_lds_into_cost_items(
+            cost_items, project_id, bearer_token,
         )
 
         return PaymentPageResponse(
@@ -478,6 +488,77 @@ class PaymentPageService:
         )
 
     # ------------------------------------------------------------------ Phase E
+
+    def _inject_track_a_lds_into_cost_items(
+        self,
+        cost_items: List[CostItemResponse],
+        project_id: str,
+        bearer_token: Optional[str],
+    ) -> None:
+        """Mutate cost_items in place — attach ``sla_ld_deduction`` block
+        to each cost item that has at least one activity with a Track A
+        (per-deliverable) LD. Soft-fails to no-op on any error."""
+        try:
+            client = ContractManagementClient()
+            by_activity = client.get_deliverable_lds_by_activity(
+                project_id, bearer_token,
+            )
+        except Exception:  # noqa: BLE001
+            return
+        if not by_activity:
+            return
+
+        # Gather activities per cost item via its milestones.
+        # cost_item → milestones (from cost_item.milestone_ids)
+        # milestone → activities (via ActivityRepository)
+        all_ms_ids = {ms for ci in cost_items for ms in (ci.milestone_ids or [])}
+        if not all_ms_ids:
+            return
+        activities_by_ms = self.activities.list_by_milestone_ids(list(all_ms_ids))
+
+        for ci in cost_items:
+            if not ci.milestone_ids:
+                continue
+            details: List[CostItemSlaLdDetail] = []
+            total = Decimal("0.00")
+            for ms_id in ci.milestone_ids:
+                for act in (activities_by_ms.get(ms_id) or []):
+                    aid = act.id if hasattr(act, "id") else act.get("id")
+                    entry = by_activity.get(aid)
+                    if not entry:
+                        continue
+                    for item in entry.get("items", []):
+                        try:
+                            amt = Decimal(str(item.get("ldAmount") or "0"))
+                        except (ValueError, ArithmeticError):
+                            amt = Decimal("0")
+                        try:
+                            pct = Decimal(str(item.get("ldPercent"))) if item.get("ldPercent") else None
+                        except (ValueError, ArithmeticError):
+                            pct = None
+                        try:
+                            base = Decimal(str(item.get("ldBaseAmount"))) if item.get("ldBaseAmount") else None
+                        except (ValueError, ArithmeticError):
+                            base = None
+                        details.append(CostItemSlaLdDetail(
+                            activity_id=aid,
+                            sla_ref=item.get("slaRef"),
+                            ld_formula_rule=item.get("ldFormulaRule") or "",
+                            ld_percent=pct,
+                            ld_amount=amt if amt else None,
+                            ld_base_amount=base,
+                            observed_value=(
+                                Decimal(str(item["observedValue"]))
+                                if item.get("observedValue") is not None else None
+                            ),
+                            evaluated_on=item.get("evaluatedOn"),
+                            status=item.get("status"),
+                        ))
+                        total += amt
+            if details:
+                ci.sla_ld_deduction = CostItemSlaLdBlock(
+                    total_amount=total, details=details,
+                )
 
     def _build_sla_ld_deductions(
         self, project_id: str, bearer_token: Optional[str],

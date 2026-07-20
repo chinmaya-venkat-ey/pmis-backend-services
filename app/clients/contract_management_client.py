@@ -50,6 +50,38 @@ class ContractManagementClient:
 
     # ------------------------------------------------------------------ reads
 
+    # ------------------------------------------------------------------ shared
+
+    def _get(
+        self, path: str, bearer_token: Optional[str],
+    ) -> Optional[Dict[str, Any]]:
+        """Auth-forwarding GET returning the parsed 'data' payload or None
+        on any failure. Callers decide how to shape their default."""
+        if not self._base_url or not bearer_token:
+            return None
+        url = f"{self._base_url}{path}"
+        try:
+            with httpx.Client(timeout=self._timeout) as client:
+                resp = client.get(
+                    url,
+                    headers={"Authorization": f"Bearer {bearer_token}",
+                             "Accept": "application/json"},
+                )
+        except httpx.HTTPError as exc:
+            logger.warning("contract-mgmt unreachable at %s: %s", path, exc)
+            return None
+        if resp.status_code >= 400:
+            logger.info("contract-mgmt %s on %s — treating as no data",
+                        resp.status_code, path)
+            return None
+        try:
+            body = resp.json()
+        except ValueError:
+            return None
+        return body.get("data") if isinstance(body, dict) else None
+
+    # ------------------------------------------------------------------ settlement
+
     def list_settlements(
         self, project_id: str, bearer_token: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
@@ -96,3 +128,38 @@ class ContractManagementClient:
                 items,
             )
         return items
+
+    # ------------------------------------------------------------------ Track A (per-deliverable)
+
+    def get_deliverable_lds(
+        self, activity_id: str, bearer_token: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Track A LDs for ONE activity (single call)."""
+        default = {"activityId": activity_id, "totalLdAmount": "0.00", "items": []}
+        if not self._base_url or not bearer_token:
+            return default
+        data = self._get(
+            f"/api/v3/sla-compliance/activities/{activity_id}/deliverable-lds",
+            bearer_token,
+        )
+        return data if isinstance(data, dict) else default
+
+    def get_deliverable_lds_by_activity(
+        self, project_id: str, bearer_token: Optional[str] = None,
+    ) -> Dict[str, Dict[str, Any]]:
+        """Track A LDs for EVERY activity on a project (bulk — 1 HTTP call).
+
+        Returns ``{activity_id: {activityId, totalLdAmount, items[]}}``.
+        Activities with no Track A SLAs are absent from the dict.
+        Soft-fails to ``{}`` on any error so the payment page still renders.
+        """
+        if not self._base_url or not bearer_token:
+            return {}
+        data = self._get(
+            f"/api/v3/sla-compliance/projects/{project_id}/deliverable-lds",
+            bearer_token,
+        )
+        if not isinstance(data, dict):
+            return {}
+        by = data.get("byActivity")
+        return by if isinstance(by, dict) else {}

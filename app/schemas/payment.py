@@ -103,6 +103,27 @@ class CostItemUpdateRequest(BaseModel):
     position: Optional[int] = None
 
 
+class CostItemSlaLdDetail(ResponseModel):
+    """One activity's Track A LDs on this cost item (typed for the FE)."""
+    activity_id: str
+    sla_ref: Optional[str] = None
+    ld_formula_rule: str
+    ld_percent: Optional[Decimal] = None
+    ld_amount: Optional[Decimal] = None
+    ld_base_amount: Optional[Decimal] = None
+    observed_value: Optional[Decimal] = None
+    evaluated_on: Optional[str] = None
+    status: Optional[str] = None
+
+
+class CostItemSlaLdBlock(ResponseModel):
+    """Track A LD summary attached to a cost item — Phase 1 deliverable
+    LDs (SLA 001/002 per RFP §5.28.2.b/c). Present only when at least
+    one linked activity has a Track A LD; absent otherwise."""
+    total_amount: Decimal = Decimal("0.00")
+    details: List[CostItemSlaLdDetail] = Field(default_factory=list)
+
+
 class CostItemResponse(ResponseModel):
     id: str
     project_id: str
@@ -127,6 +148,11 @@ class CostItemResponse(ResponseModel):
     created_by: Optional[str] = None
     updated_by: Optional[str] = None
     deleted_at: Optional[datetime] = None
+    # Phase E / P1b — Track A (per-deliverable) SLA LDs from contract-mgmt.
+    # None when no Track A LDs apply; block populated when SLAs 001/002
+    # (or MSIP milestone equivalents) have breached on any activity
+    # linked to this cost item's milestones.
+    sla_ld_deduction: Optional[CostItemSlaLdBlock] = None
 
 
 # ================================================================== payment terms

@@ -22,11 +22,24 @@ from app.core.errors import NotFoundError, ValidationError
 from app.core.response import api_response
 from app.db import get_db
 from app.dependencies import get_optional_current_user_id
+from pydantic import BaseModel, Field
+
 from app.schemas.sla_settlement import (
     SettlementItem,
     SettlementListResponse,
     SettlementOverrideRequest,
 )
+
+
+class SettlementInvoicedRequest(BaseModel):
+    """POST body for `.../settlement/{quarter}/mark-invoiced`."""
+    invoice_ref: Optional[str] = Field(
+        default=None,
+        alias="invoiceRef",
+        description="External invoice reference (audit trail).",
+    )
+
+    model_config = {"populate_by_name": True}
 from app.services.quarterly_settlement_service import QuarterlySettlementService
 from app.utilities.quarter import parse_quarter_key, quarter_of
 
@@ -88,6 +101,33 @@ def get_settlement(
         row = svc.close(project_id, qk, mode="auto")
     else:
         row = existing
+    return api_response(data=SettlementItem.model_validate(row).model_dump(by_alias=True))
+
+
+@router.post(
+    "/sla-compliance/projects/{project_id}/settlement/{quarter}/mark-invoiced",
+    summary="Lock the settlement row after invoice raise (immutable audit)",
+    description=(
+        "Called by project-mgmt's invoice-raise flow after the LD deduction "
+        "has been billed. Once status='invoiced', the override endpoint "
+        "refuses further changes — errors have to be corrected via credit "
+        "note, not by mutating the settlement row. Safe to invoke twice."
+    ),
+)
+def mark_settlement_invoiced(
+    project_id: str,
+    quarter: str,
+    payload: SettlementInvoicedRequest,
+    db: Annotated[Session, Depends(get_db)],
+    user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
+):
+    qk = _resolve_quarter(quarter)
+    svc = QuarterlySettlementService(db)
+    row = svc.mark_invoiced(
+        project_id, qk,
+        invoiced_by=user_id or "",
+        invoice_ref=payload.invoice_ref,
+    )
     return api_response(data=SettlementItem.model_validate(row).model_dump(by_alias=True))
 
 

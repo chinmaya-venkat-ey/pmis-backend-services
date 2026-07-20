@@ -205,6 +205,55 @@ class QuarterlySettlementService:
             consequence_flags=existing.consequence_flags or {},
         )
 
+    # ------------------------------------------------------------------ invoice lock
+
+    def mark_invoiced(
+        self,
+        project_id: str,
+        qk: QuarterKey,
+        *,
+        invoiced_by: str,
+        invoice_ref: Optional[str] = None,
+    ) -> SlaSettlementPeriod:
+        """Lock the settlement row after invoice raise (Phase E).
+
+        Once ``status='invoiced'`` the override endpoint refuses further
+        changes (immutable audit — a mistake here means issue a credit
+        note, not mutate the row). Called by project-mgmt's invoice-raise
+        flow via HTTP; safe to invoke twice (idempotent).
+        """
+        existing = self.repo.get(project_id=project_id, qk=qk)
+        if existing is None:
+            raise NotFoundError(
+                f"No settlement row for {project_id} {qk.label()} — "
+                "run auto-close first.",
+                code="settlement_not_found",
+            )
+        if existing.status == "invoiced":
+            return existing   # idempotent
+
+        return self.repo.upsert(
+            project_id=project_id,
+            contract_type=existing.contract_type,
+            qk=qk,
+            sum_ld_percent=existing.sum_ld_percent,
+            capped_ld_percent=existing.capped_ld_percent,
+            f_amount=existing.f_amount,
+            qgr_amount=existing.qgr_amount,
+            npqp=existing.npqp,
+            ld_amount=existing.ld_amount,
+            pa_amount=existing.pa_amount,
+            aqp_amount=existing.aqp_amount,
+            status="invoiced",
+            closed_by=invoiced_by,
+            override_reason=(
+                f"invoiced (ref={invoice_ref})" if invoice_ref
+                else "invoiced"
+            ),
+            source_aggregate_ids=existing.source_aggregate_ids,
+            consequence_flags=existing.consequence_flags or {},
+        )
+
     # ------------------------------------------------------------------ auto-close sweep
 
     def close_projects_ready_to_close(

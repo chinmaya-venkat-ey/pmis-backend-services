@@ -45,8 +45,32 @@ from app.repositories.sla_quarterly_aggregate_repository import (
 from app.schemas.sla_evaluation import SimpleEvaluationRequest
 from app.services.ld_bands import ld_percent_for_points, resolve_band_pairs
 from app.services.sla_evaluator.service import SlaEvaluatorService
+from app.services.sla_evaluator.point_accumulation import DEFAULT_LEVEL_POINTS
 from app.utilities.logger import get_logger
-from app.utilities.quarter import QuarterKey, quarter_of
+from app.utilities.quarter import QuarterKey, previous_quarter, quarter_of
+
+
+# RFP §5.28.3.f/g — per-SLA carry-forward severity. SLA 008 carries SL 4;
+# SLA 009 carries SL 2. Keyed on the SLA-family number so any variant
+# (canonical, timestamped, project-scoped) resolves the same value.
+_CARRY_FORWARD_SEVERITY_BY_FAMILY: Dict[int, int] = {
+    8: 4,   # SLA 008 — onboarding of additional resources
+    9: 2,   # SLA 009 — replacement resource onboarding
+}
+
+
+def _carry_forward_severity_for(sla_ref: Optional[str]) -> Optional[int]:
+    """Return the severity level to carry when this SLA has
+    carry_forward_severity=True, or None if the family isn't in the
+    known-carry-forward set. Falls back to whatever severity the
+    previous quarter had (see rollup logic)."""
+    if not sla_ref:
+        return None
+    import re
+    m = re.search(r"SLA[-_]?0*(\d+)", sla_ref, re.IGNORECASE)
+    if not m:
+        return None
+    return _CARRY_FORWARD_SEVERITY_BY_FAMILY.get(int(m.group(1)))
 
 
 logger = get_logger(__name__)
@@ -388,53 +412,82 @@ class SlaComplianceService:
         result into contract.sla_quarterly_aggregate. Idempotent —
         re-running for the same (mapping, quarter) overwrites the row.
 
-        Returns the persisted row, or None if the mapping has no
-        evaluation rows in the quarter (nothing to aggregate; existing
-        row, if any, is left in place — safer than deleting).
+        Phase F2 — when ``sla.carry_forward_severity=True`` (SLA 008/009)
+        AND the previous quarter had a breach AND this quarter shows no
+        resolution (no evaluation row with met=True), a synthetic carry-
+        forward row is emitted with the previous severity's points and
+        ``carried_forward=True`` marked for the audit trail.
+
+        Returns the persisted row, or None if the mapping has neither
+        evaluations nor a carry-forward from the previous quarter.
         """
         loaded = self.mapping_repo.load_with_sla(mapping_id)
         if loaded is None:
             return None
         mapping, sla, _formula_type = loaded
 
-        # Pull every evaluation row in this mapping × quarter, with its id
-        # and points contribution. period_end / evaluated_on can differ
-        # (a fixed_escalation row may report period_end far in the past);
-        # for accumulation we key on evaluated_on so late-arriving
-        # observations always land in the quarter they were evaluated in.
+        # Pull every evaluation row in this mapping × quarter.
         rows = self.db.execute(
             select(
                 SlaEvaluationResult.id,
                 SlaEvaluationResult.accumulated_points,
                 SlaEvaluationResult.project_id,
                 SlaEvaluationResult.activity_id,
+                SlaEvaluationResult.met,
             ).where(
                 SlaEvaluationResult.mapping_id == mapping_id,
                 SlaEvaluationResult.evaluated_on >= qk.quarter_start,
                 SlaEvaluationResult.evaluated_on <= qk.quarter_end,
             ).order_by(SlaEvaluationResult.evaluated_on)
         ).all()
-        if not rows:
-            return None
 
-        # Sum points; skip rows with NULL points (pending_observation etc.).
+        # Sum points from actual observations; track if any evaluation
+        # resolved (met=True) — needed for the carry-forward gate.
         total_points = Decimal("0")
         source_ids: List[str] = []
+        this_quarter_resolved = False
         for r in rows:
             if r.accumulated_points is not None:
                 total_points += Decimal(str(r.accumulated_points))
             source_ids.append(r.id)
+            if r.met:
+                this_quarter_resolved = True
+
+        # Phase F2 — carry-forward gate.
+        carry_points, carry_severity, carry_note = Decimal("0"), None, None
+        if (
+            getattr(sla, "carry_forward_severity", False)
+            and not this_quarter_resolved
+        ):
+            prev_qk = previous_quarter(qk)
+            prev = self.qtr_agg_repo.get(mapping_id=mapping_id, qk=prev_qk)
+            if prev is not None and (prev.derived_severity or 0) >= 1:
+                # Carry the RFP-specific severity for this SLA family
+                # (SLA008 => 4, SLA009 => 2). Fall back to the previous
+                # quarter's own severity if the family isn't recognised.
+                cf_sev = _carry_forward_severity_for(sla.sla_ref) or int(prev.derived_severity)
+                cf_points = DEFAULT_LEVEL_POINTS.get(cf_sev, Decimal("0"))
+                total_points += cf_points
+                carry_points = cf_points
+                carry_severity = cf_sev
+                carry_note = (
+                    f"carried from {prev_qk.label()} "
+                    f"(prev sev={prev.derived_severity}, "
+                    f"cf sev={cf_sev}, cf points={cf_points})"
+                )
+
+        # If neither observations nor a carry-forward apply, leave the
+        # aggregate alone (returning None) — safer than writing an empty row.
+        if not rows and carry_points == 0:
+            return None
 
         # Ladder lookup — project's chart if configured, RFP default otherwise.
-        # Uses SlaEvaluatorService's helper so the chart source stays consistent
-        # with what the per-observation evaluator sees.
         scoring = self.evaluator._resolve_project_scoring(
             mapping.activity_id, bearer_token=None,
         )
         ld_pct = ld_percent_for_points(total_points, scoring["ld_band_pairs"])
 
-        # Severity we surface = highest severity_level seen among source rows.
-        # (More useful to ops than "derived from points" which loses the tier.)
+        # Highest severity in this quarter = max(observed row severities, carry_severity).
         sev_row = self.db.execute(
             select(func.max(SlaEvaluationResult.severity_level)).where(
                 SlaEvaluationResult.mapping_id == mapping_id,
@@ -442,11 +495,27 @@ class SlaComplianceService:
                 SlaEvaluationResult.evaluated_on <= qk.quarter_end,
             )
         ).scalar()
+        derived_sev = None
+        if sev_row is not None:
+            derived_sev = int(sev_row)
+        if carry_severity is not None:
+            derived_sev = max(derived_sev or 0, carry_severity)
 
-        # Project id — prefer the freshest evaluation row (mapping table
-        # doesn't carry project_id; the row does).
-        project_id = rows[-1].project_id or ""
-        activity_id = rows[-1].activity_id or mapping.activity_id
+        # Project id / activity id — prefer freshest observation row;
+        # fall back to the mapping's own activity_id (needed when the row
+        # is carry-forward-only, no observations in this quarter).
+        if rows:
+            project_id = rows[-1].project_id or ""
+            activity_id = rows[-1].activity_id or mapping.activity_id
+        else:
+            # Carry-forward-only: derive project_id via resolver.
+            act = self.resolver.get_activity(mapping.activity_id) or {}
+            project_id = act.get("projectId") or act.get("project_id") or ""
+            activity_id = mapping.activity_id
+
+        notes: Dict[str, Any] = {"sourceRowCount": len(source_ids)}
+        if carry_note:
+            notes["carryForward"] = carry_note
 
         return self.qtr_agg_repo.upsert(
             mapping_id=mapping_id,
@@ -456,35 +525,49 @@ class SlaComplianceService:
             activity_id=activity_id,
             qk=qk,
             accumulated_points=total_points,
-            derived_severity=int(sev_row) if sev_row is not None else None,
+            derived_severity=derived_sev,
             ld_percent=ld_pct,
             source_result_ids=source_ids,
-            carried_forward=False,   # Phase F populates carry-forward paths
-            notes={"sourceRowCount": len(source_ids)},
+            carried_forward=(carry_severity is not None),
+            notes=notes,
         )
 
     def rollup_project_for_quarter(
         self, project_id: str, qk: QuarterKey,
     ) -> List[SlaQuarterlyAggregate]:
-        """Roll up every mapping on a project that had evaluations in
-        this quarter.
+        """Roll up every mapping on a project that either had evaluations
+        this quarter OR needs a carry-forward from the previous quarter.
 
         Reads from ``sla_evaluation_results`` (which carries ``project_id``
         directly) to identify the exact mapping set to refresh, avoiding
-        the O(N) cross-schema resolver walk that would result from
-        iterating every ACTIVE mapping in the DB. A quarter with zero
-        evaluation rows returns [].
+        the O(N) cross-schema resolver walk. Also picks up
+        carry-forward-only mappings (SLA 008/009 that had a breach in
+        the previous quarter and have no evaluation this quarter yet).
         """
-        mapping_ids = self.db.execute(
+        # 1. Mappings with evaluations in the current quarter.
+        current_ids = set(self.db.execute(
             select(SlaEvaluationResult.mapping_id).where(
                 SlaEvaluationResult.project_id == project_id,
                 SlaEvaluationResult.evaluated_on >= qk.quarter_start,
                 SlaEvaluationResult.evaluated_on <= qk.quarter_end,
             ).distinct()
-        ).scalars().all()
+        ).scalars().all())
+
+        # 2. Phase F2 — mappings that had a breach LAST quarter on
+        # carry-forward SLAs. rollup_mapping_for_quarter's own gate
+        # decides whether to actually emit a synthetic row.
+        prev_qk = previous_quarter(qk)
+        carry_candidates = set(self.db.execute(
+            select(SlaQuarterlyAggregate.mapping_id).where(
+                SlaQuarterlyAggregate.project_id == project_id,
+                SlaQuarterlyAggregate.fiscal_year == prev_qk.fiscal_year,
+                SlaQuarterlyAggregate.quarter == prev_qk.quarter,
+                SlaQuarterlyAggregate.derived_severity >= 1,
+            )
+        ).scalars().all())
 
         results: List[SlaQuarterlyAggregate] = []
-        for mid in mapping_ids:
+        for mid in current_ids | carry_candidates:
             row = self.rollup_mapping_for_quarter(mid, qk)
             if row is not None:
                 results.append(row)

@@ -21,7 +21,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, Depends, Path, Query, status
+from fastapi import APIRouter, Depends, Header, Path, Query, status
 from sqlalchemy.orm import Session
 
 from app.controllers.payment_page_controller import PaymentPageController
@@ -275,14 +275,20 @@ payment_page_router = APIRouter(prefix="/projects", tags=["payment-page"])
 @payment_page_router.get(
     "/{project_uuid}/payment-page",
     response_model=PaymentPageResponse,
-    summary="Full payment page (cost items + totals + phases + qrg + ccn) — read-only",
+    summary="Full payment page (cost items + totals + phases + qrg + ccn + sla-ld) — read-only",
     dependencies=[Depends(require_project_permission(PAYMENT_READ))],
 )
 def get_payment_page(
     project_uuid: str,
     controller: Annotated[PaymentPageController, Depends(get_payment_page_controller)],
+    authorization: Annotated[Optional[str], Header()] = None,
 ):
-    return controller.get_page(project_uuid)
+    # Forward the caller's bearer so the payment page's Phase-E SLA-LD block
+    # can call contract-mgmt as the same user (no service-account elevation).
+    bearer = None
+    if authorization and authorization.lower().startswith("bearer "):
+        bearer = authorization.split(None, 1)[1].strip() or None
+    return controller.get_page(project_uuid, bearer_token=bearer)
 
 
 @payment_page_router.get(

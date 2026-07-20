@@ -479,6 +479,40 @@ class PhaseSequenceUpdateRequest(BaseModel):
     sequence: Annotated[int, Field(ge=0)]
 
 
+class SlaLdDeductionBlock(ResponseModel):
+    """One quarter's SLA-LD deduction — Phase E, pulled from contract-mgmt.
+
+    Rendered on the payment page as a negative line item alongside the
+    normal cost blocks. AQP (Actual Quarterly Payment per RFP §5.28.1.d.h)
+    is included so the FE doesn't have to redo the (PA - LD) + QGR math.
+
+    ``status`` values (from contract-mgmt):
+      * ``auto_closed``  quarterly cron auto-closed the row; ops can
+                         still override until the invoice is raised.
+      * ``overridden``   finance-role user replaced sum_ld_percent.
+      * ``invoiced``     row is immutable — invoice raised.
+      * ``blocked_missing_npqp``  leave-mgmt was unreachable at close time;
+                                   payment page shows the block flagged so
+                                   ops know to fix + re-close before invoice.
+    """
+
+    settlement_id: str
+    fiscal_year: int
+    quarter: int
+    quarter_start: date
+    quarter_end: date
+    sum_ld_percent: Optional[Decimal] = None
+    capped_ld_percent: Optional[Decimal] = None
+    f_amount: Optional[Decimal] = None
+    qgr_amount: Optional[Decimal] = None
+    npqp: Optional[Decimal] = None
+    ld_amount: Optional[Decimal] = None
+    pa_amount: Optional[Decimal] = None
+    aqp_amount: Optional[Decimal] = None
+    status: str
+    override_reason: Optional[str] = None
+
+
 class PaymentPageResponse(ResponseModel):
     """Full payment page — read-only, reactive. Everything derived is
     recomputed on every GET so the API stays the source of truth."""
@@ -499,6 +533,10 @@ class PaymentPageResponse(ResponseModel):
     totals: PaymentTotals
     phases: List[PhaseBlock] = Field(default_factory=list)
     ccn: CcnBlock
+    # Phase E — one entry per quarter that has a settlement row in
+    # contract-mgmt. Empty when contract-mgmt is unreachable OR when the
+    # project has no active SLAs. Never breaks the page render.
+    sla_ld_deductions: List[SlaLdDeductionBlock] = Field(default_factory=list)
 
 
 # ==================================================================== cycle count

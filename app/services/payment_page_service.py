@@ -37,6 +37,7 @@ from app.repositories.project_phase_cf_allocation_repository import (
 )
 from app.repositories.project_phase_qrg_repository import ProjectPhaseQrgRepository
 from app.repositories.project_repository import ProjectRepository
+from app.clients.contract_management_client import ContractManagementClient
 from app.schemas.payment import (
     CarryForwardAllocationResponse,
     CarryForwardResponse,
@@ -48,6 +49,7 @@ from app.schemas.payment import (
     PaymentTermResponse,
     PaymentTotals,
     PhaseBlock,
+    SlaLdDeductionBlock,
 )
 from app.utilities import catalogs, cf_pool, cycle_calc, payment_calc
 from app.utilities.payment_lock import assert_payment_writable, is_payment_locked
@@ -266,7 +268,12 @@ class PaymentPageService:
 
     # ------------------------------------------------------------------ read
 
-    def build_page(self, project_id: str) -> PaymentPageResponse:
+    def build_page(
+        self,
+        project_id: str,
+        *,
+        bearer_token: Optional[str] = None,
+    ) -> PaymentPageResponse:
         project = self._require_project(project_id)
         project_freq = project.payment_frequency_code  # ONE frequency per project
 
@@ -445,6 +452,13 @@ class PaymentPageService:
             value=payment_calc.ccn_value(totals.total_contract_cost, cap_pct),
         )
 
+        # Phase E — SLA quarterly LD deductions from contract-mgmt.
+        # Soft-fail: any HTTP / parse issue returns [] so the payment page
+        # renders without the block rather than 5xxing.
+        sla_ld_deductions = self._build_sla_ld_deductions(
+            project_id, bearer_token,
+        )
+
         return PaymentPageResponse(
             project_id=project.id,
             project_code=project.project_code,
@@ -460,7 +474,46 @@ class PaymentPageService:
             totals=totals,
             phases=phase_blocks,
             ccn=ccn,
+            sla_ld_deductions=sla_ld_deductions,
         )
+
+    # ------------------------------------------------------------------ Phase E
+
+    def _build_sla_ld_deductions(
+        self, project_id: str, bearer_token: Optional[str],
+    ) -> List[SlaLdDeductionBlock]:
+        """Fetch settlement rows from contract-mgmt + shape them for the
+        payment page. Never raises — a failed fetch returns []."""
+        try:
+            client = ContractManagementClient()
+            items = client.list_settlements(project_id, bearer_token)
+        except Exception:  # noqa: BLE001 — never break the payment page
+            return []
+
+        out: List[SlaLdDeductionBlock] = []
+        for it in items:
+            try:
+                out.append(SlaLdDeductionBlock(
+                    settlement_id=it["id"],
+                    fiscal_year=it["fiscalYear"],
+                    quarter=it["quarter"],
+                    quarter_start=it["quarterStart"],
+                    quarter_end=it["quarterEnd"],
+                    sum_ld_percent=it.get("sumLdPercent"),
+                    capped_ld_percent=it.get("cappedLdPercent"),
+                    f_amount=it.get("fAmount"),
+                    qgr_amount=it.get("qgrAmount"),
+                    npqp=it.get("npqp"),
+                    ld_amount=it.get("ldAmount"),
+                    pa_amount=it.get("paAmount"),
+                    aqp_amount=it.get("aqpAmount"),
+                    status=it.get("status") or "unknown",
+                    override_reason=it.get("overrideReason"),
+                ))
+            except (KeyError, TypeError, ValueError):
+                # Skip malformed row — better than losing the whole block.
+                continue
+        return out
 
     def validate_finance(self, project_id: str) -> dict:
         """Run the server-side finance-page validation checks (the checks behind

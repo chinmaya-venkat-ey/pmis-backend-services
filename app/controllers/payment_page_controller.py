@@ -23,8 +23,10 @@ class PaymentPageController:
         self.db = db
         self.service = PaymentPageService(db)
 
-    def get_page(self, project_id: str) -> PaymentPageResponse:
-        return self.service.build_page(project_id)
+    def get_page(
+        self, project_id: str, *, bearer_token: Optional[str] = None,
+    ) -> PaymentPageResponse:
+        return self.service.build_page(project_id, bearer_token=bearer_token)
 
     def validate(self, project_id: str) -> dict:
         return self.service.validate_finance(project_id)

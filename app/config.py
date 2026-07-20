@@ -102,6 +102,16 @@ class Settings(BaseSettings):
     user_management_service_timeout_seconds: float = Field(default=5.0)
     user_management_client: Optional[str] = Field(default=None)
 
+    # === Contract management (PMIS-contract-management) ===
+    # Used by PaymentPageService to fetch SLA quarterly-settlement rows
+    # (Phase D) so the payment page renders LD deductions per quarter
+    # alongside cost items. The caller's Authorization header is forwarded
+    # — contract-mgmt gates the settlement endpoints on the same JWT via
+    # its own auth middleware. Leave blank → payment page renders without
+    # the LD block (soft-fail).
+    contract_management_base_url: Optional[str] = Field(default=None)
+    contract_management_timeout_seconds: float = Field(default=5.0)
+
     # === Ticket service (PMIS-Ticket-service, Java) ===
     # Read-only source for the dashboard's tickets block. Leave the URL
     # blank to degrade tickets to available:false. Base must include the

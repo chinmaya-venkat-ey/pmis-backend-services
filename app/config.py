@@ -79,6 +79,28 @@ class Settings(BaseSettings):
     user_management_service_url: Optional[str] = Field(default=None)
     user_management_service_timeout_seconds: float = Field(default=5.0)
 
+    # === Cross-service: leave-management ===
+    # Used by NpqpService (Phase C) to fetch F (planned quarterly staff cost).
+    # NpqpService calls GET /api/attendance/cost/monthly per (year, month) and
+    # sums the returned per-resource ``cost`` fields across the three months
+    # of the quarter. Leave-mgmt already folds paid-leave, half-day, and
+    # relaxation deductions into that ``cost`` value per RFP §5.24-5.25, so
+    # NpqpService does not have to redo any of that arithmetic.
+    #
+    # Service-account creds — the daily cron authenticates against user-mgmt
+    # to obtain a bearer (login + universal OTP flow), caches it in-memory
+    # for its 2h TTL, then forwards it to leave-mgmt. Leave blank to disable
+    # the whole NPQP pipeline (NpqpService returns "unavailable").
+    leave_management_base_url: Optional[str] = Field(default=None)
+    leave_management_timeout_seconds: float = Field(default=10.0)
+    pmis_service_account_login: Optional[str] = Field(default=None)
+    pmis_service_account_password: Optional[str] = Field(default=None)
+    pmis_service_account_otp: str = Field(
+        default="000000",
+        description="Universal OTP (UNIVERSAL_OTP_ENABLED=true on user-mgmt). "
+                    "Override in envs where the universal OTP is disabled.",
+    )
+
     # === SLA image attachments — NFS-first, S3 microservice optional ===
     #
     # The contract module mirrors pmis-project-management's storage setup

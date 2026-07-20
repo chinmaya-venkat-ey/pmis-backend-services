@@ -18,13 +18,18 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.core.errors import ForbiddenError
+from app.core.errors import ForbiddenError, ValidationError
 from app.core.response import api_response
 from app.dependencies import get_optional_current_user_id
 from app.db import get_db
 from app.models.sla_evaluation_result import SlaEvaluationResult
 from app.schemas.sla_compliance import ObservationRequest
+from app.schemas.sla_quarterly_aggregate import (
+    QuarterlyAggregateItem,
+    QuarterlyAggregateResponse,
+)
 from app.services.sla_compliance_service import SlaComplianceService
+from app.utilities.quarter import parse_quarter_key, quarter_of
 
 router = APIRouter(tags=["sla-compliance"])
 
@@ -356,3 +361,63 @@ def sla_by_project(db: Annotated[Session, Depends(get_db)],
     for r in rows:
         by.setdefault(r.project_id or "", []).append(r)
     return api_response(data={pid: _summarise(rs) for pid, rs in by.items()})
+
+
+# ------------------------------------------------------------------ Phase B quarterly aggregate
+#
+# Reads the sla_quarterly_aggregate table (populated by the daily cron and
+# by evaluate_and_persist as a side effect). Used by the settlement page
+# to show "what did each SLA contribute to this quarter's LD %?" and by
+# Phase D's QuarterlySettlementService.close as its input.
+#
+# `quarter` accepts either "2026-Q2" (label form) or an ISO date (any day
+# in the target quarter). Omitted → the quarter containing today.
+# ------------------------------------------------------------------
+
+@router.get(
+    "/sla-compliance/projects/{project_id}/quarterly-aggregate",
+    summary="Per-SLA quarterly aggregate for one project × one quarter",
+    response_model=None,   # api_response wraps; keep OpenAPI loose
+)
+def sla_quarterly_aggregate(
+    project_id: str,
+    db: Annotated[Session, Depends(get_db)],
+    quarter: Optional[str] = None,   # ?quarter=2026-Q2 or ?quarter=2026-05-10
+):
+    from datetime import date as _dt_date
+    if not quarter:
+        qk = quarter_of(_dt_date.today())
+    else:
+        try:
+            if "-Q" in quarter.upper():
+                qk = parse_quarter_key(quarter)
+            else:
+                qk = quarter_of(_dt_date.fromisoformat(quarter))
+        except (ValueError, IndexError) as exc:
+            raise ValidationError(
+                f"Invalid quarter '{quarter}' — use '2026-Q2' or an ISO date.",
+                code="invalid_quarter",
+            ) from exc
+
+    svc = SlaComplianceService(db)
+    # Refresh first so the response reflects the latest evaluation rows —
+    # cheap because upsert-by-primary-key is fast.
+    svc.rollup_project_for_quarter(project_id, qk)
+    rows = svc.qtr_agg_repo.list_for_project_quarter(project_id=project_id, qk=qk)
+
+    from decimal import Decimal as _D
+    uncapped = sum(
+        ((r.ld_percent or _D("0")) for r in rows), _D("0")
+    )
+
+    resp = QuarterlyAggregateResponse(
+        project_id=project_id,
+        quarter_key=qk.label(),
+        fiscal_year=qk.fiscal_year,
+        quarter=qk.quarter,
+        quarter_start=qk.quarter_start,
+        quarter_end=qk.quarter_end,
+        total_ld_percent_uncapped=uncapped,
+        items=[QuarterlyAggregateItem.model_validate(r) for r in rows],
+    )
+    return api_response(data=resp.model_dump(by_alias=True))

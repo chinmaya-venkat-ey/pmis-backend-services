@@ -37,9 +37,19 @@ from app.models.sla_definition import SlaDefinition
 from app.models.sla_evaluation_result import SlaEvaluationResult
 from app.models.sla_observation import SlaObservation
 from app.models.sla_parameter_value import SlaParameterValue
+from app.models.sla_quarterly_aggregate import SlaQuarterlyAggregate
 from app.repositories.sla_activity_mapping_repository import SlaActivityMappingRepository
+from app.repositories.sla_quarterly_aggregate_repository import (
+    SlaQuarterlyAggregateRepository,
+)
 from app.schemas.sla_evaluation import SimpleEvaluationRequest
+from app.services.ld_bands import ld_percent_for_points, resolve_band_pairs
 from app.services.sla_evaluator.service import SlaEvaluatorService
+from app.utilities.logger import get_logger
+from app.utilities.quarter import QuarterKey, quarter_of
+
+
+logger = get_logger(__name__)
 
 # Formulas whose observation (days delayed) can be auto-derived from the
 # activity's own dates. Everything else needs a recorded observation.
@@ -88,6 +98,7 @@ class SlaComplianceService:
         self.resolver = DbActivityResolver(db)
         self.evaluator = SlaEvaluatorService(db, self.resolver)
         self.mapping_repo = SlaActivityMappingRepository(db)
+        self.qtr_agg_repo = SlaQuarterlyAggregateRepository(db)
 
     # ================================================================= observations
 
@@ -309,7 +320,159 @@ class SlaComplianceService:
                 counts[self.evaluate_and_persist(m.id, on_date)] += 1
             except Exception:  # noqa: BLE001 — one bad mapping must not stop the run
                 counts["error"] += 1
-        return {"evaluatedOn": on_date.isoformat(), "activeMappings": len(active), "outcomes": dict(counts)}
+
+        # Phase B — after every daily evaluation, refresh the current-quarter
+        # rollup for every active mapping so `sla_quarterly_aggregate` stays
+        # in step with the evaluation stream. Late observations that land
+        # inside a still-open quarter therefore reflect immediately in the
+        # aggregate; the settlement service (Phase D) reads only from
+        # `sla_quarterly_aggregate` and never re-sums evaluation rows itself.
+        qk = quarter_of(on_date)
+        rollup_counts: Dict[str, int] = defaultdict(int)
+        for m in active:
+            try:
+                self.rollup_mapping_for_quarter(m.id, qk)
+                rollup_counts["ok"] += 1
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "rollup_quarterly failed for mapping=%s quarter=%s: %s",
+                    m.id, qk.label(), exc,
+                )
+                rollup_counts["error"] += 1
+
+        return {
+            "evaluatedOn": on_date.isoformat(),
+            "activeMappings": len(active),
+            "outcomes": dict(counts),
+            "quarterlyRollup": {
+                "quarterKey": qk.label(),
+                "counts": dict(rollup_counts),
+            },
+        }
+
+    # ================================================================= quarterly rollup (Phase B)
+    #
+    # Implements RFP §5.28.1.a-c: for one mapping in one quarter, sum every
+    # evaluation_result's accumulated_points, look up the ladder ONCE, and
+    # write / update the single sla_quarterly_aggregate row for that
+    # (mapping, quarter). This is where "reset at end of reporting
+    # interval" actually happens: each quarter is a fresh sum, independent
+    # of prior quarters.
+
+    def rollup_mapping_for_quarter(
+        self, mapping_id: str, qk: QuarterKey,
+    ) -> Optional[SlaQuarterlyAggregate]:
+        """Refresh one mapping's quarterly aggregate row.
+
+        Sums accumulated_points across every evaluation_result whose
+        ``evaluated_on`` falls in the quarter, feeds the total to the
+        project's LD chart via ld_percent_for_points, and upserts the
+        result into contract.sla_quarterly_aggregate. Idempotent —
+        re-running for the same (mapping, quarter) overwrites the row.
+
+        Returns the persisted row, or None if the mapping has no
+        evaluation rows in the quarter (nothing to aggregate; existing
+        row, if any, is left in place — safer than deleting).
+        """
+        loaded = self.mapping_repo.load_with_sla(mapping_id)
+        if loaded is None:
+            return None
+        mapping, sla, _formula_type = loaded
+
+        # Pull every evaluation row in this mapping × quarter, with its id
+        # and points contribution. period_end / evaluated_on can differ
+        # (a fixed_escalation row may report period_end far in the past);
+        # for accumulation we key on evaluated_on so late-arriving
+        # observations always land in the quarter they were evaluated in.
+        rows = self.db.execute(
+            select(
+                SlaEvaluationResult.id,
+                SlaEvaluationResult.accumulated_points,
+                SlaEvaluationResult.project_id,
+                SlaEvaluationResult.activity_id,
+            ).where(
+                SlaEvaluationResult.mapping_id == mapping_id,
+                SlaEvaluationResult.evaluated_on >= qk.quarter_start,
+                SlaEvaluationResult.evaluated_on <= qk.quarter_end,
+            ).order_by(SlaEvaluationResult.evaluated_on)
+        ).all()
+        if not rows:
+            return None
+
+        # Sum points; skip rows with NULL points (pending_observation etc.).
+        total_points = Decimal("0")
+        source_ids: List[str] = []
+        for r in rows:
+            if r.accumulated_points is not None:
+                total_points += Decimal(str(r.accumulated_points))
+            source_ids.append(r.id)
+
+        # Ladder lookup — project's chart if configured, RFP default otherwise.
+        # Uses SlaEvaluatorService's helper so the chart source stays consistent
+        # with what the per-observation evaluator sees.
+        scoring = self.evaluator._resolve_project_scoring(
+            mapping.activity_id, bearer_token=None,
+        )
+        ld_pct = ld_percent_for_points(total_points, scoring["ld_band_pairs"])
+
+        # Severity we surface = highest severity_level seen among source rows.
+        # (More useful to ops than "derived from points" which loses the tier.)
+        sev_row = self.db.execute(
+            select(func.max(SlaEvaluationResult.severity_level)).where(
+                SlaEvaluationResult.mapping_id == mapping_id,
+                SlaEvaluationResult.evaluated_on >= qk.quarter_start,
+                SlaEvaluationResult.evaluated_on <= qk.quarter_end,
+            )
+        ).scalar()
+
+        # Project id — prefer the freshest evaluation row (mapping table
+        # doesn't carry project_id; the row does).
+        project_id = rows[-1].project_id or ""
+        activity_id = rows[-1].activity_id or mapping.activity_id
+
+        return self.qtr_agg_repo.upsert(
+            mapping_id=mapping_id,
+            sla_id=sla.id,
+            sla_ref=sla.sla_ref,
+            project_id=project_id,
+            activity_id=activity_id,
+            qk=qk,
+            accumulated_points=total_points,
+            derived_severity=int(sev_row) if sev_row is not None else None,
+            ld_percent=ld_pct,
+            source_result_ids=source_ids,
+            carried_forward=False,   # Phase F populates carry-forward paths
+            notes={"sourceRowCount": len(source_ids)},
+        )
+
+    def rollup_project_for_quarter(
+        self, project_id: str, qk: QuarterKey,
+    ) -> List[SlaQuarterlyAggregate]:
+        """Roll up every active mapping on a project for one quarter.
+
+        Convenience for the audit API and Phase D's settlement close;
+        internally calls rollup_mapping_for_quarter per mapping (which is
+        cheap — one SELECT + one UPSERT).
+        """
+        mappings = self.db.execute(
+            select(SlaActivityMapping).where(
+                SlaActivityMapping.status == "ACTIVE",
+            )
+        ).scalars().all()
+
+        # Filter to project via evaluation rows' project_id (mapping row
+        # doesn't carry project_id; only activity_id → project_id via
+        # cross-schema lookup, which the resolver already caches).
+        results: List[SlaQuarterlyAggregate] = []
+        for m in mappings:
+            act = self.resolver.get_activity(m.activity_id) or {}
+            pid = act.get("projectId") or act.get("project_id")
+            if pid != project_id:
+                continue
+            row = self.rollup_mapping_for_quarter(m.id, qk)
+            if row is not None:
+                results.append(row)
+        return results
 
     # ================================================================= activity completion
     #

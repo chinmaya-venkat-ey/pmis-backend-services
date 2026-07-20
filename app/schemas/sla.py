@@ -598,6 +598,11 @@ class SlaFromRfpRequest(BaseModel):
     Sent as the ``payload`` form field on POST /sla-masters/from-rfp.
     """
     model_config = {
+        # FE onboarding wizard sometimes sends the DB-column names
+        # (description / calculation_method / scope_text) instead of the
+        # RFP-form names (definition / calculation / scope). Accept both
+        # via AliasChoices below so payloads don't silently drop fields.
+        "populate_by_name": True,
         "json_schema_extra": {
             "example": {
                 "sla_ref": "PMU-SLA001",
@@ -649,11 +654,17 @@ class SlaFromRfpRequest(BaseModel):
                                description='Code from sla_category_master (decides the engine).')
 
     # ── 2. RFP text rows ──
+    # AliasChoices lets the FE send either the RFP-form name or the
+    # DB-column name — both land here. Prior to this the FE was silently
+    # dropping description / calculation_method / scope_text because they
+    # didn't match the RFP-form names.
     definition: Optional[str] = Field(
         None, description='RFP row "Definition of SLA".',
+        validation_alias=AliasChoices("definition", "description"),
     )
     scope: Optional[str] = Field(
         None, description='RFP row "Scope of SLA".',
+        validation_alias=AliasChoices("scope", "scope_text"),
     )
     data_source: Optional[str] = Field(
         None, max_length=255,
@@ -661,6 +672,7 @@ class SlaFromRfpRequest(BaseModel):
     )
     calculation: Optional[str] = Field(
         None, description='RFP row "SLA calculation" — plain-English formula.',
+        validation_alias=AliasChoices("calculation", "calculation_method"),
     )
     reports_submitted_to: Optional[str] = Field(
         None, max_length=255,

@@ -168,11 +168,14 @@ class SlaEvaluatorService:
                 key = f"L{single.severity_level}"
                 severity_breakdown[key] = severity_breakdown.get(key, 0) + 1
 
-        # Change 2: whole-activity LD total — the LD% is CUMULATIVE across SLAs.
-        # Each evaluated SLA already derived its own ld_percent from its own points
-        # via the project's LD chart; the activity total is the SUM of those per-SLA
-        # percentages, CAPPED at 10% (the maximum LD allowed for the activity total).
-        # total_points is retained for display only. None when nothing was evaluated.
+        # Phase D correction — activity-level totals surface RAW (uncapped) sums.
+        # RFP §5.27.6 caps the CUMULATIVE LD at 10% PER QUARTER (across every
+        # activity's every SLA on the project), not per activity. Applying the
+        # cap here would silently under-report on activities that break 10% on
+        # their own AND would over-report when multiple activities each land
+        # above 10% (the wrong sum would be 20%+ where the RFP allows only 10%).
+        # The cap now lives in QuarterlySettlementService.close (Phase D) which
+        # aggregates across every mapping on the project × quarter.
         total_points: Optional[Decimal] = None
         total_ld_percent: Optional[Decimal] = None
         if mapping_results:
@@ -184,7 +187,7 @@ class SlaEvaluatorService:
                 m.ld_percent for m in mapping_results if m.ld_percent is not None
             ]
             if per_sla_ld:
-                total_ld_percent = min(sum(per_sla_ld), Decimal("10"))
+                total_ld_percent = sum(per_sla_ld)
 
         return ActivityEvaluationResponse(
             activity_id=activity_id,

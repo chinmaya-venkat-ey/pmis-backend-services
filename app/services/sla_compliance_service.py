@@ -27,7 +27,7 @@ from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.clients.db_activity_resolver import DbActivityResolver
@@ -340,6 +340,21 @@ class SlaComplianceService:
                 )
                 rollup_counts["error"] += 1
 
+        # Phase D — on quarter_end+1, auto-close the just-ended quarter's
+        # settlement rows for every project that has active mappings.
+        # (Delegated to QuarterlySettlementService which self-guards on the
+        # date so it's safe to call every day.)
+        auto_closed_projects: List[str] = []
+        try:
+            from app.services.quarterly_settlement_service import (
+                QuarterlySettlementService,
+            )
+            auto_closed_projects = QuarterlySettlementService(
+                self.db, compliance_service=self,
+            ).close_projects_ready_to_close(on_date=on_date)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("auto-close sweep failed: %s", exc)
+
         return {
             "evaluatedOn": on_date.isoformat(),
             "activeMappings": len(active),
@@ -347,6 +362,9 @@ class SlaComplianceService:
             "quarterlyRollup": {
                 "quarterKey": qk.label(),
                 "counts": dict(rollup_counts),
+            },
+            "quarterlyAutoClose": {
+                "projectsClosed": len(auto_closed_projects),
             },
         }
 
@@ -448,28 +466,26 @@ class SlaComplianceService:
     def rollup_project_for_quarter(
         self, project_id: str, qk: QuarterKey,
     ) -> List[SlaQuarterlyAggregate]:
-        """Roll up every active mapping on a project for one quarter.
+        """Roll up every mapping on a project that had evaluations in
+        this quarter.
 
-        Convenience for the audit API and Phase D's settlement close;
-        internally calls rollup_mapping_for_quarter per mapping (which is
-        cheap — one SELECT + one UPSERT).
+        Reads from ``sla_evaluation_results`` (which carries ``project_id``
+        directly) to identify the exact mapping set to refresh, avoiding
+        the O(N) cross-schema resolver walk that would result from
+        iterating every ACTIVE mapping in the DB. A quarter with zero
+        evaluation rows returns [].
         """
-        mappings = self.db.execute(
-            select(SlaActivityMapping).where(
-                SlaActivityMapping.status == "ACTIVE",
-            )
+        mapping_ids = self.db.execute(
+            select(SlaEvaluationResult.mapping_id).where(
+                SlaEvaluationResult.project_id == project_id,
+                SlaEvaluationResult.evaluated_on >= qk.quarter_start,
+                SlaEvaluationResult.evaluated_on <= qk.quarter_end,
+            ).distinct()
         ).scalars().all()
 
-        # Filter to project via evaluation rows' project_id (mapping row
-        # doesn't carry project_id; only activity_id → project_id via
-        # cross-schema lookup, which the resolver already caches).
         results: List[SlaQuarterlyAggregate] = []
-        for m in mappings:
-            act = self.resolver.get_activity(m.activity_id) or {}
-            pid = act.get("projectId") or act.get("project_id")
-            if pid != project_id:
-                continue
-            row = self.rollup_mapping_for_quarter(m.id, qk)
+        for mid in mapping_ids:
+            row = self.rollup_mapping_for_quarter(mid, qk)
             if row is not None:
                 results.append(row)
         return results

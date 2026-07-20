@@ -1,0 +1,247 @@
+"""QuarterlySettlementService — Phase D quarter close.
+
+The money layer: turns per-mapping aggregates (Phase B) + NPQP (Phase C)
+into a single settlement row per (project, quarter) per RFP §5.28.1.d.h:
+
+    LD_amount = min(Σ per-SLA LD%, 10%) × NPQP    (§5.27.6 cap)
+    AQP        = (PA − LD) + QGR                    (§5.28.1.d.h)
+
+PA — payable for actual resource deployment for the quarter — is
+sourced from the payment page (leave-mgmt already gives us F, which is
+"planned"; PA is "actually paid based on attendance", but in the current
+architecture the same cost/monthly endpoint is used for both). Phase E
+wires the settlement's LD ₹ back into the payment page as a deduction
+line item; that flow marks the settlement ``status='invoiced'``.
+
+Auto-close trigger: run_daily calls ``close_projects_ready_to_close`` on
+quarter_end + 1. Manual override via
+``POST /sla-compliance/projects/{id}/settlement/{quarter}/override``.
+"""
+from __future__ import annotations
+
+from datetime import date as _date, timedelta
+from decimal import Decimal
+from typing import List, Optional
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.core.errors import NotFoundError, ValidationError
+from app.models.sla_activity_mapping import SlaActivityMapping
+from app.models.sla_settlement_period import SlaSettlementPeriod
+from app.repositories.sla_settlement_period_repository import (
+    SlaSettlementPeriodRepository,
+)
+from app.services.npqp_service import NpqpService
+from app.services.sla_compliance_service import SlaComplianceService
+from app.utilities.logger import get_logger
+from app.utilities.quarter import QuarterKey, quarter_of
+
+
+logger = get_logger(__name__)
+
+
+LD_CAP_PERCENT = Decimal("10")   # RFP §5.27.6 — hard cap per quarter.
+
+
+class QuarterlySettlementService:
+    def __init__(
+        self,
+        db: Session,
+        compliance_service: Optional[SlaComplianceService] = None,
+        npqp_service: Optional[NpqpService] = None,
+    ):
+        self.db = db
+        self.compliance = compliance_service or SlaComplianceService(db)
+        self.npqp = npqp_service or NpqpService(db)
+        self.repo = SlaSettlementPeriodRepository(db)
+
+    # ------------------------------------------------------------------ close
+
+    def close(
+        self,
+        project_id: str,
+        qk: QuarterKey,
+        *,
+        mode: str = "auto",
+        closed_by: Optional[str] = None,
+    ) -> SlaSettlementPeriod:
+        """Compute + persist the quarter-close settlement row.
+
+        Idempotent — re-invoking updates the row unless status='invoiced'
+        (Phase E locks that transition). ``mode`` labels the status
+        ('auto' → 'auto_closed', 'manual' → 'auto_closed' with a
+        distinct ``closed_by``); genuine finance overrides go through
+        ``override`` below.
+        """
+        existing = self.repo.get(project_id=project_id, qk=qk)
+        if existing is not None and existing.status == "invoiced":
+            # Immutable. Caller must issue a credit note instead.
+            return existing
+
+        # 1. Refresh Phase B aggregates for this project × quarter before
+        #    reading them — a late observation lands in the aggregate
+        #    within the same call so the settlement reflects it.
+        self.compliance.rollup_project_for_quarter(project_id, qk)
+        aggregates = self.compliance.qtr_agg_repo.list_for_project_quarter(
+            project_id=project_id, qk=qk,
+        )
+
+        # 2. Sum per-SLA LD % (uncapped) → cap at 10%.
+        sum_ld = sum(
+            (Decimal(str(a.ld_percent)) for a in aggregates if a.ld_percent is not None),
+            Decimal("0"),
+        )
+        capped_ld = min(sum_ld, LD_CAP_PERCENT)
+
+        # 3. NPQP for the quarter (Phase C).
+        npqp_resp = self.npqp.compute(project_id, qk)
+
+        # 4. LD ₹ = capped% × NPQP. Block when NPQP couldn't be computed.
+        if npqp_resp.status != "ok":
+            logger.warning(
+                "Settlement close for %s %s blocked — NPQP status=%s",
+                project_id, qk.label(), npqp_resp.status,
+            )
+            return self.repo.upsert(
+                project_id=project_id,
+                contract_type=None,
+                qk=qk,
+                sum_ld_percent=sum_ld,
+                capped_ld_percent=capped_ld,
+                f_amount=npqp_resp.f_amount,
+                qgr_amount=npqp_resp.qgr_amount,
+                npqp=npqp_resp.npqp,
+                ld_amount=None,      # unknown — NPQP unavailable
+                pa_amount=None,
+                aqp_amount=None,
+                status="blocked_missing_npqp",
+                closed_by=closed_by,
+                override_reason=None,
+                source_aggregate_ids=[a.id for a in aggregates],
+                consequence_flags={"npqp_status": npqp_resp.status},
+            )
+
+        npqp = npqp_resp.npqp
+        ld_amount = (capped_ld / Decimal("100")) * npqp
+        # PA — in the current architecture leave-mgmt's "cost" is what the
+        # consultant is actually paid for the quarter's staff work. So we
+        # treat PA = F (the same F NPQP used). If a distinct "planned vs
+        # actual" split is introduced later, this is the one place to wire
+        # a separate PA source.
+        pa = npqp_resp.f_amount
+        aqp = (pa - ld_amount) + npqp_resp.qgr_amount
+
+        row = self.repo.upsert(
+            project_id=project_id,
+            contract_type=None,
+            qk=qk,
+            sum_ld_percent=sum_ld,
+            capped_ld_percent=capped_ld,
+            f_amount=npqp_resp.f_amount,
+            qgr_amount=npqp_resp.qgr_amount,
+            npqp=npqp,
+            ld_amount=ld_amount,
+            pa_amount=pa,
+            aqp_amount=aqp,
+            status="auto_closed",
+            closed_by=closed_by,
+            override_reason=None,
+            source_aggregate_ids=[a.id for a in aggregates],
+        )
+        return row
+
+    # ------------------------------------------------------------------ override
+
+    def override(
+        self,
+        project_id: str,
+        qk: QuarterKey,
+        *,
+        new_sum_ld_percent: Decimal,
+        override_reason: str,
+        closed_by: str,
+    ) -> SlaSettlementPeriod:
+        """Finance-role override — replace sum_ld_percent + recompute
+        capped_ld/LD_amount/AQP with the same NPQP as the auto-close."""
+        existing = self.repo.get(project_id=project_id, qk=qk)
+        if existing is None:
+            raise NotFoundError(
+                f"No settlement row for {project_id} {qk.label()} — "
+                "run auto-close first.",
+                code="settlement_not_found",
+            )
+        if existing.status == "invoiced":
+            raise ValidationError(
+                "Cannot override an invoiced settlement — issue a credit note.",
+                code="settlement_immutable",
+            )
+
+        capped_ld = min(new_sum_ld_percent, LD_CAP_PERCENT)
+        # Reuse the existing NPQP — override changes only the LD %, not
+        # the payment base.
+        npqp = existing.npqp or Decimal("0")
+        pa = existing.pa_amount or Decimal("0")
+        qgr = existing.qgr_amount or Decimal("0")
+        ld_amount = (capped_ld / Decimal("100")) * npqp
+        aqp = (pa - ld_amount) + qgr
+
+        return self.repo.upsert(
+            project_id=project_id,
+            contract_type=existing.contract_type,
+            qk=qk,
+            sum_ld_percent=new_sum_ld_percent,
+            capped_ld_percent=capped_ld,
+            f_amount=existing.f_amount,
+            qgr_amount=qgr,
+            npqp=npqp,
+            ld_amount=ld_amount,
+            pa_amount=pa,
+            aqp_amount=aqp,
+            status="overridden",
+            closed_by=closed_by,
+            override_reason=override_reason,
+            source_aggregate_ids=existing.source_aggregate_ids,
+            consequence_flags=existing.consequence_flags or {},
+        )
+
+    # ------------------------------------------------------------------ auto-close sweep
+
+    def close_projects_ready_to_close(
+        self, on_date: Optional[_date] = None,
+    ) -> List[str]:
+        """Cron hook — call on quarter_end+1 for every project that has
+        active mappings but no settlement row for the just-ended quarter.
+
+        Returns the list of project_ids closed on this run (for logging).
+        """
+        on_date = on_date or _date.today()
+        # Only auto-close on the day AFTER a quarter ends — cheap way to
+        # avoid running the sweep every day.
+        prev_day = on_date - timedelta(days=1)
+        prev_qk = quarter_of(prev_day)
+        if on_date != prev_qk.quarter_end + timedelta(days=1):
+            return []
+
+        # Find every project that has ANY active mapping (via the
+        # cross-schema resolver — mapping doesn't carry project_id).
+        mappings = self.db.execute(
+            select(SlaActivityMapping).where(SlaActivityMapping.status == "ACTIVE")
+        ).scalars().all()
+        project_ids: set = set()
+        for m in mappings:
+            act = self.compliance.resolver.get_activity(m.activity_id) or {}
+            pid = act.get("projectId") or act.get("project_id")
+            if pid:
+                project_ids.add(pid)
+
+        closed: List[str] = []
+        for pid in project_ids:
+            try:
+                self.close(pid, prev_qk, mode="auto")
+                closed.append(pid)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "auto-close failed for %s %s: %s", pid, prev_qk.label(), exc,
+                )
+        return closed

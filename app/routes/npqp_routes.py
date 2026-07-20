@@ -16,7 +16,7 @@ from __future__ import annotations
 from datetime import date as _dt_date
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header
 from sqlalchemy.orm import Session
 
 from app.core.errors import ValidationError
@@ -90,6 +90,7 @@ def get_npqp(
     project_id: str,
     db: Annotated[Session, Depends(get_db)],
     quarter: Optional[str] = None,
+    authorization: Annotated[Optional[str], Header()] = None,
 ):
     if not quarter:
         qk = quarter_of(_dt_date.today())
@@ -105,5 +106,11 @@ def get_npqp(
                 code="invalid_quarter",
             ) from exc
 
-    resp = NpqpService(db).compute(project_id, qk)
+    # Forward caller's JWT to leave-mgmt (JWT-forwarding auth model).
+    bearer = None
+    if authorization:
+        parts = authorization.split(None, 1)
+        if len(parts) == 2 and parts[0].lower() == "bearer":
+            bearer = parts[1].strip() or None
+    resp = NpqpService(db).compute(project_id, qk, bearer_token=bearer)
     return api_response(data=resp.model_dump(by_alias=True))

@@ -82,24 +82,24 @@ class Settings(BaseSettings):
     # === Cross-service: leave-management ===
     # Used by NpqpService (Phase C) to fetch F (planned quarterly staff cost).
     # NpqpService calls GET /api/attendance/cost/monthly per (year, month) and
-    # sums the returned per-resource ``cost`` fields across the three months
-    # of the quarter. Leave-mgmt already folds paid-leave, half-day, and
-    # relaxation deductions into that ``cost`` value per RFP §5.24-5.25, so
-    # NpqpService does not have to redo any of that arithmetic.
+    # sums the per-resource ``cost`` fields across the quarter's 3 months.
+    # Leave-mgmt already folds paid-leave, half-day, and RFP §5.24.1
+    # relaxation into that value, so NpqpService just sums.
     #
-    # Service-account creds — the daily cron authenticates against user-mgmt
-    # to obtain a bearer (login + universal OTP flow), caches it in-memory
-    # for its 2h TTL, then forwards it to leave-mgmt. Leave blank to disable
-    # the whole NPQP pipeline (NpqpService returns "unavailable").
+    # Auth — JWT-forwarding. The caller's Authorization header is
+    # forwarded verbatim from every settlement/npqp GET into leave-mgmt.
+    # No service-account credentials required. Since every trigger is
+    # user-initiated (event-driven model, no cron), there's always a
+    # bearer available. Missing bearer → NpqpService returns 'unavailable'.
     leave_management_base_url: Optional[str] = Field(default=None)
     leave_management_timeout_seconds: float = Field(default=10.0)
-    pmis_service_account_login: Optional[str] = Field(default=None)
-    pmis_service_account_password: Optional[str] = Field(default=None)
-    pmis_service_account_otp: str = Field(
-        default="000000",
-        description="Universal OTP (UNIVERSAL_OTP_ENABLED=true on user-mgmt). "
-                    "Override in envs where the universal OTP is disabled.",
-    )
+    # Retired env vars (previously required for service-account login flow;
+    # kept as unused config keys temporarily so container deploys don't error
+    # on unknown env vars — safe to remove from container env at any time):
+    #   PMIS_SERVICE_ACCOUNT_LOGIN, PMIS_SERVICE_ACCOUNT_PASSWORD,
+    #   PMIS_SERVICE_ACCOUNT_OTP. All three are no longer read by any code
+    #   path. Pydantic settings ignores env vars not declared here, so
+    #   they'll silently be dropped on next deploy.
 
     # === SLA image attachments — NFS-first, S3 microservice optional ===
     #

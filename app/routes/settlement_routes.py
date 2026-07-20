@@ -23,7 +23,7 @@ from __future__ import annotations
 from datetime import date as _dt_date
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -97,6 +97,18 @@ def _envelope_err(code: str, message: str, status: int = 422):
         "error": {"_type": "Error", "errorIdentifier": code, "message": message},
         "status": status,
     }
+
+
+def _bearer_from_header(authorization: Optional[str]) -> Optional[str]:
+    """Extract the bearer token from the Authorization header for
+    forwarding to leave-mgmt. Returns None when the header is missing
+    or malformed."""
+    if not authorization:
+        return None
+    parts = authorization.split(None, 1)
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        return None
+    return parts[1].strip() or None
 
 
 def _resolve_quarter(quarter: Optional[str]):
@@ -174,12 +186,18 @@ def get_settlement(
     project_id: str,
     quarter: str,
     db: Annotated[Session, Depends(get_db)],
+    authorization: Annotated[Optional[str], Header()] = None,
 ):
     qk = _resolve_quarter(quarter)
     svc = QuarterlySettlementService(db)
     existing = svc.repo.get(project_id=project_id, qk=qk)
     if existing is None or existing.status == "open":
-        row = svc.close(project_id, qk, mode="auto")
+        # Forward the caller's JWT so leave-mgmt validates against the
+        # actual user, not a service account.
+        row = svc.close(
+            project_id, qk, mode="auto",
+            bearer_token=_bearer_from_header(authorization),
+        )
     else:
         row = existing
     return api_response(data=SettlementItem.model_validate(row).model_dump(by_alias=True))

@@ -97,6 +97,7 @@ class QuarterlySettlementService:
         *,
         mode: str = "auto",
         closed_by: Optional[str] = None,
+        bearer_token: Optional[str] = None,
     ) -> SlaSettlementPeriod:
         """Compute + persist the quarter-close settlement row.
 
@@ -196,8 +197,9 @@ class QuarterlySettlementService:
 
         capped_ld = min(sum_ld, cap_pct)
 
-        # 3. NPQP for the quarter (Phase C).
-        npqp_resp = self.npqp.compute(project_id, qk)
+        # 3. NPQP for the quarter (Phase C). Bearer forwarded so leave-mgmt
+        #    validates against the CALLER, not a service account.
+        npqp_resp = self.npqp.compute(project_id, qk, bearer_token=bearer_token)
 
         # 4. LD ₹ = capped% × NPQP. Block when NPQP couldn't be computed.
         if npqp_resp.status != "ok":

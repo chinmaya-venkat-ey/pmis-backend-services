@@ -80,11 +80,17 @@ class NpqpService:
     # ------------------------------------------------------------------ F
 
     def _fetch_month_cost(
-        self, project_id: str, year: int, month: int,
+        self,
+        project_id: str,
+        year: int,
+        month: int,
+        bearer_token: Optional[str] = None,
     ) -> Tuple[Optional[Decimal], List[NpqpResourceCost]]:
         """One month → (F_month, per-resource rows). None means leave-mgmt
         returned nothing / errored — caller must not proceed with a partial F."""
-        rows = self.leave_client.get_monthly_cost(project_id, year, month)
+        rows = self.leave_client.get_monthly_cost(
+            project_id, year, month, bearer_token=bearer_token,
+        )
         if rows is None:
             return None, []
         f_month = Decimal("0")
@@ -108,12 +114,20 @@ class NpqpService:
 
     # ------------------------------------------------------------------ public
 
-    def compute(self, project_id: str, qk: QuarterKey) -> NpqpResponse:
+    def compute(
+        self,
+        project_id: str,
+        qk: QuarterKey,
+        *,
+        bearer_token: Optional[str] = None,
+    ) -> NpqpResponse:
         f_total = Decimal("0")
         per_month: List[NpqpResourceCost] = []
         leave_ok = True
         for (year, month) in _months_of_quarter(qk):
-            f_month, rows = self._fetch_month_cost(project_id, year, month)
+            f_month, rows = self._fetch_month_cost(
+                project_id, year, month, bearer_token=bearer_token,
+            )
             if f_month is None:
                 # Leave-mgmt didn't answer for this month. Record but keep going
                 # so the audit response shows WHICH month failed.

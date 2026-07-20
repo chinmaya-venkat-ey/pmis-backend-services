@@ -1,14 +1,22 @@
 """Quarterly settlement — audit read + finance override.
 
-Three endpoints, all under /api/v3/sla-compliance/projects/{id}/settlement:
+Four endpoints, all under /api/v3/sla-compliance/projects/{id}/settlement:
 
   GET  /                              — list history (all quarters)
   GET  /{quarter}                     — single quarter row (auto-closes lazily)
+  POST /{quarter}/mark-invoiced       — lock the row after invoice raise
   POST /{quarter}/override            — finance override (audited)
 
 Auth: standard bearer for GET; POST requires the caller be authenticated
 (finer-grained finance permission gate can be added in a follow-up
 alongside the svc-npqp hardening).
+
+All responses use the standard api_response envelope:
+  {"data": <payload>, "message": null, "error": null, "status": <http>}
+On error:
+  {"data": null, "message": null,
+   "error": {"_type": "Error", "errorIdentifier": "<code>", "message": "..."},
+   "status": <http>}
 """
 from __future__ import annotations
 
@@ -16,19 +24,20 @@ from datetime import date as _dt_date
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.core.errors import NotFoundError, ValidationError
+from app.core.errors import ValidationError
 from app.core.response import api_response
 from app.db import get_db
 from app.dependencies import get_optional_current_user_id
-from pydantic import BaseModel, Field
-
 from app.schemas.sla_settlement import (
     SettlementItem,
     SettlementListResponse,
     SettlementOverrideRequest,
 )
+from app.services.quarterly_settlement_service import QuarterlySettlementService
+from app.utilities.quarter import parse_quarter_key, quarter_of
 
 
 class SettlementInvoicedRequest(BaseModel):
@@ -37,14 +46,57 @@ class SettlementInvoicedRequest(BaseModel):
         default=None,
         alias="invoiceRef",
         description="External invoice reference (audit trail).",
+        examples=["INV-2026-Q3-001"],
     )
 
     model_config = {"populate_by_name": True}
-from app.services.quarterly_settlement_service import QuarterlySettlementService
-from app.utilities.quarter import parse_quarter_key, quarter_of
 
 
 router = APIRouter(tags=["sla-settlement"])
+
+
+# ── OpenAPI response examples ─────────────────────────────────────────
+# One canonical settlement row shape — reused by every 200 response.
+_SETTLEMENT_ROW_EXAMPLE = {
+    "id": "2744efdd-e056-414c-a178-059a690e9c42",
+    "projectId": "60c67666-895f-4138-bd99-c907b571e933",
+    "contractType": "PMU",
+    "fiscalYear": 2026,
+    "quarter": 3,
+    "quarterStart": "2026-07-01",
+    "quarterEnd": "2026-09-30",
+    "sumLdPercent": "44.0000",
+    "cappedLdPercent": "10.0000",
+    "fAmount": "1215801.65",
+    "qgrAmount": "0.00",
+    "npqp": "1215801.65",
+    "ldAmount": "121580.17",
+    "paAmount": "1215801.65",
+    "aqpAmount": "1094221.49",
+    "status": "auto_closed",
+    "closedAt": "2026-07-20T08:26:35.442Z",
+    "closedBy": "dd9a8a1c-ddb8-4d6f-9259-fb4871b9575b",
+    "overrideReason": None,
+    "sourceAggregateIds": ["<uuid>", "<uuid>"],
+    "consequenceFlags": {},
+    "createdAt": "2026-07-20T08:26:35.442Z",
+    "updatedAt": "2026-07-20T08:26:35.442Z",
+}
+
+
+def _envelope_ok(data):
+    """Wrap an example payload in the api_response envelope shape."""
+    return {
+        "data": data, "message": None, "error": None, "status": 200,
+    }
+
+
+def _envelope_err(code: str, message: str, status: int = 422):
+    return {
+        "data": None, "message": None,
+        "error": {"_type": "Error", "errorIdentifier": code, "message": message},
+        "status": status,
+    }
 
 
 def _resolve_quarter(quarter: Optional[str]):
@@ -64,6 +116,21 @@ def _resolve_quarter(quarter: Optional[str]):
 @router.get(
     "/sla-compliance/projects/{project_id}/settlement",
     summary="List every settlement row for this project (history)",
+    description=(
+        "Returns every settlement row for the project sorted by "
+        "fiscalYear DESC, quarter DESC. Empty items[] when the project "
+        "has no quarters closed yet."
+    ),
+    responses={
+        200: {"description": "Envelope with data.items[] of settlement rows",
+              "content": {"application/json": {
+                  "example": _envelope_ok({
+                      "_type": "SettlementListResponse",
+                      "projectId": "60c67666-895f-4138-bd99-c907b571e933",
+                      "items": [_SETTLEMENT_ROW_EXAMPLE],
+                  }),
+              }}},
+    },
 )
 def list_settlements(
     project_id: str,
@@ -84,9 +151,24 @@ def list_settlements(
     description=(
         "Reads the settlement for the given quarter. If none exists, "
         "runs the close computation (Phase B rollup + Phase C NPQP + "
-        "cap + AQP) and persists a row with status='auto_closed'. "
-        "Passing an already-invoiced quarter returns the frozen row."
+        "quarter cap + AQP) and persists a row with status='auto_closed'. "
+        "Passing an already-invoiced quarter returns the frozen row.\n\n"
+        "quarter format: 2026-Q1 .. 2026-Q4, or any ISO date in the "
+        "target quarter."
     ),
+    responses={
+        200: {"description": "Envelope with data: <settlement row>",
+              "content": {"application/json": {
+                  "example": _envelope_ok(_SETTLEMENT_ROW_EXAMPLE),
+              }}},
+        422: {"description": "Invalid quarter format",
+              "content": {"application/json": {
+                  "example": _envelope_err(
+                      "invalid_quarter",
+                      "Invalid quarter '2026-Q9' — use '2026-Q2' or an ISO date.",
+                  ),
+              }}},
+    },
 )
 def get_settlement(
     project_id: str,
@@ -97,7 +179,6 @@ def get_settlement(
     svc = QuarterlySettlementService(db)
     existing = svc.repo.get(project_id=project_id, qk=qk)
     if existing is None or existing.status == "open":
-        # Compute + persist on demand.
         row = svc.close(project_id, qk, mode="auto")
     else:
         row = existing
@@ -108,11 +189,30 @@ def get_settlement(
     "/sla-compliance/projects/{project_id}/settlement/{quarter}/mark-invoiced",
     summary="Lock the settlement row after invoice raise (immutable audit)",
     description=(
-        "Called by project-mgmt's invoice-raise flow after the LD deduction "
-        "has been billed. Once status='invoiced', the override endpoint "
-        "refuses further changes — errors have to be corrected via credit "
-        "note, not by mutating the settlement row. Safe to invoke twice."
+        "Called by project-mgmt's invoice-raise flow after the LD "
+        "deduction has been billed. Once status='invoiced', the override "
+        "endpoint refuses further changes — errors have to be corrected "
+        "via credit note, not by mutating the settlement row.\n\n"
+        "Safe to invoke twice (idempotent)."
     ),
+    responses={
+        200: {"description": "Envelope with locked settlement row (status='invoiced')",
+              "content": {"application/json": {
+                  "example": _envelope_ok({
+                      **_SETTLEMENT_ROW_EXAMPLE,
+                      "status": "invoiced",
+                      "overrideReason": "invoiced (ref=INV-2026-Q3-001)",
+                  }),
+              }}},
+        404: {"description": "No settlement row for this quarter yet",
+              "content": {"application/json": {
+                  "example": _envelope_err(
+                      "settlement_not_found",
+                      "No settlement row for 60c67... 2026-Q3 — run auto-close first.",
+                      status=404,
+                  ),
+              }}},
+    },
 )
 def mark_settlement_invoiced(
     project_id: str,
@@ -136,11 +236,32 @@ def mark_settlement_invoiced(
     summary="Finance override — replace sum_ld_percent + recompute",
     description=(
         "Overrides the auto-close sum-of-per-SLA-LD-%. The new value is "
-        "capped at 10% × NPQP per RFP §5.27.6 before persistence. "
+        "capped at the RFP §5.27.6 quarter cap (10% by default, per "
+        "contract_ld_rules.quarterly_ld_cap_pct) before persistence.\n\n"
         "Fails 404 if no settlement row exists yet (run auto-close first); "
         "fails 422 if the row is already invoiced (immutable — issue a "
         "credit note instead)."
     ),
+    responses={
+        200: {"description": "Envelope with recomputed settlement row (status='overridden')",
+              "content": {"application/json": {
+                  "example": _envelope_ok({
+                      **_SETTLEMENT_ROW_EXAMPLE,
+                      "sumLdPercent": "15.0000",
+                      "cappedLdPercent": "10.0000",
+                      "status": "overridden",
+                      "overrideReason": "Adjustment agreed with vendor per email 2026-07-20",
+                  }),
+              }}},
+        404: {"description": "No settlement row for this quarter"},
+        422: {"description": "Row is invoiced (immutable)",
+              "content": {"application/json": {
+                  "example": _envelope_err(
+                      "settlement_immutable",
+                      "Cannot override an invoiced settlement — issue a credit note.",
+                  ),
+              }}},
+    },
 )
 def override_settlement(
     project_id: str,

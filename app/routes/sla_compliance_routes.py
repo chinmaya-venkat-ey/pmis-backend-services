@@ -377,7 +377,48 @@ def sla_by_project(db: Annotated[Session, Depends(get_db)],
 @router.get(
     "/sla-compliance/projects/{project_id}/quarterly-aggregate",
     summary="Per-SLA quarterly aggregate for one project × one quarter",
-    response_model=None,   # api_response wraps; keep OpenAPI loose
+    description=(
+        "Returns every SLA's contribution to this quarter — one row per "
+        "(mapping, quarter) with accumulated points, derived severity, "
+        "LD %, and audit trail. The endpoint refreshes the rollup "
+        "before responding (idempotent, cheap upserts). "
+        "`totalLdPercentUncapped` is the sum-of-per-SLA-LD-%s BEFORE "
+        "the 10%-NPQP quarter cap; the settlement endpoint applies "
+        "the cap.\n\n"
+        "Response envelope: standard api_response wrapper."
+    ),
+    response_model=None,
+    responses={
+        200: {"description": "Envelope with per-SLA aggregate items",
+              "content": {"application/json": {"example": {
+                  "data": {
+                      "projectId": "60c67666-895f-4138-bd99-c907b571e933",
+                      "quarterKey": "2026-Q3",
+                      "fiscalYear": 2026, "quarter": 3,
+                      "quarterStart": "2026-07-01", "quarterEnd": "2026-09-30",
+                      "totalLdPercentUncapped": "44.0000",
+                      "items": [{
+                          "id": "<uuid>",
+                          "mappingId": "<uuid>",
+                          "slaId": "<uuid>",
+                          "slaRef": "PMU-SLA007",
+                          "projectId": "60c67...",
+                          "activityId": "<uuid>",
+                          "fiscalYear": 2026, "quarter": 3,
+                          "quarterStart": "2026-07-01", "quarterEnd": "2026-09-30",
+                          "accumulatedPoints": "8.0000",
+                          "derivedSeverity": 4,
+                          "ldPercent": "4.0000",
+                          "carriedForward": False,
+                          "sourceResultIds": ["<uuid>"],
+                          "notes": {"sourceRowCount": 3},
+                          "computedAt": "2026-07-20T08:30:00Z",
+                      }],
+                  },
+                  "message": None, "error": None, "status": 200,
+              }}}},
+        422: {"description": "Invalid quarter format"},
+    },
 )
 def sla_quarterly_aggregate(
     project_id: str,

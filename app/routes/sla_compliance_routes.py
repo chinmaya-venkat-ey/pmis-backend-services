@@ -447,9 +447,37 @@ def sla_quarterly_aggregate(
     rows = svc.qtr_agg_repo.list_for_project_quarter(project_id=project_id, qk=qk)
 
     from decimal import Decimal as _D
+    from app.models.sla_definition import SlaDefinition
+    from app.services.quarterly_settlement_service import _TRACK_B_RULES
+
+    # Batch-load ld_formula_rule per SLA so each item can surface its Track.
+    sla_ids = {r.sla_id for r in rows}
+    rule_by_sla = {}
+    if sla_ids:
+        for sid, rule in db.execute(
+            select(SlaDefinition.id, SlaDefinition.ld_formula_rule)
+            .where(SlaDefinition.id.in_(list(sla_ids)))
+        ).all():
+            rule_by_sla[sid] = rule
+
+    def _make_item(r):
+        item = QuarterlyAggregateItem.model_validate(r)
+        rule = rule_by_sla.get(r.sla_id)
+        item.ld_formula_rule = rule
+        if rule is None:
+            item.ld_track = None
+        elif rule in _TRACK_B_RULES:
+            item.ld_track = "B"
+        else:
+            item.ld_track = "A"
+        return item
+
+    # Uncapped total sums ONLY Track B — Track A doesn't contribute to
+    # the NPQP-cap math (per RFP §5.28.2 vs §5.28.3 separation).
     uncapped = sum(
-        ((r.ld_percent or _D("0")) for r in rows), _D("0")
-    )
+        (r.ld_percent or _D("0")) for r in rows
+        if (rule_by_sla.get(r.sla_id) or "LADDER") in _TRACK_B_RULES
+    ) or _D("0")
 
     resp = QuarterlyAggregateResponse(
         project_id=project_id,
@@ -459,6 +487,6 @@ def sla_quarterly_aggregate(
         quarter_start=qk.quarter_start,
         quarter_end=qk.quarter_end,
         total_ld_percent_uncapped=uncapped,
-        items=[QuarterlyAggregateItem.model_validate(r) for r in rows],
+        items=[_make_item(r) for r in rows],
     )
     return api_response(data=resp.model_dump(by_alias=True))

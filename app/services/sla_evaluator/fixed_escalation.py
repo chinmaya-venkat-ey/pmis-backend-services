@@ -20,10 +20,12 @@ Two modes, dispatched on ``ctx.sla.ld_formula_rule``:
     is <= observed_value, surface that tier's ``lookup_value`` as
     ``rate_percent`` and let downstream compute the amount.
 
-Cap: the computed LD % is clamped at ``quarterly_ld_cap_pct`` (default
-10, from contract_ld_rules) so a very late deliverable can't produce
-> 100% of its own cost. This is a safety belt — the settlement layer
-also caps at 10% at the quarter level per RFP §5.27.6.
+Cap: the computed LD % is clamped at the contract's
+``quarterly_ld_cap_pct`` (from contract_ld_rules) so a very late
+deliverable can't produce > that cap on its own. This is a safety belt
+— the settlement layer also caps at the same value at the quarter level
+per RFP §5.27.6. Missing config → no cap applied (the raw computed % is
+surfaced; the settlement layer will block on the same missing rule).
 """
 from __future__ import annotations
 
@@ -149,13 +151,13 @@ class FixedEscalationEvaluator(FormulaEvaluator):
         units = max(observed_units, Decimal("0"))
         raw_pct = rate * units
 
-        # Safety cap: per-SLA LD % capped by the quarterly cap so no
-        # single deliverable/day count blows past 10%. RFP §5.27.6 also
-        # caps at the quarter total downstream — this is belt-and-braces.
-        cap_pct = ctx.contract_ld_rules.get(
-            "quarterly_ld_cap_pct", Decimal("10"),
-        )
-        ld_pct = min(raw_pct, cap_pct)
+        # Safety cap: per-SLA LD % capped by the contract's quarterly cap
+        # so no single deliverable/day count blows past the contract's
+        # ceiling. RFP §5.27.6 also caps at the quarter total downstream
+        # — this is belt-and-braces. Missing config → surface the raw %
+        # (settlement layer will block on the same missing rule).
+        cap_pct = ctx.contract_ld_rules.get("quarterly_ld_cap_pct")
+        ld_pct = min(raw_pct, cap_pct) if cap_pct is not None else raw_pct
 
         result.breaches.append(
             BreachDetail(

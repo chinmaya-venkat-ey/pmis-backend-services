@@ -3,7 +3,9 @@
 The money layer: turns per-mapping aggregates (Phase B) + NPQP (Phase C)
 into a single settlement row per (project, quarter) per RFP §5.28.1.d.h:
 
-    LD_amount = min(Σ per-SLA LD%, 10%) × NPQP    (§5.27.6 cap)
+    LD_amount = min(Σ per-SLA LD%, contract_cap%) × NPQP  (§5.27.6 cap;
+                                                          contract_cap%
+                                                          from contract_ld_rules)
     AQP        = (PA − LD) + QGR                    (§5.28.1.d.h)
 
 PA — payable for actual resource deployment for the quarter — is
@@ -43,18 +45,35 @@ from app.utilities.quarter import QuarterKey, quarter_of
 logger = get_logger(__name__)
 
 
-# DEFAULT cap fallback — used ONLY when the settlement can't look up
-# ``quarterly_ld_cap_pct`` in ``contract.contract_ld_rules`` for this
-# project's contract type (e.g. a project whose SLAs have contract_type
-# left null). Migration 0023 seeds 10% for every configured contract
-# type per each RFP's cap clause. The DSL wins; this constant is the
-# defensive fallback.
-LD_CAP_PERCENT_FALLBACK = Decimal("10")
+# Track B — SLA rules that participate in the quarterly-NPQP settlement.
+# The SUM of these is capped per the contract's cap (from contract_ld_rules).
+#   LADDER                     resource-based points ladder (SLA 004-011)
+#   PER_UNIT_TIME_QUARTERLY    per-day × NPQP (SLA 003)
+#   PER_OCCURRENCE             occurrence-count → severity (SLA 004 alt)
+#   AVAILABILITY_UPTIME        MSIP §1.5.4 (evaluator TODO)
+#   DAYS_WEIGHTED              BSP (evaluator TODO)
+#
+# Track A — SLA rules whose LD attaches to a specific deliverable's own
+# invoice (RFP §5.28.2.b/c). NOT summed into the quarter cap:
+#   PER_UNIT_TIME_DELIVERABLE  SLA 001/002, MSIP milestone
+_TRACK_B_RULES = frozenset({
+    "LADDER",
+    "PER_UNIT_TIME_QUARTERLY",
+    "PER_OCCURRENCE",
+    "AVAILABILITY_UPTIME",
+    "DAYS_WEIGHTED",
+})
 
 
-def _resolve_cap_from_rules(rules: Dict[str, Decimal]) -> Decimal:
+def _resolve_cap_from_rules(rules: Dict[str, Decimal]) -> Optional[Decimal]:
+    """Look up the quarterly cap from the contract's DSL rules.
+
+    Returns None when the contract has no cap rule configured — caller
+    must block the settlement in that case (never silently fall back to
+    a hardcoded number, since each RFP's cap clause is contract-specific).
+    """
     val = rules.get("quarterly_ld_cap_pct")
-    return Decimal(str(val)) if val is not None else LD_CAP_PERCENT_FALLBACK
+    return Decimal(str(val)) if val is not None else None
 
 
 class QuarterlySettlementService:
@@ -96,23 +115,69 @@ class QuarterlySettlementService:
         #    reading them — a late observation lands in the aggregate
         #    within the same call so the settlement reflects it.
         self.compliance.rollup_project_for_quarter(project_id, qk)
-        aggregates = self.compliance.qtr_agg_repo.list_for_project_quarter(
+        all_aggregates = self.compliance.qtr_agg_repo.list_for_project_quarter(
             project_id=project_id, qk=qk,
         )
 
-        # 2. Sum per-SLA LD % (uncapped) → cap at the RFP quarter cap.
+        # 2. Track A/B split — RFP §5.28.2 vs §5.28.3.
+        #    Only Track B (NPQP-based) rules participate in the quarter
+        #    settlement's LD sum + cap. Track A (per-deliverable rules)
+        #    have their own LD calc and are billed on the deliverable's
+        #    OWN invoice line — surfaced via a separate endpoint that
+        #    project-mgmt's payment page consumes per cost item.
+        rule_by_sla_id = self._load_rule_by_sla_id(
+            {a.sla_id for a in all_aggregates}
+        )
+        aggregates = [
+            a for a in all_aggregates
+            if (rule_by_sla_id.get(a.sla_id) or "LADDER") in _TRACK_B_RULES
+        ]
+
+        # 3. Sum per-SLA LD % (uncapped) → cap at the RFP quarter cap.
         sum_ld = sum(
             (Decimal(str(a.ld_percent)) for a in aggregates if a.ld_percent is not None),
             Decimal("0"),
         )
-        # Cap is DATA-DRIVEN: read from contract_ld_rules keyed on the
-        # project's contract type (derived from an aggregate's SLA when
-        # available; falls back to a cross-schema query against the
-        # project's ACTIVE mappings for empty quarters).
-        # Migration 0023 seeded 10% for every configured contract.
-        contract_type = self._resolve_contract_type(aggregates, project_id=project_id)
+        # Cap is DATA-DRIVEN — sourced from contract_ld_rules keyed on the
+        # project's contract type. Every contract's RFP has its own cap
+        # clause (PMU §5.27.6, MSAP Annexure-3E, MSIP §1.5.5, BSP §22 —
+        # all coincide at 10% today but stay independently configurable).
+        # ``_resolve_contract_type`` uses ALL aggregates (Track A included)
+        # so a project with only Track A SLAs still resolves its type;
+        # falls back to a cross-schema query for empty quarters.
+        contract_type = self._resolve_contract_type(all_aggregates, project_id=project_id)
         rules = self.compliance.evaluator._load_contract_ld_rules(contract_type)
         cap_pct = _resolve_cap_from_rules(rules)
+
+        # No cap configured for this contract → block the settlement rather
+        # than pick a magic number. The cap is a contract-specific RFP
+        # clause; a missing rule is a data-config bug, not a runtime
+        # fallback situation. Ops sees the block reason and fixes the seed.
+        if cap_pct is None:
+            logger.warning(
+                "Settlement close for %s %s blocked — no "
+                "quarterly_ld_cap_pct rule for contract_type=%r. "
+                "Seed contract.contract_ld_rules for this contract.",
+                project_id, qk.label(), contract_type,
+            )
+            return self.repo.upsert(
+                project_id=project_id,
+                contract_type=contract_type,
+                qk=qk,
+                sum_ld_percent=sum_ld,
+                capped_ld_percent=None,
+                f_amount=None, qgr_amount=None, npqp=None,
+                ld_amount=None, pa_amount=None, aqp_amount=None,
+                status="blocked_missing_cap",
+                closed_by=closed_by,
+                override_reason=None,
+                source_aggregate_ids=[a.id for a in aggregates],
+                consequence_flags={
+                    "missing_rule": "quarterly_ld_cap_pct",
+                    "contract_type": contract_type,
+                },
+            )
+
         capped_ld = min(sum_ld, cap_pct)
 
         # 3. NPQP for the quarter (Phase C).
@@ -173,6 +238,20 @@ class QuarterlySettlementService:
         return row
 
     # ------------------------------------------------------------------ helpers
+
+    def _load_rule_by_sla_id(self, sla_ids) -> Dict[str, Optional[str]]:
+        """Batch-load ``ld_formula_rule`` for a set of SLAs.
+
+        Returns ``{sla_id: rule_or_None}``. Empty input → empty dict.
+        Used by ``close`` to split aggregates into Track A / Track B.
+        """
+        if not sla_ids:
+            return {}
+        rows = self.db.execute(
+            select(SlaDefinition.id, SlaDefinition.ld_formula_rule)
+            .where(SlaDefinition.id.in_(list(sla_ids)))
+        ).all()
+        return {r.id: r.ld_formula_rule for r in rows}
 
     def _resolve_contract_type(
         self, aggregates, project_id: Optional[str] = None,
@@ -242,10 +321,18 @@ class QuarterlySettlementService:
             )
 
         # Cap is data-driven — read from the existing row's contract_type
-        # (set at auto-close time) so an override honours the same cap the
-        # RFP cap that applied at close.
+        # (set at auto-close time) so an override honours the same
+        # contract-specific cap that applied at close. Missing config →
+        # refuse the override rather than default to a magic number.
         rules = self.compliance.evaluator._load_contract_ld_rules(existing.contract_type)
         cap_pct = _resolve_cap_from_rules(rules)
+        if cap_pct is None:
+            raise ValidationError(
+                f"No quarterly_ld_cap_pct rule configured for "
+                f"contract_type={existing.contract_type!r} — "
+                f"seed contract.contract_ld_rules before overriding.",
+                code="cap_rule_missing",
+            )
         capped_ld = min(new_sum_ld_percent, cap_pct)
         # Reuse the existing NPQP — override changes only the LD %, not
         # the payment base.

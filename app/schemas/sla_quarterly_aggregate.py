@@ -29,6 +29,22 @@ class QuarterlyAggregateItem(BaseModel):
     ld_percent: Optional[Decimal] = Field(
         default=None, serialization_alias="ldPercent",
     )
+    ld_formula_rule: Optional[str] = Field(
+        default=None, serialization_alias="ldFormulaRule",
+        description="Track classifier — populated from sla_definitions. "
+                    "Track B (LADDER / PER_UNIT_TIME_QUARTERLY / PER_OCCURRENCE "
+                    "/ AVAILABILITY_UPTIME / DAYS_WEIGHTED) participates in "
+                    "the quarterly settlement's 10% cap. Track A "
+                    "(PER_UNIT_TIME_DELIVERABLE) is billed on the "
+                    "deliverable's own invoice via the payment page's per-cost-item "
+                    "block, NOT this settlement.",
+    )
+    ld_track: Optional[str] = Field(
+        default=None, serialization_alias="ldTrack",
+        description="'B' when the rule participates in the NPQP-quarter "
+                    "settlement, 'A' for per-deliverable rules, None when "
+                    "the rule isn't classified.",
+    )
     carried_forward: bool = Field(serialization_alias="carriedForward")
     source_result_ids: Optional[List[str]] = Field(
         default=None, serialization_alias="sourceResultIds",

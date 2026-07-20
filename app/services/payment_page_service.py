@@ -545,7 +545,9 @@ class PaymentPageService:
                             sla_ref=item.get("slaRef"),
                             ld_formula_rule=item.get("ldFormulaRule") or "",
                             ld_percent=pct,
-                            ld_amount=amt if amt else None,
+                            # amt=0 is a valid value ("SLA compliant, no LD");
+                            # preserve it as 0 rather than coercing to None.
+                            ld_amount=amt,
                             ld_base_amount=base,
                             observed_value=(
                                 Decimal(str(item["observedValue"]))

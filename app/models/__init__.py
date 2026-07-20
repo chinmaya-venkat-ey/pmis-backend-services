@@ -28,9 +28,11 @@ from app.models.activity_workflow_tracker import ActivityWorkflowTracker  # noqa
 from app.models.project_cf_pool_installment import ProjectCfPoolInstallment  # noqa: F401
 from app.models.dashboard_metric_snapshot import DashboardMetricSnapshot  # noqa: F401
 
-# Phase A — staffing plan + attendance + QGR config for NPQP.
-from app.models.resource_deployment_plan import ResourceDeploymentPlan  # noqa: F401
-from app.models.resource_attendance_month import ResourceAttendanceMonth  # noqa: F401
+# Phase A — QGR config for NPQP.
+# NOTE: resource_deployment_plan + resource_attendance_month were dropped in
+# migration p1a000000030 — leave-management service owns those data
+# authoritatively via GET /leaves/api/resources and .../attendance/report/*.
+# Contract-management's NpqpService calls those endpoints instead.
 from app.models.project_qgr_config import ProjectQgrConfig  # noqa: F401
 
 # Mirror declarations (read-only)

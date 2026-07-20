@@ -106,9 +106,11 @@ class QuarterlySettlementService:
             Decimal("0"),
         )
         # Cap is DATA-DRIVEN: read from contract_ld_rules keyed on the
-        # project's contract type (derived from the first aggregate's
-        # SLA). Migration 0023 seeded 10% for every configured contract.
-        contract_type = self._resolve_contract_type(aggregates)
+        # project's contract type (derived from an aggregate's SLA when
+        # available; falls back to a cross-schema query against the
+        # project's ACTIVE mappings for empty quarters).
+        # Migration 0023 seeded 10% for every configured contract.
+        contract_type = self._resolve_contract_type(aggregates, project_id=project_id)
         rules = self.compliance.evaluator._load_contract_ld_rules(contract_type)
         cap_pct = _resolve_cap_from_rules(rules)
         capped_ld = min(sum_ld, cap_pct)
@@ -172,18 +174,46 @@ class QuarterlySettlementService:
 
     # ------------------------------------------------------------------ helpers
 
-    def _resolve_contract_type(self, aggregates) -> Optional[str]:
-        """Derive the project's contract_type from the first aggregate's
-        SLA (SLAs on a project share contract_type). None when the
-        project has no aggregates yet — caller will use the fallback cap.
+    def _resolve_contract_type(
+        self, aggregates, project_id: Optional[str] = None,
+    ) -> Optional[str]:
+        """Derive the project's contract_type.
+
+        Prefers reading from an aggregate's SLA (cheap — one row already
+        in memory). Falls back to a cross-schema query against ACTIVE
+        mappings on the project when no aggregates exist — a project can
+        legitimately have SLAs configured but zero breaches this quarter.
+        Returns None only when the project has no SLAs at all.
         """
-        if not aggregates:
-            return None
-        sla_id = aggregates[0].sla_id
-        row = self.db.execute(
-            select(SlaDefinition.contract_type).where(SlaDefinition.id == sla_id)
-        ).scalar()
-        return row
+        # Fast path — read from any aggregate's SLA.
+        if aggregates:
+            sla_id = aggregates[0].sla_id
+            row = self.db.execute(
+                select(SlaDefinition.contract_type).where(SlaDefinition.id == sla_id)
+            ).scalar()
+            if row:
+                return row
+
+        # Fallback — no aggregates yet (empty quarter). Query the project's
+        # own active SLAs to still get a contract_type populated so the
+        # settlement row + cap lookup can proceed correctly.
+        if project_id:
+            from sqlalchemy import text as _text
+            row = self.db.execute(
+                _text("""
+                    SELECT DISTINCT s.contract_type
+                      FROM contract.sla_activity_mappings m
+                      JOIN contract.sla_definitions s ON s.id = m.sla_id
+                      JOIN project.activities a ON a.id = m.activity_id
+                     WHERE m.status = 'ACTIVE'
+                       AND s.contract_type IS NOT NULL
+                       AND a.project_id = :pid
+                     LIMIT 1
+                """),
+                {"pid": project_id},
+            ).scalar()
+            return row
+        return None
 
     # ------------------------------------------------------------------ override
 

@@ -21,10 +21,12 @@ from __future__ import annotations
 
 from datetime import date as _date, timedelta
 from decimal import Decimal
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
+from app.models.sla_definition import SlaDefinition
 
 from app.core.errors import NotFoundError, ValidationError
 from app.models.sla_activity_mapping import SlaActivityMapping
@@ -41,7 +43,18 @@ from app.utilities.quarter import QuarterKey, quarter_of
 logger = get_logger(__name__)
 
 
-LD_CAP_PERCENT = Decimal("10")   # RFP §5.27.6 — hard cap per quarter.
+# DEFAULT cap fallback — used ONLY when the settlement can't look up
+# ``quarterly_ld_cap_pct`` in ``contract.contract_ld_rules`` for this
+# project's contract type (e.g. a project whose SLAs have contract_type
+# left null). Migration 0023 seeds 10% for every configured contract
+# type per each RFP's cap clause. The DSL wins; this constant is the
+# defensive fallback.
+LD_CAP_PERCENT_FALLBACK = Decimal("10")
+
+
+def _resolve_cap_from_rules(rules: Dict[str, Decimal]) -> Decimal:
+    val = rules.get("quarterly_ld_cap_pct")
+    return Decimal(str(val)) if val is not None else LD_CAP_PERCENT_FALLBACK
 
 
 class QuarterlySettlementService:
@@ -87,12 +100,18 @@ class QuarterlySettlementService:
             project_id=project_id, qk=qk,
         )
 
-        # 2. Sum per-SLA LD % (uncapped) → cap at 10%.
+        # 2. Sum per-SLA LD % (uncapped) → cap at the RFP quarter cap.
         sum_ld = sum(
             (Decimal(str(a.ld_percent)) for a in aggregates if a.ld_percent is not None),
             Decimal("0"),
         )
-        capped_ld = min(sum_ld, LD_CAP_PERCENT)
+        # Cap is DATA-DRIVEN: read from contract_ld_rules keyed on the
+        # project's contract type (derived from the first aggregate's
+        # SLA). Migration 0023 seeded 10% for every configured contract.
+        contract_type = self._resolve_contract_type(aggregates)
+        rules = self.compliance.evaluator._load_contract_ld_rules(contract_type)
+        cap_pct = _resolve_cap_from_rules(rules)
+        capped_ld = min(sum_ld, cap_pct)
 
         # 3. NPQP for the quarter (Phase C).
         npqp_resp = self.npqp.compute(project_id, qk)
@@ -105,7 +124,7 @@ class QuarterlySettlementService:
             )
             return self.repo.upsert(
                 project_id=project_id,
-                contract_type=None,
+                contract_type=contract_type,
                 qk=qk,
                 sum_ld_percent=sum_ld,
                 capped_ld_percent=capped_ld,
@@ -134,7 +153,7 @@ class QuarterlySettlementService:
 
         row = self.repo.upsert(
             project_id=project_id,
-            contract_type=None,
+            contract_type=contract_type,
             qk=qk,
             sum_ld_percent=sum_ld,
             capped_ld_percent=capped_ld,
@@ -149,6 +168,21 @@ class QuarterlySettlementService:
             override_reason=None,
             source_aggregate_ids=[a.id for a in aggregates],
         )
+        return row
+
+    # ------------------------------------------------------------------ helpers
+
+    def _resolve_contract_type(self, aggregates) -> Optional[str]:
+        """Derive the project's contract_type from the first aggregate's
+        SLA (SLAs on a project share contract_type). None when the
+        project has no aggregates yet — caller will use the fallback cap.
+        """
+        if not aggregates:
+            return None
+        sla_id = aggregates[0].sla_id
+        row = self.db.execute(
+            select(SlaDefinition.contract_type).where(SlaDefinition.id == sla_id)
+        ).scalar()
         return row
 
     # ------------------------------------------------------------------ override
@@ -177,7 +211,12 @@ class QuarterlySettlementService:
                 code="settlement_immutable",
             )
 
-        capped_ld = min(new_sum_ld_percent, LD_CAP_PERCENT)
+        # Cap is data-driven — read from the existing row's contract_type
+        # (set at auto-close time) so an override honours the same cap the
+        # RFP cap that applied at close.
+        rules = self.compliance.evaluator._load_contract_ld_rules(existing.contract_type)
+        cap_pct = _resolve_cap_from_rules(rules)
+        capped_ld = min(new_sum_ld_percent, cap_pct)
         # Reuse the existing NPQP — override changes only the LD %, not
         # the payment base.
         npqp = existing.npqp or Decimal("0")

@@ -50,27 +50,30 @@ from app.utilities.logger import get_logger
 from app.utilities.quarter import QuarterKey, previous_quarter, quarter_of
 
 
-# RFP §5.28.3.f/g — per-SLA carry-forward severity. SLA 008 carries SL 4;
-# SLA 009 carries SL 2. Keyed on the SLA-family number so any variant
-# (canonical, timestamped, project-scoped) resolves the same value.
-_CARRY_FORWARD_SEVERITY_BY_FAMILY: Dict[int, int] = {
-    8: 4,   # SLA 008 — onboarding of additional resources
-    9: 2,   # SLA 009 — replacement resource onboarding
-}
-
-
-def _carry_forward_severity_for(sla_ref: Optional[str]) -> Optional[int]:
-    """Return the severity level to carry when this SLA has
-    carry_forward_severity=True, or None if the family isn't in the
-    known-carry-forward set. Falls back to whatever severity the
-    previous quarter had (see rollup logic)."""
+def _sla_family_number(sla_ref: Optional[str]) -> Optional[int]:
+    """Extract the SLA family number from ``PMU-SLA008`` /
+    ``PMU_SLA009_20260715...`` and every other variant."""
     if not sla_ref:
         return None
     import re
     m = re.search(r"SLA[-_]?0*(\d+)", sla_ref, re.IGNORECASE)
-    if not m:
+    return int(m.group(1)) if m else None
+
+
+def _carry_forward_severity_for(
+    sla_ref: Optional[str],
+    contract_ld_rules: Dict[str, Decimal],
+) -> Optional[int]:
+    """Return the severity level to carry, sourced from
+    ``contract_ld_rules`` (DSL — see migration 0023 seeds
+    ``sla_008_carry_forward_severity=4``, ``sla_009_carry_forward_severity=2``
+    for PMU). Returns None when no rule matches — the rollup falls back
+    to the previous quarter's own severity in that case."""
+    family = _sla_family_number(sla_ref)
+    if family is None:
         return None
-    return _CARRY_FORWARD_SEVERITY_BY_FAMILY.get(int(m.group(1)))
+    val = contract_ld_rules.get(f"sla_{family:03d}_carry_forward_severity")
+    return int(val) if val is not None else None
 
 
 logger = get_logger(__name__)
@@ -462,10 +465,16 @@ class SlaComplianceService:
             prev_qk = previous_quarter(qk)
             prev = self.qtr_agg_repo.get(mapping_id=mapping_id, qk=prev_qk)
             if prev is not None and (prev.derived_severity or 0) >= 1:
-                # Carry the RFP-specific severity for this SLA family
-                # (SLA008 => 4, SLA009 => 2). Fall back to the previous
-                # quarter's own severity if the family isn't recognised.
-                cf_sev = _carry_forward_severity_for(sla.sla_ref) or int(prev.derived_severity)
+                # Carry-forward severity is DATA-DRIVEN — sourced from
+                # contract_ld_rules per SLA family (RFP-specific values
+                # seeded in migration 0023, e.g. sla_008=4, sla_009=2).
+                # If no rule exists, fall back to the previous quarter's
+                # own severity — preserves the breach's magnitude even
+                # for un-configured families.
+                rules = self.evaluator._load_contract_ld_rules(sla.contract_type)
+                cf_sev = _carry_forward_severity_for(sla.sla_ref, rules)
+                if cf_sev is None:
+                    cf_sev = int(prev.derived_severity)
                 cf_points = DEFAULT_LEVEL_POINTS.get(cf_sev, Decimal("0"))
                 total_points += cf_points
                 carry_points = cf_points

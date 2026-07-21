@@ -22,7 +22,9 @@ Guards: ``end_date`` must be on/after ``start_date``; the window may not exceed
 """
 from __future__ import annotations
 
+import calendar
 from datetime import date, datetime
+from typing import Optional
 
 from app.core.errors import ValidationError
 from app.utilities.timezones import IST
@@ -65,6 +67,10 @@ _INDEXERS = {
     YEARLY: _year_index,
 }
 
+# Number of calendar months in one bucket of each frequency. Used by the
+# CONTRACT-RELATIVE (anchored) period math below.
+_PERIOD_MONTHS = {MONTHLY: 1, QUARTERLY: 3, HALF_YEARLY: 6, YEARLY: 12}
+
 
 def _add_years(d: date, n: int) -> date:
     """``d`` plus ``n`` years (Feb 29 → Feb 28 on a non-leap target year)."""
@@ -74,12 +80,53 @@ def _add_years(d: date, n: int) -> date:
         return d.replace(year=d.year + n, day=28)
 
 
-def count_cycles(start_date: date, end_date: date, frequency: str) -> int:
-    """Number of calendar-aligned ``frequency`` cycles the [start, end] window spans.
+def _add_months(d: date, n: int) -> date:
+    """``d`` plus ``n`` calendar months, clamping the day to the target month's
+    length (Jan 31 + 1 month → Feb 28/29). ``n`` may be negative."""
+    m0 = d.year * 12 + (d.month - 1) + n
+    year, month = divmod(m0, 12)
+    month += 1
+    last = calendar.monthrange(year, month)[1]
+    return date(year, month, min(d.day, last))
+
+
+# ---------------------------------------------------------------------------
+# CONTRACT-RELATIVE periods (bug #325/#327). When an ``anchor`` (the project /
+# contract start date) is supplied, buckets are measured FROM that date instead
+# of from the absolute calendar. Period 0 is the bucket beginning on the anchor;
+# the anchor's day-of-month defines every bucket boundary. So a contract running
+# Apr 1 → Mar 31 at yearly frequency is ONE contract year (index 0), not the two
+# calendar years the legacy indexers would report. ``anchor is None`` preserves
+# the legacy absolute-calendar behaviour (undated projects, the stateless
+# cycle-count scratch tool, existing tests).
+# ---------------------------------------------------------------------------
+
+def _anchored_index(d: date, anchor: date, frequency: str) -> int:
+    """Contract-relative bucket index of ``d`` measured from ``anchor``."""
+    pm = _PERIOD_MONTHS[frequency]
+    months = (d.year - anchor.year) * 12 + (d.month - anchor.month)
+    if d.day < anchor.day:      # anchor day-of-month is the boundary
+        months -= 1
+    return months // pm         # floor-div → monotonic across the anchor
+
+
+def _period_index(d: date, frequency: str, anchor: Optional[date] = None) -> int:
+    """Bucket index of ``d`` — contract-relative when ``anchor`` is given, else
+    the legacy absolute-calendar index."""
+    if anchor is not None:
+        return _anchored_index(d, anchor, frequency)
+    return _INDEXERS[frequency](d)
+
+
+def count_cycles(start_date: date, end_date: date, frequency: str,
+                 anchor: Optional[date] = None) -> int:
+    """Number of ``frequency`` cycles the [start, end] window spans.
 
     Inclusive bucket-touch — a partial bucket still counts as one full cycle.
-    Raises ValidationError on an inverted range, an over-long span (> 10 yrs),
-    or an unsupported frequency.
+    When ``anchor`` (contract start) is given the buckets are contract-relative
+    (bug #325); otherwise they are calendar-aligned (legacy). Raises
+    ValidationError on an inverted range, an over-long span (> 10 yrs), or an
+    unsupported frequency.
     """
     if end_date < start_date:
         raise ValidationError(
@@ -93,14 +140,14 @@ def count_cycles(start_date: date, end_date: date, frequency: str) -> int:
             code="date_span_too_large",
             details={"maxYears": MAX_SPAN_YEARS},
         )
-    indexer = _INDEXERS.get(frequency)
-    if indexer is None:
+    if frequency not in _INDEXERS:
         raise ValidationError(
             f"Unsupported frequency {frequency!r}.",
             code="unsupported_frequency",
             details={"supported": sorted(_INDEXERS)},
         )
-    return indexer(end_date) - indexer(start_date) + 1
+    return (_period_index(end_date, frequency, anchor)
+            - _period_index(start_date, frequency, anchor) + 1)
 
 
 def _to_ist_date(dt: datetime) -> date:
@@ -112,7 +159,10 @@ def _to_ist_date(dt: datetime) -> date:
     return dt.date()
 
 
-def count_cycles_from_datetimes(start: datetime, end: datetime, frequency: str) -> int:
+def count_cycles_from_datetimes(start: datetime, end: datetime, frequency: str,
+                                anchor=None) -> int:
     """``count_cycles`` for ``datetime`` inputs — the on-the-wire type used by
-    milestones/projects. Normalizes each to the IST calendar date first."""
-    return count_cycles(_to_ist_date(start), _to_ist_date(end), frequency)
+    milestones/projects. Normalizes each (and the optional contract-start
+    ``anchor``) to the IST calendar date first."""
+    anchor_date = _to_ist_date(anchor) if isinstance(anchor, datetime) else anchor
+    return count_cycles(_to_ist_date(start), _to_ist_date(end), frequency, anchor=anchor_date)

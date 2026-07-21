@@ -188,6 +188,10 @@ class ProjectService:
             category_other_reason=None,
             start_date=payload.start_date,
             end_date=payload.end_date,
+            # #321 / #322 — captured at creation (all optional/additive).
+            contract_signing_date=getattr(payload, "contract_signing_date", None),
+            actual_start_date=getattr(payload, "actual_start_date", None),
+            actual_start_remarks=getattr(payload, "actual_start_remarks", None),
             created_by=caller_user_id,
             updated_by=caller_user_id,
         )

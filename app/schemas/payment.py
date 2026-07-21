@@ -275,6 +275,12 @@ class CarryForwardUpdateRequest(BaseModel):
     # Custom-split inputs (only read when methodCode is a ``*_custom`` method).
     allocation_mode: Annotated[Optional[str], Field(default=None, max_length=8)] = None
     allocations: Optional[List[CarryForwardAllocationItem]] = None
+    # Independent partial carry-forward percentages (bug #326). When omitted the
+    # read-time defaults apply (other-cost → 100 when enabled, one-time → 0).
+    #   * other_cost_carry_percent — % of the phase's OTHER-cost leftover to carry.
+    #   * one_time_carry_percent   — % of the phase's OPE to carry forward.
+    other_cost_carry_percent: Annotated[Optional[Decimal], Field(default=None, ge=0, le=100)] = None
+    one_time_carry_percent: Annotated[Optional[Decimal], Field(default=None, ge=0, le=100)] = None
 
     _MODE_TO_METHOD = {"phase": "phase_evenly", "milestone": "milestone_evenly"}
 
@@ -285,6 +291,8 @@ class CarryForwardUpdateRequest(BaseModel):
             self.mode = None
             self.allocation_mode = None
             self.allocations = None
+            self.other_cost_carry_percent = None
+            self.one_time_carry_percent = None
             return self
         # Fold the legacy mode alias into method_code when method_code is absent.
         if not self.method_code and self.mode is not None:
@@ -377,6 +385,16 @@ class CarryForwardResponse(ResponseModel):
     # installment carries this; the last absorbs the rounding remainder). 0 for
     # applied methods / when there is no pool.
     pool_per_period: Decimal = Decimal("0.00")
+    # ---- Independent OPE / other-cost carry split (bug #326) ----
+    # The one-time (OPE) and other-cost streams carry SEPARATELY. ``carried_out``
+    # / ``received`` above are the OTHER-cost stream; the fields below are the OPE
+    # stream and the per-stream configuration.
+    other_cost_leftover: Decimal = Decimal("0.00")     # unbilled other-cost portion
+    other_cost_carry_percent: Optional[Decimal] = None  # % of other-cost leftover carried
+    one_time_received: Decimal = Decimal("0.00")       # OPE carried INTO this phase
+    one_time_retained: Decimal = Decimal("0.00")       # OPE kept in this phase's value
+    one_time_carried_out: Decimal = Decimal("0.00")    # OPE carried OUT to later phases
+    one_time_carry_percent: Optional[Decimal] = None    # % of OPE carried
 
 
 # ======================================================================= ccn cap

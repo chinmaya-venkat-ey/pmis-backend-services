@@ -368,6 +368,8 @@ def set_phase_carry_forward(
         allocation_mode=payload.allocation_mode,
         allocations=([a.model_dump() for a in payload.allocations]
                      if payload.allocations else None),
+        other_cost_carry_percent=payload.other_cost_carry_percent,
+        one_time_carry_percent=payload.one_time_carry_percent,
         caller_user_id=caller_user_id, caller_is_admin=caller_is_admin,
     )
 

@@ -234,6 +234,36 @@ def phase_recurring_total(items, phase) -> Decimal:
     return _round_money(total)
 
 
+def recurring_only_phases(items) -> set:
+    """Phases whose cost is ENTIRELY recurring.
+
+    A recurring row bills via its own dated frequency schedule, not via
+    milestone payment-term %s. A phase carrying ONLY recurring rows therefore
+    sits OUTSIDE the normal phase sequence — it exists to display its date span
+    and that schedule. Such a phase:
+
+      * takes no payment-term % (and must not be failed for a blank %),
+      * takes no ONE-TIME (out-of-pocket) share — including the last-phase
+        remainder, which would otherwise dump the whole pool on it,
+      * neither carries leftover forward NOR receives carry-forward.
+
+    A MIXED phase (recurring + fixed/resource/transaction) is deliberately NOT
+    included — its billing lines still need the normal treatment.
+    """
+    recurring: set = set()
+    billing: set = set()
+    for it in items:
+        phase = getattr(it, "phase", None)
+        if phase is None:
+            continue
+        code = _code(it)
+        if code == RECURRING_COST:
+            recurring.add(phase)
+        elif code in PHASE_COST_TYPES:
+            billing.add(phase)
+    return recurring - billing
+
+
 def one_time_total(items) -> Decimal:
     """Σ ``row_total`` of the ONE-TIME cost rows. Folded into the first phase's
     payment base (see ``phase_payment_base``)."""
@@ -416,8 +446,16 @@ def one_time_distribution(cost_rows, ordered_phases, one_time_config) -> dict:
     pool = one_time_total(cost_rows)
     if not ordered or pool <= _ZERO:
         return alloc
+    # Recurring-only phases are outside the billing sequence and take NO
+    # one-time (out-of-pocket) share. They are dropped from the eligible list
+    # entirely — otherwise a trailing recurring phase would absorb the whole
+    # remainder as the "last phase".
+    excluded = recurring_only_phases(cost_rows)
+    eligible = [p for p in ordered if p not in excluded]
+    if not eligible:
+        return alloc
     used = _ZERO
-    for p in ordered[:-1]:
+    for p in eligible[:-1]:
         cfg = one_time_config.get(p) or {}
         if cfg.get("enabled"):
             share = _phase_one_time_share(cfg, pool)
@@ -427,53 +465,58 @@ def one_time_distribution(cost_rows, ordered_phases, one_time_config) -> dict:
                 share = _ZERO
             alloc[p] = share
             used = _round_money(used + share)
-    alloc[ordered[-1]] = _round_money(pool - used)  # last phase = the remainder
+    alloc[eligible[-1]] = _round_money(pool - used)  # last ELIGIBLE phase = the remainder
     return alloc
 
 
 def carry_forward_distribution(cost_rows, term_rows, ordered_phases, config_by_phase,
                                one_time_alloc=None, phase_dates=None,
-                               project_bounds=None) -> dict:
-    """Carry-forward ("carry forward cost") over phases in SEQUENCE order.
+                               project_bounds=None, carry_split_by_phase=None) -> dict:
+    """Carry-forward over phases in SEQUENCE order, with INDEPENDENT one-time
+    (OPE) and other-cost streams (bug #326 — previously clubbed into one leftover).
 
-    A phase may opt in (``config_by_phase[phase]``) to carry its ENTIRE leftover
-    (effective base − Σ %-payouts) forward. The master-driven ``method`` chooses
-    the recipient UNIT and the ``formula`` chooses each recipient's SHARE:
+    Per phase, two streams carry forward SEPARATELY, each by its own percent:
 
-      * ``"phase"`` / ``"time"`` — across all SUBSEQUENT phases' totals
-                          (``phase_received`` grows their base; compounds down
-                          the chain). ``time`` additionally weights shares by
-                          per-phase cycle counts supplied in ``recipient_vars``.
-      * ``"milestone"`` — across all SUBSEQUENT milestones' payable values
-                          (``milestone_received``; a direct add-on, paid out, so
-                          it does not re-enter a phase base).
+      * OPE stream — ``one_time_alloc[p] + one_time_received[p]``. A configurable
+        ``one_time_carry_percent`` of it carries forward PHASE-WISE (even split)
+        into the subsequent billing phases' OPE (``one_time_received``); the rest
+        is RETAINED in this phase and joins its billable base (OPE stays in the
+        base — confirmed model).
+      * Other-cost stream — ``phase_base_total[p] + phase_received[p]``
+        (fixed/resource/transaction + other-cost carry-in). Milestone %s bill the
+        COMBINED base (other + retained OPE); the unbilled OTHER-cost portion
+        carries at ``other_cost_carry_percent`` via the master-driven ``method``
+        (``phase`` → subsequent phases' base; ``time`` → a dated pool; ``milestone``
+        → subsequent milestones).
 
-    Config shape per phase (see ``_normalize_cf_config``): the new
-    ``{"enabled", "method", "formula", "recipient_vars"}`` or the legacy
-    ``{"enabled", "mode"}`` (evenly). A phase with no eligible recipients for
-    its method carries nothing.
+    ``carry_split_by_phase[p] = {"one_time_pct", "other_cost_pct"}`` (Decimals).
+    Read-time defaults (applied by the caller): other → 100 when carry enabled,
+    one_time → 0. Recurring-only phases are outside the billing sequence — they
+    neither carry (either stream) nor receive.
 
-    Returns::
-
-        {"phase_received": {phase: amt},       # phase-wise inflow (grows base)
-         "milestone_received": {ms_id: amt},   # milestone-wise inflow (direct)
-         "effective_base": {phase: amt},       # fixed(+one_time first) + phase_received
-         "leftover": {phase: amt},             # effective_base − Σ %-payouts (≥0)
-         "carried_out": {phase: amt}}          # leftover carried OUT (0 if none)
+    Returns the per-phase dicts inline; new keys ``one_time_received``,
+    ``one_time_retained``, ``one_time_carried_out``, ``other_cost_leftover`` sit
+    alongside the legacy ``phase_received`` / ``effective_base`` / ``leftover`` /
+    ``carried_out`` (the last now the OTHER-cost carry).
     """
+    from app.utilities import cf_pool
+
     ordered = list(ordered_phases)
-    phase_received = {p: _ZERO for p in ordered}
+    phase_received = {p: _ZERO for p in ordered}          # other-cost carry-in
+    one_time_received = {p: _ZERO for p in ordered}       # OPE carry-in
     milestone_received: dict = {}
     effective_base: dict = {}
-    leftover: dict = {}
-    carried_out = {p: _ZERO for p in ordered}
-    pool: dict = {}  # source_phase -> [dated installment dicts] (frequency methods)
-    # One-time is distributed to phases (see one_time_distribution) and joins
-    # each phase's billable base — it is NO LONGER auto-folded into the first phase.
+    leftover: dict = {}                                   # combined base − Σ %-payouts
+    other_cost_leftover: dict = {}                        # OTHER-cost portion of leftover
+    carried_out = {p: _ZERO for p in ordered}             # OTHER-cost carried OUT
+    one_time_retained = {p: _ZERO for p in ordered}
+    one_time_carried_out = {p: _ZERO for p in ordered}
+    pool: dict = {}
     one_time_alloc = one_time_alloc or {}
     phase_dates = phase_dates or {}
+    carry_split_by_phase = carry_split_by_phase or {}
+    excluded_phases = recurring_only_phases(cost_rows)
 
-    # Milestone ids present per phase (from the live payment terms).
     ms_by_phase: dict = {}
     for t in term_rows:
         ph = getattr(t, "phase", None)
@@ -482,54 +525,85 @@ def carry_forward_distribution(cost_rows, term_rows, ordered_phases, config_by_p
             ms_by_phase.setdefault(ph, []).append(mid)
 
     for i, p in enumerate(ordered):
-        base = phase_base_total(cost_rows, p) + one_time_alloc.get(p, _ZERO)
-        base = _round_money(base + phase_received[p])
+        cfg = _normalize_cf_config(config_by_phase.get(p) or {})
+        split = carry_split_by_phase.get(p) or {}
+        other_pct = split.get("other_cost_pct")
+        if other_pct is None:                             # legacy: whole other-cost leftover
+            other_pct = _HUNDRED if cfg["enabled"] else _ZERO
+        ot_pct = split.get("one_time_pct")
+        if ot_pct is None:                                # OPE stays in the phase by default
+            ot_pct = _ZERO
+        is_excluded = p in excluded_phases
+        subsequent = [q for q in ordered[i + 1:] if q not in excluded_phases]
+
+        # ---- OPE stream: carry a % of the allocation phase-wise, retain the rest ----
+        ope_in = _round_money(one_time_alloc.get(p, _ZERO) + one_time_received[p])
+        ope_carried = _ZERO
+        if cfg["enabled"] and ot_pct > _ZERO and ope_in > _ZERO and subsequent and not is_excluded:
+            ope_carried = _distribute_by_formula(
+                _round_money(ope_in * ot_pct / _HUNDRED),
+                subsequent, _EVENLY_FORMULA, one_time_received, {})
+        one_time_carried_out[p] = ope_carried
+        ope_retained = _round_money(ope_in - ope_carried)
+        one_time_retained[p] = ope_retained
+
+        # ---- combined base billed by the milestone %s (other-cost + retained OPE) ----
+        other_base = _round_money(phase_base_total(cost_rows, p) + phase_received[p])
+        base = _round_money(other_base + ope_retained)
         effective_base[p] = base
 
         allocated = _ZERO
         for t in term_rows:
             if getattr(t, "phase", None) == p:
                 allocated += payment_value(getattr(t, "percent_of_payment", None), base)
-        # Leftover = the phase base not yet allocated by its milestone %s. Fixed,
-        # resource and transaction lines all bill via those %s, so their
-        # unallocated remainder simply carries forward together.
         lo = base - allocated
         lo = _round_money(lo) if lo > _ZERO else _ZERO
         leftover[p] = lo
 
-        cfg = _normalize_cf_config(config_by_phase.get(p) or {})
-        if cfg["enabled"] and lo > _ZERO:
+        # The OTHER-cost portion of the unbilled leftover (proportional attribution:
+        # the milestone %s bill the combined base uniformly).
+        billed_fraction = (allocated / base) if base > _ZERO else _ZERO
+        other_lo = (_round_money(other_base * (Decimal(1) - billed_fraction))
+                    if other_base > _ZERO else _ZERO)
+        if other_lo > lo:                                 # rounding safety
+            other_lo = lo
+        other_cost_leftover[p] = other_lo
+
+        # ---- other-cost carry via the master-driven method ----
+        if cfg["enabled"] and other_lo > _ZERO and other_pct > _ZERO and not is_excluded:
+            carry_amt = _round_money(other_lo * other_pct / _HUNDRED)
             method = cfg["method"]
             formula = cfg["formula"]
             rvars = cfg["recipient_vars"]
-            subsequent = ordered[i + 1:]
             if method == CF_TIME:
-                # POOL family (frequency-based): the leftover is NOT applied to any
-                # phase — it becomes a dated installment schedule consumed later at
-                # invoicing. phase_received is deliberately left untouched.
-                from app.utilities import cf_pool
+                # POOL family: a dated installment schedule, not applied to any
+                # phase base. Contract-relative buckets (bug #325).
                 _, p_end = phase_dates.get(p, (None, None))
                 p_start, p_end_proj = (project_bounds or (None, None))
                 installments = cf_pool.build_installments(
-                    lo, p_start, p_end_proj, p_end, cfg["frequency"])
+                    carry_amt, p_start, p_end_proj, p_end, cfg["frequency"], anchor=p_start)
                 if installments:
                     pool[p] = installments
                     carried_out[p] = _round_money(
                         sum((x["amount"] for x in installments), _ZERO))
             elif method == CF_PHASE and subsequent:
                 carried_out[p] = _distribute_by_formula(
-                    lo, subsequent, formula, phase_received, rvars)
+                    carry_amt, subsequent, formula, phase_received, rvars)
             elif method == CF_MILESTONE:
                 sub_ms = [m for sp in subsequent for m in ms_by_phase.get(sp, [])]
                 if sub_ms:
                     carried_out[p] = _distribute_by_formula(
-                        lo, sub_ms, formula, milestone_received, rvars)
+                        carry_amt, sub_ms, formula, milestone_received, rvars)
 
     return {
         "phase_received": phase_received,
+        "one_time_received": one_time_received,
         "milestone_received": milestone_received,
         "effective_base": effective_base,
         "leftover": leftover,
+        "other_cost_leftover": other_cost_leftover,
         "carried_out": carried_out,
+        "one_time_retained": one_time_retained,
+        "one_time_carried_out": one_time_carried_out,
         "pool": pool,
     }

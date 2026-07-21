@@ -14,10 +14,33 @@ _ZERO = Decimal("0")
 _HUNDRED = Decimal("100")
 _TOL = Decimal("0.01")
 _PHASE_TYPES = {"fixed", "resource_cost", "transaction_cost"}
+_RECURRING = "recurring_cost"
 
 
 def _d(x) -> Decimal:
     return Decimal(str(x)) if x is not None else _ZERO
+
+
+def _recurring_only_phases(cost_items) -> set:
+    """Phases whose cost is ENTIRELY recurring.
+
+    Recurring money bills via its own dated frequency schedule, not via
+    milestone payment-term %s, so such a phase is outside the billing sequence
+    and must never be failed for a missing / blank payment-term %. Mixed phases
+    (recurring + fixed/resource/transaction) still get the normal treatment.
+    Mirrors ``payment_calc.recurring_only_phases``."""
+    recurring: set = set()
+    billing: set = set()
+    for c in cost_items:
+        phase = getattr(c, "phase", None)
+        if phase is None:
+            continue
+        code = getattr(c, "cost_type_code", None)
+        if code == _RECURRING:
+            recurring.add(phase)
+        elif code in _PHASE_TYPES:
+            billing.add(phase)
+    return recurring - billing
 
 
 def run_finance_validation(page, active_milestone_ids: Iterable[str]) -> dict:
@@ -30,6 +53,9 @@ def run_finance_validation(page, active_milestone_ids: Iterable[str]) -> dict:
     cost_items = list(page.cost_items or [])
     phases = list(page.phases or [])
     active_ids = set(active_milestone_ids or set())
+    # Phases that carry only recurring cost — outside the billing sequence, so
+    # the payment-term checks below skip them entirely.
+    recurring_phases = _recurring_only_phases(cost_items)
 
     # ---- cost-level ------------------------------------------------------
     add("total-cost", "Total contract cost > 0",
@@ -74,17 +100,22 @@ def run_finance_validation(page, active_milestone_ids: Iterable[str]) -> dict:
 
     # ---- payment terms ---------------------------------------------------
     term_problems: list = []
-    n = len(phases)
-    for i, p in enumerate(phases):
+    # "Last phase must total 100%" applies to the last BILLING phase. A
+    # recurring-only phase is out of the sequence, so a trailing recurring
+    # phase must not rob the real last phase of that rule.
+    billing_phases = [p for p in phases if p.phase not in recurring_phases]
+    last_billing = billing_phases[-1].phase if billing_phases else None
+    for p in phases:
         terms = p.payment_terms or []
         # Recurring money is billed via its own dated frequency schedule, not
-        # via milestone payment-term %s, so a phase whose cost is entirely
-        # recurring has NO payment terms. Exempt it from the "% must total 100"
-        # rule instead of flagging a phantom 0% shortfall on it.
-        if not terms:
+        # via milestone payment-term %s, so a recurring-only phase is outside
+        # the billing sequence. Exempt it from the "% must total 100" rule
+        # instead of flagging a phantom 0% shortfall on it. (The `not terms`
+        # arm also covers any other phase that carries no billable term.)
+        if p.phase in recurring_phases or not terms:
             continue
         tot = sum((_d(t.percent_of_payment) for t in terms), _ZERO)
-        is_last = i == n - 1
+        is_last = p.phase == last_billing
         cf_on = bool(getattr(p.carry_forward, "enabled", False))
         if tot > _HUNDRED + _TOL:
             term_problems.append(f"{p.phase} over-allocated ({tot}%)")
@@ -95,7 +126,11 @@ def run_finance_validation(page, active_milestone_ids: Iterable[str]) -> dict:
     add("term-pct", "Payment-term % complete per phase (last = 100; shortfall must carry forward)",
         not term_problems, "; ".join(term_problems))
 
-    blank_pct = [str(t.milestone_id) for p in phases for t in (p.payment_terms or [])
+    # Recurring-only phases take no payment-term %, so a blank % there is not a
+    # defect — skip them (they are the "% is blank" false failure).
+    blank_pct = [str(t.milestone_id)
+                 for p in phases if p.phase not in recurring_phases
+                 for t in (p.payment_terms or [])
                  if t.percent_of_payment is None]
     add("term-not-blank", "No payment term % is blank", not blank_pct,
         f"{len(blank_pct)} term(s) have a blank %.")

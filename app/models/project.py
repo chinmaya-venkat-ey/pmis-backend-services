@@ -91,6 +91,13 @@ class Project(Base):
     end_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     actual_start_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     actual_end_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    # #321 — the date the contract was signed (client requirement, captured at
+    # project creation). Nullable/additive.
+    contract_signing_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    # #322 — reason/remarks for a late actual start, captured alongside the
+    # actual start date (with optional attachments via the project attachment
+    # path). Nullable/additive.
+    actual_start_remarks: Mapped[Optional[str]] = mapped_column(String(2000))
 
     # Finance fields — INR rupees stored as NUMERIC(18, 2). All default to
     # safe zero/no-op values so existing rows continue to behave as before

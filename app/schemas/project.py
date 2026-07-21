@@ -184,6 +184,8 @@ class ProjectResponse(ResponseModel):
     end_date: Optional[datetime] = None
     actual_start_date: Optional[datetime] = None
     actual_end_date: Optional[datetime] = None
+    contract_signing_date: Optional[datetime] = None   # #321
+    actual_start_remarks: Optional[str] = None          # #322
 
     parent_id: Optional[str] = None
 
@@ -266,6 +268,11 @@ class ProjectCreateRequest(BaseModel):
 
     start_date: Optional[datetime] = None
     end_date: Optional[datetime] = None
+    # #321 Contract Signing Date (captured at creation). #322 actual start date
+    # (now settable on create) + late-start remarks. All additive/optional.
+    contract_signing_date: Optional[datetime] = None
+    actual_start_date: Optional[datetime] = None
+    actual_start_remarks: Annotated[Optional[str], Field(default=None, max_length=2000)] = None
 
     vendor_ids: List[str] = Field(default_factory=list)
 
@@ -333,6 +340,8 @@ class ProjectUpdateRequest(BaseModel):
     end_date: Optional[datetime] = None
     actual_start_date: Optional[datetime] = None
     actual_end_date: Optional[datetime] = None
+    contract_signing_date: Optional[datetime] = None   # #321
+    actual_start_remarks: Annotated[Optional[str], Field(default=None, max_length=2000)] = None  # #322
     vendor_ids: Optional[List[str]] = None
 
     # Finance fields (Doc-finance) — optional on PATCH. Editing finance via

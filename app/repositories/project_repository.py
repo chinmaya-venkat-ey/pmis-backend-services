@@ -101,6 +101,11 @@ class ProjectRepository:
             # vendor->project projection (user-svc applied it), so no local
             # users.* read or re-projection is needed. Empty set → no projects.
             clauses.append(Project.id.in_(caller_project_ids or set()))
+            # #310: hide pre-publish (new/draft) projects from non-broad callers,
+            # mirroring the single-project GET which 404s them. Without this a
+            # member sees a draft in Search Projects, clicks it, and the detail
+            # fetch 404s ("Not Found projects showing in search").
+            clauses.append(Project.status.notin_(("new", "draft")))
         if clauses:
             stmt = stmt.where(and_(*clauses))
             count_stmt = count_stmt.where(and_(*clauses))

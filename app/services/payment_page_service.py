@@ -60,15 +60,17 @@ from app.utilities.payment_masters import validate_frequency_code
 _PARTIAL = "partial_payment"
 
 
-def _safe_cycle_count(start, end, frequency) -> Optional[int]:
+def _safe_cycle_count(start, end, frequency, anchor=None) -> Optional[int]:
     """Resilient cycle count for a project / phase / milestone span — null (never
     raises) when a frequency isn't applied yet, isn't a cycle frequency
     (one_time/daily), the dates are missing, or the range is unusable. Keeps the
-    read endpoints from ever 500ing."""
+    read endpoints from ever 500ing. ``anchor`` (the project/contract start date)
+    makes the buckets contract-relative (bug #325); omit it for calendar
+    buckets."""
     if start is None or end is None or not frequency:
         return None
     try:
-        return cycle_calc.count_cycles_from_datetimes(start, end, frequency)
+        return cycle_calc.count_cycles_from_datetimes(start, end, frequency, anchor=anchor)
     except ValidationError:
         return None
 
@@ -134,7 +136,7 @@ class PaymentPageService:
         phase_cycle_counts = {}
         for p in ordered:
             s, e = phase_dates.get(p, (None, None))
-            phase_cycle_counts[p] = _safe_cycle_count(s, e, project_freq) or 0
+            phase_cycle_counts[p] = _safe_cycle_count(s, e, project_freq, anchor=project.start_date) or 0
         ms_by_phase: dict = {}
         for t in term_rows:
             if t.phase is not None and t.milestone_id is not None:
@@ -182,9 +184,20 @@ class PaymentPageService:
             for q in configs
         }
         one_time_alloc = payment_calc.one_time_distribution(cost_rows, ordered, one_time_config)
+        # Independent partial carry-forward split (bug #326): per-phase percentages
+        # for the OPE vs other-cost streams. NULL columns → caller-side defaults
+        # (other 100 when carry enabled, one_time 0) applied inside the calc.
+        carry_split_by_phase = {
+            q.phase: {
+                "one_time_pct": getattr(q, "one_time_carry_percent", None),
+                "other_cost_pct": getattr(q, "other_cost_carry_percent", None),
+            }
+            for q in configs
+        }
         cf = payment_calc.carry_forward_distribution(
             cost_rows, term_rows, ordered, cf_config, one_time_alloc=one_time_alloc,
-            phase_dates=phase_dates, project_bounds=project_bounds)
+            phase_dates=phase_dates, project_bounds=project_bounds,
+            carry_split_by_phase=carry_split_by_phase)
         self._one_time_alloc = one_time_alloc  # exposed to build_page for the response
         return ordered, config_by_phase, cf, cost_rows, term_rows
 
@@ -326,7 +339,15 @@ class PaymentPageService:
         # the project frequency). Built once here: per-row for the cost-item
         # response, and merged per-phase for the phase overlay below.
         rec_by_ci, rec_by_phase = _build_recurring_schedules(
-            cost_rows, phase_dates, project_freq,
+            cost_rows, phase_dates, project_freq, project_start=project.start_date,
+        )
+        # Phases carrying ONLY recurring cost sit outside the billing sequence:
+        # no payment-term %, no one-time share, no carry-forward in or out.
+        # They still render with their dates + frequency schedule.
+        recurring_phases = payment_calc.recurring_only_phases(cost_rows)
+        # The terminal BILLING phase (ignoring any trailing recurring-only phase).
+        last_billing_phase = next(
+            (p for p in reversed(list(ordered)) if p not in recurring_phases), None
         )
         cost_items = [
             _cost_item_response(c, ms_map.get(c.id, []), rec_by_ci.get(c.id, []))
@@ -354,7 +375,7 @@ class PaymentPageService:
                 m_start, m_end = ms_dates.get(t.milestone_id, (None, None))
                 resp = _payment_term_response(
                     t, effective_total, row_total_by_ci.get(t.cost_item_id, Decimal("0")),
-                    cycle_count=_safe_cycle_count(m_start, m_end, project_freq),
+                    cycle_count=_safe_cycle_count(m_start, m_end, project_freq, anchor=project.start_date),
                     start_date=m_start, end_date=m_end,
                     carry_received=ms_received.get(t.milestone_id, Decimal("0")),
                     percent_override=override,
@@ -392,10 +413,17 @@ class PaymentPageService:
                 (ms_received.get(t.milestone_id, Decimal("0")) for t in terms_in_phase),
                 Decimal("0"),
             )
-            is_last = idx == len(ordered) - 1
+            # Terminal BILLING phase — a trailing recurring-only phase is out of
+            # the sequence and must not claim this flag.
+            is_last = phase == last_billing_phase
             pool_list = cf.get("pool", {}).get(phase, [])
+            # A recurring-only phase is outside the billing sequence: carry
+            # forward is not applicable to it (neither given nor received), so
+            # report it as disabled regardless of any stale stored config.
+            is_recurring_phase = phase in recurring_phases
             cf_block = CarryForwardResponse(
-                enabled=bool(getattr(cfg, "carry_forward_enabled", False)),
+                enabled=(False if is_recurring_phase
+                         else bool(getattr(cfg, "carry_forward_enabled", False))),
                 method_code=getattr(cfg, "carry_forward_method_code", None),
                 # Last phase auto-utilised → nothing unallocated.
                 leftover=(Decimal("0.00") if (is_last and pct_overrides)
@@ -416,6 +444,14 @@ class PaymentPageService:
                 ],
                 pool_per_period=(payment_calc.to_2dp(pool_list[0]["amount"])
                                  if pool_list else Decimal("0.00")),
+                # Independent OPE / other-cost carry split (bug #326).
+                other_cost_leftover=cf["other_cost_leftover"].get(phase, Decimal("0.00")),
+                other_cost_carry_percent=getattr(cfg, "other_cost_carry_percent", None),
+                one_time_received=cf["one_time_received"].get(phase, Decimal("0.00")),
+                one_time_retained=cf["one_time_retained"].get(phase, Decimal("0.00")),
+                one_time_carried_out=cf["one_time_carried_out"].get(phase, Decimal("0.00")),
+                one_time_carry_percent=(None if is_recurring_phase
+                                        else getattr(cfg, "one_time_carry_percent", None)),
             )
             phase_blocks.append(PhaseBlock(
                 phase=phase,
@@ -426,7 +462,10 @@ class PaymentPageService:
                 phase_base_total=phase_base,
                 effective_phase_total=effective_total,
                 one_time_allocated=getattr(self, "_one_time_alloc", {}).get(phase, Decimal("0.00")),
-                one_time_enabled=bool(getattr(cfg, "one_time_enabled", False)),
+                # One-time (out-of-pocket) is never added to a recurring-only
+                # phase — report it as not applicable there.
+                one_time_enabled=(False if is_recurring_phase
+                                  else bool(getattr(cfg, "one_time_enabled", False))),
                 one_time_mode=getattr(cfg, "one_time_mode", None),
                 one_time_value=getattr(cfg, "one_time_value", None),
                 expense_total=expense_total,
@@ -441,9 +480,9 @@ class PaymentPageService:
                 recurring_schedule=recurring_pool,
                 start_date=start_date,
                 end_date=end_date,
-                cycle_count=_safe_cycle_count(start_date, end_date, project_freq),
+                cycle_count=_safe_cycle_count(start_date, end_date, project_freq, anchor=project.start_date),
                 pending_cycles=cf_pool.remaining_periods(
-                    project.end_date, end_date, project_freq),
+                    project.end_date, end_date, project_freq, anchor=project.start_date),
                 payment_terms=term_responses,
                 carry_forward=cf_block,
             ))
@@ -479,6 +518,7 @@ class PaymentPageService:
             end_date=project.end_date,
             cycle_count=_safe_cycle_count(
                 project.start_date, project.end_date, project_freq,
+                anchor=project.start_date,
             ),
             cost_items=cost_items,
             totals=totals,
@@ -625,7 +665,8 @@ class PaymentPageService:
         (used by the payment-term list endpoint). Enriches partial-payment
         milestones with their activity split."""
         ordered, _, cf, cost_rows, all_terms = self._load_phase_state(project_id)
-        project_freq = self._require_project(project_id).payment_frequency_code
+        _project = self._require_project(project_id)
+        project_freq = _project.payment_frequency_code
         # A row's own total = its line total: transaction rows are
         # perTxn × planned + tax (not the stored cost, which is 0 for them).
         row_total_by_ci = {
@@ -647,7 +688,7 @@ class PaymentPageService:
             m_start, m_end = ms_dates.get(t.milestone_id, (None, None))
             resp = _payment_term_response(
                 t, eff, row_total_by_ci.get(t.cost_item_id, Decimal("0")),
-                cycle_count=_safe_cycle_count(m_start, m_end, project_freq),
+                cycle_count=_safe_cycle_count(m_start, m_end, project_freq, anchor=_project.start_date),
                 start_date=m_start, end_date=m_end,
                 carry_received=ms_received.get(t.milestone_id, Decimal("0")),
                 percent_override=override,
@@ -727,6 +768,8 @@ class PaymentPageService:
         self, project_id: str, phase: str, *,
         enabled: bool, method_code: Optional[str], caller_user_id: Optional[str],
         allocation_mode: Optional[str] = None, allocations: Optional[List[dict]] = None,
+        other_cost_carry_percent: Optional[Decimal] = None,
+        one_time_carry_percent: Optional[Decimal] = None,
         caller_is_admin: bool = False,
     ) -> PaymentPageResponse:
         """Configure carry-forward for a phase. A carrying phase always carries
@@ -799,22 +842,35 @@ class PaymentPageService:
                         "Time-based carry-forward needs a dated phase and project bounds.",
                         code="validation_error",
                     )
-                if not cf_pool.remaining_periods(project.end_date, phase_end, variant):
+                if not cf_pool.remaining_periods(project.end_date, phase_end, variant, anchor=project.start_date):
                     raise ValidationError(
                         "Time-based carry-forward has no future billing periods after this phase.",
                         code="validation_error",
                     )
             # Custom methods need a fully-allocated share set over valid recipients.
+            # The basis is the OTHER-cost leftover (what the custom method actually
+            # distributes — OPE carries via its own phase-wise stream, bug #326).
             if variant == "custom":
                 recipients = sub_ms if method == payment_calc.CF_MILESTONE else subsequent
+                basis = (cf.get("other_cost_leftover") or cf.get("leftover") or {})
                 alloc_rows = self._normalise_cf_allocations(
                     method, allocation_mode, allocations, recipients,
-                    leftover=cf["leftover"].get(phase, Decimal("0.00")),
+                    leftover=basis.get(phase, Decimal("0.00")),
+                )
+            # OPE carry (bug #326) needs a subsequent billing phase to receive it.
+            if one_time_carry_percent and one_time_carry_percent > Decimal("0") and not subsequent:
+                raise ValidationError(
+                    "Cannot carry one-time (OPE) forward from the last phase — no subsequent phase.",
+                    code="validation_error",
                 )
 
         fields = dict(
             carry_forward_enabled=enabled,
             carry_forward_method_code=method_code if enabled else None,
+            # Independent OPE / other-cost carry percentages (bug #326); cleared
+            # when carry-forward is disabled.
+            other_cost_carry_percent=other_cost_carry_percent if enabled else None,
+            one_time_carry_percent=one_time_carry_percent if enabled else None,
             updated_by=caller_user_id,
         )
         row = config_by_phase.get(phase) or self.phase_qrg.get_for_phase(project_id, phase)
@@ -1090,7 +1146,8 @@ class PaymentPageService:
         if term is None:
             raise ValidationError("Payment term not found.", code="not_found")
         ordered, _, cf, cost_rows, all_terms = self._load_phase_state(term.project_id)
-        project_freq = self._require_project(term.project_id).payment_frequency_code
+        _project = self._require_project(term.project_id)
+        project_freq = _project.payment_frequency_code
         effective_total = cf["effective_base"].get(term.phase, Decimal("0"))
         override = _last_phase_percent_overrides(ordered, all_terms).get(term.id)
         row_total = next(
@@ -1101,7 +1158,7 @@ class PaymentPageService:
         m_start, m_end = ms_dates.get(term.milestone_id, (None, None))
         resp = _payment_term_response(
             term, effective_total, row_total,
-            cycle_count=_safe_cycle_count(m_start, m_end, project_freq),
+            cycle_count=_safe_cycle_count(m_start, m_end, project_freq, anchor=_project.start_date),
             start_date=m_start, end_date=m_end,
             carry_received=cf["milestone_received"].get(term.milestone_id, Decimal("0")),
             percent_override=override,
@@ -1152,9 +1209,16 @@ def _cost_item_response(row, milestone_ids: List[str], schedule=None) -> CostIte
     return resp
 
 
-def _build_recurring_schedules(cost_rows, phase_dates, project_freq):
+def _build_recurring_schedules(cost_rows, phase_dates, project_freq=None, project_start=None):
     """Build every recurring row's dated installment schedule using the row's
-    OWN ``frequency_code`` (falling back to the project frequency, then yearly).
+    OWN ``frequency_code``, defaulting to yearly (annual) when a row has none.
+
+    Recurring rows are created with a mandatory frequency (defaulted to yearly),
+    so the fallback here only guards legacy rows. ``project_freq`` is retained
+    for signature stability but no longer drives the default — the default is
+    annual, per product rule. ``project_start`` anchors the schedule on the
+    contract start so the periods follow the contract, not the calendar (bug
+    #327); None keeps the legacy calendar buckets.
 
     Returns ``(by_cost_item, by_phase)``:
       * ``by_cost_item[ci_id]`` — that row's raw installment list at the row's
@@ -1170,13 +1234,14 @@ def _build_recurring_schedules(cost_rows, phase_dates, project_freq):
         phase = getattr(r, "phase", None)
         start_date, end_date = phase_dates.get(phase, (None, None))
         r_total = payment_calc.line_total(r)
-        # Per-row frequency wins; project frequency, then yearly, are fallbacks.
-        freq = getattr(r, "frequency_code", None) or project_freq or "yearly"
-        sched = (cf_pool.build_schedule(r_total, start_date, end_date, freq)
+        # Per-row frequency wins; default to yearly (annual) when a row has none.
+        freq = getattr(r, "frequency_code", None) or "yearly"
+        sched = (cf_pool.build_schedule(r_total, start_date, end_date, freq, anchor=project_start)
                  if r_total > Decimal("0") else [])
         by_ci[r.id] = sched
         phase_entries.setdefault(phase, {"scheds": [], "freqs": [],
-                                         "start": start_date, "end": end_date})
+                                         "start": start_date, "end": end_date,
+                                         "anchor": project_start})
         phase_entries[phase]["scheds"].append(sched)
         phase_entries[phase]["freqs"].append(freq)
     by_phase = {phase: _merge_phase_recurring(e) for phase, e in phase_entries.items()}
@@ -1199,24 +1264,25 @@ def _merge_phase_recurring(entry) -> list:
     scheds = entry["scheds"]
     granular = cf_pool.finest_frequency(entry["freqs"])
     span_start, span_end = entry.get("start"), entry.get("end")
+    anchor = entry.get("anchor")  # contract-relative overlay buckets (bug #327)
 
     if granular is not None and span_start and span_end:
-        start_i = cf_pool.bucket_index(span_start, granular)
-        end_i = cf_pool.bucket_index(span_end, granular)
+        start_i = cf_pool.bucket_index(span_start, granular, anchor=anchor)
+        end_i = cf_pool.bucket_index(span_end, granular, anchor=anchor)
         if start_i is not None and end_i is not None and end_i >= start_i:
             # Seed the full granular timeline over the phase span, then drop each
             # row's installments onto the bucket holding their period end.
             amounts = {i: Decimal("0") for i in range(start_i, end_i + 1)}
             for sched in scheds:
                 for inst in sched:
-                    gi = cf_pool.bucket_index(inst["period_end"], granular)
+                    gi = cf_pool.bucket_index(inst["period_end"], granular, anchor=anchor)
                     if gi is None:
                         continue
                     gi = min(max(gi, start_i), end_i)
                     amounts[gi] = payment_calc.to_2dp(amounts[gi] + inst["amount"])
             out = []
             for i in range(start_i, end_i + 1):
-                s, e = cf_pool.bucket_bounds(i, granular)
+                s, e = cf_pool.bucket_bounds(i, granular, anchor=anchor)
                 out.append({"period_index": i, "period_start": s,
                             "period_end": e, "amount": amounts[i]})
             return out
@@ -1256,10 +1322,17 @@ def _last_phase_percent_overrides(ordered, term_rows) -> dict:
     milestones. The terminal phase can't carry leftover forward, so it is always
     fully utilised (e.g. one milestone set to 60% auto-fills the other to 40%).
     Returns ``{term_id: percent}`` for the null terms it fills — empty for every
-    non-last phase, or a last phase whose terms are all explicit."""
+    non-last phase, or a last phase whose terms are all explicit.
+
+    "Last" means the last BILLING phase: any trailing phase that carries no
+    payment terms (a recurring-only phase, which is out of the billing
+    sequence) is walked past, so the real terminal phase still auto-fills."""
     if not ordered:
         return {}
-    last = ordered[-1]
+    phases_with_terms = {t.phase for t in term_rows}
+    last = next((p for p in reversed(list(ordered)) if p in phases_with_terms), None)
+    if last is None:
+        return {}
     last_terms = [t for t in term_rows if t.phase == last]
     null_terms = [t for t in last_terms if t.percent_of_payment is None]
     if not null_terms:

@@ -50,6 +50,11 @@ TRANSACTION_COST = "transaction_cost"
 # Project-level cost distributed across frequency periods as a payment schedule
 # (no phase, no milestones) — like one_time but scheduled.
 RECURRING_COST = "recurring_cost"
+# A recurring row always carries a distribution frequency. It is mandatory, but
+# when the caller does not choose one we default to yearly (annual) rather than
+# storing NULL — so the schedule is always deterministic and finance validation
+# passes without forcing the user to pick.
+DEFAULT_RECURRING_FREQUENCY = "yearly"
 EXPENSE_TYPES = (RESOURCE_COST, TRANSACTION_COST)
 # Cost types that live on a phase, carry milestones and bill via payment terms.
 PHASE_COST_TYPES = (FIXED, RESOURCE_COST, TRANSACTION_COST)
@@ -149,17 +154,16 @@ class ProjectCostItemService:
             # a fixed row). Its value is added to that phase and its ``cost`` is
             # distributed across the phase's date span as a schedule (shown at the
             # phase level), NOT via percentage payment terms. A per-row frequency
-            # is OPTIONAL — the schedule uses the project frequency (default
-            # yearly when the project has none set).
+            # is MANDATORY and drives that schedule; when the caller omits it we
+            # default to yearly (annual) instead of storing NULL.
             if phase is None:
                 raise ValidationError("Phase is required for a recurring cost row.")
             if len(milestone_ids) != 1:
                 raise ValidationError("A recurring cost row needs exactly one milestone.")
             if payload.cost is None:
                 raise ValidationError("A recurring cost row needs a cost amount.")
-            freq = (
-                validate_frequency_code(self.db, payload.frequency_code)
-                if payload.frequency_code else None
+            freq = validate_frequency_code(
+                self.db, payload.frequency_code or DEFAULT_RECURRING_FREQUENCY
             )
         elif cost_type == FIXED:
             if phase is None:
@@ -264,8 +268,8 @@ class ProjectCostItemService:
             milestone_ids = []  # one-time clears its bundle
         elif effective_type == RECURRING_COST:
             # Recurring cost lives on a phase with exactly one milestone (its
-            # schedule spans the phase's date span). Needs a cost amount;
-            # frequency is optional (schedule uses the project frequency).
+            # schedule spans the phase's date span). Needs a cost amount and a
+            # mandatory distribution frequency (defaulting to yearly).
             if effective_phase is None:
                 raise ValidationError("Phase is required for a recurring cost row.")
             effective_ms = milestone_ids if milestone_ids is not None else self.repo.list_milestone_ids(row.id)
@@ -274,11 +278,15 @@ class ProjectCostItemService:
             effective_cost = updates.get("cost", row.cost)
             if effective_cost is None:
                 raise ValidationError("A recurring cost row needs a cost amount.")
-            # Frequency is OPTIONAL (the schedule uses the project frequency);
-            # validate only if the client sent one.
-            if "frequency_code" in updates and updates["frequency_code"] is not None:
+            # Frequency is MANDATORY and defaults to yearly (annual). Validate an
+            # explicit value; when the row would otherwise end up without one
+            # (client cleared it, the row is newly recurring, or a legacy row
+            # never had one) fall back to the default rather than storing NULL.
+            if "frequency_code" in updates:
                 updates["frequency_code"] = validate_frequency_code(
-                    self.db, updates["frequency_code"])
+                    self.db, updates["frequency_code"] or DEFAULT_RECURRING_FREQUENCY)
+            elif row.frequency_code is None:
+                updates["frequency_code"] = DEFAULT_RECURRING_FREQUENCY
         elif effective_type == FIXED:
             if effective_phase is None:
                 raise ValidationError("Phase is required for a fixed cost row.")

@@ -35,12 +35,15 @@ class PaymentPageController:
         self, project_id: str, phase: str, *,
         enabled: bool, method_code: Optional[str], caller_user_id: Optional[str],
         allocation_mode: Optional[str] = None, allocations: Optional[list] = None,
+        other_cost_carry_percent=None, one_time_carry_percent=None,
         caller_is_admin: bool = False,
     ) -> PaymentPageResponse:
         return self.service.set_carry_forward(
             project_id, phase, enabled=enabled, method_code=method_code,
             caller_user_id=caller_user_id,
             allocation_mode=allocation_mode, allocations=allocations,
+            other_cost_carry_percent=other_cost_carry_percent,
+            one_time_carry_percent=one_time_carry_percent,
             caller_is_admin=caller_is_admin,
         )
 

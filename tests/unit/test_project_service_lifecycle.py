@@ -133,6 +133,31 @@ def test_publish_rejects_when_already_closed():
     svc.repo.update.assert_not_called()
 
 
+def test_assert_milestones_in_finance_accepts_non_fixed_cost_rows():
+    from app.services.project_service import ProjectService
+
+    svc = ProjectService(MagicMock())
+
+    def fake_execute(query):
+        # Tables are schema-qualified ("project.milestones"), so key off a
+        # distinctive table name rather than a SELECT prefix.
+        q = str(query)
+        result = MagicMock()
+        if "cost_item_milestones" in q:
+            # Bound-ids query: m-1 IS bound — via a NON-fixed (e.g. recurring)
+            # cost row, which the `!= one_time` filter now accepts.
+            result.all.return_value = [("m-1",)]
+        else:
+            # Live-milestones query.
+            result.all.return_value = [("m-1", "Alpha")]
+        return result
+
+    svc.db.execute.side_effect = fake_execute
+
+    # Must not raise: the milestone is on a non-fixed cost row.
+    svc._assert_milestones_in_finance("p-1")
+
+
 # ----- close --------------------------------------------------------------
 
 def test_close_flips_to_closed_with_reason():

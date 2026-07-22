@@ -469,6 +469,43 @@ def one_time_distribution(cost_rows, ordered_phases, one_time_config) -> dict:
     return alloc
 
 
+def one_time_allocation_summary(cost_rows, ordered_phases, one_time_config) -> dict:
+    """OPE (one-time) allocation guide for the payment page — a pre-validate /
+    publish aid, NOT a billing figure.
+
+    ``allocated`` is how much of the one-time pool the user has EXPLICITLY
+    assigned to phases (each opted-in non-terminal phase's share, clamped so the
+    running total never exceeds the pool — the same explicit shares
+    :func:`one_time_distribution` lays down, MINUS the remainder it auto-absorbs
+    onto the last phase). ``pending`` = ``pool − allocated`` is the amount still
+    unallocated; publishing requires it to be 0 (the pool must be fully
+    allocated). Keep the explicit-share loop below in sync with
+    :func:`one_time_distribution`.
+
+    Returns ``{"pool", "allocated", "pending"}`` (all ₹, 2dp).
+    """
+    pool = one_time_total(cost_rows)
+    ordered = list(ordered_phases)
+    excluded = recurring_only_phases(cost_rows)
+    eligible = [p for p in ordered if p not in excluded]
+    if pool <= _ZERO or not eligible:
+        return {"pool": _round_money(pool), "allocated": _ZERO,
+                "pending": _round_money(pool)}
+    used = _ZERO
+    for p in eligible[:-1]:                       # last eligible phase auto-absorbs → pending
+        cfg = one_time_config.get(p) or {}
+        if cfg.get("enabled"):
+            share = _phase_one_time_share(cfg, pool)
+            if share > pool - used:               # same defensive clamp as one_time_distribution
+                share = _round_money(pool - used)
+            if share < _ZERO:
+                share = _ZERO
+            used = _round_money(used + share)
+    allocated = _round_money(used)
+    return {"pool": _round_money(pool), "allocated": allocated,
+            "pending": _round_money(pool - allocated)}
+
+
 def carry_forward_distribution(cost_rows, term_rows, ordered_phases, config_by_phase,
                                one_time_alloc=None, phase_dates=None,
                                project_bounds=None) -> dict:

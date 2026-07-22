@@ -468,6 +468,28 @@ class PaymentPageService:
                 carry_forward=cf_block,
             ))
 
+        # Project-level OPE allocation guide (pre-validate/publish): how much of
+        # the one-time pool the user has ALLOCATED so far vs. what is still
+        # PENDING. Explicit allocation only — the auto-absorbed remainder is the
+        # pending amount that must reach 0 to publish. Rebuild the same
+        # one_time_config shape _load_phase_state uses (phase → enabled/mode/value).
+        one_time_config = {
+            p: {
+                "enabled": bool(getattr(cfg, "one_time_enabled", False)),
+                "mode": getattr(cfg, "one_time_mode", None),
+                "value": getattr(cfg, "one_time_value", None),
+            }
+            for p, cfg in config_by_phase.items()
+        }
+        ope = payment_calc.one_time_allocation_summary(cost_rows, ordered, one_time_config)
+        totals.one_time_allocated = ope["allocated"]
+        totals.one_time_pending = ope["pending"]
+        if ope["pool"] > Decimal("0.00"):
+            alloc_pct = payment_calc.to_2dp(ope["allocated"] / ope["pool"] * Decimal("100"))
+            totals.one_time_allocated_percent = alloc_pct
+            totals.one_time_pending_percent = payment_calc.to_2dp(
+                Decimal("100") - alloc_pct)
+
         cap_pct = payment_calc.to_2dp(project.ccn_cap_percent)
         ccn = CcnBlock(
             cap_percent=cap_pct,

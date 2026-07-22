@@ -442,6 +442,16 @@ class PaymentTotals(ResponseModel):
     resource_cost: Decimal = Decimal("0.00")
     transaction_cost: Decimal = Decimal("0.00")
     recurring_cost: Decimal = Decimal("0.00")
+    # Project-level OPE (one-time / out-of-pocket) allocation guide — a
+    # pre-validate/publish aid showing, cumulatively, how much of the
+    # one_time_cost pool the user has ALLOCATED to phases vs. how much is still
+    # PENDING (unallocated). Publishing requires pending == 0 (the pool must be
+    # fully allocated). allocated + pending == one_time_cost; the percents are of
+    # one_time_cost and sum to 100 (0/0 when there is no OPE).
+    one_time_allocated: Decimal = Decimal("0.00")
+    one_time_pending: Decimal = Decimal("0.00")
+    one_time_allocated_percent: Decimal = Decimal("0.00")
+    one_time_pending_percent: Decimal = Decimal("0.00")
 
 
 class CcnBlock(ResponseModel):

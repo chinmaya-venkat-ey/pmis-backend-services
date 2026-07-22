@@ -184,20 +184,9 @@ class PaymentPageService:
             for q in configs
         }
         one_time_alloc = payment_calc.one_time_distribution(cost_rows, ordered, one_time_config)
-        # Independent partial carry-forward split (bug #326): per-phase percentages
-        # for the OPE vs other-cost streams. NULL columns → caller-side defaults
-        # (other 100 when carry enabled, one_time 0) applied inside the calc.
-        carry_split_by_phase = {
-            q.phase: {
-                "one_time_pct": getattr(q, "one_time_carry_percent", None),
-                "other_cost_pct": getattr(q, "other_cost_carry_percent", None),
-            }
-            for q in configs
-        }
         cf = payment_calc.carry_forward_distribution(
             cost_rows, term_rows, ordered, cf_config, one_time_alloc=one_time_alloc,
-            phase_dates=phase_dates, project_bounds=project_bounds,
-            carry_split_by_phase=carry_split_by_phase)
+            phase_dates=phase_dates, project_bounds=project_bounds)
         self._one_time_alloc = one_time_alloc  # exposed to build_page for the response
         return ordered, config_by_phase, cf, cost_rows, term_rows
 
@@ -444,14 +433,6 @@ class PaymentPageService:
                 ],
                 pool_per_period=(payment_calc.to_2dp(pool_list[0]["amount"])
                                  if pool_list else Decimal("0.00")),
-                # Independent OPE / other-cost carry split (bug #326).
-                other_cost_leftover=cf["other_cost_leftover"].get(phase, Decimal("0.00")),
-                other_cost_carry_percent=getattr(cfg, "other_cost_carry_percent", None),
-                one_time_received=cf["one_time_received"].get(phase, Decimal("0.00")),
-                one_time_retained=cf["one_time_retained"].get(phase, Decimal("0.00")),
-                one_time_carried_out=cf["one_time_carried_out"].get(phase, Decimal("0.00")),
-                one_time_carry_percent=(None if is_recurring_phase
-                                        else getattr(cfg, "one_time_carry_percent", None)),
             )
             phase_blocks.append(PhaseBlock(
                 phase=phase,
@@ -768,8 +749,6 @@ class PaymentPageService:
         self, project_id: str, phase: str, *,
         enabled: bool, method_code: Optional[str], caller_user_id: Optional[str],
         allocation_mode: Optional[str] = None, allocations: Optional[List[dict]] = None,
-        other_cost_carry_percent: Optional[Decimal] = None,
-        one_time_carry_percent: Optional[Decimal] = None,
         caller_is_admin: bool = False,
     ) -> PaymentPageResponse:
         """Configure carry-forward for a phase. A carrying phase always carries
@@ -852,25 +831,14 @@ class PaymentPageService:
             # distributes — OPE carries via its own phase-wise stream, bug #326).
             if variant == "custom":
                 recipients = sub_ms if method == payment_calc.CF_MILESTONE else subsequent
-                basis = (cf.get("other_cost_leftover") or cf.get("leftover") or {})
                 alloc_rows = self._normalise_cf_allocations(
                     method, allocation_mode, allocations, recipients,
-                    leftover=basis.get(phase, Decimal("0.00")),
-                )
-            # OPE carry (bug #326) needs a subsequent billing phase to receive it.
-            if one_time_carry_percent and one_time_carry_percent > Decimal("0") and not subsequent:
-                raise ValidationError(
-                    "Cannot carry one-time (OPE) forward from the last phase — no subsequent phase.",
-                    code="validation_error",
+                    leftover=cf["leftover"].get(phase, Decimal("0.00")),
                 )
 
         fields = dict(
             carry_forward_enabled=enabled,
             carry_forward_method_code=method_code if enabled else None,
-            # Independent OPE / other-cost carry percentages (bug #326); cleared
-            # when carry-forward is disabled.
-            other_cost_carry_percent=other_cost_carry_percent if enabled else None,
-            one_time_carry_percent=one_time_carry_percent if enabled else None,
             updated_by=caller_user_id,
         )
         row = config_by_phase.get(phase) or self.phase_qrg.get_for_phase(project_id, phase)

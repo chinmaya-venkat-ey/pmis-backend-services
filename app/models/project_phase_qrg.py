@@ -90,19 +90,6 @@ class ProjectPhaseQrg(Base):
     one_time_mode: Mapped[Optional[str]] = mapped_column(String(8))
     one_time_value: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 2))
 
-    # Independent partial carry-forward percentages (bug #326). The one-time
-    # (OPE) stream and the other-cost stream carry forward SEPARATELY instead of
-    # as one clubbed leftover:
-    #   * other_cost_carry_percent — % of this phase's OTHER-cost leftover
-    #     (fixed/resource/transaction, unbilled by milestone %s) to carry via the
-    #     carry-forward method. NULL → 100 when carry_forward_enabled (legacy
-    #     "carry the whole leftover"), else 0.
-    #   * one_time_carry_percent — % of this phase's OPE (allocation + carried-in)
-    #     to carry forward phase-wise; the rest is retained in this phase's value
-    #     and billed with it. NULL → 0 (OPE stays in the phase by default).
-    other_cost_carry_percent: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2))
-    one_time_carry_percent: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2))
-
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=datetime.utcnow
     )

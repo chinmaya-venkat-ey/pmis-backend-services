@@ -31,6 +31,23 @@ from app.schemas.sla import (
 )
 
 
+# The four contract types (BSP / MSAP / MSIP / PMU). SLA refs are
+# "<CONTRACT>-SLA###" so the prefix identifies the contract type (#362).
+_CONTRACT_TYPES = frozenset({"BSP", "MSAP", "MSIP", "PMU"})
+
+
+def _derive_contract_type(sla_ref: Optional[str]) -> Optional[str]:
+    """Contract type from the sla_ref prefix (e.g. "BSP-SLA001" -> "BSP").
+
+    Returns None when the ref has no recognisable contract-type prefix, so a
+    genuinely project-scoped SLA with a non-standard ref still onboards (its
+    contract_type simply stays NULL, as before)."""
+    if not sla_ref or "-" not in sla_ref:
+        return None
+    prefix = sla_ref.split("-", 1)[0].strip().upper()
+    return prefix if prefix in _CONTRACT_TYPES else None
+
+
 # ---------------------------------------------------------------------------
 # DSL generator
 # ---------------------------------------------------------------------------
@@ -646,14 +663,21 @@ class SlaService:
                 code="duplicate_sla_ref",
             )
 
+        # #362: contract_type must not end up NULL, or the SLA Mapping view
+        # (which always surfaces it) shows it blank while Onboard leaves it
+        # unset. When the caller omits it, derive it from the sla_ref prefix
+        # (refs are "<CONTRACT>-SLA###", e.g. "BSP-SLA001" -> "BSP"), which is
+        # the canonical convention across every seeded RFP SLA.
+        contract_type = payload.contract_type or _derive_contract_type(payload.sla_ref)
+
         # Duplicate check 1 — same title in same contract_type. Skipped
         # when contract_type is None (project-scoped flow); duplicate
         # protection there comes from the sla_ref uniqueness check above.
-        if payload.contract_type and self.repo.find_by_title_and_contract_type(
-            payload.contract_type, payload.title,
+        if contract_type and self.repo.find_by_title_and_contract_type(
+            contract_type, payload.title,
         ) is not None:
             raise ConflictError(
-                f"An SLA with title '{payload.title}' already exists for contract_type '{payload.contract_type}'",
+                f"An SLA with title '{payload.title}' already exists for contract_type '{contract_type}'",
                 code="duplicate_sla_title",
             )
 
@@ -684,7 +708,7 @@ class SlaService:
         # remains a catalog template (legacy behaviour).
         defn = SlaDefinition(
             project_id=payload.project_id,
-            contract_type=payload.contract_type,
+            contract_type=contract_type,  # #362: derived from sla_ref when omitted
             formula_id=formula.id,
             sla_ref=payload.sla_ref,
             title=payload.title,

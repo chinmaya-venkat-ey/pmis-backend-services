@@ -5,7 +5,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
-from pydantic import AliasChoices, BaseModel, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 
 # ---------------------------------------------------------------------------
@@ -13,6 +13,17 @@ from pydantic import AliasChoices, BaseModel, Field
 # ---------------------------------------------------------------------------
 
 class SlaMetricInput(BaseModel):
+    # #349: a real example so Swagger / generated forms don't render the
+    # "string" / "1.1" placeholders that then get submitted and persisted.
+    model_config = ConfigDict(json_schema_extra={"example": {
+        "metric_key": "days_delayed",
+        "display_name": "Days delayed",
+        "unit": "days",
+        "target_numeric": 5,
+        "direction": "LOWER_BETTER",
+        "is_primary": True,
+    }})
+
     metric_key: str = Field(..., max_length=100)
     display_name: str = Field(..., max_length=255)
     unit: str = Field("", max_length=50)
@@ -28,6 +39,17 @@ class SlaParameterInput(BaseModel):
 
 
 class SlaConditionBandInput(BaseModel):
+    # #349: real example (no "string" / "1.1" placeholders).
+    model_config = ConfigDict(json_schema_extra={"example": {
+        "metric_key": "days_delayed",
+        "band_label": "0.5% per day",
+        "range_min": 1,
+        "range_max": 15,
+        "range_unit": "days",
+        "rate_percent": 0.5,
+        "sort_order": 0,
+    }})
+
     metric_key: str = Field(..., max_length=100)
     band_label: str = Field(..., max_length=50)
     range_min: Optional[Decimal] = None
@@ -490,6 +512,14 @@ class SlaSimpleMeasurement(BaseModel):
     text fallback), backend slugifies ``display_name`` into the
     metric_key — preserved for backwards compat.
     """
+    # #349: real example (no "string" placeholders in "What is Measured").
+    model_config = ConfigDict(json_schema_extra={"example": {
+        "metric_key": "days_delayed",
+        "display_name": "Days delayed",
+        "unit": "days",
+        "target_value": 5,
+    }})
+
     metric_key: Optional[str] = Field(
         None, max_length=100,
         description='Catalog metric_key when picked from /sla-input-variables. '
@@ -517,6 +547,15 @@ class SlaSimpleTargetRow(BaseModel):
     row falls back to the SLA's primary measurement, which is the
     correct default for single-metric SLAs (PMU-SLA005 et al).
     """
+    # #349: real example (no "string" / "1.1" placeholders in the Target rows).
+    model_config = ConfigDict(json_schema_extra={"example": {
+        "severity": 1,
+        "threshold_label": "1 occurrence",
+        "from_value": 0,
+        "to_value": 1,
+        "input_variable": "days_delayed",
+    }})
+
     severity: Optional[int] = Field(
         None, ge=0, le=10,
         description='Severity level the row corresponds to. The PMU / MSAP / '

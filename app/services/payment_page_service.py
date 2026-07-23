@@ -945,7 +945,8 @@ class PaymentPageService:
         # back to false on read, so allowing the write here would silently
         # orphan the config (stored true, always read false → looks like it
         # "resets" on reload). Reject it up front instead.
-        if enabled and phase in payment_calc.recurring_only_phases(cost_rows):
+        recurring_phases = payment_calc.recurring_only_phases(cost_rows)
+        if enabled and phase in recurring_phases:
             raise ValidationError(
                 "This phase is recurring-only; it does not take a one-time (OPE) "
                 "share.", code="validation_error")
@@ -958,7 +959,12 @@ class PaymentPageService:
             last = ordered[-1] if ordered else None
             others = Decimal("0.00")
             for q in config_by_phase.values():
+                # Exclude recurring-only phases from the pool-consumption check —
+                # they are excluded from the actual distribution and from the
+                # totals, so a stale orphan config on one must NOT eat headroom
+                # here (that would wrongly block a legitimate allocation).
                 if (q.phase != phase and q.phase in ordered and q.phase != last
+                        and q.phase not in recurring_phases
                         and getattr(q, "one_time_enabled", False)):
                     others += self._one_time_share(q.one_time_mode, q.one_time_value, pool)
             if others + this_share > pool + Decimal("0.01"):

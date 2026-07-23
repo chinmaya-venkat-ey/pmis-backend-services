@@ -24,9 +24,11 @@ from app.controllers.project_category_controller import ProjectCategoryControlle
 from app.controllers.project_status_transition_controller import (
     ProjectStatusTransitionController,
 )
+from app.controllers.designation_controller import DesignationController
 from app.controllers.resource_type_controller import ResourceTypeController
 from app.controllers.vendor_controller import VendorController
 from app.db import get_db
+from app.services.designation_service import DesignationService
 from app.services.activity_status_service import ActivityStatusService
 from app.services.activity_type_service import ActivityTypeService
 from app.services.cost_type_service import CostTypeService
@@ -57,6 +59,12 @@ def get_resource_type_controller(
     db: Session = Depends(get_db),
 ) -> ResourceTypeController:
     return ResourceTypeController(ResourceTypeService(db))
+
+
+def get_designation_controller(
+    db: Session = Depends(get_db),
+) -> DesignationController:
+    return DesignationController(DesignationService(db))
 
 
 def get_priority_controller(db: Session = Depends(get_db)) -> PriorityController:

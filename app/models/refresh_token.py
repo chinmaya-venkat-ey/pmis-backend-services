@@ -47,3 +47,7 @@ class RefreshToken(Base):
     # Set on logout / deactivation / password-reset — hard-kills the token.
     revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    # #365: jti of the ACCESS token minted with this session (updated on
+    # rotation). Lets an admin revoke both the session AND its still-valid
+    # access token (via users.revoked_tokens) for an instant hard cut.
+    access_jti: Mapped[Optional[str]] = mapped_column(String(64))

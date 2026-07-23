@@ -434,11 +434,21 @@ class RbacRepository:
         # org_admin on V without being employed there. The role-assignment
         # row is the single source of truth.
         if org_ids_seen:
-            from app.models._cross_schema import ProjectVendor
+            from app.models._cross_schema import ProjectVendor, Vendor
 
+            # #246: project ONLY through vendors that are still live. Deleting a
+            # vendor (org) soft-deletes masters.vendors but PRESERVES the
+            # project_vendors mapping rows, so without this join an org_admin on
+            # a removed vendor keeps implicit ("project", pid) scope and the
+            # project lingers in their list showing "no organization". Joining to
+            # the vendor + filtering deleted_at drops those dangling references.
             stmt = (
                 select(ProjectVendor.vendor_id, ProjectVendor.project_id)
-                .where(ProjectVendor.vendor_id.in_(org_ids_seen))
+                .join(Vendor, Vendor.id == ProjectVendor.vendor_id)
+                .where(
+                    ProjectVendor.vendor_id.in_(org_ids_seen),
+                    Vendor.deleted_at.is_(None),
+                )
             )
             for vid, pid in self.db.execute(stmt).all():
                 org_perms = out.get(("org", vid), set())

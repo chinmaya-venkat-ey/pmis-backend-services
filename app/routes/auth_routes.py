@@ -6,6 +6,8 @@ from typing import Annotated, Union
 from fastapi import APIRouter, Depends, status
 
 from app.controllers.auth_controller import AuthController
+from app.core.permissions import USERS_REVOKE_SESSIONS
+from app.core.rbac import require_permission
 from app.dependencies import (
     get_auth_controller,
     get_caller_jti,
@@ -20,6 +22,8 @@ from app.schemas.auth import (
     LogoutResponse,
     RefreshRequest,
     RefreshResponse,
+    SessionRevokeResponse,
+    UserSessionListResponse,
 )
 from app.schemas.otp import OtpSendRequest, OtpSendResponse, OtpVerifyRequest
 from app.schemas.password import (
@@ -158,3 +162,49 @@ def get_me(
     user_id: Annotated[str, Depends(get_current_user_id)],
 ):
     return controller.get_me(user_id)
+
+
+# ---- #365 SuperAdmin session management (super_admin only) ----------------
+
+@router.get(
+    "/{user_id}/sessions",
+    response_model=UserSessionListResponse,
+    summary="List a user's active sessions (SuperAdmin only)",
+    dependencies=[Depends(require_permission(USERS_REVOKE_SESSIONS))],
+)
+def list_user_sessions(
+    user_id: str,
+    controller: Annotated[AuthController, Depends(get_auth_controller)],
+):
+    return controller.list_user_sessions(user_id)
+
+
+@router.post(
+    "/{user_id}/sessions/revoke-all",
+    response_model=SessionRevokeResponse,
+    summary="Revoke ALL of a user's sessions — instant hard cut (SuperAdmin only)",
+    description=(
+        "Revokes every active session for the user and denylists their live "
+        "access tokens, so both refresh and access are rejected immediately."
+    ),
+    dependencies=[Depends(require_permission(USERS_REVOKE_SESSIONS))],
+)
+def revoke_all_user_sessions(
+    user_id: str,
+    controller: Annotated[AuthController, Depends(get_auth_controller)],
+):
+    return controller.revoke_all_user_sessions(user_id)
+
+
+@router.delete(
+    "/{user_id}/sessions/{session_id}",
+    response_model=SessionRevokeResponse,
+    summary="Revoke ONE of a user's sessions — instant hard cut (SuperAdmin only)",
+    dependencies=[Depends(require_permission(USERS_REVOKE_SESSIONS))],
+)
+def revoke_user_session(
+    user_id: str,
+    session_id: str,
+    controller: Annotated[AuthController, Depends(get_auth_controller)],
+):
+    return controller.revoke_user_session(user_id, session_id)

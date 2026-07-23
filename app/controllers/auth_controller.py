@@ -64,6 +64,26 @@ class AuthController:
     def logout(self, *, user_id: str, jti: str) -> LogoutResponse:
         return self.auth.logout(user_id=user_id, jti=jti)
 
+    # ------------------------------------------------- session admin (#365)
+
+    def list_user_sessions(self, target_user_id: str) -> "UserSessionListResponse":
+        from app.schemas.auth import UserSessionListResponse, UserSessionSummary
+        sessions = self.auth.list_user_sessions(target_user_id)
+        return UserSessionListResponse(
+            user_id=target_user_id,
+            sessions=[UserSessionSummary(**s) for s in sessions],
+        )
+
+    def revoke_all_user_sessions(self, target_user_id: str) -> "SessionRevokeResponse":
+        from app.schemas.auth import SessionRevokeResponse
+        count = self.auth.revoke_all_user_sessions(target_user_id)
+        return SessionRevokeResponse(user_id=target_user_id, revoked=count)
+
+    def revoke_user_session(self, target_user_id: str, session_id: str) -> "SessionRevokeResponse":
+        from app.schemas.auth import SessionRevokeResponse
+        self.auth.revoke_user_session(target_user_id, session_id)
+        return SessionRevokeResponse(user_id=target_user_id, revoked=1)
+
     # ------------------------------------------------------------------ introspect / me
 
     def introspect(self, payload: IntrospectRequest) -> IntrospectResponse:

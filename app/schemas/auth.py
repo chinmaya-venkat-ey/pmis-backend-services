@@ -164,3 +164,30 @@ LoginResponse.model_rebuild()
 LoginOtpRequired.model_rebuild()
 IntrospectTokenInfo.model_rebuild()
 IntrospectResponse.model_rebuild()
+
+
+# ---- #365 SuperAdmin session management -----------------------------------
+
+class UserSessionSummary(ResponseModel):
+    """One live session (an active login/device) for a user."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    session_id: str          # the refresh-token jti; pass to the revoke endpoint
+    issued_at: datetime
+    last_used_at: Optional[datetime] = None
+    expires_at: datetime
+
+
+class UserSessionListResponse(ResponseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    user_id: str
+    sessions: List[UserSessionSummary]
+
+
+class SessionRevokeResponse(ResponseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    user_id: str
+    revoked: int             # number of sessions revoked

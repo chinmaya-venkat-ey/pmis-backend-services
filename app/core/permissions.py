@@ -53,6 +53,7 @@ USERS_LIST_ALL_ORGS: Final[str] = "users:list_all_orgs"  # admin / super_admin o
 USERS_DELETE_ALL: Final[str] = "users:delete_all"  # admin globally
 USERS_DELETE_VENDOR: Final[str] = "users:delete_vendor"  # org_admin: delete users in own vendor
 USERS_GRANT_SUPERADMIN: Final[str] = "users:grant_superadmin"  # super_admin only
+USERS_REVOKE_SESSIONS: Final[str] = "users:revoke_sessions"  # super_admin only (#365)
 
 # Field-level writes on PATCH /user/users/{id}/update.
 # Per round-7 Doc-44: nobody but self / admin / super_admin gets these.

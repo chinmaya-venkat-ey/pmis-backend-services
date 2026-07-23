@@ -120,6 +120,7 @@ class AuthService:
         # Decode access_token to grab its expiry without re-implementing.
         _, _, access_payload = verify_access_token(access_token)
         access_exp = access_payload["exp"] if access_payload else None
+        access_jti = access_payload.get("jti") if access_payload else None
         access_expires_at = (
             datetime.fromtimestamp(access_exp, tz=timezone.utc) if access_exp else _utcnow()
         )
@@ -127,9 +128,11 @@ class AuthService:
         # Multi-session: record THIS login as its own refresh-token row. A
         # 2nd login/device/tab adds another row and never invalidates the
         # others (the old single-column model was the root of the "logged out
-        # for no reason" bug).
+        # for no reason" bug). #365: stash the access jti so an admin revoke can
+        # denylist the live access token too.
         self.refresh_repo.create(
             user_id=user.id, jti=refresh_jti, expires_at=refresh_expires_at,
+            access_jti=access_jti,
         )
         # Bound concurrent sessions per account (revoke oldest beyond the cap)
         # and drop this user's stale rows so the table can't grow unbounded.
@@ -199,6 +202,53 @@ class AuthService:
         self.refresh_repo.revoke_all_for_user(user_id)
         self.db.commit()
         return LogoutResponse()
+
+    # ------------------------------------------------- session admin (#365)
+
+    def _require_user(self, user_id: str):
+        user = self.user_repo.get_by_id(user_id)
+        if user is None or user.deleted_at is not None:
+            raise UserNotFoundError(f"User {user_id!r} not found")
+        return user
+
+    def list_user_sessions(self, target_user_id: str) -> list:
+        """SuperAdmin: a target user's live sessions (one per active
+        login/device), newest first."""
+        self._require_user(target_user_id)
+        return [
+            {
+                "session_id": r.jti,
+                "issued_at": r.issued_at,
+                "last_used_at": r.last_used_at,
+                "expires_at": r.expires_at,
+            }
+            for r in self.refresh_repo.list_active_sessions(target_user_id)
+        ]
+
+    def revoke_all_user_sessions(self, target_user_id: str) -> int:
+        """SuperAdmin: hard-cut EVERY session for a user — revoke the refresh
+        sessions AND denylist their live access tokens so access dies at once.
+        Returns the number of sessions revoked."""
+        self._require_user(target_user_id)
+        for access_jti in self.refresh_repo.live_access_jtis(target_user_id):
+            self.revoked.revoke(jti=access_jti, user_id=target_user_id)
+        count = self.refresh_repo.revoke_all_for_user(target_user_id)
+        self.db.commit()
+        return count
+
+    def revoke_user_session(self, target_user_id: str, session_id: str) -> None:
+        """SuperAdmin: hard-cut ONE session (``session_id`` = its refresh jti).
+        Denylists the session's access token too. 404 if the session does not
+        belong to the target user."""
+        from app.core.errors import NotFoundError
+
+        row = self.refresh_repo.get_by_jti(session_id)
+        if row is None or row.user_id != target_user_id:
+            raise NotFoundError(f"Session {session_id!r} not found for this user")
+        if row.access_jti:
+            self.revoked.revoke(jti=row.access_jti, user_id=target_user_id)
+        self.refresh_repo.revoke_by_jti(session_id)
+        self.db.commit()
 
     # ------------------------------------------------------------------ introspect
 

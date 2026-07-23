@@ -70,10 +70,16 @@ class RefreshService:
         access_token = create_access_token(new_claims)
         new_refresh_token, new_jti, new_refresh_expires = create_refresh_token(new_claims)
 
+        # #365: carry the freshly-minted access token's jti onto the new session
+        # row so an admin revoke can denylist the current access token too.
+        _, _, new_access_payload = verify_access_token(access_token)
+        new_access_jti = new_access_payload.get("jti") if new_access_payload else None
+
         # Rotate within this session's chain: stamp the old row (it stays valid
         # for the grace window) and mint a fresh row. Never evicts.
         self.refresh_repo.rotate(
             token_row, new_jti=new_jti, new_expires_at=new_refresh_expires,
+            new_access_jti=new_access_jti,
         )
         # Keep the table bounded — drop this user's expired / past-grace rows.
         self.refresh_repo.delete_stale_for_user(

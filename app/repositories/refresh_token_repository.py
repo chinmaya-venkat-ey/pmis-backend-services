@@ -31,13 +31,17 @@ class RefreshTokenRepository:
     def __init__(self, db: Session):
         self.db = db
 
-    def create(self, *, user_id: str, jti: str, expires_at: datetime) -> RefreshToken:
+    def create(
+        self, *, user_id: str, jti: str, expires_at: datetime,
+        access_jti: Optional[str] = None,
+    ) -> RefreshToken:
         row = RefreshToken(
             id=str(uuid4()),
             user_id=user_id,
             jti=jti,
             issued_at=_utcnow(),
             expires_at=expires_at,
+            access_jti=access_jti,
         )
         self.db.add(row)
         self.db.flush()
@@ -67,6 +71,7 @@ class RefreshTokenRepository:
 
     def rotate(
         self, old_row: RefreshToken, *, new_jti: str, new_expires_at: datetime,
+        new_access_jti: Optional[str] = None,
     ) -> RefreshToken:
         """Stamp the old token as rotated (it stays valid for the grace window)
         and mint a fresh row. Never evicts, so concurrent refreshes coexist."""
@@ -76,7 +81,43 @@ class RefreshTokenRepository:
         old_row.last_used_at = now
         return self.create(
             user_id=old_row.user_id, jti=new_jti, expires_at=new_expires_at,
+            access_jti=new_access_jti,
         )
+
+    def list_active_sessions(self, user_id: str) -> list:
+        """#365: a user's live sessions (un-rotated HEAD rows — one per active
+        login/device), newest first. Used by the admin session-list endpoint."""
+        now = _utcnow()
+        return list(self.db.execute(
+            select(RefreshToken)
+            .where(RefreshToken.user_id == user_id)
+            .where(RefreshToken.revoked_at.is_(None))
+            .where(RefreshToken.expires_at > now)
+            .where(RefreshToken.rotated_at.is_(None))
+            .order_by(RefreshToken.issued_at.desc())
+        ).scalars().all())
+
+    def live_access_jtis(self, user_id: str) -> list:
+        """#365: access jtis of every still-usable session row (heads AND
+        in-grace rotated rows) for a user — everything to denylist on a hard
+        revoke. Excludes already-revoked / expired rows."""
+        now = _utcnow()
+        rows = self.db.execute(
+            select(RefreshToken.access_jti)
+            .where(RefreshToken.user_id == user_id)
+            .where(RefreshToken.revoked_at.is_(None))
+            .where(RefreshToken.expires_at > now)
+        ).scalars().all()
+        return [j for j in rows if j]
+
+    def get_by_jti(self, jti: str) -> Optional[RefreshToken]:
+        """Raw lookup by jti (no validity filtering) — the admin revoke path
+        needs the row's access_jti + owner even for an in-grace token."""
+        if not jti:
+            return None
+        return self.db.execute(
+            select(RefreshToken).where(RefreshToken.jti == jti)
+        ).scalar_one_or_none()
 
     def revoke_all_for_user(self, user_id: str) -> int:
         """Hard-kill every live session for a user (logout / deactivate /

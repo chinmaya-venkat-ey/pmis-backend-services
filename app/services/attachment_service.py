@@ -124,6 +124,7 @@ class AttachmentService:
         files: List[UploadFile],
         *,
         caller_user_id: str,
+        category: Optional[str] = None,
     ) -> Comment:
         """Validate, write bytes, persist a body-NULL comment row, audit
         + commit, and return the freshly-created Comment row.
@@ -148,6 +149,7 @@ class AttachmentService:
             author_user_id=caller_user_id,
             body=None,
             attachments=envelopes,
+            category=category,
         )
         self.audit.write(
             project_id=project_id,
@@ -170,13 +172,14 @@ class AttachmentService:
         files: List[UploadFile],
         *,
         caller_user_id: str,
+        category: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Project-attachment upload — returns the legacy Collection
         envelope. The controller still calls this for the project route.
         """
         row = self.upload_row(
             target_kind, target_id, files,
-            caller_user_id=caller_user_id,
+            caller_user_id=caller_user_id, category=category,
         )
         return self._envelope_response(row, row.attachments or [])
 
@@ -185,6 +188,8 @@ class AttachmentService:
     def list_for_target(
         self, target_kind: str, target_id: str, *,
         offset: int = 1, page_size: int = 50, include_deleted: bool = False,
+        access_resolver=None,
+        category: Optional[str] = None, exclude_category: Optional[str] = None,
     ) -> Dict[str, Any]:
         """List body-IS-NULL comment rows under a target.
 
@@ -206,7 +211,14 @@ class AttachmentService:
         rows, total = self.comments.list_attachments_for_target(
             target_kind, target_id,
             offset=offset, page_size=page_size, include_deleted=include_deleted,
+            category=category, exclude_category=exclude_category,
         )
+        # #323 role-based document access: drop documents the caller may not see
+        # (public docs, admins, and the uploader are kept). No resolver ⇒ internal
+        # call ⇒ no filtering. total is re-stated to the visible count.
+        if access_resolver is not None:
+            rows = access_resolver.filter_rows(rows)
+            total = len(rows)
         if target_kind == "project":
             return self._project_collection_envelope(rows)
         return self._target_collection_envelope(
@@ -271,7 +283,10 @@ class AttachmentService:
             "_embedded": {"elements": elements},
         }
 
-    def list_for_project(self, project_id: str) -> Dict[str, Any]:
+    def list_for_project(
+        self, project_id: str, *, access_resolver=None,
+        category: Optional[str] = None, exclude_category: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """Project-scoped listing for ``GET /project/projects/{uuid}/attachments``.
 
         Lists every comment row under ``target_kind='project'`` for the
@@ -283,6 +298,8 @@ class AttachmentService:
         # since the FE renders all on one screen (mirrors monolith).
         return self.list_for_target(
             "project", project_id, offset=1, page_size=500,
+            access_resolver=access_resolver,
+            category=category, exclude_category=exclude_category,
         )
 
     # ------------------------------------------------------------- helper

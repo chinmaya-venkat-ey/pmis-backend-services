@@ -116,9 +116,12 @@ def _make_list_endpoint(target_kind: str):
         )
         # Monolith parity: comment list always filters out soft-deleted -
         # there's no ``includeDeleted`` toggle on the wire.
+        # #323: pass caller facts so restricted documents are filtered out.
+        from app.services.document_access import caller_facts_from_request
         return controller.list_for_target(
             target_kind, target_id,
             offset=offset, page_size=page_size, include_deleted=False,
+            **caller_facts_from_request(request),
         )
 
     handler.__name__ = f"list_{target_kind}_comments"
@@ -176,9 +179,12 @@ for _path, _kind in _KIND_BY_PATH.items():
 )
 def get_comment(
     comment_id: str,
+    request: Request,
     controller: Annotated[CommentController, Depends(get_comment_controller)],
 ) -> CommentResponse:
-    return controller.get(comment_id)
+    # #323: a restricted document 404s for callers who may not see it.
+    from app.services.document_access import caller_facts_from_request
+    return controller.get(comment_id, **caller_facts_from_request(request))
 
 
 # --------------------------------------------------------- DELETE by id

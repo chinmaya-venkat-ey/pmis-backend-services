@@ -49,10 +49,21 @@ class AttachmentController:
     def list_for_target(
         self, target_kind: str, target_id: str, *,
         offset: int = 1, page_size: int = 50, include_deleted: bool = False,
+        caller_user_id: Optional[str] = None,
+        caller_is_admin: bool = False,
+        authorization: Optional[str] = None,
     ) -> Dict[str, Any]:
+        # #323: build a document-access resolver from the caller so restricted
+        # documents are filtered out of the listing.
+        from app.services.document_access import build_resolver
+        resolver = build_resolver(
+            self.db, caller_user_id=caller_user_id,
+            caller_is_admin=caller_is_admin, authorization=authorization,
+        )
         return self.service.list_for_target(
             target_kind, target_id,
             offset=offset, page_size=page_size, include_deleted=include_deleted,
+            access_resolver=resolver,
         )
 
     def delete(

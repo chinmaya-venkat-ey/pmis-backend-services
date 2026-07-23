@@ -658,6 +658,85 @@ class ActivityService:
             "blocking_dependencies": status["blockers"],
         }
 
+    def start(
+        self, activity_id: str, *,
+        actual_start_date=None,
+        caller_user_id: Optional[str] = None,
+        request=None,
+    ):
+        """#188 — Start an activity: a validated transition into the "started"
+        state. Sets ``activity_started`` and stamps ``actual_start_date``.
+
+        Validations:
+          * the activity exists and is not soft-deleted (404 otherwise);
+          * its project is not closed;
+          * it is not already started, and not already terminal (completed);
+          * every predecessor (dependency target) is completed — you cannot
+            start an activity whose upstream work is unfinished.
+
+        A started activity is still ``not_completed`` (started ≠ done). The
+        approval workflow (SUBMIT → APPROVE) runs LATER, when the work is
+        finished — starting must not fire it.
+        """
+        from datetime import datetime, timezone
+
+        row = self.get_by_id(activity_id)  # 404 on missing / soft-deleted
+        project = self.projects.get_by_id(row.project_id)
+        if (getattr(project, "status", None) or "").lower() == "closed":
+            raise ValidationError(
+                "Cannot start an activity on a closed project.",
+                details={"project_id": row.project_id, "project_status": "closed"},
+            )
+        if row.activity_started:
+            raise ValidationError("Activity is already started.")
+        if is_terminal_status(row.status):
+            raise ValidationError(
+                "Cannot start an activity that is already completed."
+            )
+        dep = self.dependency_completion_status(activity_id)
+        if not dep["eligible"]:
+            names = ", ".join(f"'{b['name']}'" for b in dep["blockers"][:3])
+            more = (
+                f" (+{len(dep['blockers']) - 3} more)"
+                if len(dep["blockers"]) > 3 else ""
+            )
+            raise ValidationError(
+                "Cannot start this activity — the following predecessor "
+                f"activit(ies) are not yet completed: {names}{more}.",
+                details={"blockers": dep["blockers"]},
+            )
+        # Field-level RBAC: starting writes activity_started + actual_start_date.
+        if request is not None:
+            from app.core.permissions import ACTIVITY_FIELD_CODES
+            from app.core.rbac import assert_field_writes_allowed
+            assert_field_writes_allowed(
+                request,
+                field_codes=ACTIVITY_FIELD_CODES,
+                touched_fields={"activity_started", "actual_start_date"},
+                scope_key=("project", row.project_id),
+            )
+        new_actual = actual_start_date or datetime.now(timezone.utc)
+        before_started = row.activity_started
+        before_actual = row.actual_start_date
+        self.repo.update(
+            row, updated_by=caller_user_id,
+            activity_started=True, actual_start_date=new_actual,
+        )
+        self.audit.write(
+            project_id=row.project_id,
+            target_kind="activity", target_id=row.id,
+            action="start", actor_user_id=caller_user_id,
+            changes={
+                "activity_started": {"before": before_started, "after": True},
+                "actual_start_date": {
+                    "before": before_actual.isoformat() if before_actual else None,
+                    "after": new_actual.isoformat(),
+                },
+            },
+        )
+        self.db.commit()
+        return row
+
     def _assert_deps_completed(self, activity_id: str) -> None:
         """Dependency-completion gate (monolith parity, _gate_status_against_deps).
         Block flipping an activity's status to ``completed`` while any of its

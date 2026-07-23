@@ -30,6 +30,7 @@ from app.controllers.attachment_controller import AttachmentController
 from app.core.permissions import (
     ATTACHMENTS_CREATE,
     COMMENTS_READ,
+    PROJECTS_ADMIN_OVERRIDE,
 )
 from app.core.rbac import assert_action_allowed, require_authenticated
 from app.dependencies import (
@@ -112,9 +113,14 @@ def _make_list_endpoint(target_kind: str):
             scope_key=("project", project_id) if project_id else None,
         )
         # Monolith parity: attachment list always filters out soft-deleted.
+        # #323: pass caller facts so restricted documents are filtered out.
         return controller.list_for_target(
             target_kind, target_id,
             offset=offset, page_size=page_size, include_deleted=False,
+            caller_user_id=getattr(request.state, "user_id", None),
+            caller_is_admin=(PROJECTS_ADMIN_OVERRIDE in (
+                getattr(request.state, "user_permissions", None) or set())),
+            authorization=request.headers.get("authorization"),
         )
 
     handler.__name__ = f"list_{target_kind}_attachments"

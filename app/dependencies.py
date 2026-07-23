@@ -94,6 +94,11 @@ def get_attachment_controller(db: Session = Depends(get_db)) -> AttachmentContro
     return AttachmentController(db)
 
 
+def get_document_access_controller(db: Session = Depends(get_db)):
+    from app.controllers.document_access_controller import DocumentAccessController
+    return DocumentAccessController(db)
+
+
 def get_dashboard_controller(db: Session = Depends(get_db)) -> DashboardController:
     return DashboardController(db)
 

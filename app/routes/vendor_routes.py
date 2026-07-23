@@ -410,6 +410,28 @@ def delete_vendor(
     row = db.get(Vendor, vendor_id)
     if not row:
         raise HTTPException(status_code=404, detail=_VENDOR_NOT_FOUND)
+    # #138: an organization (vendor) cannot be deleted while it is still mapped
+    # to active projects — restrict deletion until those dependencies are
+    # resolved (mirrors the user-side guard) so soft-delete can't strand a
+    # project with a removed org. Closed/completed/deleted projects don't block.
+    active_projects = db.execute(
+        select(Project.id, Project.name)
+        .join(ProjectVendor, ProjectVendor.project_id == Project.id)
+        .where(ProjectVendor.vendor_id == vendor_id)
+        .where(Project.deleted_at.is_(None))
+        .where(Project.status.notin_(("closed", "completed")))
+    ).all()
+    if active_projects:
+        names = ", ".join(n for _, n in active_projects[:10])
+        more = "" if len(active_projects) <= 10 else f" (+{len(active_projects) - 10} more)"
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Cannot delete this organization — it is mapped to "
+                f"{len(active_projects)} active project(s): {names}{more}. "
+                f"Remove the project mappings first."
+            ),
+        )
     now = datetime.now(timezone.utc)
     row.active = False
     row.deleted_at = now

@@ -31,6 +31,15 @@ _ACTIVITY_STATUS_CHOICES = ("not_completed", "completed")
 _M_A_CATEGORY_CHOICES = ("original", "asg", "ccn")
 
 
+class ActivityStartRequest(BaseModel):
+    """#188 — POST /activities/{id}/start. Body optional; ``actualStartDate``
+    defaults to now when omitted."""
+
+    model_config = _REQUEST_CONFIG
+
+    actual_start_date: Optional[datetime] = None
+
+
 class ActivityResourceSchema(ResponseModel):
     """Embedded resource sidecar (1:1 with activity)."""
 

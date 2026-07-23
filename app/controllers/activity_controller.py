@@ -140,6 +140,18 @@ class ActivityController:
         )
         return self._to_response(row)
 
+    def start(
+        self, activity_id: str, payload,
+        *, caller_user_id: Optional[str], request=None,
+    ):
+        # #188: validated start (predecessors done, not already started/terminal).
+        row = self.service.start(
+            activity_id,
+            actual_start_date=getattr(payload, "actual_start_date", None),
+            caller_user_id=caller_user_id, request=request,
+        )
+        return self._to_response(row)
+
     def delete(self, activity_id: str, *, caller_user_id: Optional[str]):
         row = self.service.delete(activity_id, caller_user_id=caller_user_id)
         return self._to_response(row)

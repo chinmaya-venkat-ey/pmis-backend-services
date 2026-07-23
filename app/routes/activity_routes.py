@@ -33,6 +33,7 @@ from app.schemas.activity import (
     ActivityCompletionEligibilityResponse,
     ActivityCreateRequest,
     ActivityResponse,
+    ActivityStartRequest,
     ActivityUpdateRequest,
 )
 from app.utilities.multipart_form import (
@@ -212,6 +213,34 @@ def update_activity(
 ):
     return controller.update(
         activity_id, payload,
+        caller_user_id=caller_user_id, request=request,
+    )
+
+
+@router.post(
+    "/{activity_id}/start",
+    response_model=ActivityResponse,
+    summary="Start an activity (#188 — validated: predecessors done, not started/terminal)",
+    description=(
+        "Marks the activity started (``activityStarted=true``) and stamps "
+        "``actualStartDate`` (defaults to now). Rejects starting a completed "
+        "activity, an already-started one, one on a closed project, or one "
+        "whose predecessor activities are not yet completed. A started activity "
+        "is still ``not_completed`` — the approval workflow runs later."
+    ),
+    # Auth at the route; field-level RBAC (activity_started / actual_start_date)
+    # runs in the service via assert_field_writes_allowed.
+    dependencies=[Depends(require_authenticated())],
+)
+def start_activity(
+    activity_id: str,
+    request: Request,
+    controller: Annotated[ActivityController, Depends(get_activity_controller)],
+    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
+    payload: Optional[ActivityStartRequest] = None,
+):
+    return controller.start(
+        activity_id, payload or ActivityStartRequest(),
         caller_user_id=caller_user_id, request=request,
     )
 

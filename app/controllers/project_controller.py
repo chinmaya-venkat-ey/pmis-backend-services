@@ -25,6 +25,10 @@ from app.services.discussion_feed_service import DiscussionFeedService
 from app.services.project_service import ProjectService
 
 
+# #322: classifier for a project's late-start (actual-start) reason documents.
+ACTUAL_START_REASON_CATEGORY = "actual_start_reason"
+
+
 class ProjectController:
     def __init__(self, db: Session):
         self.db = db
@@ -298,9 +302,19 @@ class ProjectController:
 
     def discussion_feed(
         self, project_id: str, *, offset: int = 1, page_size: int = 50,
+        caller_user_id: Optional[str] = None,
+        caller_is_admin: bool = False,
+        authorization: Optional[str] = None,
     ) -> Dict[str, Any]:
+        # #323: filter restricted documents out of the unified feed.
+        from app.services.document_access import build_resolver
+        resolver = build_resolver(
+            self.db, caller_user_id=caller_user_id,
+            caller_is_admin=caller_is_admin, authorization=authorization,
+        )
         return self.discussion.list_for_project(
             project_id, offset=offset, page_size=page_size,
+            access_resolver=resolver,
         )
 
     def role_assignments(self, project_id: str) -> Dict[str, Any]:
@@ -313,5 +327,50 @@ class ProjectController:
             project_id, authorization=authorization,
         )
 
-    def list_attachments(self, project_id: str) -> Dict[str, Any]:
-        return self.attachments.list_for_project(project_id)
+    def list_attachments(
+        self, project_id: str, *,
+        caller_user_id: Optional[str] = None,
+        caller_is_admin: bool = False,
+        authorization: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        # #323: filter restricted documents out of the project attachment list.
+        # #322: the actual-start reason documents have their own endpoint, so
+        # they are excluded from the general project attachment list.
+        from app.services.document_access import build_resolver
+        resolver = build_resolver(
+            self.db, caller_user_id=caller_user_id,
+            caller_is_admin=caller_is_admin, authorization=authorization,
+        )
+        return self.attachments.list_for_project(
+            project_id, access_resolver=resolver,
+            exclude_category=ACTUAL_START_REASON_CATEGORY,
+        )
+
+    def upload_actual_start_attachments(
+        self, project_id: str, files, *, caller_user_id: str,
+    ) -> Dict[str, Any]:
+        """#322: attach supporting documents to a project's late-start reason.
+
+        ``AttachmentService.upload`` resolves the project and 404s if missing.
+        """
+        return self.attachments.upload(
+            "project", project_id, files,
+            caller_user_id=caller_user_id, category=ACTUAL_START_REASON_CATEGORY,
+        )
+
+    def list_actual_start_attachments(
+        self, project_id: str, *,
+        caller_user_id: Optional[str] = None,
+        caller_is_admin: bool = False,
+        authorization: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """#322: the late-start reason's documents (still #323-access-filtered)."""
+        from app.services.document_access import build_resolver
+        resolver = build_resolver(
+            self.db, caller_user_id=caller_user_id,
+            caller_is_admin=caller_is_admin, authorization=authorization,
+        )
+        return self.attachments.list_for_project(
+            project_id, access_resolver=resolver,
+            category=ACTUAL_START_REASON_CATEGORY,
+        )

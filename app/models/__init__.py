@@ -22,6 +22,7 @@ from app.models.subtask import Subtask  # noqa: F401
 from app.models.subtask_dependency import SubtaskDependency  # noqa: F401
 from app.models.subtask_resource import SubtaskResource  # noqa: F401
 from app.models.comment import Comment  # noqa: F401
+from app.models.document_access_rule import DocumentAccessRule  # noqa: F401
 from app.models.project_ownership import ProjectOwnership  # noqa: F401
 from app.models.activity_assignment import ActivityAssignment  # noqa: F401
 from app.models.activity_workflow_tracker import ActivityWorkflowTracker  # noqa: F401

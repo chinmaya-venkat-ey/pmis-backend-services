@@ -118,6 +118,9 @@ class CommentController:
     def list_for_target(
         self, target_kind: str, target_id: str, *,
         offset=1, page_size=50, include_deleted=False,
+        caller_user_id: Optional[str] = None,
+        caller_is_admin: bool = False,
+        authorization: Optional[str] = None,
     ) -> Dict[str, Any]:
         # Verify the target exists so we 404 on bad ids instead of empty list.
         self.resolve_project_id(target_kind, target_id)
@@ -125,6 +128,14 @@ class CommentController:
             target_kind, target_id,
             offset=offset, page_size=page_size, include_deleted=include_deleted,
         )
+        # #323: drop restricted document rows the caller may not see.
+        from app.services.document_access import build_resolver
+        resolver = build_resolver(
+            self.db, caller_user_id=caller_user_id,
+            caller_is_admin=caller_is_admin, authorization=authorization,
+        )
+        rows = resolver.filter_rows(rows)
+        total = len(rows)
         return {
             "items": [self._to_response(r) for r in rows],
             "total": total, "offset": offset, "page_size": page_size,
@@ -132,7 +143,12 @@ class CommentController:
 
     # ---------------------------------------------------------- get by id
 
-    def get(self, comment_id: str) -> CommentResponse:
+    def get(
+        self, comment_id: str, *,
+        caller_user_id: Optional[str] = None,
+        caller_is_admin: bool = False,
+        authorization: Optional[str] = None,
+    ) -> CommentResponse:
         """Resolve one comment/attachment row by its OWN id (not by
         target). Serves both regular comments and attachment-only
         (``body IS NULL``) document rows — the resolved envelope carries
@@ -141,6 +157,16 @@ class CommentController:
         matching the monolith.
         """
         row = self.service.get_by_id(comment_id)
+        # #323: a restricted document the caller may not see 404s (don't leak
+        # its existence or its file URL via direct id access).
+        from app.services.document_access import build_resolver
+        resolver = build_resolver(
+            self.db, caller_user_id=caller_user_id,
+            caller_is_admin=caller_is_admin, authorization=authorization,
+        )
+        if not resolver.filter_rows([row]):
+            from app.core.errors import CommentNotFoundError
+            raise CommentNotFoundError(f"Comment {comment_id} not found.")
         return self._to_response(row)
 
     # ------------------------------------------------------------- create

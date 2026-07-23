@@ -47,6 +47,11 @@ class Comment(Base):
     body: Mapped[Optional[str]] = mapped_column(Text)
     # JSONB list of {url, filename, mimeType, sizeBytes, uploadedAt}; None/[] = none.
     attachments: Mapped[Optional[list[Any]]] = mapped_column(JSONB)
+    # Optional classifier for special-purpose attachment rows. NULL = a normal
+    # comment / general attachment. #322 uses ``'actual_start_reason'`` for the
+    # late-start remark's supporting documents, keeping them out of the general
+    # attachment list and on their own dedicated endpoint.
+    category: Mapped[Optional[str]] = mapped_column(String(40))
 
     author_user_id: Mapped[str] = mapped_column(String(36))  # logical FK to users.users.id
 

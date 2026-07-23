@@ -33,6 +33,7 @@ from app.core.permissions import (
     PROJECTS_READ,
     PROJECTS_READ_ALL,
     PROJECTS_UPDATE_CONFIG,
+    PROJECTS_ADMIN_OVERRIDE,
     PROJECT_MEMBERS_READ,
     COMMENTS_CREATE,
 )
@@ -540,6 +541,7 @@ def list_project_audit_logs(
 )
 def list_project_discussion_feed(
     project_uuid: str,
+    request: Request,
     controller: Annotated[ProjectController, Depends(get_project_controller)],
     offset: Annotated[int, Query(ge=1, description="Page number (1-indexed).")] = 1,
     page_size: Annotated[int, Query(
@@ -549,6 +551,10 @@ def list_project_discussion_feed(
 ):
     return controller.discussion_feed(
         project_uuid, offset=offset, page_size=page_size,
+        caller_user_id=getattr(request.state, "user_id", None),
+        caller_is_admin=(PROJECTS_ADMIN_OVERRIDE in (
+            getattr(request.state, "user_permissions", None) or set())),
+        authorization=request.headers.get("authorization"),
     )
 
 
@@ -563,9 +569,17 @@ def list_project_discussion_feed(
 )
 def list_project_attachments(
     project_uuid: str,
+    request: Request,
     controller: Annotated[ProjectController, Depends(get_project_controller)],
 ):
-    return controller.list_attachments(project_uuid)
+    # #323: pass caller facts so restricted documents are filtered from the list.
+    return controller.list_attachments(
+        project_uuid,
+        caller_user_id=getattr(request.state, "user_id", None),
+        caller_is_admin=(PROJECTS_ADMIN_OVERRIDE in (
+            getattr(request.state, "user_permissions", None) or set())),
+        authorization=request.headers.get("authorization"),
+    )
 
 
 @router.post(
@@ -596,4 +610,56 @@ async def upload_project_attachments(
     return controller.attachments.upload(
         "project", project_uuid, files,
         caller_user_id=caller_user_id or "",
+    )
+
+
+# ------------------------------------------- #322 actual-start reason documents
+
+@router.post(
+    "/{project_uuid}/actual-start-attachments",
+    status_code=status.HTTP_201_CREATED,
+    summary="Attach documents to a project's late-start (actual start) reason (#322)",
+    description=(
+        "Multipart-only endpoint for the supporting documents of a project's "
+        "late-start remark (``actualStartRemarks``). Files land in the comments "
+        "table tagged ``category='actual_start_reason'`` and are kept OUT of the "
+        "general project attachment list — fetch them via "
+        "``GET /projects/{uuid}/actual-start-attachments``."
+    ),
+    dependencies=[Depends(require_project_permission(COMMENTS_CREATE))],
+    openapi_extra=multipart_files_only_request_body(
+        description=(
+            "One or more documents explaining the late start. Repeat the form "
+            "key ``files`` for each file."
+        ),
+    ),
+)
+async def upload_actual_start_attachments(
+    project_uuid: str,
+    controller: Annotated[ProjectController, Depends(get_project_controller)],
+    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
+    files: Annotated[List[UploadFile], File()],
+):
+    return controller.upload_actual_start_attachments(
+        project_uuid, files, caller_user_id=caller_user_id or "",
+    )
+
+
+@router.get(
+    "/{project_uuid}/actual-start-attachments",
+    summary="List a project's late-start (actual start) reason documents (#322)",
+    dependencies=[Depends(require_project_permission(PROJECTS_READ))],
+)
+def list_actual_start_attachments(
+    project_uuid: str,
+    request: Request,
+    controller: Annotated[ProjectController, Depends(get_project_controller)],
+):
+    # #323: still access-filtered.
+    return controller.list_actual_start_attachments(
+        project_uuid,
+        caller_user_id=getattr(request.state, "user_id", None),
+        caller_is_admin=(PROJECTS_ADMIN_OVERRIDE in (
+            getattr(request.state, "user_permissions", None) or set())),
+        authorization=request.headers.get("authorization"),
     )

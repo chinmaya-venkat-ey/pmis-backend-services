@@ -17,6 +17,7 @@ from app.routes import (
     critical_path_routes,
     dashboard_cron_routes,
     dashboard_routes,
+    document_access_routes,
     finance_routes,
     health_routes,
     milestone_routes,
@@ -52,6 +53,8 @@ project_router.include_router(subtask_routes.router)
 # router each.
 project_router.include_router(comment_routes.router)
 project_router.include_router(attachment_routes.router)
+# #323 document access-control management (admin/superadmin only).
+project_router.include_router(document_access_routes.router)
 
 # Read-only surfaces.
 project_router.include_router(dashboard_routes.router)

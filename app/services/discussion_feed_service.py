@@ -29,6 +29,7 @@ class DiscussionFeedService:
 
     def list_for_project(
         self, project_id: str, *, offset: int = 1, page_size: int = 50,
+        access_resolver=None,
     ) -> Dict[str, Any]:
         project = self.projects.get_by_id(project_id)
         if project is None:
@@ -72,6 +73,12 @@ class DiscussionFeedService:
             offset=offset,
             page_size=page_size,
         )
+
+        # #323: drop restricted documents the caller may not see (body-only
+        # discussion comments carry no rules, so they are always kept).
+        if access_resolver is not None:
+            rows = access_resolver.filter_rows(rows)
+            total = len(rows)
 
         name_resolvers = {
             "project": {project_id: project.name},

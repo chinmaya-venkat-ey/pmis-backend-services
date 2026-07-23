@@ -410,6 +410,9 @@ class PaymentPageService:
             # forward is not applicable to it (neither given nor received), so
             # report it as disabled regardless of any stale stored config.
             is_recurring_phase = phase in recurring_phases
+            # An explicit one-time (OPE) share only counts for phases inside the
+            # billing sequence that aren't the auto-absorbing last phase.
+            _ope_config_honoured = not is_recurring_phase and not is_last
             cf_block = CarryForwardResponse(
                 enabled=(False if is_recurring_phase
                          else bool(getattr(cfg, "carry_forward_enabled", False))),
@@ -443,12 +446,20 @@ class PaymentPageService:
                 phase_base_total=phase_base,
                 effective_phase_total=effective_total,
                 one_time_allocated=getattr(self, "_one_time_alloc", {}).get(phase, Decimal("0.00")),
-                # One-time (out-of-pocket) is never added to a recurring-only
-                # phase — report it as not applicable there.
-                one_time_enabled=(False if is_recurring_phase
-                                  else bool(getattr(cfg, "one_time_enabled", False))),
-                one_time_mode=getattr(cfg, "one_time_mode", None),
-                one_time_value=getattr(cfg, "one_time_value", None),
+                # An explicit OPE share is honoured ONLY for phases that take
+                # part in the one-time distribution: NOT recurring-only phases
+                # (outside the billing sequence) and NOT the last billing phase
+                # (it auto-absorbs the remainder). For those the stored config is
+                # ignored, so report it fully CLEARED — reporting a stale
+                # enabled/mode/value is what made an edit look like it "reset" on
+                # reload (a phase set here, then turned recurring-only or shuffled
+                # to last, kept a ghost value the FE showed then dropped).
+                one_time_enabled=(bool(getattr(cfg, "one_time_enabled", False))
+                                  if _ope_config_honoured else False),
+                one_time_mode=(getattr(cfg, "one_time_mode", None)
+                               if _ope_config_honoured else None),
+                one_time_value=(getattr(cfg, "one_time_value", None)
+                                if _ope_config_honoured else None),
                 expense_total=expense_total,
                 # Full value of the phase: the billable base (fixed + resource +
                 # transaction + one-time allocated + carry-forward received) that
@@ -929,6 +940,15 @@ class PaymentPageService:
             raise ValidationError(
                 "The last phase auto-absorbs the one-time remainder; it cannot be "
                 "given an explicit share.", code="validation_error")
+        # A recurring-only phase sits outside the billing sequence and never
+        # takes a one-time (OPE) share — build_page forces its oneTimeEnabled
+        # back to false on read, so allowing the write here would silently
+        # orphan the config (stored true, always read false → looks like it
+        # "resets" on reload). Reject it up front instead.
+        if enabled and phase in payment_calc.recurring_only_phases(cost_rows):
+            raise ValidationError(
+                "This phase is recurring-only; it does not take a one-time (OPE) "
+                "share.", code="validation_error")
         if enabled:
             pool = payment_calc.one_time_total(cost_rows)
             if pool <= 0:

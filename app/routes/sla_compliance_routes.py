@@ -353,6 +353,16 @@ def sla_for_activity(
 
     def _f(x):
         return float(x) if x is not None else None
+
+    def _weeks(x):
+        # Ceiling of days / 7 so 8 days -> 2 weeks (RFP §5.28.2.b:
+        # "part-weeks count as full weeks"). Returns None when the
+        # source is None, so the FE can render "-" cleanly.
+        if x is None:
+            return None
+        import math
+        return int(math.ceil(float(x) / 7))
+
     results = [
         {
             "mappingId":         r.mapping_id,
@@ -368,6 +378,7 @@ def sla_for_activity(
             "targetDays":        _f(r.target_days),
             "actualDays":        _f(r.actual_days),
             "delayDays":         _f(r.delay_days),
+            "delayWeeks":        _weeks(r.delay_days),
             "ldPercent":         _f(r.ld_percent),
             "ldAmount":          _f(r.ld_amount),
             "ldBaseAmount":      _f(r.ld_base_amount),

@@ -27,8 +27,21 @@ class NpqpResponse(BaseModel):
     quarter_end: date = Field(serialization_alias="quarterEnd")
     f_amount: Decimal = Field(
         serialization_alias="fAmount",
-        description="Planned/actual quarterly staff cost — sum of per-resource "
-                    "per-month costs from leave-mgmt.",
+        description="F — Planned Quarterly Payment (RFP §5.28.1.d.c). Sum of "
+                    "the monthly rates on the resource deployment plan "
+                    "(leave.project_resource) for every resource active in each "
+                    "month of the quarter. Full month's rate counts for any "
+                    "resource assigned during the month.",
+    )
+    pa_amount: Decimal = Field(
+        default=Decimal("0"),
+        serialization_alias="paAmount",
+        description="PA — Payable amount for Actual resource deployment "
+                    "(RFP §5.28.1.d.g). Sum of leave-mgmt's per-resource per-month "
+                    "'cost' figures, which fold in attendance, paid leave, half-day, "
+                    "and RFP §5.24.1 relaxation. Distinct from F because ACTUAL "
+                    "attendance can be less than PLANNED (missed days, un-approved "
+                    "leave). LD is calculated on NPQP but deducted from PA.",
     )
     qgr_amount: Decimal = Field(
         default=Decimal("0"),
@@ -36,10 +49,11 @@ class NpqpResponse(BaseModel):
         description="Quarterly Guaranteed Revenue (RFP §5.23.2). "
                     "Present only if project_qgr_config has an effective row.",
     )
-    npqp: Decimal = Field(description="F + QGR")
+    npqp: Decimal = Field(description="F + QGR (RFP §5.28.1.d.e)")
     status: str = Field(
-        description="'ok' | 'leave_mgmt_unavailable' | 'no_resources'. "
-                    "Settlement close blocks (marks blocked_missing_npqp) when != ok.",
+        description="'ok' | 'leave_mgmt_unavailable' | 'no_resources' | "
+                    "'no_deployment_plan'. Settlement close blocks (marks "
+                    "blocked_missing_npqp) when != ok.",
     )
     per_month: List[NpqpResourceCost] = Field(
         default_factory=list, serialization_alias="perMonth",

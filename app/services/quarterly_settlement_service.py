@@ -229,12 +229,13 @@ class QuarterlySettlementService:
 
         npqp = npqp_resp.npqp
         ld_amount = (capped_ld / Decimal("100")) * npqp
-        # PA — in the current architecture leave-mgmt's "cost" is what the
-        # consultant is actually paid for the quarter's staff work. So we
-        # treat PA = F (the same F NPQP used). If a distinct "planned vs
-        # actual" split is introduced later, this is the one place to wire
-        # a separate PA source.
-        pa = npqp_resp.f_amount
+        # PA — actual attendance-adjusted payment (RFP §5.28.1.d.g). Distinct
+        # from F: F is what the resource-deployment plan says the consultant
+        # would be paid at full attendance; PA is what leave-mgmt's per-month
+        # cost actually resolves to after leaves / absences. LD is calculated
+        # on NPQP (F+QGR) per §5.28.1.d.f but deducted from PA per §5.28.1.d.h,
+        # so a shortfall on attendance reduces the AQP linearly.
+        pa = npqp_resp.pa_amount
         aqp = (pa - ld_amount) + npqp_resp.qgr_amount
 
         row = self.repo.upsert(

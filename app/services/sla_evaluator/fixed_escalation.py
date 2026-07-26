@@ -45,12 +45,32 @@ from app.services.sla_evaluator.base import (
 # to build the contract_ld_rules key (``sla_001_rate_pct_per_week``).
 _SLA_FAMILY_RE = re.compile(r"SLA[-_]?0*(\d+)", re.IGNORECASE)
 
+# Extract the numeric suffix from a lookup_key like "week_12" / "day_5".
+# from-rfp seeds sort_order = (index + 1), so using sort_order as the
+# value-threshold produces an off-by-one (observed=12 picks week_11=5.5%
+# instead of week_12=6.0%). We take the true threshold from the key
+# suffix and fall back to sort_order-1 for any legacy row that doesn't
+# carry the "{unit}_{n}" convention.
+_LOOKUP_KEY_SUFFIX_RE = re.compile(r"_(-?\d+)$")
+
 
 def _sla_family_number(sla_ref: Optional[str]) -> Optional[int]:
     if not sla_ref:
         return None
     m = _SLA_FAMILY_RE.search(sla_ref)
     return int(m.group(1)) if m else None
+
+
+def _tier_threshold(row) -> Decimal:
+    """Prefer the numeric suffix in ``lookup_key`` (``week_12`` → 12) as
+    the value-threshold this tier fires at; fall back to sort_order - 1
+    when the key lacks the convention (sort_order is 1-indexed row
+    position, so subtracting 1 recovers the 0-indexed threshold)."""
+    key = row.lookup_key or ""
+    m = _LOOKUP_KEY_SUFFIX_RE.search(key)
+    if m:
+        return Decimal(m.group(1))
+    return Decimal(max(0, (row.sort_order or 1) - 1))
 
 
 class FixedEscalationEvaluator(FormulaEvaluator):
@@ -93,7 +113,7 @@ class FixedEscalationEvaluator(FormulaEvaluator):
 
         chosen = None
         for row in rows:
-            threshold = Decimal(row.sort_order)
+            threshold = _tier_threshold(row)
             if observed_value >= threshold:
                 chosen = row
 

@@ -21,6 +21,8 @@ Decisions this encodes (see the design doc):
 """
 from __future__ import annotations
 
+import math
+import re as _re
 from collections import defaultdict
 from datetime import date as _date, datetime, timezone
 from decimal import Decimal
@@ -35,6 +37,7 @@ from app.core.errors import NotFoundError, ValidationError
 from app.models.sla_activity_mapping import SlaActivityMapping
 from app.models.sla_definition import SlaDefinition
 from app.models.sla_evaluation_result import SlaEvaluationResult
+from app.models.sla_lookup_row import SlaLookupRow
 from app.models.sla_observation import SlaObservation
 from app.models.sla_parameter_value import SlaParameterValue
 from app.models.sla_quarterly_aggregate import SlaQuarterlyAggregate
@@ -182,6 +185,63 @@ class SlaComplianceService:
         except (TypeError, ValueError):
             return 0
 
+    _LOOKUP_KEY_PREFIX_RE = _re.compile(r"^(week|day|month)_", _re.IGNORECASE)
+
+    def _sla_delay_unit(self, sla: SlaDefinition) -> str:
+        """Return the time-unit the SLA measures delay in — ``'week'``,
+        ``'day'``, or ``'month'``.
+
+        Resolution order:
+          1. ``sla.metadata.rfp_form.linear_escalation.unit`` — set by
+             the from-rfp onboarding path; source of truth when present.
+          2. Prefix of any ``sla_lookup_rows.lookup_key`` (``week_N`` →
+             week, ``day_N`` → day) — infers the unit for legacy SLAs
+             onboarded before from-rfp stashed the RFP form snapshot.
+          3. Default ``'day'`` — no conversion (matches the historical
+             behaviour of the evaluator before unit-awareness).
+
+        Called on the auto-derived path to translate the day-based
+        activity-delta into the unit the SLA's tier table / rate is
+        keyed on. RFP §5.28.2.b: "part-weeks count as full weeks" —
+        the caller uses ceiling division on the result.
+        """
+        md = getattr(sla, "metadata", None) or {}
+        if isinstance(md, dict):
+            unit = (
+                ((md.get("rfp_form") or {}).get("linear_escalation") or {})
+                .get("unit")
+            )
+            if unit:
+                return str(unit).strip().lower()
+        row_key = self.db.execute(
+            select(SlaLookupRow.lookup_key)
+            .where(SlaLookupRow.sla_id == sla.id)
+            .limit(1)
+        ).scalar()
+        if row_key:
+            m = self._LOOKUP_KEY_PREFIX_RE.match(str(row_key))
+            if m:
+                return m.group(1).lower()
+        return "day"
+
+    @staticmethod
+    def _convert_delay_days_to_unit(delay_days: int, unit: str) -> int:
+        """Ceiling-convert a day-count into the SLA's declared unit.
+
+        RFP §5.28.2.b: "Part-weeks count as full weeks" — 8 days late →
+        2 weeks, not 1. Applied consistently for months too. ``'day'``
+        (and any unknown unit) pass through unchanged so we never
+        silently mangle a value we don't understand.
+        """
+        if delay_days <= 0:
+            return int(delay_days)
+        u = (unit or "").lower()
+        if u == "week":
+            return math.ceil(delay_days / 7)
+        if u == "month":
+            return math.ceil(delay_days / 30)
+        return int(delay_days)
+
     def _derive_days(self, activity: Dict[str, Any], grace: int) -> Optional[Dict[str, Decimal]]:
         """target = planned window (end − start); actual = (actual_end|today) − start;
         delay = max(0, actual − target − grace). All in days."""
@@ -269,7 +329,14 @@ class SlaComplianceService:
             days = self._derive_days(activity, grace)
 
         if formula_type in _DATE_DERIVABLE and days is not None:
-            observed: Any = int(days["delay"])
+            # _derive_days returns delay in DAYS, but the SLA's tier table
+            # and per-unit-time rate are keyed on the SLA's declared unit
+            # (weeks for SLA 001/002, days for SLA 003). Convert with
+            # ceiling division so 28 days becomes 4 weeks — RFP §5.28.2.b
+            # says "part-weeks count as full weeks".
+            delay_days_int = int(days["delay"])
+            unit = self._sla_delay_unit(sla)
+            observed: Any = self._convert_delay_days_to_unit(delay_days_int, unit)
             source = "auto"
         else:
             obs = self._latest_observation(mapping_id)

@@ -80,6 +80,20 @@ class PointAccumulationEvaluator(FormulaEvaluator):
         accumulated = Decimal("0")
         highest_level: Optional[int] = None
 
+        # PER_UNIT_OVER_THRESHOLD — RFP §5.28.3.b (PMU/PMC-SLA005 shape):
+        # baseline count (e.g. 1 replacement/quarter) is free; every unit
+        # OVER the baseline emits the escalation band's severity once.
+        # Point-accumulation single-band-hit doesn't express this; here
+        # points scale linearly with (observed - baseline).
+        rule = (getattr(ctx.sla, "ld_formula_rule", "") or "").upper()
+        if (
+            rule == "PER_UNIT_OVER_THRESHOLD"
+            and obs.shape == "SINGLE_VALUE"
+            and obs.single_value is not None
+        ):
+            return self._per_unit_over_threshold(ctx, result, primary.metric_key,
+                                                  obs.single_value, bands)
+
         if obs.shape == "SINGLE_VALUE" and obs.single_value is not None:
             band = self._first_band_for(obs.single_value, bands)
             if band is not None:
@@ -141,3 +155,66 @@ class PointAccumulationEvaluator(FormulaEvaluator):
             if FormulaEvaluator._value_in_band(value, band):
                 return band
         return None
+
+    def _per_unit_over_threshold(
+        self,
+        ctx: EvaluationContext,
+        result: EvaluatedResult,
+        metric_key: str,
+        observed_value: Decimal,
+        bands: List[SlaConditionBand],
+    ) -> EvaluatedResult:
+        """RFP §5.28.3.b — points scale linearly with units over the
+        baseline threshold.
+
+        Reads the two bands the SLA's condition-band table provides:
+          * baseline band (severity=0) — its ``range_max`` is the "free"
+            threshold below which no penalty applies (e.g. 1 replacement).
+          * escalation band (severity>0) — its ``severity_level`` is the
+            penalty per unit over the threshold.
+
+        Points = max(0, observed - baseline) * points_for(escalation_sev).
+        Severity = escalation band's severity when observed > baseline,
+        else 0.
+        """
+        baseline_band = next(
+            (b for b in bands if (b.severity_level or 0) == 0 and b.range_max is not None),
+            None,
+        )
+        escalation_band = next(
+            (b for b in bands if (b.severity_level or 0) > 0),
+            None,
+        )
+        if baseline_band is None or escalation_band is None:
+            result.notes.append(
+                "PER_UNIT_OVER_THRESHOLD needs one baseline band "
+                "(severity=0, range_max=threshold) and one escalation band "
+                "(severity>0); check the SLA's condition_bands."
+            )
+            return result
+
+        baseline = Decimal(str(baseline_band.range_max))
+        extra = max(Decimal("0"), observed_value - baseline)
+        per_unit_pts = self._band_points(escalation_band, ctx)
+        points = extra * per_unit_pts
+
+        result.accumulated_points = points
+        if extra > 0:
+            result.severity_level = escalation_band.severity_level
+            result.breaches.append(
+                BreachDetail(
+                    metric_key=metric_key,
+                    band_label=escalation_band.band_label,
+                    observed_value=observed_value,
+                    severity_level=escalation_band.severity_level,
+                    points_contribution=points,
+                    note=(
+                        f"PER_UNIT_OVER_THRESHOLD: extra={extra} "
+                        f"(observed={observed_value} - baseline={baseline}), "
+                        f"points/unit={per_unit_pts}"
+                    ),
+                )
+            )
+        else:
+            result.severity_level = 0
+        return result

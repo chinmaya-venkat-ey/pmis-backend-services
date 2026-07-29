@@ -347,6 +347,9 @@ class PaymentPageService:
         # remaining (100 − Σ explicit) evenly so the phase always totals 100%
         # (its leftover can't carry forward).
         pct_overrides = _last_phase_percent_overrides(ordered, term_rows)
+        # LD-basis allotment: every billing phase totals 100% (default even
+        # split); this is the basis penalties / LD are computed on.
+        ld_basis_overrides = _ld_basis_overrides(term_rows, recurring_phases)
 
         phase_blocks: List[PhaseBlock] = []
         for idx, phase in enumerate(ordered):
@@ -368,6 +371,7 @@ class PaymentPageService:
                     start_date=m_start, end_date=m_end,
                     carry_received=ms_received.get(t.milestone_id, Decimal("0")),
                     percent_override=override,
+                    ld_basis_override=ld_basis_overrides.get(t.id),
                 )
                 resp.payment_type = payment_type_map.get(t.milestone_id)
                 if resp.payment_type == _PARTIAL:
@@ -1364,16 +1368,55 @@ def _last_phase_percent_overrides(ordered, term_rows) -> dict:
     return {t.id: p for t, p in zip(null_terms, shares)}
 
 
+def _ld_basis_overrides(term_rows, recurring_phases=frozenset()) -> dict:
+    """Resolve the LD-basis ALLOTMENT for terms that have none stored.
+
+    A phase's allotment is its FULL 100% distribution to milestones and is the
+    basis penalties / LD are computed on — so, unlike the pay-% even split (which
+    fills only the LAST phase), this fills EVERY billing phase: terms with an
+    explicit ``ld_basis_percent`` keep it, and the remaining (``100 − Σ explicit``,
+    floored at 0) is split EVENLY across the null-allotment terms so each phase
+    totals 100%. Recurring-only phases are outside the billing sequence and are
+    skipped. Returns ``{term_id: percent}`` for the null terms it fills."""
+    out: dict = {}
+    by_phase: dict = {}
+    for t in term_rows:
+        by_phase.setdefault(t.phase, []).append(t)
+    for phase, terms in by_phase.items():
+        if phase in recurring_phases:
+            continue
+        null_terms = [t for t in terms if t.ld_basis_percent is None]
+        if not null_terms:
+            continue
+        explicit_sum = sum(
+            (t.ld_basis_percent for t in terms if t.ld_basis_percent is not None),
+            Decimal("0"),
+        )
+        remaining = Decimal("100") - explicit_sum
+        if remaining < Decimal("0"):
+            remaining = Decimal("0")
+        shares = _even_split(remaining, len(null_terms))
+        for t, p in zip(null_terms, shares):
+            out[t.id] = p
+    return out
+
+
 def _payment_term_response(
     row, phase_base: Decimal, row_base: Decimal, cycle_count: Optional[int] = None,
     start_date=None, end_date=None, carry_received: Decimal = Decimal("0"),
     percent_override: Optional[Decimal] = None,
+    ld_basis_override: Optional[Decimal] = None,
 ) -> PaymentTermResponse:
     """``value`` = ``percent × phase EFFECTIVE total`` (fixed [+ one-time on
     first] + phase-wise received) PLUS any milestone-wise ``carry_received``
     paid directly to this milestone. ``percent_override`` (the last-phase
     even-split default) wins over the stored percent when set. ``row_base`` is
-    the term's own cost-row total, surfaced as ``rowTotal`` for info only."""
+    the term's own cost-row total, surfaced as ``rowTotal`` for info only.
+
+    ``ld_basis_percent`` is the milestone's phase allotment (stored value, or the
+    even-split ``ld_basis_override`` when unset); ``ld_basis_value`` = that
+    allotment × the phase EFFECTIVE base — the money penalties / LD are computed
+    against (independent of the reduced ``value`` actually paid)."""
     resp = PaymentTermResponse.model_validate(row)
     resp.row_total = payment_calc.to_2dp(row_base)
     pct = percent_override if percent_override is not None else row.percent_of_payment
@@ -1382,6 +1425,9 @@ def _payment_term_response(
     cr = payment_calc.to_2dp(carry_received)
     resp.carry_received = cr
     resp.value = payment_calc.to_2dp(base_value + cr)
+    ld_basis = ld_basis_override if ld_basis_override is not None else row.ld_basis_percent
+    resp.ld_basis_percent = ld_basis
+    resp.ld_basis_value = payment_calc.payment_value(ld_basis, phase_base)
     resp.start_date = start_date
     resp.end_date = end_date
     resp.cycle_count = cycle_count

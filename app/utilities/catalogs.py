@@ -189,6 +189,21 @@ def is_known_resource_type(db: Session, resource_type_id: str) -> bool:
     ).first() is not None
 
 
+def designation_row(db: Session, designation_id: str):
+    """Fetch the ACTIVE ``masters.designations`` mirror row for
+    ``designation_id`` (or None). Used to snapshot the per-hour rate + owning
+    organization when a planned resource is added/costed."""
+    if not designation_id:
+        return None
+    from app.models._cross_schema import Designation as _Designation
+    return db.execute(
+        select(_Designation)
+        .where(_Designation.id == designation_id)
+        .where(_Designation.active.is_(True))
+        .limit(1)
+    ).scalar_one_or_none()
+
+
 def active_choices_for(
     db: Session, model, fallback: Iterable[str],
 ) -> Tuple[str, ...]:

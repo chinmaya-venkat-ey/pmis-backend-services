@@ -171,6 +171,9 @@ class PaymentTermUpdateRequest(BaseModel):
 
     frequency_code: Annotated[Optional[str], Field(default=None, max_length=32)]
     percent_of_payment: Annotated[Optional[Decimal], Field(default=None, ge=0, le=100)] = None
+    # The milestone's phase allotment (penalty / LD basis). Default even split;
+    # editable per RFP. Must total 100% per phase; pay% must be <= this.
+    ld_basis_percent: Annotated[Optional[Decimal], Field(default=None, ge=0, le=100)] = None
 
 
 # ----------------------------------------------- per-activity payment split
@@ -214,6 +217,11 @@ class PaymentTermResponse(ResponseModel):
     payment_type: Optional[str] = None        # the milestone's payment type (partial/complete)
     frequency_code: Optional[str] = None
     percent_of_payment: Optional[Decimal] = None
+    # Allotment / penalty basis. ``ld_basis_percent`` is the effective value
+    # (stored value, or the even split 100/N when unset). ``ld_basis_value`` is
+    # the money the penalty / LD is computed against.
+    ld_basis_percent: Optional[Decimal] = None
+    ld_basis_value: Decimal = Decimal("0.00")  # derived: ldBasis% × phase EFFECTIVE base
     row_total: Decimal = Decimal("0.00")      # the cost row's own total (informational)
     value: Decimal = Decimal("0.00")          # derived: percent × phase EFFECTIVE total + carryReceived
     # Carry-forward received DIRECTLY by this milestone (milestone-wise mode).

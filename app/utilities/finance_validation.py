@@ -126,6 +126,38 @@ def run_finance_validation(page, active_milestone_ids: Iterable[str]) -> dict:
     add("term-pct", "Payment-term % complete per phase (last = 100; shortfall must carry forward)",
         not term_problems, "; ".join(term_problems))
 
+    # ---- LD basis / allotment -------------------------------------------
+    # The allotment ("LD Basis %") is the phase's FULL 100% distribution to its
+    # milestones and the basis penalties / LD are computed on, so — unlike pay%,
+    # which may fall short and carry — it must total 100% in EVERY billing phase.
+    # (Recurring-only phases are outside the billing sequence, so exempt.)
+    basis_problems: list = []
+    for p in phases:
+        terms = p.payment_terms or []
+        if p.phase in recurring_phases or not terms:
+            continue
+        tot_basis = sum((_d(t.ld_basis_percent) for t in terms), _ZERO)
+        if abs(tot_basis - _HUNDRED) > _TOL:
+            basis_problems.append(f"{p.phase} allotment totals {tot_basis}%, must be 100%")
+    add("ld-basis-pct", "LD Basis % (allotment) totals 100% per phase",
+        not basis_problems, "; ".join(basis_problems))
+
+    # Pay % can be LESS than the allotment (the gap carries forward) but never
+    # MORE — a milestone cannot be paid beyond its own allotment.
+    over_pay: list = []
+    for p in phases:
+        if p.phase in recurring_phases:
+            continue
+        for t in (p.payment_terms or []):
+            if (t.percent_of_payment is not None and t.ld_basis_percent is not None
+                    and _d(t.percent_of_payment) > _d(t.ld_basis_percent) + _TOL):
+                over_pay.append(
+                    f"{p.phase}/{t.milestone_id} pay {_d(t.percent_of_payment)}% "
+                    f"> allotment {_d(t.ld_basis_percent)}%"
+                )
+    add("pay-le-basis", "Pay % does not exceed its LD Basis % allotment",
+        not over_pay, "; ".join(over_pay))
+
     # Recurring-only phases take no payment-term %, so a blank % there is not a
     # defect — skip them (they are the "% is blank" false failure).
     blank_pct = [str(t.milestone_id)

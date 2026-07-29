@@ -123,6 +123,53 @@ class ProjectPaymentTermService:
                     + " across its milestones, or leave one milestone blank to auto-fill.",
                 )
 
+        # HARD per-PHASE cap on the ALLOTMENT ("LD Basis %"): Σ ld_basis_percent
+        # (live, this phase, excluding this row) + new value must be <= 100. Kept
+        # INDEPENDENT of the pay% cap above — a milestone's allotment (e.g. 12.5%)
+        # legitimately exceeds what it is actually paid (e.g. 8%), so the two
+        # percents are never summed together.
+        if (
+            "ld_basis_percent" in updates
+            and updates["ld_basis_percent"] is not None
+            and row.phase is not None
+        ):
+            new_basis = Decimal(str(updates["ld_basis_percent"]))
+            others_basis = self.repo.sum_ld_basis_for_phase(
+                row.project_id, row.phase, exclude_id=row.id,
+            )
+            if others_basis + new_basis > _HUNDRED:
+                raise ValidationError(
+                    "Total LD Basis % (allotment) for this phase cannot exceed 100. "
+                    f"Already allotted {others_basis}%, attempted to add {new_basis}% "
+                    f"(headroom {_HUNDRED - others_basis}%).",
+                )
+
+        # The ALLOTMENT must total EXACTLY 100% per phase — it is the phase's full
+        # distribution to milestones and the basis penalties are computed on (this
+        # is the "100% allotment" rule, now living on LD Basis % rather than pay%).
+        # A null allotment auto-fills the remainder (even split), so reject only
+        # when EVERY term in the phase is explicit and the total != 100.
+        if "ld_basis_percent" in updates and row.phase is not None:
+            phase_terms = [
+                t for t in self.repo.list_all_live(row.project_id) if t.phase == row.phase
+            ]
+            total_basis = Decimal("0")
+            all_explicit_basis = True
+            for t in phase_terms:
+                val = updates["ld_basis_percent"] if t.id == row.id else t.ld_basis_percent
+                if val is None:
+                    all_explicit_basis = False
+                else:
+                    total_basis += Decimal(str(val))
+            if all_explicit_basis and total_basis != _HUNDRED:
+                short = _HUNDRED - total_basis
+                raise ValidationError(
+                    f"The phase LD Basis % (allotment) must total 100% (this would "
+                    f"make it {total_basis}%). "
+                    + (f"Add {short}% more" if short > 0 else f"Remove {-short}%")
+                    + " across its milestones, or leave one blank to auto-fill.",
+                )
+
         before = {k: getattr(row, k) for k in updates}
         self.repo.update(row, updated_by=caller_user_id, **updates)
         self.audit.write(

@@ -37,9 +37,10 @@ catches divergence (once project-svc is added to its _PEER_SERVICES list).
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Integer, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import MirrorBase
@@ -178,6 +179,24 @@ class ResourceType(MirrorBase):
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     code: Mapped[str] = mapped_column(String(64))
     name: Mapped[str] = mapped_column(String(255))
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class Designation(MirrorBase):
+    """Per-organization job designation + monthly rate. Canonical: masters-svc
+    app/models/designation.py. ``vendor_id`` → masters.vendors.id (NULL = global);
+    ``monthly_rate`` drives planned-resource costing."""
+
+    __tablename__ = "designations"
+    __table_args__ = {"schema": "masters"}
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    code: Mapped[str] = mapped_column(String(64))
+    name: Mapped[str] = mapped_column(String(255))
+    vendor_id: Mapped[Optional[str]] = mapped_column(String(36))
+    monthly_rate: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 2))
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

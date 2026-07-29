@@ -73,6 +73,12 @@ class ProjectPaymentTerm(Base):
     # Logical FK to masters.frequencies.code (cross-schema). Nullable for now.
     frequency_code: Mapped[Optional[str]] = mapped_column(String(32))
     percent_of_payment: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2))
+    # The milestone's ALLOTMENT of its phase — its full share (default even split
+    # 100/N), which must total 100% per phase and is the basis PENALTIES / LD are
+    # calculated on. Distinct from ``percent_of_payment`` (the reduced amount
+    # actually paid this phase; the gap carries forward). Null → resolves to the
+    # even split on the response. FE label: "LD Basis %".
+    ld_basis_percent: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2))
 
     position: Mapped[int] = mapped_column(Integer, default=0)
 

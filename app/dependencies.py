@@ -131,6 +131,13 @@ def get_project_cost_item_controller(
     return ProjectCostItemController(db)
 
 
+def get_planned_resource_controller(
+    db: Session = Depends(get_db),
+) -> "PlannedResourceController":
+    from app.controllers.planned_resource_controller import PlannedResourceController
+    return PlannedResourceController(db)
+
+
 def get_project_payment_term_controller(
     db: Session = Depends(get_db),
 ) -> ProjectPaymentTermController:

@@ -114,6 +114,23 @@ class ProjectPaymentTermRepository:
             stmt = stmt.where(ProjectPaymentTerm.id != exclude_id)
         return Decimal(self.db.execute(stmt).scalar_one())
 
+    def sum_ld_basis_for_phase(
+        self, project_id: str, phase, *, exclude_id: Optional[str] = None,
+    ) -> Decimal:
+        """Σ ``ld_basis_percent`` across LIVE payment terms in a phase (optionally
+        excluding one row). Parallel to ``sum_percent_for_phase`` but for the
+        allotment / penalty-basis column — kept independent (pay% and ld_basis
+        are never summed together)."""
+        stmt = (
+            select(func.coalesce(func.sum(ProjectPaymentTerm.ld_basis_percent), 0))
+            .where(ProjectPaymentTerm.project_id == project_id)
+            .where(ProjectPaymentTerm.phase == phase)
+            .where(ProjectPaymentTerm.deleted_at.is_(None))
+        )
+        if exclude_id is not None:
+            stmt = stmt.where(ProjectPaymentTerm.id != exclude_id)
+        return Decimal(self.db.execute(stmt).scalar_one())
+
     def sum_percent_for_cost_item(
         self, project_id: str, cost_item_id: str, *, exclude_id: Optional[str] = None,
     ) -> Decimal:

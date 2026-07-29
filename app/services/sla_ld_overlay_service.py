@@ -4,8 +4,13 @@ Brings the SLA breach → liquidated-damages deduction onto the payment page,
 per milestone: the cost page owns the milestone's scheduled payment, and
 contract-management owns the SLA verdict + LD%. This joins them:
 
-    ldAmount   = ldPercent% × milestone scheduled
+    ldAmount   = ldPercent% × milestone LD Basis (allotment) value
     netPayable = scheduled − ldAmount
+
+    The LD basis is the milestone's ALLOTMENT ("LD Basis %" × phase base) — its
+    full intended share of the phase — NOT the reduced amount actually scheduled
+    to be paid (percentOfPayment), so a milestone that carries part of its share
+    forward is still penalised on the full allotment.
 
 Additive and read-only — it does not touch the payment computation itself;
 the FE overlays these figures on the existing cost page. (Per decision E the
@@ -41,10 +46,15 @@ class SlaLdOverlayService:
         page = self.payment.build_page(project_id)
 
         scheduled_by_ms: Dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
+        # Penalty / LD basis per milestone = Σ its terms' allotment value
+        # ("LD Basis %" × phase base), which is DISTINCT from the reduced amount
+        # actually scheduled to be paid. LD is computed on this allotment.
+        ld_base_by_ms: Dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
         for ph in page.phases:
             for t in ph.payment_terms:
                 if t.milestone_id:
                     scheduled_by_ms[t.milestone_id] += (t.value or Decimal("0"))
+                    ld_base_by_ms[t.milestone_id] += (t.ld_basis_value or Decimal("0"))
 
         names = dict(self.db.execute(
             select(Milestone.id, Milestone.name)
@@ -58,11 +68,16 @@ class SlaLdOverlayService:
         for ms_id, scheduled in scheduled_by_ms.items():
             s = sla_by_ms.get(ms_id, {})
             ld_pct = Decimal(str(s.get("ldPercent") or 0))
-            ld_amount = (ld_pct / Decimal("100")) * scheduled
+            # LD is applied to the milestone's ALLOTMENT (LD Basis %), not the
+            # reduced amount actually paid. netPayable still deducts it from the
+            # scheduled payment.
+            ld_base = ld_base_by_ms.get(ms_id, Decimal("0"))
+            ld_amount = (ld_pct / Decimal("100")) * ld_base
             rows.append({
                 "milestoneId": ms_id,
                 "milestone": names.get(ms_id),
                 "scheduled": _f(scheduled),
+                "ldBasis": _f(ld_base),
                 "slaAvailable": bool(s.get("available")),
                 "compliance": s.get("compliance", 0),
                 "met": s.get("met", 0), "breached": s.get("breached", 0),

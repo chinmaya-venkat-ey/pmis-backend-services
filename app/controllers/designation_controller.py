@@ -15,8 +15,10 @@ class DesignationController:
     def __init__(self, service: DesignationService):
         self.service = service
 
-    def list_(self, *, include_inactive: bool = False) -> List[DesignationResponse]:
-        rows = self.service.list_(include_inactive=include_inactive)
+    def list_(
+        self, *, include_inactive: bool = False, vendor_id: str | None = None,
+    ) -> List[DesignationResponse]:
+        rows = self.service.list_(include_inactive=include_inactive, vendor_id=vendor_id)
         return [DesignationResponse.model_validate(r) for r in rows]
 
     def get_details(self, designation_id: str) -> DesignationResponse:

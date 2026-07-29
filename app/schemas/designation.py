@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Annotated, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -16,6 +17,11 @@ class DesignationCreateRequest(BaseModel):
 
     code: Annotated[str, Field(min_length=1, max_length=64, pattern=r"^[a-zA-Z0-9_-]+$")]
     name: Annotated[str, Field(min_length=1, max_length=255)]
+    # The organization this designation belongs to (masters.vendors.id). NULL =
+    # a global/template designation shared across orgs.
+    vendor_id: Annotated[Optional[str], Field(default=None, max_length=36)]
+    # Per-month rate used to cost planned resources.
+    monthly_rate: Annotated[Optional[Decimal], Field(default=None, ge=0)]
     active: bool = Field(default=True)
 
 
@@ -25,6 +31,8 @@ class DesignationUpdateRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
 
     name: Annotated[Optional[str], Field(default=None, min_length=1, max_length=255)]
+    vendor_id: Annotated[Optional[str], Field(default=None, max_length=36)]
+    monthly_rate: Annotated[Optional[Decimal], Field(default=None, ge=0)]
     active: Annotated[Optional[bool], Field(default=None)]
 
 
@@ -34,6 +42,8 @@ class DesignationResponse(ResponseModel):
     id: str
     code: str
     name: str
+    vendor_id: Optional[str] = None
+    monthly_rate: Optional[Decimal] = None
     active: bool
     created_at: datetime
     updated_at: datetime

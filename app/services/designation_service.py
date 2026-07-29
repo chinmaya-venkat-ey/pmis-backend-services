@@ -19,8 +19,10 @@ class DesignationService:
         self.db = db
         self.repo = DesignationRepository(db)
 
-    def list_(self, *, include_inactive: bool = False) -> List[Designation]:
-        return self.repo.list_(include_inactive=include_inactive)
+    def list_(
+        self, *, include_inactive: bool = False, vendor_id: str | None = None,
+    ) -> List[Designation]:
+        return self.repo.list_(include_inactive=include_inactive, vendor_id=vendor_id)
 
     def get_by_id(self, designation_id: str) -> Designation:
         row = self.repo.get_by_id(designation_id)
@@ -29,14 +31,18 @@ class DesignationService:
         return row
 
     def create(self, payload: DesignationCreateRequest) -> Designation:
-        if self.repo.get_by_code(payload.code) is not None:
+        # Uniqueness is per organization: the same code may exist once per vendor
+        # (and once globally when vendor_id is NULL).
+        if self.repo.get_by_code(payload.code, payload.vendor_id) is not None:
             raise CatalogEntryConflictError(
-                f"Designation code {payload.code!r} already exists",
-                details={"code": payload.code},
+                f"Designation code {payload.code!r} already exists for this organization",
+                details={"code": payload.code, "vendorId": payload.vendor_id},
             )
         row = self.repo.create(
             code=payload.code,
             name=payload.name,
+            vendor_id=payload.vendor_id,
+            monthly_rate=payload.monthly_rate,
             active=payload.active,
         )
         self.db.commit()

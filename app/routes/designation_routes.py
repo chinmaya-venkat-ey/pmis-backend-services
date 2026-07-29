@@ -1,7 +1,7 @@
 """Routes for the designations catalog."""
 from __future__ import annotations
 
-from typing import Annotated, List
+from typing import Annotated, List, Optional
 
 from fastapi import APIRouter, Depends, Query, status
 
@@ -28,8 +28,12 @@ router = APIRouter(prefix="/designations", tags=["designations"])
 def list_designations(
     controller: Annotated[DesignationController, Depends(get_designation_controller)],
     include_inactive: bool = Query(False, description="Include deactivated rows"),
+    vendor_id: Optional[str] = Query(
+        None,
+        description="Filter to one organization's designations (masters.vendors.id)",
+    ),
 ) -> List[DesignationResponse]:
-    return controller.list_(include_inactive=include_inactive)
+    return controller.list_(include_inactive=include_inactive, vendor_id=vendor_id)
 
 
 @router.get(

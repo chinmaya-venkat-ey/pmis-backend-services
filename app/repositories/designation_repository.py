@@ -16,14 +16,24 @@ class DesignationRepository:
     def get_by_id(self, designation_id: str) -> Optional[Designation]:
         return self.db.get(Designation, designation_id)
 
-    def get_by_code(self, code: str) -> Optional[Designation]:
+    def get_by_code(self, code: str, vendor_id: Optional[str] = None) -> Optional[Designation]:
+        """Org-scoped lookup: a code is unique WITHIN an organization
+        (``vendor_id``). ``vendor_id=None`` matches the global/template rows."""
         stmt = select(Designation).where(Designation.code == code)
+        if vendor_id is None:
+            stmt = stmt.where(Designation.vendor_id.is_(None))
+        else:
+            stmt = stmt.where(Designation.vendor_id == vendor_id)
         return self.db.execute(stmt).scalars().first()
 
-    def list_(self, *, include_inactive: bool = False) -> List[Designation]:
+    def list_(
+        self, *, include_inactive: bool = False, vendor_id: Optional[str] = None,
+    ) -> List[Designation]:
         stmt = select(Designation)
         if not include_inactive:
             stmt = stmt.where(Designation.active.is_(True))
+        if vendor_id is not None:
+            stmt = stmt.where(Designation.vendor_id == vendor_id)
         stmt = stmt.order_by(Designation.name.asc())
         return list(self.db.execute(stmt).scalars().all())
 

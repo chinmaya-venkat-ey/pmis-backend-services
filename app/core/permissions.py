@@ -64,13 +64,6 @@ RESOURCE_TYPES_MANAGE: Final[str] = "resource_types:manage"
 
 
 # =========================================================================
-# Catalog: designations (job designations, e.g. "Consultant")
-# =========================================================================
-DESIGNATIONS_READ: Final[str] = "designations:read"
-DESIGNATIONS_MANAGE: Final[str] = "designations:manage"
-
-
-# =========================================================================
 # Catalog: priorities  (doc-41 — FE picker for milestones / tasks / subtasks)
 # =========================================================================
 PRIORITIES_READ: Final[str] = "priorities:read"
@@ -155,7 +148,6 @@ ALL_MASTERS_READ_PERMISSIONS: Final[tuple[str, ...]] = (
     DIVISIONS_READ,
     VENDORS_READ,
     RESOURCE_TYPES_READ,
-    DESIGNATIONS_READ,
     PRIORITIES_READ,
     PROJECT_CATEGORIES_READ,
     ACTIVITY_TYPES_READ,
@@ -173,7 +165,6 @@ ALL_MASTERS_MANAGE_PERMISSIONS: Final[tuple[str, ...]] = (
     DIVISIONS_MANAGE,
     VENDORS_MANAGE,
     RESOURCE_TYPES_MANAGE,
-    DESIGNATIONS_MANAGE,
     PRIORITIES_MANAGE,
     PROJECT_CATEGORIES_MANAGE,
     ACTIVITY_TYPES_MANAGE,

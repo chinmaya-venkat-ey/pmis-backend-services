@@ -36,7 +36,6 @@ from app.routes.project_category_routes import router as project_category_router
 from app.routes.project_status_transition_routes import (
     router as project_status_transition_router,
 )
-from app.routes.designation_routes import router as designation_router
 from app.routes.resource_type_routes import router as resource_type_router
 from app.routes.vendor_routes import router as vendor_router
 
@@ -45,7 +44,6 @@ api_router = APIRouter(prefix="/api/v3/master")
 api_router.include_router(division_router)
 api_router.include_router(vendor_router)
 api_router.include_router(resource_type_router)
-api_router.include_router(designation_router)
 api_router.include_router(priority_router)
 api_router.include_router(cost_type_router)
 api_router.include_router(frequency_router)

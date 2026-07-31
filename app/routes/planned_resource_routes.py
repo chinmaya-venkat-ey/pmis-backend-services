@@ -1,9 +1,10 @@
 """Planned-resources routes — the resource-type phase "Planned Resources" tab.
 
-Rows plan a headcount of a (per-org) designation over a deployment window; the
-BE snapshots the per-hour rate from the designation master and derives billable
-hours from the project leaveConfig, then rolls the SUM into the phase's
-``resource_cost`` cost item. Same RBAC as the rest of the finance module:
+Rows plan a headcount of a designation (``role``) over a deployment window. The
+client supplies the role + its per-contract-year rate card (from leave-mgmt's
+``/api/designation-rates``); the BE splits the window by contract year, costs each
+year at its own rate, and rolls the SUM into the phase's ``resource_cost`` cost
+item. Same RBAC as the rest of the finance module:
   - reads  → ``projects:read`` (PAYMENT_READ)
   - writes → ``projects:update:finance`` (PROJECTS_UPDATE_FINANCE); publish-lock
     + admin bypass applied in the service.

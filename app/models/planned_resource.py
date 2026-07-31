@@ -1,19 +1,21 @@
 """PlannedResource — one planned-resource row on a resource-type phase.
 
 Rows belong to a ``resource_cost`` cost item (``cost_item_id``) — the phase's
-resource cost row. Each row plans a headcount of a designation over a deployment
-window; its ``computed_cost`` = ``quantity × monthly_rate_snapshot ×
-duration_months`` (the deployment window as fractional months, days / 30.44). The
-SUM of a cost row's live planned-resource costs is written back onto that cost
-item's ``cost`` (so the existing payment/carry-forward math is untouched — the
-resource cost simply becomes the planned total). Multiple rows may share a
-designation (e.g. several consultants for different durations); they all
-accumulate into the SUM.
+resource cost row. Each row plans a headcount of a designation (``role``) over a
+deployment window, priced from the **per-contract-year rate card** the client
+supplies (sourced from the leave-management ``/api/designation-rates`` service).
+The cost is split by contract year: for each year the window spans,
+``quantity × rateCardByYear["Year-N"] × months-in-that-year`` (fractional months,
+days / 30.44), summed into ``computed_cost``; the per-year split is kept in
+``cost_by_year``. The SUM of a cost row's live planned-resource costs is written
+back onto that cost item's ``cost`` (so the existing payment/carry-forward math is
+untouched). Multiple rows may share a role (e.g. several architects for different
+windows); they all accumulate into the SUM.
 
-``designation_id`` / ``vendor_id`` are logical FKs to masters.designations.id /
-masters.vendors.id (read via the cross-schema mirror). ``monthly_rate_snapshot``
-snapshots the designation's rate at entry so later master-rate edits don't
-silently restate historical plans.
+``role`` is the designation NAME (free text, as leave-mgmt returns it — not an FK).
+``vendor_id`` is the organisation (masters.vendors.id) the rate card belongs to.
+``rate_card_snapshot`` snapshots the ``rateCardByYear`` map at entry so later
+rate-card edits don't silently restate historical plans.
 """
 from __future__ import annotations
 
@@ -23,6 +25,7 @@ from typing import Optional
 from uuid import uuid4
 
 from sqlalchemy import Date, DateTime, ForeignKey, Index, Integer, Numeric, String, text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -51,18 +54,20 @@ class PlannedResource(Base):
     cost_item_id: Mapped[str] = mapped_column(
         ForeignKey("project.project_cost_items.id")
     )
-    # Logical FKs (cross-schema) to masters.
-    designation_id: Mapped[str] = mapped_column(String(36))
+    # The designation NAME (free text, as leave-mgmt returns it — not an FK) and
+    # the organisation (masters.vendors.id) whose rate card this row uses.
+    role: Mapped[Optional[str]] = mapped_column(String(255))
     vendor_id: Mapped[Optional[str]] = mapped_column(String(36))
 
     quantity: Mapped[int] = mapped_column(Integer, default=1)
     deploy_start: Mapped[Optional[date]] = mapped_column(Date)
     deploy_end: Mapped[Optional[date]] = mapped_column(Date)
 
-    # Snapshot of the designation's per-month rate at entry.
-    monthly_rate_snapshot: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 2))
-    # Derived + persisted for transparency (the deployment window in fractional
-    # months) and the row's cost (quantity × rate × months).
+    # Snapshot of the client-supplied rateCardByYear map {"Year-N": monthlyRate}.
+    rate_card_snapshot: Mapped[Optional[dict]] = mapped_column(JSONB)
+    # Per-contract-year cost breakdown {"Year-N": amount} (transparency).
+    cost_by_year: Mapped[Optional[dict]] = mapped_column(JSONB)
+    # Total deployment window in fractional months (Σ per-year months).
     duration_months: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 2))
     computed_cost: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 2))
 

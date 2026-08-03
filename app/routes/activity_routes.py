@@ -54,11 +54,20 @@ from app.utilities.openapi_extra import (
 milestone_scoped_router = APIRouter(prefix="/milestones", tags=["activities"])
 
 
+def _bearer_from_request(request: Request) -> Optional[str]:
+    """Extract the caller's bearer token (for the write-time leave-mgmt rate call)."""
+    auth = request.headers.get("authorization") or ""
+    if auth.lower().startswith("bearer "):
+        return auth.split(None, 1)[1].strip() or None
+    return None
+
+
 async def _create_multipart(
     request: Request,
     milestone_id: str,
     controller: ActivityController,
     caller_user_id: Optional[str],
+    bearer_token: Optional[str] = None,
 ):
     form = await request.form()
     try:
@@ -105,7 +114,7 @@ async def _create_multipart(
     return controller.create(
         milestone_id, payload,
         caller_user_id=caller_user_id,
-        body=body, attachments=envelopes or None,
+        body=body, attachments=envelopes or None, bearer_token=bearer_token,
     )
 
 
@@ -127,14 +136,15 @@ async def create_activity(
     controller: Annotated[ActivityController, Depends(get_activity_controller)],
     caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
 ):
+    bearer = _bearer_from_request(request)
     return await dispatch_create(
         request,
         schema_cls=ActivityCreateRequest,
         json_handler=lambda data: controller.create(
-            milestone_id, data, caller_user_id=caller_user_id,
+            milestone_id, data, caller_user_id=caller_user_id, bearer_token=bearer,
         ),
         multipart_handler=lambda: _create_multipart(
-            request, milestone_id, controller, caller_user_id,
+            request, milestone_id, controller, caller_user_id, bearer,
         ),
     )
 
@@ -214,6 +224,7 @@ def update_activity(
     return controller.update(
         activity_id, payload,
         caller_user_id=caller_user_id, request=request,
+        bearer_token=_bearer_from_request(request),
     )
 
 

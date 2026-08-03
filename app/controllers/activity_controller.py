@@ -1,6 +1,7 @@
 """ActivityController."""
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import List, Optional
 
 from sqlalchemy.orm import Session
@@ -9,6 +10,7 @@ from app.repositories.activity_repository import ActivityRepository
 from app.schemas.activity import (
     ActivityCompletionEligibilityResponse,
     ActivityCreateRequest,
+    ActivityPlannedResourceResponse,
     ActivityResourceSchema,
     ActivityResponse,
     ActivityUpdateRequest,
@@ -47,6 +49,19 @@ class ActivityController:
         resp.resource = (
             ActivityResourceSchema.model_validate(resource_row)
             if resource_row else None
+        )
+        # Per-activity planned-resource allocations with the rate + cost SNAPSHOTTED
+        # at write time (no live call here). ``resourceCostTotal`` = Σ computedCost.
+        pr_rows = self.repo.list_planned_resources(row.id)
+        resp.resources = [
+            ActivityPlannedResourceResponse(
+                designation=pr.designation, quantity=pr.quantity, duration=pr.duration,
+                monthly_rate=pr.monthly_rate, computed_cost=pr.computed_cost,
+            )
+            for pr in pr_rows
+        ]
+        resp.resource_cost_total = sum(
+            ((pr.computed_cost or Decimal("0")) for pr in pr_rows), Decimal("0"),
         )
         # Multipart-arm /create may attach a freshly-created Comment row
         # on ``_inline_comment`` — surface as ``data.comment``.
@@ -122,21 +137,22 @@ class ActivityController:
         *, caller_user_id: Optional[str],
         body: Optional[str] = None,
         attachments: Optional[List[dict]] = None,
+        bearer_token: Optional[str] = None,
     ):
         row = self.service.create(
             milestone_id, payload,
             caller_user_id=caller_user_id,
-            body=body, attachments=attachments,
+            body=body, attachments=attachments, bearer_token=bearer_token,
         )
         return self._to_response(row)
 
     def update(
         self, activity_id: str, payload: ActivityUpdateRequest,
-        *, caller_user_id: Optional[str], request=None,
+        *, caller_user_id: Optional[str], request=None, bearer_token=None,
     ):
         row = self.service.update(
             activity_id, payload,
-            caller_user_id=caller_user_id, request=request,
+            caller_user_id=caller_user_id, request=request, bearer_token=bearer_token,
         )
         return self._to_response(row)
 

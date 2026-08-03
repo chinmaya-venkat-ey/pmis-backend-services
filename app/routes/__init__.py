@@ -22,7 +22,6 @@ from app.routes import (
     health_routes,
     milestone_routes,
     payment_routes,
-    planned_resource_routes,
     project_routes,
     qgr_routes,
     subtask_routes,
@@ -88,8 +87,6 @@ project_router.include_router(payment_routes.payment_term_project_scoped_router)
 project_router.include_router(payment_routes.payment_term_router)
 project_router.include_router(payment_routes.payment_page_router)
 project_router.include_router(payment_routes.cycle_count_router)
-project_router.include_router(planned_resource_routes.planned_resource_project_scoped_router)
-project_router.include_router(planned_resource_routes.planned_resource_router)
 
 # QGR (Quarterly Guaranteed Revenue) — RFP §5.23.2. CRUD used by
 # contract-management's NpqpService (via cross-schema SELECT — no HTTP

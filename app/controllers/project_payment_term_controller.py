@@ -33,11 +33,14 @@ class ProjectPaymentTermController:
         )
         return self.page.term_response(row.id)
 
-    def list_for_project(self, project_id, *, offset=1, page_size=50, include_deleted=False):
+    def list_for_project(
+        self, project_id, *, offset=1, page_size=50, include_deleted=False,
+        bearer_token=None,
+    ):
         rows, total = self.service.list_for_project(
             project_id, offset=offset, page_size=page_size, include_deleted=include_deleted,
         )
-        items = self.page.list_term_responses(project_id, rows)
+        items = self.page.list_term_responses(project_id, rows, bearer_token=bearer_token)
         return {
             "items": items,
             "total": total, "offset": offset, "page_size": page_size,

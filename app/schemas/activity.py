@@ -60,6 +60,30 @@ class ActivityResourceSchema(ResponseModel):
     division_other: Optional[str] = None
 
 
+class ActivityPlannedResourceItem(BaseModel):
+    """One planned-resource allocation on a resource-based activity (create/update).
+
+    ``designation`` is the leave-mgmt ``role`` name (the rate is resolved LIVE at
+    compute time, never sent here). ``duration`` is a flat number of months in
+    [0, 3]."""
+
+    model_config = _REQUEST_CONFIG
+
+    designation: Annotated[str, Field(min_length=1, max_length=255)]
+    quantity: Annotated[int, Field(ge=1)] = 1
+    duration: Annotated[Decimal, Field(ge=0, le=3)]
+
+
+class ActivityPlannedResourceResponse(ResponseModel):
+    """One allocation row with its live-resolved monthly rate + computed cost."""
+
+    designation: str
+    quantity: int
+    duration: Decimal
+    monthly_rate: Optional[Decimal] = None    # live from leave-mgmt (0 if unavailable)
+    computed_cost: Optional[Decimal] = None   # quantity × monthlyRate × duration
+
+
 class ActivityResponse(ResponseModel):
     """Field order matches monolith ``format_activity_response`` byte-for-byte:
     id, displayCode, projectId, milestoneId, name, description, type,
@@ -107,6 +131,10 @@ class ActivityResponse(ResponseModel):
     updated_by: Optional[str] = None
     deleted_at: Optional[datetime] = None
     resource: Optional[ActivityResourceSchema] = None
+    # Per-activity planned-resource allocations (resource-based activities), each
+    # with its live-resolved rate + cost; empty for non-resource activities.
+    resources: List[ActivityPlannedResourceResponse] = Field(default_factory=list)
+    resource_cost_total: Decimal = Decimal("0")
     # Category + CCN value (Doc-finance). See app/schemas/milestone.py.
     category: str = "original"
     ccn_value: Decimal = Decimal("0")
@@ -187,6 +215,8 @@ class ActivityCreateRequest(BaseModel):
     )
     vendor_id: Annotated[Optional[str], Field(default=None, max_length=36)]
     depends_on: List[str] = Field(default_factory=list)
+    # Planned-resource allocations for a resource-based activity (replace-set).
+    resources: List[ActivityPlannedResourceItem] = Field(default_factory=list)
     # Finance — optional on the wire. Pre-publish creates IGNORE
     # category/ccnValue and force 'original'/0; post-publish creates
     # default category to 'asg' when omitted, and require ccnValue > 0
@@ -281,6 +311,8 @@ class ActivityUpdateRequest(BaseModel):
     vendor_id: Annotated[Optional[str], Field(default=None, max_length=36)]
     position: Optional[int] = None
     depends_on: Optional[List[str]] = None
+    # Planned-resource allocations — None = leave unchanged; [] = clear.
+    resources: Optional[List[ActivityPlannedResourceItem]] = None
     # Finance — optional on PATCH. Service layer locks category once set
     # (409 if changed) and accepts ccn_value updates only when the
     # existing row's category is 'ccn'.

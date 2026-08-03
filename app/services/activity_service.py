@@ -63,6 +63,35 @@ _CATEGORY_CCN = "ccn"
 _VALID_CATEGORIES = (_CATEGORY_ORIGINAL, _CATEGORY_ASG, _CATEGORY_CCN)
 
 
+def _snapshot_resource_rows(project, activity_start, vendor_id, items, bearer_token):
+    """Map ``ActivityPlannedResourceItem[]`` → repo dicts, resolving each row's
+    monthly rate from the Java designation-rates service (for the activity's
+    contract year, per project+org) and SNAPSHOTTING rate + cost. Leave-mgmt
+    down / no card → rate 0 (cost 0)."""
+    items = list(items or [])
+    if not items:
+        return []
+    from app.clients.leave_designation_rates_client import LeaveDesignationRatesClient
+    from app.utilities import resource_rate
+    cards = resource_rate.cards_by_role(
+        LeaveDesignationRatesClient().fetch_designation_rates(
+            getattr(project, "id", None), vendor_id, bearer_token,
+        )
+    )
+    year_no = resource_rate.contract_year_no(
+        activity_start, getattr(project, "start_date", None),
+    )
+    out = []
+    for i in items:
+        rate = resource_rate.rate_for_year(cards.get(i.designation), year_no)
+        cost = resource_rate.row_cost(rate, i.quantity, i.duration)
+        out.append({
+            "designation": i.designation, "quantity": i.quantity, "duration": i.duration,
+            "monthly_rate": rate, "computed_cost": cost,
+        })
+    return out
+
+
 class ActivityService:
     def __init__(self, db: Session):
         self.db = db
@@ -95,6 +124,7 @@ class ActivityService:
         caller_user_id: Optional[str],
         body: Optional[str] = None,
         attachments: Optional[List[dict]] = None,
+        bearer_token: Optional[str] = None,
     ):
         milestone = self.milestones.get_by_id(milestone_id)
         if milestone is None:
@@ -187,6 +217,17 @@ class ActivityService:
             self._assert_deps_exist(resolved_deps)
             self._assert_dep_dates_outlasting(row, resolved_deps)
             self.repo.replace_dependencies(row.id, resolved_deps)
+
+        if payload.resources:
+            self._assert_resource_based(milestone)
+            project = self.projects.get_by_id(milestone.project_id)
+            self.repo.replace_planned_resources(
+                row.id, row.project_id,
+                _snapshot_resource_rows(
+                    project, row.start_date, row.vendor_id, payload.resources, bearer_token,
+                ),
+                actor_user_id=caller_user_id,
+            )
 
         # Inline comment / attachments — written under the new activity.
         # Captured on ``_inline_comment`` so the controller can echo the
@@ -330,6 +371,7 @@ class ActivityService:
     def update(  # NOSONAR(S3776): sequential validation gates with order-sensitive side effects (validate -> mutate -> audit -> commit -> depends_on cycle-check) -- refactor deferred to a sprint with FE regression coverage
         self, activity_id: str, payload: ActivityUpdateRequest,
         *, caller_user_id: Optional[str], request=None,
+        bearer_token: Optional[str] = None,
     ):
         row = self.get_by_id(activity_id)
         updates = payload.model_dump(exclude_unset=True)
@@ -338,6 +380,9 @@ class ActivityService:
         # whose values are processed separately below.
         touched = set(updates.keys())
         depends_on = updates.pop("depends_on", None)
+        # Planned resources are a child collection, written separately below —
+        # remove from the column updates so repo.update doesn't setattr the ORM.
+        updates.pop("resources", None)
         # Doc-finance: handle category + ccn_value lifecycle separately.
         category_requested = updates.pop("category", None)
         ccn_value_requested = updates.pop("ccn_value", None)
@@ -452,6 +497,23 @@ class ActivityService:
                 action="update", actor_user_id=caller_user_id,
                 changes={"depends_on": resolved_deps},
             )
+        if payload.resources is not None:
+            milestone = self.milestones.get_by_id(row.milestone_id)
+            self._assert_resource_based(milestone)
+            project = self.projects.get_by_id(row.project_id)
+            self.repo.replace_planned_resources(
+                row.id, row.project_id,
+                _snapshot_resource_rows(
+                    project, row.start_date, row.vendor_id, payload.resources, bearer_token,
+                ),
+                actor_user_id=caller_user_id,
+            )
+            self.audit.write(
+                project_id=row.project_id,
+                target_kind="activity", target_id=row.id,
+                action="update", actor_user_id=caller_user_id,
+                changes={"resources": len(payload.resources)},
+            )
         # Cascade: if status transitioned to terminal, try to roll up.
         if (
             "status" in updates and updates["status"] is not None
@@ -460,6 +522,15 @@ class ActivityService:
             self._cascade_to_parent(row, caller_user_id=caller_user_id)
         self.db.commit()
         return row
+
+    def _assert_resource_based(self, milestone) -> None:
+        """Planned resources are only allowed on activities under a
+        resource-based milestone."""
+        if milestone is None or not getattr(milestone, "is_resource_based", False):
+            raise ValidationError(
+                "Planned resources can only be set on activities under a "
+                "resource-based milestone."
+            )
 
     def delete(self, activity_id: str, *, caller_user_id: Optional[str]):
         row = self.get_by_id(activity_id)

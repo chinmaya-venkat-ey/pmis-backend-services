@@ -199,9 +199,16 @@ def list_payment_terms(
     offset: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[Optional[int], Query(ge=1, alias="pageSize")] = None,
     include_deleted: Annotated[bool, Query(alias="includeDeleted")] = False,
+    authorization: Annotated[Optional[str], Header()] = None,
 ):
+    # Forward the caller's bearer so resource-milestone activity costs resolve
+    # live (leave-mgmt designation rates), same as the payment page.
+    bearer = None
+    if authorization and authorization.lower().startswith("bearer "):
+        bearer = authorization.split(None, 1)[1].strip() or None
     return controller.list_for_project(
         project_uuid, offset=offset, page_size=page_size, include_deleted=include_deleted,
+        bearer_token=bearer,
     )
 
 

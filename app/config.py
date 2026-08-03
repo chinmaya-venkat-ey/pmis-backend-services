@@ -112,6 +112,15 @@ class Settings(BaseSettings):
     contract_management_base_url: Optional[str] = Field(default=None)
     contract_management_timeout_seconds: float = Field(default=5.0)
 
+    # === Leave management (PMIS-leave-management, Java) — designation rates ===
+    # Live source for per-designation, per-contract-year monthly rate cards used
+    # to cost a resource-based activity's planned resources. The caller's
+    # Authorization header is forwarded. Blank => rates resolve to 0 (soft-fail);
+    # the payment page still renders. Base includes the host, e.g.
+    # "http://10.1.131.199:8019". Set to "mock" to use the built-in stub (local).
+    leave_management_base_url: Optional[str] = Field(default=None)
+    leave_management_timeout_seconds: float = Field(default=5.0)
+
     # === Ticket service (PMIS-Ticket-service, Java) ===
     # Read-only source for the dashboard's tickets block. Leave the URL
     # blank to degrade tickets to available:false. Base must include the
@@ -137,6 +146,12 @@ class Settings(BaseSettings):
     # "http://pmis-contract-management:8005".
     contract_management_base_url: Optional[str] = Field(default=None)
     contract_management_timeout_seconds: float = Field(default=6.0)
+
+    # === Leave management (PMIS-leave-management, Java) — designation rates ===
+    # Live per-designation per-contract-year rate cards for resource costing.
+    # Blank => rates 0 (soft-fail). "mock" => built-in stub for local harness.
+    leave_management_base_url: Optional[str] = Field(default=None)
+    leave_management_timeout_seconds: float = Field(default=5.0)
 
     # === Dashboard snapshot cron ===
     # Shared secret the scheduler must send as the ``X-Cron-Secret`` header

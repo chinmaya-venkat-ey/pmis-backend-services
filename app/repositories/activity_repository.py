@@ -1,4 +1,5 @@
-"""ActivityRepository — CRUD + dependencies + 1:1 resource sidecar."""
+"""ActivityRepository — CRUD + dependencies + 1:1 resource sidecar +
+1:many planned-resource allocations."""
 from __future__ import annotations
 
 from typing import List, Optional, Tuple
@@ -9,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.pagination import paginate
 from app.models.activity import Activity
 from app.models.activity_dependency import ActivityDependency
+from app.models.activity_planned_resource import ActivityPlannedResource
 from app.models.activity_resource import ActivityResource
 from app.models.subtask import Subtask
 from app.models.subtask_resource import SubtaskResource
@@ -120,7 +122,10 @@ class ActivityRepository:
             row.id, deleted_at=lambda m: m.deleted_at.is_(None),
         )
         now = now_ist()
-        targets: List = [(ActivityResource, [ActivityResource.activity_id == row.id])]
+        targets: List = [
+            (ActivityResource, [ActivityResource.activity_id == row.id]),
+            (ActivityPlannedResource, [ActivityPlannedResource.activity_id == row.id]),
+        ]
         if task_ids:
             targets += [
                 (TaskResource, [TaskResource.task_id.in_(task_ids)]),
@@ -145,7 +150,10 @@ class ActivityRepository:
         task_ids, subtask_ids = self._snapshot_subtree_ids(
             row.id, deleted_at=lambda m: m.deleted_at == cascade_ts,
         )
-        targets: List = [(ActivityResource, [ActivityResource.activity_id == row.id])]
+        targets: List = [
+            (ActivityResource, [ActivityResource.activity_id == row.id]),
+            (ActivityPlannedResource, [ActivityPlannedResource.activity_id == row.id]),
+        ]
         if task_ids:
             targets += [
                 (TaskResource, [TaskResource.task_id.in_(task_ids)]),
@@ -201,3 +209,48 @@ class ActivityRepository:
         self.db.add(row)
         self.db.flush()
         return row
+
+    # ------------------------------------------------- planned-resource allocations
+
+    def list_planned_resources(self, activity_id: str) -> List[ActivityPlannedResource]:
+        return list(self.db.execute(
+            select(ActivityPlannedResource)
+            .where(ActivityPlannedResource.activity_id == activity_id)
+            .where(ActivityPlannedResource.deleted_at.is_(None))
+            .order_by(ActivityPlannedResource.position.asc())
+        ).scalars())
+
+    def list_planned_resources_for_activities(
+        self, activity_ids: List[str],
+    ) -> List[ActivityPlannedResource]:
+        if not activity_ids:
+            return []
+        return list(self.db.execute(
+            select(ActivityPlannedResource)
+            .where(ActivityPlannedResource.activity_id.in_(activity_ids))
+            .where(ActivityPlannedResource.deleted_at.is_(None))
+            .order_by(ActivityPlannedResource.position.asc())
+        ).scalars())
+
+    def replace_planned_resources(
+        self, activity_id: str, project_id: str, rows: List[dict], *,
+        actor_user_id: Optional[str] = None,
+    ) -> None:
+        """Wholesale-replace an activity's allocation rows (hard delete + insert).
+        ``rows`` = [{designation, quantity, duration}, ...] in display order."""
+        self.db.execute(
+            ActivityPlannedResource.__table__.delete().where(
+                ActivityPlannedResource.activity_id == activity_id
+            )
+        )
+        for pos, r in enumerate(rows or [], start=1):
+            self.db.add(ActivityPlannedResource(
+                activity_id=activity_id, project_id=project_id,
+                designation=r["designation"], quantity=r["quantity"],
+                duration=r["duration"],
+                monthly_rate=r.get("monthly_rate"),
+                computed_cost=r.get("computed_cost"),
+                position=pos,
+                created_by=actor_user_id, updated_by=actor_user_id,
+            ))
+        self.db.flush()

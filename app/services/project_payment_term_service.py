@@ -144,31 +144,12 @@ class ProjectPaymentTermService:
                     f"(headroom {_HUNDRED - others_basis}%).",
                 )
 
-        # The ALLOTMENT must total EXACTLY 100% per phase — it is the phase's full
-        # distribution to milestones and the basis penalties are computed on (this
-        # is the "100% allotment" rule, now living on LD Basis % rather than pay%).
-        # A null allotment auto-fills the remainder (even split), so reject only
-        # when EVERY term in the phase is explicit and the total != 100.
-        if "ld_basis_percent" in updates and row.phase is not None:
-            phase_terms = [
-                t for t in self.repo.list_all_live(row.project_id) if t.phase == row.phase
-            ]
-            total_basis = Decimal("0")
-            all_explicit_basis = True
-            for t in phase_terms:
-                val = updates["ld_basis_percent"] if t.id == row.id else t.ld_basis_percent
-                if val is None:
-                    all_explicit_basis = False
-                else:
-                    total_basis += Decimal(str(val))
-            if all_explicit_basis and total_basis != _HUNDRED:
-                short = _HUNDRED - total_basis
-                raise ValidationError(
-                    f"The phase LD Basis % (allotment) must total 100% (this would "
-                    f"make it {total_basis}%). "
-                    + (f"Add {short}% more" if short > 0 else f"Remove {-short}%")
-                    + " across its milestones, or leave one blank to auto-fill.",
-                )
+        # NOTE: the ALLOTMENT should total 100% per phase, but — exactly like pay%
+        # (percent_of_payment) — that completeness is NOT enforced here at set time;
+        # it is a "Validate" check (finance_validation `ld-basis-pct`). Blocking the
+        # save whenever the phase != 100% made the field un-editable (you could not
+        # change one milestone's allotment without the whole phase momentarily
+        # leaving 100%). The per-phase <= 100 cap above still prevents over-allotment.
 
         before = {k: getattr(row, k) for k in updates}
         self.repo.update(row, updated_by=caller_user_id, **updates)

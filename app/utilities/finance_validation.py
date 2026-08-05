@@ -15,6 +15,7 @@ _HUNDRED = Decimal("100")
 _TOL = Decimal("0.01")
 _PHASE_TYPES = {"fixed", "resource_cost", "transaction_cost"}
 _RECURRING = "recurring_cost"
+_RESOURCE = "resource_cost"
 
 
 def _d(x) -> Decimal:
@@ -56,6 +57,16 @@ def run_finance_validation(page, active_milestone_ids: Iterable[str]) -> dict:
     # Phases that carry only recurring cost — outside the billing sequence, so
     # the payment-term checks below skip them entirely.
     recurring_phases = _recurring_only_phases(cost_items)
+    # Resource (cost-driven) milestones: their pay% and per-activity split are
+    # DERIVED cost shares (value / phase resource total), not manually-entered %s.
+    # The "% <= allotment" and "activities sum to the term %" rules assume manual
+    # entry, so those two checks skip resource milestones — their consistency is
+    # guaranteed by VALUE (Σ activity value = term value), not by the rounded %s.
+    resource_ms_ids = {
+        mid for c in cost_items
+        if getattr(c, "cost_type_code", None) == _RESOURCE
+        for mid in (getattr(c, "milestone_ids", None) or [])
+    }
 
     # ---- cost-level ------------------------------------------------------
     add("total-cost", "Total contract cost > 0",
@@ -149,6 +160,8 @@ def run_finance_validation(page, active_milestone_ids: Iterable[str]) -> dict:
         if p.phase in recurring_phases:
             continue
         for t in (p.payment_terms or []):
+            if t.milestone_id in resource_ms_ids:
+                continue  # cost-driven pay% (share), not bounded by the even-split allotment
             if (t.percent_of_payment is not None and t.ld_basis_percent is not None
                     and _d(t.percent_of_payment) > _d(t.ld_basis_percent) + _TOL):
                 over_pay.append(
@@ -170,6 +183,8 @@ def run_finance_validation(page, active_milestone_ids: Iterable[str]) -> dict:
     split_problems: list = []
     for p in phases:
         for t in (p.payment_terms or []):
+            if t.milestone_id in resource_ms_ids:
+                continue  # cost-driven split: activity %s are derived cost shares
             acts = t.activities or []
             if acts:
                 s = sum((_d(a.percent_of_payment) for a in acts), _ZERO)

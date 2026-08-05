@@ -281,16 +281,22 @@ class PaymentPageService:
         project = self._require_project(project_id)
         project_freq = project.payment_frequency_code  # ONE frequency per project
 
-        ordered, config_by_phase, cf, cost_rows, term_rows = self._load_phase_state(project_id)
+        cost_rows = self.cost_items.list_all_live(project_id)
         ms_map = self.cost_items.milestone_ids_by_cost_item([c.id for c in cost_rows])
+        # Resource-based costing FIRST: override each resource_cost row's cost from
+        # its milestones' activities' snapshots (rate × qty × duration), in-memory
+        # (no DB write) — done BEFORE _load_phase_state so the carry-forward /
+        # effective base uses the DERIVED cost too (not the typed one).
+        resource_cost_by_activity, resource_ms_ids, res_acts_by_ms = \
+            self._apply_resource_costs(cost_rows, ms_map)
+        ordered, config_by_phase, cf, cost_rows, term_rows = self._load_phase_state(
+            project_id, cost_rows=cost_rows)
         phase_dates = self.cost_items.phase_milestone_date_bounds(project_id)
         ms_dates = self.cost_items.milestone_date_map(project_id)
-
-        # Resource-based costing: set each resource_cost cost item's cost LIVE from
-        # its milestones' activities' planned-resource allocations (leave-mgmt rate
-        # × qty × duration), in-memory (no DB write), so totals + phase base reflect
-        # it. Returns the per-activity resource cost for the partial-payment breakup.
-        resource_cost_by_activity = self._apply_resource_costs(cost_rows, ms_map)
+        # Resource (cost-driven) terms: value = Σ activities' resource cost, percent
+        # = derived cost-share (see _resource_term_derived). Keyed by term id.
+        resource_term_derived = self._resource_term_derived(
+            term_rows, resource_ms_ids, res_acts_by_ms, resource_cost_by_activity)
 
         # Saved custom-split shares, grouped by carrying phase (for round-trip).
         alloc_resp_by_phase: dict = {}
@@ -389,14 +395,12 @@ class PaymentPageService:
                         override if override is not None else t.percent_of_payment,
                         ms_pos.get(t.milestone_id),
                         cost_by_activity=resource_cost_by_activity,
+                        is_resource=t.milestone_id in resource_ms_ids,
                     )
-                    # Resource milestone: the term value is the Σ of its activities'
-                    # resource costs (activity values are the cost, not pct × base).
-                    if any(a.id in resource_cost_by_activity for a in ms_acts):
-                        resp.value = payment_calc.to_2dp(sum(
-                            (resource_cost_by_activity.get(a.id, Decimal("0"))
-                             for a in ms_acts), Decimal("0"),
-                        ))
+                # Resource (cost-driven) milestone: term value = Σ its activities'
+                # resource cost, percent = derived cost-share (never even-split/null).
+                if t.id in resource_term_derived:
+                    resp.value, resp.percent_of_payment = resource_term_derived[t.id]
                 term_responses.append(resp)
 
             start_date, end_date = phase_dates.get(phase, (None, None))
@@ -699,7 +703,13 @@ class PaymentPageService:
         """Build responses for a set of term rows under one carry-forward pass
         (used by the payment-term list endpoint). Enriches partial-payment
         milestones with their activity split (resource milestones: cost-driven)."""
-        ordered, _, cf, cost_rows, all_terms = self._load_phase_state(project_id)
+        cost_rows = self.cost_items.list_all_live(project_id)
+        ms_map = self.cost_items.milestone_ids_by_cost_item([c.id for c in cost_rows])
+        # Override resource costs BEFORE the effective-base pass (see build_page).
+        cost_by_activity, resource_ms_ids, res_acts_by_ms = \
+            self._apply_resource_costs(cost_rows, ms_map)
+        ordered, _, cf, cost_rows, all_terms = self._load_phase_state(
+            project_id, cost_rows=cost_rows)
         _project = self._require_project(project_id)
         project_freq = _project.payment_frequency_code
         # A row's own total = its line total: transaction rows are
@@ -716,9 +726,10 @@ class PaymentPageService:
         term_acts = self.term_activities.list_for_terms([t.id for t in term_rows])
         ms_received = cf["milestone_received"]
         pct_overrides = _last_phase_percent_overrides(ordered, all_terms)
-        # Live per-activity resource cost across all partial milestones' activities.
-        all_partial_acts = [a for acts in activities_by_ms.values() for a in acts]
-        cost_by_activity = self._cost_by_activity(all_partial_acts)
+        # Resource-term value + derived % computed over ALL terms (this endpoint is
+        # paginated, so the phase resource total must span the whole phase).
+        resource_term_derived = self._resource_term_derived(
+            all_terms, resource_ms_ids, res_acts_by_ms, cost_by_activity)
         out: List[PaymentTermResponse] = []
         for t in term_rows:
             override = pct_overrides.get(t.id)
@@ -739,12 +750,10 @@ class PaymentPageService:
                     override if override is not None else t.percent_of_payment,
                     ms_pos.get(t.milestone_id),
                     cost_by_activity=cost_by_activity,
+                    is_resource=t.milestone_id in resource_ms_ids,
                 )
-                if any(a.id in cost_by_activity for a in ms_acts):
-                    resp.value = payment_calc.to_2dp(sum(
-                        (cost_by_activity.get(a.id, Decimal("0")) for a in ms_acts),
-                        Decimal("0"),
-                    ))
+            if t.id in resource_term_derived:
+                resp.value, resp.percent_of_payment = resource_term_derived[t.id]
             out.append(resp)
         return out
 
@@ -1201,10 +1210,17 @@ class PaymentPageService:
         term = self.payment_terms.get_by_id(term_id)
         if term is None:
             raise ValidationError("Payment term not found.", code="not_found")
-        ordered, _, cf, cost_rows, all_terms = self._load_phase_state(term.project_id)
+        cost_rows = self.cost_items.list_all_live(term.project_id)
+        ms_map = self.cost_items.milestone_ids_by_cost_item([c.id for c in cost_rows])
+        cost_by_activity, resource_ms_ids, res_acts_by_ms = \
+            self._apply_resource_costs(cost_rows, ms_map)
+        ordered, _, cf, cost_rows, all_terms = self._load_phase_state(
+            term.project_id, cost_rows=cost_rows)
         _project = self._require_project(term.project_id)
         project_freq = _project.payment_frequency_code
         effective_total = cf["effective_base"].get(term.phase, Decimal("0"))
+        resource_term_derived = self._resource_term_derived(
+            all_terms, resource_ms_ids, res_acts_by_ms, cost_by_activity)
         override = _last_phase_percent_overrides(ordered, all_terms).get(term.id)
         row_total = next(
             (payment_calc.row_total(c.cost, c.tax_amount)
@@ -1226,17 +1242,14 @@ class PaymentPageService:
                 [term.milestone_id]).get(term.milestone_id, [])
             ms_position = self.milestones.position_by_ids(
                 [term.milestone_id]).get(term.milestone_id)
-            cost_by_activity = self._cost_by_activity(ms_acts)
             resp.activities = _build_term_activities(
                 effective_total, ms_acts, self.term_activities.list_for_term(term_id),
                 override if override is not None else term.percent_of_payment, ms_position,
                 cost_by_activity=cost_by_activity,
+                is_resource=term.milestone_id in resource_ms_ids,
             )
-            if any(a.id in cost_by_activity for a in ms_acts):
-                resp.value = payment_calc.to_2dp(sum(
-                    (cost_by_activity.get(a.id, Decimal("0")) for a in ms_acts),
-                    Decimal("0"),
-                ))
+        if term.id in resource_term_derived:
+            resp.value, resp.percent_of_payment = resource_term_derived[term.id]
         return resp
 
     def _cost_by_activity(self, activities):
@@ -1261,18 +1274,24 @@ class PaymentPageService:
     def _apply_resource_costs(self, cost_rows, ms_map):
         """Set each ``resource_cost`` cost item's ``cost`` from its milestones'
         activities' SNAPSHOTTED planned-resource costs, and return
-        ``{activity_id: resource_cost}`` for the partial-payment breakup.
+        ``(cost_by_activity, resource_ms_ids, acts_by_ms)``.
+
+        ``resource_ms_ids`` = milestones bound to a ``resource_cost`` line — these
+        are the COST-DRIVEN milestones (even one with no resource activities and a
+        ₹0 cost). Callers use this set rather than "does any activity have a cost",
+        so a resource milestone never falls back to percent × base.
 
         The cost is set on the (detached) ORM rows in-memory so the payment math
         (line_total / phase_base_total / totals) consumes it unchanged — WITHOUT
-        writing to the DB (the page is a read)."""
+        writing to the DB (the page is a read). MUST be applied BEFORE the
+        carry-forward / effective-base pass so those use the derived cost too."""
         resource_ci = [
             c for c in cost_rows if c.cost_type_code == payment_calc.RESOURCE_COST
         ]
+        resource_ms_ids = {m for c in resource_ci for m in ms_map.get(c.id, [])}
         if not resource_ci:
-            return {}
-        res_ms_ids = sorted({m for c in resource_ci for m in ms_map.get(c.id, [])})
-        acts_by_ms = self.activities.list_by_milestone_ids(res_ms_ids)
+            return {}, resource_ms_ids, {}
+        acts_by_ms = self.activities.list_by_milestone_ids(sorted(resource_ms_ids))
         all_acts = [a for acts in acts_by_ms.values() for a in acts]
         cost_by_activity = self._cost_by_activity(all_acts)
         for c in resource_ci:
@@ -1284,7 +1303,30 @@ class PaymentPageService:
             )
             self.db.expunge(c)          # detach so the in-memory cost is not flushed
             c.cost = payment_calc.to_2dp(ci_total)
-        return cost_by_activity
+        return cost_by_activity, resource_ms_ids, acts_by_ms
+
+    def _resource_term_derived(self, terms, resource_ms_ids, acts_by_ms, cost_by_activity):
+        """``{term_id: (value, percent)}`` for resource (cost-driven) terms.
+
+        ``value`` = Σ the term milestone's activities' snapshotted resource cost;
+        ``percent`` = ``value / Σ(this phase's resource-term values) × 100`` — so a
+        lone resource milestone in a phase reads 100% and two unequal ones read
+        their true cost share (33.33 / 66.67), never a blank or even-split %.
+        Non-resource terms are omitted."""
+        val: dict = {}
+        for t in terms:
+            if t.milestone_id in resource_ms_ids:
+                v = sum((cost_by_activity.get(a.id, Decimal("0"))
+                         for a in acts_by_ms.get(t.milestone_id, [])), Decimal("0"))
+                val[t.id] = (t.phase, payment_calc.to_2dp(v))
+        phase_total: dict = {}
+        for phase, v in val.values():
+            phase_total[phase] = phase_total.get(phase, Decimal("0")) + v
+        out: dict = {}
+        for tid, (phase, v) in val.items():
+            tot = phase_total.get(phase, Decimal("0"))
+            out[tid] = (v, payment_calc.to_2dp(v / tot * Decimal("100")) if tot > 0 else Decimal("0"))
+        return out
 
     def _require_project(self, project_id: str):
         project = self.projects.get_by_id(project_id)
@@ -1526,22 +1568,27 @@ def _payment_term_response(
 
 def _build_term_activities(
     phase_base: Decimal, activities, allocations, term_percent=None, milestone_position=None,
-    cost_by_activity=None,
+    cost_by_activity=None, is_resource=False,
 ) -> List[PaymentTermActivityResponse]:
     """One response per milestone ACTIVITY (so the FE can show the full set).
 
-    For a **resource-based** milestone (any activity present in
-    ``cost_by_activity``), each activity's ``value`` is its RESOURCE COST
-    (rate × qty × duration, resolved live) and its ``percent_of_payment`` is
-    derived (``activityCost / Σ costs × 100``). Otherwise percent comes from the
-    stored split (``allocations``) or an EVEN division of ``term_percent``, and
-    value = ``percent × phase base``. Display code is ``A<milestonePos>.<activityPos>``."""
+    For a **resource-based** milestone (``is_resource`` — decided at the MILESTONE
+    level by the caller, i.e. it is bound to a ``resource_cost`` line), each
+    activity's ``value`` is its RESOURCE COST (rate × qty × duration, snapshotted)
+    and its ``percent_of_payment`` is derived (``activityCost / Σ costs × 100``);
+    an activity with no resources reads ₹0. Otherwise percent comes from the stored
+    split (``allocations``) or an EVEN division of ``term_percent``, and value =
+    ``percent × phase base``. Display code is ``A<milestonePos>.<activityPos>``.
+
+    NOTE: ``is_resource`` is NO LONGER inferred from "some activity has a cost" — a
+    resource milestone with no resource-bearing activities must still price each
+    activity at its resource cost (0), never percent × base (which fabricated large
+    ₹ amounts from the phase base)."""
     out: List[PaymentTermActivityResponse] = []
     if not activities:
         return out
 
     cost_by_activity = cost_by_activity or {}
-    is_resource = any(a.id in cost_by_activity for a in activities)
     resource_total = sum(
         (cost_by_activity.get(a.id, Decimal("0")) for a in activities), Decimal("0"),
     )

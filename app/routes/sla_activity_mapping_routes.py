@@ -344,12 +344,29 @@ def evaluate_by_sla_ref(
 def evaluate_activity_bulk(
     activity_id: str,
     payload: BulkEvaluationRequest,
+    db: Annotated[Session, Depends(get_db)],
     ctrl: SlaActivityMappingController = Depends(get_sla_activity_mapping_controller),
+    user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)] = None,
     bearer_token: Optional[str] = Depends(get_bearer_token),
 ):
     result = ctrl.evaluate_activity_bulk(
         activity_id, payload, bearer_token=bearer_token,
     )
+    # Persist every observation in the bulk map, same as the single-SLA path —
+    # otherwise "evaluate all" would score without saving. Per-SLA failures are
+    # logged, never raised, so one bad value can't drop the whole response.
+    compliance = SlaComplianceService(db)
+    for sla_ref, value in (payload.observations or {}).items():
+        try:
+            compliance.record_observation_for_ref(
+                activity_id=activity_id, sla_ref=sla_ref,
+                observed_value=value, recorded_by=user_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            _eval_logger.warning(
+                "evaluate_activity_bulk: failed to persist observation for "
+                "activity=%s sla_ref=%s: %s", activity_id, sla_ref, exc,
+            )
     return api_response(
         data=hal_resource(
             "ActivityEvaluation",

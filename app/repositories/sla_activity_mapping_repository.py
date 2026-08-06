@@ -118,15 +118,22 @@ class SlaActivityMappingRepository:
         return (row[0], row[1], row[2])
 
     def list_by_sla(
-        self, sla_id: str
+        self, sla_id: str, *, active_only: bool = True
     ) -> List[Tuple[SlaActivityMapping, SlaDefinition, Optional[str]]]:
         """All mappings attached to a given SLA template — for the FE's
-        'Mapped Activities' panel on the SLA detail view."""
+        'Mapped Activities' panel on the SLA detail view.
+
+        Mirrors ``list_for_activity``: retired mappings are hidden by default
+        so a retired mapping stops appearing in the list. Pass
+        ``active_only=False`` to include retired rows.
+        """
         stmt = (
             select(SlaActivityMapping, SlaDefinition, FormulaLibrary.formula_type)
             .join(SlaDefinition, SlaActivityMapping.sla_id == SlaDefinition.id)
             .join(FormulaLibrary, SlaDefinition.formula_id == FormulaLibrary.id, isouter=True)
             .where(SlaActivityMapping.sla_id == sla_id)
-            .order_by(SlaActivityMapping.effective_from.desc())
         )
+        if active_only:
+            stmt = stmt.where(SlaActivityMapping.status == "ACTIVE")
+        stmt = stmt.order_by(SlaActivityMapping.effective_from.desc())
         return [(r[0], r[1], r[2]) for r in self.db.execute(stmt).all()]

@@ -62,9 +62,9 @@ class SlaActivityMappingController:
         return self.service.list_for_activity(activity_id, active_only=active_only)
 
     def list_for_sla(
-        self, sla_id: str
+        self, sla_id: str, active_only: bool = True
     ) -> List[SlaActivityMappingResponse]:
-        return self.service.list_for_sla(sla_id)
+        return self.service.list_for_sla(sla_id, active_only=active_only)
 
     # ------------------------------------------------------------------ evaluate
 

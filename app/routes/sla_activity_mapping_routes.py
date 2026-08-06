@@ -117,12 +117,15 @@ def list_mappings(
 )
 def list_all_mappings(
     sla_id: Optional[str] = None,
+    active_only: bool = True,
     ctrl: SlaActivityMappingController = Depends(get_sla_activity_mapping_controller),
 ):
     # The FE's SLA-detail view fetches `/sla-activity-mappings?sla_id=…` to
-    # show "Mapped Activities" for the template being viewed.
+    # show "Mapped Activities" for the template being viewed. Retired mappings
+    # are hidden by default (active_only=True) so a retired mapping stops
+    # appearing here; pass active_only=false to include them.
     if sla_id:
-        items = ctrl.list_for_sla(sla_id)
+        items = ctrl.list_for_sla(sla_id, active_only=active_only)
     else:
         items = []
     elements = [

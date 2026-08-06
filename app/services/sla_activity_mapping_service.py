@@ -175,10 +175,14 @@ class SlaActivityMappingService:
         ]
 
     def list_for_sla(
-        self, sla_id: str
+        self, sla_id: str, *, active_only: bool = True
     ) -> List[SlaActivityMappingResponse]:
-        """Used by the SLA detail view to show 'Mapped Activities'."""
-        rows = self.repo.list_by_sla(sla_id)
+        """Used by the SLA detail view to show 'Mapped Activities'.
+
+        ``active_only`` (default True) hides retired mappings so a retired
+        mapping drops off the list, matching ``list_for_activity``.
+        """
+        rows = self.repo.list_by_sla(sla_id, active_only=active_only)
         return [
             self._to_response(m, sla.sla_ref, sla.title, sla.contract_type, ft,
                               category=sla.category)

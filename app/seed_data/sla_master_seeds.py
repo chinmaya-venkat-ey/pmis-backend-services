@@ -802,30 +802,35 @@ PMU_SEEDS: List[Dict[str, Any]] = [
          # highest severity seen across either metric — which is the
          # right answer when both metrics drift together (BD drops →
          # hours drop). The guard catches the drift-apart case.
+         # Band ranges follow the evaluator's min-EXCLUSIVE / max-INCLUSIVE
+         # convention (value > range_min AND value <= range_max), so an
+         # inclusive ">= 16" threshold is encoded as range_min = 15 (like
+         # SLA006 encodes ">= 20" as range_min = 19). Getting this wrong
+         # mis-scores the boundary values (16 BD -> Sev0, 12 BD -> Sev2).
          condition_bands=[
              {"metric_key": "resource_business_days",
               "band_label": "L0 >=16 BD",
-              "range_min": "16", "range_max": None,
+              "range_min": "15", "range_max": None,
               "range_unit": "days", "severity_level": 0, "sort_order": 1},
              {"metric_key": "resource_business_days",
               "band_label": "L2 12-15 BD",
-              "range_min": "12", "range_max": "16",
+              "range_min": "11", "range_max": "15",
               "range_unit": "days", "severity_level": 2, "sort_order": 2},
              {"metric_key": "resource_business_days",
               "band_label": "L4 <12 BD",
-              "range_min": None, "range_max": "12",
+              "range_min": None, "range_max": "11",
               "range_unit": "days", "severity_level": 4, "sort_order": 3},
              {"metric_key": "resource_logged_hours",
               "band_label": "L0 >=144 hrs",
-              "range_min": "144", "range_max": None,
+              "range_min": "143", "range_max": None,
               "range_unit": "hours", "severity_level": 0, "sort_order": 4},
              {"metric_key": "resource_logged_hours",
               "band_label": "L2 108-135 hrs",
-              "range_min": "108", "range_max": "144",
+              "range_min": "107", "range_max": "135",
               "range_unit": "hours", "severity_level": 2, "sort_order": 5},
              {"metric_key": "resource_logged_hours",
               "band_label": "L4 <108 hrs",
-              "range_min": None, "range_max": "108",
+              "range_min": None, "range_max": "107",
               "range_unit": "hours", "severity_level": 4, "sort_order": 6},
          ],
          guard_conditions=[

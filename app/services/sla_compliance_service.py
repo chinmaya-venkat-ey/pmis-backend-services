@@ -167,6 +167,31 @@ class SlaComplianceService:
             )
         return row
 
+    def record_observation_for_ref(
+        self, *, activity_id: str, sla_ref: str, observed_value: Any,
+        metric_key: Optional[str] = None, source: str = "recorded",
+        recorded_by: Optional[str] = None,
+    ) -> Optional[SlaObservation]:
+        """Persist an observed value keyed by (activity_id, sla_ref).
+
+        The FE's "Evaluate" button POSTs to /sla-evaluate/{sla_ref} expecting
+        the value to be SAVED (not just computed). That path was compute-only,
+        so manual/resource observations were never persisted. This resolves the
+        active mapping and delegates to record_observation, which saves the
+        observation AND auto-evaluates it. Returns None when there is no active
+        mapping (the caller has already computed a display result and should
+        not fail on the save)."""
+        loaded = self.mapping_repo.find_by_activity_and_sla_ref(
+            activity_id, sla_ref, active_only=True,
+        )
+        if loaded is None:
+            return None
+        mapping, _sla, _ft = loaded
+        return self.record_observation(
+            mapping_id=mapping.id, observed_value=observed_value,
+            metric_key=metric_key, source=source, recorded_by=recorded_by,
+        )
+
     def _latest_observation(self, mapping_id: str) -> Optional[SlaObservation]:
         return self.db.execute(
             select(SlaObservation).where(SlaObservation.mapping_id == mapping_id)

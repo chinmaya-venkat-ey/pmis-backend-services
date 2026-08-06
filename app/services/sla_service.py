@@ -921,9 +921,23 @@ class SlaService:
                 )
 
         # ── target_rows ──
+        # The onboarding FE has historically stashed target_rows with only the
+        # severity populated and from_value/to_value/threshold_label left NULL
+        # (80+ live SLAs are like this). Preferring such a stash blanks the
+        # severity table on edit — the reported "values not reflecting" bug.
+        # So: use the stash only when its rows actually carry threshold data;
+        # otherwise reverse-engineer from the authoritative condition_bands
+        # (which the evaluator uses and are always complete).
+        def _stash_row_has_data(r) -> bool:
+            return any(
+                r.get(k) not in (None, "")
+                for k in ("from_value", "to_value", "threshold_label", "rate_percent")
+            )
+
+        stash_target_rows = stash.get("target_rows") or []
         target_rows: List = []
-        if stash.get("target_rows"):
-            target_rows = [SlaSimpleTargetRow(**r) for r in stash["target_rows"]]
+        if stash_target_rows and any(_stash_row_has_data(r) for r in stash_target_rows):
+            target_rows = [SlaSimpleTargetRow(**r) for r in stash_target_rows]
         elif bands:
             for b in sorted(bands, key=lambda x: x.sort_order or 0):
                 target_rows.append(SlaSimpleTargetRow(
@@ -932,6 +946,7 @@ class SlaService:
                     threshold_label=b.band_label or "",
                     from_value=str(b.range_min) if b.range_min is not None else None,
                     to_value=str(b.range_max) if b.range_max is not None else None,
+                    input_variable=b.metric_key,
                 ))
 
         # ── linear_escalation ──

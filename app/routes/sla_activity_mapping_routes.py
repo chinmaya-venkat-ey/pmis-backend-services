@@ -11,9 +11,10 @@ POST   /api/v3/activities/{activity_id}/evaluate               fan-out across al
 """
 from __future__ import annotations
 
-from typing import Optional
+from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
 
 from app.controllers.sla_activity_mapping_controller import (
     SlaActivityMappingController,
@@ -30,11 +31,16 @@ from app.core.openapi_examples import (
     with_examples,
 )
 from app.core.response import api_response, hal_collection, hal_resource
+from app.db import get_db
 from app.dependencies import (
     get_bearer_token,
     get_optional_current_user_id,
     get_sla_activity_mapping_controller,
 )
+from app.services.sla_compliance_service import SlaComplianceService
+from app.utilities.logger import get_logger
+
+_eval_logger = get_logger(__name__)
 from app.schemas.sla_activity_mapping import (
     SlaActivityMappingCreateRequest,
     SlaActivityMappingUpdateRequest,
@@ -285,12 +291,28 @@ def evaluate_by_sla_ref(
     activity_id: str,
     sla_ref: str,
     payload: SimpleEvaluationRequest,
+    db: Annotated[Session, Depends(get_db)],
     ctrl: SlaActivityMappingController = Depends(get_sla_activity_mapping_controller),
+    user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)] = None,
     bearer_token: Optional[str] = Depends(get_bearer_token),
 ):
     result = ctrl.evaluate_by_sla_ref(
         activity_id, sla_ref, payload, bearer_token=bearer_token,
     )
+    # Persist the observed value + result. The FE "Evaluate" button expects the
+    # value to be SAVED here (see ActivitySlasPage), not just computed — this
+    # path was previously compute-only, leaving observations unsaved. Failures
+    # must not break the response the caller already has.
+    try:
+        SlaComplianceService(db).record_observation_for_ref(
+            activity_id=activity_id, sla_ref=sla_ref,
+            observed_value=payload.value, recorded_by=user_id,
+        )
+    except Exception as exc:  # noqa: BLE001
+        _eval_logger.warning(
+            "evaluate_by_sla_ref: failed to persist observation for "
+            "activity=%s sla_ref=%s: %s", activity_id, sla_ref, exc,
+        )
     return api_response(
         data=hal_resource(
             "MappingEvaluation",

@@ -141,8 +141,14 @@ class SlaActivityMappingService:
                     code="invalid_effective_range",
                 )
 
+        was_active = mapping.status != "RETIRED"
         if updates:
             mapping = self.repo.update(mapping, **updates)
+
+        # When a PATCH retires the mapping, wipe its evaluation footprint so the
+        # SLA stops surfacing in compliance views and stops feeding settlement.
+        if was_active and mapping.status == "RETIRED":
+            self._purge_evaluation_footprint(mapping.id)
 
         return self._to_response(
             mapping, sla.sla_ref, sla.title, sla.contract_type, formula_type,
@@ -157,10 +163,36 @@ class SlaActivityMappingService:
         if mapping.status == "RETIRED":
             raise ConflictError("Mapping is already retired", code="already_retired")
         mapping = self.repo.update(mapping, status="RETIRED")
+        # Retiring must remove the mapping completely: delete the evaluation
+        # results and quarterly-aggregate rows it produced while ACTIVE, else a
+        # wrongly-mapped SLA keeps showing evaluations and counting toward LD.
+        self._purge_evaluation_footprint(mapping.id)
         return self._to_response(
             mapping, sla.sla_ref, sla.title, sla.contract_type, formula_type,
             category=sla.category,
         )
+
+    def _purge_evaluation_footprint(self, mapping_id: str) -> None:
+        """Delete all evaluation results + quarterly aggregates for a mapping.
+
+        Called when a mapping is retired so its prior evaluations no longer
+        appear in compliance/settlement reads. The SLA definition, the mapping
+        row (now RETIRED), and recorded observations are left intact."""
+        from sqlalchemy import delete
+        from app.models.sla_evaluation_result import SlaEvaluationResult
+        from app.models.sla_quarterly_aggregate import SlaQuarterlyAggregate
+
+        self.db.execute(
+            delete(SlaEvaluationResult).where(
+                SlaEvaluationResult.mapping_id == mapping_id
+            )
+        )
+        self.db.execute(
+            delete(SlaQuarterlyAggregate).where(
+                SlaQuarterlyAggregate.mapping_id == mapping_id
+            )
+        )
+        self.db.commit()
 
     # ---------------------------------------------------------------- read
 

@@ -67,9 +67,11 @@ class WorkflowClient:
         action: str,
         request_info: Dict[str, Any],
         comment: Optional[str] = None,
+        bearer: Optional[str] = None,
     ) -> Dict[str, Any]:
         """POST a single transition. Returns the parsed JSON body on
-        success; raises ``WorkflowServiceError`` otherwise."""
+        success; raises ``WorkflowServiceError`` otherwise. ``bearer`` is the
+        caller's Authorization header, forwarded so Java authenticates the call."""
         body = {
             "RequestInfo": request_info,
             "ProcessInstances": [{
@@ -96,27 +98,31 @@ class WorkflowClient:
                      }},
                 ],
             }
-        return self._post(_TRANSITION_PATH, body)
+        return self._post(_TRANSITION_PATH, body, bearer=bearer)
 
     # ── reads ────────────────────────────────────────────────────────────
 
-    def search_history(self, business_id: str) -> List[Dict[str, Any]]:
+    def search_history(self, business_id: str, bearer: Optional[str] = None) -> List[Dict[str, Any]]:
         """GET the transition history for a single activity. Returns the
-        raw ``ProcessInstances`` list (may be empty)."""
+        raw ``ProcessInstances`` list (may be empty). ``bearer`` = the caller's
+        Authorization header, forwarded so Java authenticates the read."""
         if self.mode == "mock":
             logger.info("[MOCK WORKFLOW] search_history businessId=%s", business_id)
             return _mock_history(business_id)
         path = _SEARCH_PATH_TEMPLATE.format(business_id=business_id)
-        body = self._get(path)
+        body = self._get(path, bearer=bearer)
         return list(body.get("ProcessInstances") or [])
 
     # ── internals ────────────────────────────────────────────────────────
 
-    def _post(self, path: str, body: Dict[str, Any]) -> Dict[str, Any]:
+    def _post(self, path: str, body: Dict[str, Any], bearer: Optional[str] = None) -> Dict[str, Any]:
         url = f"{self.base_url}{path}"
+        headers = {"Accept": "application/json"}
+        if bearer:
+            headers["Authorization"] = bearer
         try:
             with httpx.Client(timeout=self.timeout) as client:
-                resp = client.post(url, json=body)
+                resp = client.post(url, json=body, headers=headers)
         except httpx.HTTPError as exc:
             logger.error("Workflow POST failed: %s", exc)
             raise WorkflowServiceError(str(exc), details={"url": url}) from exc
@@ -134,11 +140,14 @@ class WorkflowClient:
         except ValueError as exc:
             raise WorkflowServiceError("Invalid JSON from workflow service") from exc
 
-    def _get(self, path: str) -> Dict[str, Any]:
+    def _get(self, path: str, bearer: Optional[str] = None) -> Dict[str, Any]:
         url = f"{self.base_url}{path}"
+        headers = {"Accept": "application/json"}
+        if bearer:
+            headers["Authorization"] = bearer
         try:
             with httpx.Client(timeout=self.timeout) as client:
-                resp = client.get(url, headers={"Accept": "application/json"})
+                resp = client.get(url, headers=headers)
         except httpx.HTTPError as exc:
             logger.error("Workflow GET failed: %s", exc)
             raise WorkflowServiceError(str(exc), details={"url": url}) from exc

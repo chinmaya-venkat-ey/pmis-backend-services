@@ -91,6 +91,10 @@ class CallerContext:
     # call sites (still constructing CallerContext positionally) keep
     # working until updated.
     permissions: Set[str] = field(default_factory=set)
+    # The caller's raw Authorization header ("Bearer <jwt>"), forwarded to the
+    # Java workflow service (it validates the token; an empty authToken is
+    # rejected outside a trusted-network dev setup).
+    bearer: Optional[str] = None
 
 
 class ApprovalInboxService:
@@ -279,6 +283,7 @@ class ApprovalInboxService:
                 action=action,
                 request_info=self._build_request_info(ctx, tracker),
                 comment=comment,
+                bearer=ctx.bearer,
             )
         except WorkflowServiceError as exc:
             raise ConflictError(
@@ -337,7 +342,7 @@ class ApprovalInboxService:
         effective_role: str,
     ) -> InboxDetailResponse:
         activity, milestone, project, vendor = self._hydrate_pmis_context(tracker)
-        history = self._fetch_history_safe(tracker.business_id)
+        history = self._fetch_history_safe(tracker.business_id, bearer=ctx.bearer)
         # Re-sync the local cache from Java's authoritative history and,
         # when the workflow has reached its terminal (owner-approved) state,
         # finalize the activity + roll the milestone up. Idempotent — a
@@ -394,6 +399,7 @@ class ApprovalInboxService:
         return CallerContext(
             user_id=uid, division=division, role_codes=roles,
             is_admin=is_admin, permissions=set(perms),
+            bearer=request.headers.get("authorization"),
         )
 
     def _caller_division(self, user_id: str) -> Optional[str]:
@@ -580,9 +586,9 @@ class ApprovalInboxService:
 
     # ── Java history → display fields ────────────────────────────────────
 
-    def _fetch_history_safe(self, business_id: str) -> List[dict]:
+    def _fetch_history_safe(self, business_id: str, bearer: Optional[str] = None) -> List[dict]:
         try:
-            return self.client.search_history(business_id)
+            return self.client.search_history(business_id, bearer=bearer)
         except WorkflowServiceError as exc:
             logger.warning(
                 "Workflow service unavailable for %s; using cached state. (%s)",
@@ -961,8 +967,14 @@ class ApprovalInboxService:
         ).scalar_one_or_none()
         login = (user_row.login if user_row else ctx.user_id)
         full_name = (user_row.full_name if user_row else None) or login
+        token = (ctx.bearer or "")
+        for pfx in ("Bearer ", "bearer "):
+            if token.startswith(pfx):
+                token = token[len(pfx):]
         return {
-            "authToken": "",  # Java accepts empty when network is trusted (dev).
+            # Forward the caller's token so the Java workflow service authenticates
+            # the transition (empty is rejected outside a trusted-network dev setup).
+            "authToken": token.strip(),
             "userInfo": {
                 "uuid": ctx.user_id,
                 "userName": login,

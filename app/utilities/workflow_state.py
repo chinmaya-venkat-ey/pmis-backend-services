@@ -177,15 +177,24 @@ def build_java_roles(
     """
     seen: set[str] = set()
     out: list[dict] = []
+
+    def add(code: str) -> None:
+        # The Java workflow's action-role check is CASE-SENSITIVE
+        # (TransitionValidator matches role codes with an exact List.contains),
+        # and the deployed action config uses LOWER-case codes (e.g. SUBMIT
+        # requires 'super_admin'/'project_admin'). Emit both cases so the caller
+        # matches whichever case a given action was seeded with.
+        for c in (code.lower(), code.upper()):
+            if c not in seen:
+                seen.add(c)
+                out.append({"code": c, "name": c.replace("_", " ").title()})
+
     for code in (pmis_role_codes or []):
         java = _PMIS_ROLE_TO_JAVA_ROLE.get((code or "").lower())
-        if java and java not in seen:
-            seen.add(java)
-            out.append({"code": java, "name": java.replace("_", " ").title()})
-    if is_concerned_division and "CONCERNED_DIVISION" not in seen:
-        seen.add("CONCERNED_DIVISION")
-        out.append({"code": "CONCERNED_DIVISION", "name": "Concerned Division"})
-    if is_owner_division and "OWNER_DIVISION" not in seen:
-        seen.add("OWNER_DIVISION")
-        out.append({"code": "OWNER_DIVISION", "name": "Owner Division"})
+        if java:
+            add(java)
+    if is_concerned_division:
+        add("concerned_division")
+    if is_owner_division:
+        add("owner_division")
     return out

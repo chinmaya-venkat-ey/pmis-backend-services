@@ -191,6 +191,76 @@ def contract_totals(items) -> dict:
     }
 
 
+def line_pretax(item) -> Decimal:
+    """PRE-tax portion of a cost row: transaction rows =
+    ``per_transaction_cost × planned_transactions``; every other type = ``cost``.
+    (``line_total = line_pretax + line_tax``.)"""
+    if _code(item) == TRANSACTION_COST:
+        return transaction_total(
+            getattr(item, "per_transaction_cost", None),
+            getattr(item, "planned_transactions", None),
+        )
+    return _round_money(_to_decimal(getattr(item, "cost", None)))
+
+
+def line_tax(item) -> Decimal:
+    """The tax portion of a cost row (``tax_amount``, an exact ₹)."""
+    return _round_money(_to_decimal(getattr(item, "tax_amount", None)))
+
+
+def phase_base_pretax(items, phase) -> Decimal:
+    """Σ ``line_pretax`` of the PHASE cost lines (fixed+resource+transaction) in
+    ``phase`` — the delivery base BEFORE tax (one-time excluded)."""
+    total = _ZERO
+    for it in items:
+        if _code(it) in PHASE_COST_TYPES and getattr(it, "phase", None) == phase:
+            total += line_pretax(it)
+    return _round_money(total)
+
+
+def phase_base_tax(items, phase) -> Decimal:
+    """Σ ``line_tax`` of the PHASE cost lines in ``phase`` — the tax on the
+    delivery base (one-time excluded). ``phase_base_total = pretax + tax``."""
+    total = _ZERO
+    for it in items:
+        if _code(it) in PHASE_COST_TYPES and getattr(it, "phase", None) == phase:
+            total += line_tax(it)
+    return _round_money(total)
+
+
+def one_time_pool_split(items):
+    """``(pretax, tax, total)`` over the ONE_TIME cost rows (the pool that
+    ``one_time_distribution`` hands out to phases)."""
+    pre = _ZERO
+    tax = _ZERO
+    for it in items:
+        if _code(it) == ONE_TIME:
+            pre += line_pretax(it)
+            tax += line_tax(it)
+    return _round_money(pre), _round_money(tax), _round_money(pre + tax)
+
+
+def contract_totals_split(items) -> dict:
+    """Pre-tax + tax split of ``contract_totals``: ``{code: {'pretax':, 'tax':}}``
+    per bucket plus ``total``. Lets the totals panel show before-tax vs tax."""
+    codes = (FIXED, ONE_TIME, RESOURCE_COST, TRANSACTION_COST, RECURRING_COST)
+    out = {c: {"pretax": _ZERO, "tax": _ZERO} for c in codes}
+    tp = tt = _ZERO
+    for it in items:
+        c = _code(it)
+        pre, tax = line_pretax(it), line_tax(it)
+        tp += pre
+        tt += tax
+        if c in out:
+            out[c]["pretax"] += pre
+            out[c]["tax"] += tax
+    for c in out:
+        out[c]["pretax"] = _round_money(out[c]["pretax"])
+        out[c]["tax"] = _round_money(out[c]["tax"])
+    out["total"] = {"pretax": _round_money(tp), "tax": _round_money(tt)}
+    return out
+
+
 def phase_expense_total(items, phase) -> Decimal:
     """Σ line total (full value) of the RESOURCE / TRANSACTION rows in ``phase``."""
     total = _ZERO

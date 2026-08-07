@@ -327,6 +327,7 @@ class PaymentPageService:
         }
 
         totals_d = payment_calc.contract_totals(cost_rows)
+        split = payment_calc.contract_totals_split(cost_rows)
         totals = PaymentTotals(
             total_contract_cost=totals_d["total_contract_cost"],
             fixed_cost=totals_d["fixed_cost"],
@@ -334,7 +335,21 @@ class PaymentPageService:
             resource_cost=totals_d["resource_cost"],
             transaction_cost=totals_d["transaction_cost"],
             recurring_cost=totals_d["recurring_cost"],
+            total_contract_cost_pretax=split["total"]["pretax"],
+            total_contract_cost_tax=split["total"]["tax"],
+            fixed_cost_pretax=split[payment_calc.FIXED]["pretax"],
+            fixed_cost_tax=split[payment_calc.FIXED]["tax"],
+            one_time_cost_pretax=split[payment_calc.ONE_TIME]["pretax"],
+            one_time_cost_tax=split[payment_calc.ONE_TIME]["tax"],
+            resource_cost_pretax=split[payment_calc.RESOURCE_COST]["pretax"],
+            resource_cost_tax=split[payment_calc.RESOURCE_COST]["tax"],
+            transaction_cost_pretax=split[payment_calc.TRANSACTION_COST]["pretax"],
+            transaction_cost_tax=split[payment_calc.TRANSACTION_COST]["tax"],
+            recurring_cost_pretax=split[payment_calc.RECURRING_COST]["pretax"],
+            recurring_cost_tax=split[payment_calc.RECURRING_COST]["tax"],
         )
+        # One-time pool pre-tax/tax split (used to split each phase's one-time share).
+        ot_pool_pre, ot_pool_tax, ot_pool_total = payment_calc.one_time_pool_split(cost_rows)
 
         # Recurring schedules honour each row's OWN frequency (falling back to
         # the project frequency). Built once here: per-row for the cost-item
@@ -369,10 +384,28 @@ class PaymentPageService:
             phase_fixed = payment_calc.phase_fixed_total(cost_rows, phase)
             phase_base = payment_calc.phase_base_total(cost_rows, phase)
             effective_total = cf["effective_base"].get(phase, phase_base)
+            # Pre-tax/tax split of the delivery base + this phase's one-time share,
+            # for the per-milestone breakup (item: tax-free, one-time-excluded SLA base).
+            phase_base_pre = payment_calc.phase_base_pretax(cost_rows, phase)
+            phase_base_tx = payment_calc.phase_base_tax(cost_rows, phase)
+            ot_alloc = getattr(self, "_one_time_alloc", {}).get(phase, Decimal("0"))
+            if ot_pool_total > 0:
+                ot_alloc_pre = payment_calc.to_2dp(ot_alloc * ot_pool_pre / ot_pool_total)
+                ot_alloc_tx = payment_calc.to_2dp(ot_alloc - ot_alloc_pre)
+            else:
+                ot_alloc_pre, ot_alloc_tx = ot_alloc, Decimal("0")
             # Resource + transaction subtotal on this phase (informational — their
             # value is already part of the base that milestone %s split).
             expense_total = payment_calc.phase_expense_total(cost_rows, phase)
-            terms_in_phase = [t for t in term_rows if t.phase == phase]
+            # Order milestones WITHIN a phase by their PLANNED start date (then end,
+            # then position). The stored `position` is a project-wide creation /
+            # reconcile counter, NOT date order — so a milestone with an earlier
+            # planned start but created later would otherwise sort after. Phases
+            # themselves are already date-ordered (see _order_phases).
+            terms_in_phase = sorted(
+                (t for t in term_rows if t.phase == phase),
+                key=lambda t: _term_order_key(ms_dates.get(t.milestone_id, (None, None)), t.position),
+            )
             term_responses = []
             for t in terms_in_phase:
                 override = pct_overrides.get(t.id)
@@ -401,6 +434,11 @@ class PaymentPageService:
                 # resource cost, percent = derived cost-share (never even-split/null).
                 if t.id in resource_term_derived:
                     resp.value, resp.percent_of_payment = resource_term_derived[t.id]
+                # Tax + delivery/one-time breakup — AFTER the resource override so it
+                # uses the FINAL percent (item 1).
+                _apply_value_breakup(resp, phase_base_pre, phase_base_tx,
+                                     ot_alloc_pre, ot_alloc_tx,
+                                     is_resource=t.milestone_id in resource_ms_ids)
                 term_responses.append(resp)
 
             start_date, end_date = phase_dates.get(phase, (None, None))
@@ -467,6 +505,8 @@ class PaymentPageService:
                 sequence=idx + 1,
                 phase_fixed_total=phase_fixed,
                 phase_base_total=phase_base,
+                phase_base_pretax=phase_base_pre,
+                phase_base_tax=phase_base_tx,
                 effective_phase_total=effective_total,
                 one_time_allocated=getattr(self, "_one_time_alloc", {}).get(phase, Decimal("0.00")),
                 # An explicit OPE share is honoured ONLY for phases that take
@@ -754,6 +794,12 @@ class PaymentPageService:
                 )
             if t.id in resource_term_derived:
                 resp.value, resp.percent_of_payment = resource_term_derived[t.id]
+            # Tax + delivery breakup (one-time split is a payment-page concept, so
+            # ot=0 here — this endpoint doesn't run the one-time distribution).
+            _apply_value_breakup(
+                resp, payment_calc.phase_base_pretax(cost_rows, t.phase),
+                payment_calc.phase_base_tax(cost_rows, t.phase), Decimal("0"), Decimal("0"),
+                is_resource=t.milestone_id in resource_ms_ids)
             out.append(resp)
         return out
 
@@ -1250,6 +1296,10 @@ class PaymentPageService:
             )
         if term.id in resource_term_derived:
             resp.value, resp.percent_of_payment = resource_term_derived[term.id]
+        _apply_value_breakup(
+            resp, payment_calc.phase_base_pretax(cost_rows, term.phase),
+            payment_calc.phase_base_tax(cost_rows, term.phase), Decimal("0"), Decimal("0"),
+            is_resource=term.milestone_id in resource_ms_ids)
         return resp
 
     def _cost_by_activity(self, activities):
@@ -1531,6 +1581,51 @@ def _ld_basis_overrides(term_rows, recurring_phases=frozenset()) -> dict:
         for t, p in zip(null_terms, shares):
             out[t.id] = p
     return out
+
+
+def _apply_value_breakup(resp, phase_base_pretax, phase_base_tax,
+                         ot_alloc_pretax, ot_alloc_tax, is_resource=False):
+    """Populate the pre-tax/tax + delivery/one-time breakup on a term response.
+    Always reconciles: deliveryPreTax+deliveryTax=delivery; +oneTime(+carry)=total
+    =preTax+tax. ``ldBasisPreTaxValue`` is the DELIVERY, TAX-FREE, one-time-excluded
+    LD base (for SLA). For a RESOURCE term the delivery pre-tax = the EXACT derived
+    resource cost (``resp.value``) — NOT ``pct × base`` — so the 2dp-rounded cost-share
+    percent doesn't drift it; its tax is the proportional share of the phase's tax."""
+    pct = resp.percent_of_payment or Decimal("0")
+    ld = resp.ld_basis_percent or Decimal("0")
+    if is_resource:
+        d_pre = resp.value or Decimal("0")
+        d_tax = (payment_calc.to_2dp(d_pre * phase_base_tax / phase_base_pretax)
+                 if phase_base_pretax > 0 else Decimal("0"))
+        o_pre = o_tax = Decimal("0")   # resource milestones are cost-driven; no one-time share
+    else:
+        d_pre = payment_calc.payment_value(pct, phase_base_pretax)
+        d_tax = payment_calc.payment_value(pct, phase_base_tax)
+        o_pre = payment_calc.payment_value(pct, ot_alloc_pretax)
+        o_tax = payment_calc.payment_value(pct, ot_alloc_tax)
+    carry = resp.carry_received or Decimal("0")
+    resp.delivery_pretax_value = d_pre
+    resp.delivery_tax_value = d_tax
+    resp.delivery_value = payment_calc.to_2dp(d_pre + d_tax)
+    resp.one_time_pretax_value = o_pre
+    resp.one_time_tax_value = o_tax
+    resp.one_time_value = payment_calc.to_2dp(o_pre + o_tax)
+    resp.tax_value = payment_calc.to_2dp(d_tax + o_tax)
+    resp.pre_tax_value = payment_calc.to_2dp(d_pre + o_pre + carry)
+    resp.total_value = payment_calc.to_2dp(resp.pre_tax_value + resp.tax_value)
+    resp.ld_basis_pretax_value = payment_calc.payment_value(ld, phase_base_pretax)
+
+
+def _term_order_key(dates, position):
+    """Sort key for milestones within a phase: PLANNED start, then end, then the
+    stored position — undated milestones sort last. Uses ``.timestamp()`` so
+    tz-aware and NULL dates compare cleanly (None never compared directly)."""
+    start, end = dates
+    return (
+        start is None, start.timestamp() if start is not None else 0.0,
+        end is None, end.timestamp() if end is not None else 0.0,
+        position if position is not None else 0,
+    )
 
 
 def _payment_term_response(

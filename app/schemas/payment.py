@@ -224,6 +224,24 @@ class PaymentTermResponse(ResponseModel):
     ld_basis_value: Decimal = Decimal("0.00")  # derived: ldBasis% × phase EFFECTIVE base
     row_total: Decimal = Decimal("0.00")      # the cost row's own total (informational)
     value: Decimal = Decimal("0.00")          # derived: percent × phase EFFECTIVE total + carryReceived
+    # ── Tax + delivery/one-time breakup ──────────────────────────────────────
+    # `value` above is the LEGACY number (post-tax for fixed terms, the pre-tax
+    # resource cost for resource terms). The fields below give a CONSISTENT split
+    # for every term type and always reconcile:
+    #   deliveryPreTaxValue + deliveryTaxValue = deliveryValue
+    #   oneTimePreTaxValue  + oneTimeTaxValue  = oneTimeValue
+    #   deliveryValue + oneTimeValue (+ carryReceived) = totalValue = preTaxValue + taxValue
+    # SLA/LD should use `ldBasisPreTaxValue` (delivery-only, tax-free — one-time excluded).
+    pre_tax_value: Decimal = Decimal("0.00")           # milestone total, BEFORE tax
+    tax_value: Decimal = Decimal("0.00")               # tax portion of the milestone total
+    total_value: Decimal = Decimal("0.00")             # tax-inclusive total (preTax + tax)
+    delivery_pretax_value: Decimal = Decimal("0.00")   # fixed/resource/txn share, pre-tax
+    delivery_tax_value: Decimal = Decimal("0.00")
+    delivery_value: Decimal = Decimal("0.00")          # delivery total (pre + tax)
+    one_time_pretax_value: Decimal = Decimal("0.00")   # one-time share, pre-tax
+    one_time_tax_value: Decimal = Decimal("0.00")
+    one_time_value: Decimal = Decimal("0.00")          # one-time total (pre + tax)
+    ld_basis_pretax_value: Decimal = Decimal("0.00")   # allotment × delivery PRE-TAX base
     # Carry-forward received DIRECTLY by this milestone (milestone-wise mode).
     carry_received: Decimal = Decimal("0.00")
     # Per-activity split — populated only for partial-payment milestones.
@@ -450,6 +468,19 @@ class PaymentTotals(ResponseModel):
     resource_cost: Decimal = Decimal("0.00")
     transaction_cost: Decimal = Decimal("0.00")
     recurring_cost: Decimal = Decimal("0.00")
+    # Pre-tax + tax split of each bucket (postTax = the field above = pretax+tax).
+    total_contract_cost_pretax: Decimal = Decimal("0.00")
+    total_contract_cost_tax: Decimal = Decimal("0.00")
+    fixed_cost_pretax: Decimal = Decimal("0.00")
+    fixed_cost_tax: Decimal = Decimal("0.00")
+    one_time_cost_pretax: Decimal = Decimal("0.00")
+    one_time_cost_tax: Decimal = Decimal("0.00")
+    resource_cost_pretax: Decimal = Decimal("0.00")
+    resource_cost_tax: Decimal = Decimal("0.00")
+    transaction_cost_pretax: Decimal = Decimal("0.00")
+    transaction_cost_tax: Decimal = Decimal("0.00")
+    recurring_cost_pretax: Decimal = Decimal("0.00")
+    recurring_cost_tax: Decimal = Decimal("0.00")
     # Project-level OPE (one-time / out-of-pocket) allocation guide — a
     # pre-validate/publish aid showing, cumulatively, how much of the
     # one_time_cost pool the user has ALLOCATED to phases vs. how much is still
@@ -474,6 +505,9 @@ class PhaseBlock(ResponseModel):
     # The full billable base a phase's milestone %s split: fixed + resource +
     # transaction cost lines in the phase (before one-time / carry-forward).
     phase_base_total: Decimal = Decimal("0.00")
+    # Pre-tax + tax split of phaseBaseTotal (delivery base; one-time excluded).
+    phase_base_pretax: Decimal = Decimal("0.00")
+    phase_base_tax: Decimal = Decimal("0.00")
     # The base used for milestone value + the 100% cap: phaseBaseTotal folded
     # with the one-time allocated to this phase + carry-forward received.
     # value = % × this.

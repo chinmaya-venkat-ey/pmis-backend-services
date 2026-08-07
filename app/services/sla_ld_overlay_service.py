@@ -46,15 +46,16 @@ class SlaLdOverlayService:
         page = self.payment.build_page(project_id)
 
         scheduled_by_ms: Dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
-        # Penalty / LD basis per milestone = Σ its terms' allotment value
-        # ("LD Basis %" × phase base), which is DISTINCT from the reduced amount
-        # actually scheduled to be paid. LD is computed on this allotment.
+        # Penalty / LD basis per milestone = Σ its terms' allotment value on the
+        # DELIVERY, PRE-TAX base ("LD Basis %" × delivery pre-tax) — TAX-FREE and
+        # ONE-TIME-EXCLUDED, since LD must not apply to tax or to the one-time cost.
+        # Distinct from the reduced amount actually scheduled to be paid.
         ld_base_by_ms: Dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
         for ph in page.phases:
             for t in ph.payment_terms:
                 if t.milestone_id:
                     scheduled_by_ms[t.milestone_id] += (t.value or Decimal("0"))
-                    ld_base_by_ms[t.milestone_id] += (t.ld_basis_value or Decimal("0"))
+                    ld_base_by_ms[t.milestone_id] += (t.ld_basis_pretax_value or Decimal("0"))
 
         names = dict(self.db.execute(
             select(Milestone.id, Milestone.name)

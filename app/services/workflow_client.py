@@ -77,6 +77,9 @@ class WorkflowClient:
             "ProcessInstances": [{
                 "moduleName": _MODULE_NAME,
                 "businessService": _BUSINESS_SERVICE,
+                # Java's ProcessInstanceDTO requires `activityId` (@NotBlank); it was
+                # renamed from `businessId`, so send both for compatibility.
+                "activityId": business_id,
                 "businessId": business_id,
                 "action": action,
                 "comment": comment or "",

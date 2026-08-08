@@ -29,6 +29,7 @@ from app.schemas.sla_quarterly_aggregate import (
     QuarterlyAggregateResponse,
 )
 from app.services.sla_compliance_service import SlaComplianceService
+from app.utilities.project_anchor import project_anchor
 from app.utilities.quarter import parse_quarter_key, quarter_of
 
 router = APIRouter(tags=["sla-compliance"])
@@ -585,7 +586,7 @@ def sla_by_project(db: Annotated[Session, Depends(get_db)],
 # to show "what did each SLA contribute to this quarter's LD %?" and by
 # Phase D's QuarterlySettlementService.close as its input.
 #
-# `quarter` accepts either "2026-Q2" (label form) or an ISO date (any day
+# `quarter` accepts either "Y1-Q2" (contract-relative label) or an ISO date (any day
 # in the target quarter). Omitted → the quarter containing today.
 # ------------------------------------------------------------------
 
@@ -638,20 +639,21 @@ def sla_by_project(db: Annotated[Session, Depends(get_db)],
 def sla_quarterly_aggregate(
     project_id: str,
     db: Annotated[Session, Depends(get_db)],
-    quarter: Optional[str] = None,   # ?quarter=2026-Q2 or ?quarter=2026-05-10
+    quarter: Optional[str] = None,   # ?quarter=Y1-Q2 or ?quarter=2026-05-10
 ):
     from datetime import date as _dt_date
+    anchor = project_anchor(db, project_id)  # quarters are project-start-anchored
     if not quarter:
-        qk = quarter_of(_dt_date.today())
+        qk = quarter_of(_dt_date.today(), anchor)
     else:
         try:
             if "-Q" in quarter.upper():
-                qk = parse_quarter_key(quarter)
+                qk = parse_quarter_key(quarter, anchor)
             else:
-                qk = quarter_of(_dt_date.fromisoformat(quarter))
+                qk = quarter_of(_dt_date.fromisoformat(quarter), anchor)
         except (ValueError, IndexError) as exc:
             raise ValidationError(
-                f"Invalid quarter '{quarter}' — use '2026-Q2' or an ISO date.",
+                f"Invalid quarter '{quarter}' — use 'Y1-Q2' or an ISO date.",
                 code="invalid_quarter",
             ) from exc
 

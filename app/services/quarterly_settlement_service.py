@@ -441,12 +441,7 @@ class QuarterlySettlementService:
         Returns the list of project_ids closed on this run (for logging).
         """
         on_date = on_date or _date.today()
-        # Only auto-close on the day AFTER a quarter ends — cheap way to
-        # avoid running the sweep every day.
         prev_day = on_date - timedelta(days=1)
-        prev_qk = quarter_of(prev_day)
-        if on_date != prev_qk.quarter_end + timedelta(days=1):
-            return []
 
         # Find every project that has ANY active mapping (via the
         # cross-schema resolver — mapping doesn't carry project_id).
@@ -460,8 +455,15 @@ class QuarterlySettlementService:
             if pid:
                 project_ids.add(pid)
 
+        # Quarters are PROJECT-anchored, so each project's quarter ends on its
+        # OWN boundary (project_start + 3k months − 1 day). Close a project
+        # only on the day AFTER *its* just-ended quarter — computed per project
+        # from that project's start-date anchor.
         closed: List[str] = []
         for pid in project_ids:
+            prev_qk = quarter_of(prev_day, self.compliance._project_anchor(pid))
+            if on_date != prev_qk.quarter_end + timedelta(days=1):
+                continue
             try:
                 self.close(pid, prev_qk, mode="auto")
                 closed.append(pid)

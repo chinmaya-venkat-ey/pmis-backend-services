@@ -38,3 +38,19 @@ class Activity(MirrorBase):
     end_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     actual_start_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     actual_end_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+
+class Project(MirrorBase):
+    """Mirror of ``project.projects`` (owned by pmis-project-management).
+
+    Only the planned ``start_date`` is needed here — it is the ANCHOR for the
+    project-relative quarter math (see ``app.utilities.quarter``): quarters are
+    measured from the project's start date rather than the absolute calendar,
+    matching project-management's contract-relative period logic."""
+
+    __tablename__ = "projects"
+    __table_args__ = {"schema": "project"}
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    start_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    end_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))

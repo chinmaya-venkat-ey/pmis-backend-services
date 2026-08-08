@@ -23,6 +23,7 @@ from app.core.errors import ValidationError
 from app.core.response import api_response
 from app.db import get_db
 from app.services.npqp_service import NpqpService
+from app.utilities.project_anchor import project_anchor
 from app.utilities.quarter import parse_quarter_key, quarter_of
 
 
@@ -68,7 +69,7 @@ _NPQP_EXAMPLE_BLOCKED = {
         "When leave-mgmt is unreachable, the response is 200 with "
         "status='leave_mgmt_unavailable' (never 5xx) so the settlement "
         "flow can log + block cleanly.\n\n"
-        "quarter format: 2026-Q1 .. 2026-Q4, or any ISO date in the "
+        "quarter format: Y1-Q1 .. Yn-Q4 (contract-relative, anchored on project start), or any ISO date in the "
         "target quarter. Defaults to the current quarter."
     ),
     responses={
@@ -92,17 +93,18 @@ def get_npqp(
     quarter: Optional[str] = None,
     authorization: Annotated[Optional[str], Header()] = None,
 ):
+    anchor = project_anchor(db, project_id)  # quarters are project-start-anchored
     if not quarter:
-        qk = quarter_of(_dt_date.today())
+        qk = quarter_of(_dt_date.today(), anchor)
     else:
         try:
             if "-Q" in quarter.upper():
-                qk = parse_quarter_key(quarter)
+                qk = parse_quarter_key(quarter, anchor)
             else:
-                qk = quarter_of(_dt_date.fromisoformat(quarter))
+                qk = quarter_of(_dt_date.fromisoformat(quarter), anchor)
         except (ValueError, IndexError) as exc:
             raise ValidationError(
-                f"Invalid quarter '{quarter}' — use '2026-Q2' or an ISO date.",
+                f"Invalid quarter '{quarter}' — use 'Y1-Q2' or an ISO date.",
                 code="invalid_quarter",
             ) from exc
 

@@ -50,6 +50,7 @@ from app.services.ld_bands import ld_percent_for_points, resolve_band_pairs
 from app.services.sla_evaluator.service import SlaEvaluatorService
 from app.services.sla_evaluator.point_accumulation import DEFAULT_LEVEL_POINTS
 from app.utilities.logger import get_logger
+from app.utilities.project_anchor import project_anchor
 from app.utilities.quarter import QuarterKey, previous_quarter, quarter_of
 
 
@@ -129,6 +130,29 @@ class SlaComplianceService:
         self.evaluator = SlaEvaluatorService(db, self.resolver)
         self.mapping_repo = SlaActivityMappingRepository(db)
         self.qtr_agg_repo = SlaQuarterlyAggregateRepository(db)
+        # Memoised project-start anchors — quarters are measured FROM the
+        # project start date (see app.utilities.quarter), so every quarter
+        # computation needs the owning project's anchor. Cached per run so a
+        # batch touching many mappings of one project hits the DB once.
+        self._anchor_cache: Dict[str, Optional[_date]] = {}
+
+    # ── quarter anchoring helpers ────────────────────────────────────────────
+
+    def _project_anchor(self, project_id: Optional[str]) -> Optional[_date]:
+        """Memoised planned-start-date lookup (the quarter anchor). None when
+        the project is unknown / undated → callers fall back to calendar."""
+        if not project_id:
+            return None
+        if project_id not in self._anchor_cache:
+            self._anchor_cache[project_id] = project_anchor(self.db, project_id)
+        return self._anchor_cache[project_id]
+
+    def _anchor_for_activity(self, activity_id: Optional[str]) -> Optional[_date]:
+        """Resolve the anchor for a mapping via its activity → project."""
+        if not activity_id:
+            return None
+        act = self.resolver.get_activity(activity_id) or {}
+        return self._project_anchor(act.get("projectId") or act.get("project_id"))
 
     # ================================================================= observations
 
@@ -461,16 +485,20 @@ class SlaComplianceService:
         # inside a still-open quarter therefore reflect immediately in the
         # aggregate; the settlement service (Phase D) reads only from
         # `sla_quarterly_aggregate` and never re-sums evaluation rows itself.
-        qk = quarter_of(on_date)
+        # Quarters are PROJECT-anchored, so each mapping's current quarter is
+        # resolved against ITS project's start date — there is no single
+        # calendar quarter for the whole batch.
         rollup_counts: Dict[str, int] = defaultdict(int)
+        quarter_labels: set = set()
         for m in active:
             try:
+                qk = quarter_of(on_date, self._anchor_for_activity(m.activity_id))
+                quarter_labels.add(qk.label())
                 self.rollup_mapping_for_quarter(m.id, qk)
                 rollup_counts["ok"] += 1
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
-                    "rollup_quarterly failed for mapping=%s quarter=%s: %s",
-                    m.id, qk.label(), exc,
+                    "rollup_quarterly failed for mapping=%s: %s", m.id, exc,
                 )
                 rollup_counts["error"] += 1
 
@@ -494,7 +522,9 @@ class SlaComplianceService:
             "activeMappings": len(active),
             "outcomes": dict(counts),
             "quarterlyRollup": {
-                "quarterKey": qk.label(),
+                # Project-anchored quarters differ per project, so report the
+                # distinct current-quarter labels touched this run.
+                "quarterKeys": sorted(quarter_labels),
                 "counts": dict(rollup_counts),
             },
             "quarterlyAutoClose": {
@@ -569,7 +599,7 @@ class SlaComplianceService:
             getattr(sla, "carry_forward_severity", False)
             and not this_quarter_resolved
         ):
-            prev_qk = previous_quarter(qk)
+            prev_qk = previous_quarter(qk, self._anchor_for_activity(mapping.activity_id))
             prev = self.qtr_agg_repo.get(mapping_id=mapping_id, qk=prev_qk)
             if prev is not None and (prev.derived_severity or 0) >= 1:
                 # Carry-forward severity is DATA-DRIVEN — sourced from
@@ -672,7 +702,7 @@ class SlaComplianceService:
         # 2. Phase F2 — mappings that had a breach LAST quarter on
         # carry-forward SLAs. rollup_mapping_for_quarter's own gate
         # decides whether to actually emit a synthetic row.
-        prev_qk = previous_quarter(qk)
+        prev_qk = previous_quarter(qk, self._project_anchor(project_id))
         carry_candidates = set(self.db.execute(
             select(SlaQuarterlyAggregate.mapping_id).where(
                 SlaQuarterlyAggregate.project_id == project_id,

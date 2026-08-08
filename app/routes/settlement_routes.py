@@ -37,6 +37,7 @@ from app.schemas.sla_settlement import (
     SettlementOverrideRequest,
 )
 from app.services.quarterly_settlement_service import QuarterlySettlementService
+from app.utilities.project_anchor import project_anchor
 from app.utilities.quarter import parse_quarter_key, quarter_of
 
 
@@ -46,7 +47,7 @@ class SettlementInvoicedRequest(BaseModel):
         default=None,
         alias="invoiceRef",
         description="External invoice reference (audit trail).",
-        examples=["INV-2026-Q3-001"],
+        examples=["INV-Y1-Q3-001"],
     )
 
     model_config = {"populate_by_name": True}
@@ -111,16 +112,20 @@ def _bearer_from_header(authorization: Optional[str]) -> Optional[str]:
     return parts[1].strip() or None
 
 
-def _resolve_quarter(quarter: Optional[str]):
+def _resolve_quarter(quarter: Optional[str], db: Session, project_id: str):
+    # Quarters are anchored on the project's start date; resolve the anchor so
+    # 'Y1-Q2' labels and bare ISO dates both map to the right project-relative
+    # quarter (anchor None → legacy calendar for undated projects).
+    anchor = project_anchor(db, project_id)
     if not quarter:
-        return quarter_of(_dt_date.today())
+        return quarter_of(_dt_date.today(), anchor)
     try:
         if "-Q" in quarter.upper():
-            return parse_quarter_key(quarter)
-        return quarter_of(_dt_date.fromisoformat(quarter))
+            return parse_quarter_key(quarter, anchor)
+        return quarter_of(_dt_date.fromisoformat(quarter), anchor)
     except (ValueError, IndexError) as exc:
         raise ValidationError(
-            f"Invalid quarter '{quarter}' — use '2026-Q2' or an ISO date.",
+            f"Invalid quarter '{quarter}' — use 'Y1-Q2' or an ISO date.",
             code="invalid_quarter",
         ) from exc
 
@@ -165,7 +170,7 @@ def list_settlements(
         "runs the close computation (Phase B rollup + Phase C NPQP + "
         "quarter cap + AQP) and persists a row with status='auto_closed'. "
         "Passing an already-invoiced quarter returns the frozen row.\n\n"
-        "quarter format: 2026-Q1 .. 2026-Q4, or any ISO date in the "
+        "quarter format: Y1-Q1 .. Yn-Q4 (contract-relative, anchored on project start), or any ISO date in the "
         "target quarter."
     ),
     responses={
@@ -177,7 +182,7 @@ def list_settlements(
               "content": {"application/json": {
                   "example": _envelope_err(
                       "invalid_quarter",
-                      "Invalid quarter '2026-Q9' — use '2026-Q2' or an ISO date.",
+                      "Invalid quarter 'Y1-Q9' — use 'Y1-Q2' or an ISO date.",
                   ),
               }}},
     },
@@ -188,7 +193,7 @@ def get_settlement(
     db: Annotated[Session, Depends(get_db)],
     authorization: Annotated[Optional[str], Header()] = None,
 ):
-    qk = _resolve_quarter(quarter)
+    qk = _resolve_quarter(quarter, db, project_id)
     svc = QuarterlySettlementService(db)
     existing = svc.repo.get(project_id=project_id, qk=qk)
     if existing is None or existing.status == "open":
@@ -219,7 +224,7 @@ def get_settlement(
                   "example": _envelope_ok({
                       **_SETTLEMENT_ROW_EXAMPLE,
                       "status": "invoiced",
-                      "overrideReason": "invoiced (ref=INV-2026-Q3-001)",
+                      "overrideReason": "invoiced (ref=INV-Y1-Q3-001)",
                   }),
               }}},
         404: {"description": "No settlement row for this quarter yet",
@@ -239,7 +244,7 @@ def mark_settlement_invoiced(
     db: Annotated[Session, Depends(get_db)],
     user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
 ):
-    qk = _resolve_quarter(quarter)
+    qk = _resolve_quarter(quarter, db, project_id)
     svc = QuarterlySettlementService(db)
     row = svc.mark_invoiced(
         project_id, qk,
@@ -288,7 +293,7 @@ def override_settlement(
     db: Annotated[Session, Depends(get_db)],
     user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
 ):
-    qk = _resolve_quarter(quarter)
+    qk = _resolve_quarter(quarter, db, project_id)
     svc = QuarterlySettlementService(db)
     row = svc.override(
         project_id, qk,

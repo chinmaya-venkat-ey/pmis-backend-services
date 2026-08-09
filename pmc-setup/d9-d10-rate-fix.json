@@ -1,0 +1,1012 @@
+{
+ "rate_fix": [
+  {
+   "activityName": "D9 - Resource Deployment - Q1",
+   "designation": "Program Director",
+   "monthlyRate": "768000.00",
+   "computedCost": "576000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q1",
+   "designation": "Program Manager",
+   "monthlyRate": "512000.00",
+   "computedCost": "1536000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q1",
+   "designation": "Contract Management expert",
+   "monthlyRate": "384000.00",
+   "computedCost": "1152000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q1",
+   "designation": "Support Specialist – Procurement and contracts",
+   "monthlyRate": "384000.00",
+   "computedCost": "1152000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q1",
+   "designation": "Lead architect",
+   "monthlyRate": "512000.00",
+   "computedCost": "384000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q1",
+   "designation": "Application architect",
+   "monthlyRate": "576000.00",
+   "computedCost": "288000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q1",
+   "designation": "DC Architect",
+   "monthlyRate": "576000.00",
+   "computedCost": "288000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q1",
+   "designation": "Cloud Architect",
+   "monthlyRate": "576000.00",
+   "computedCost": "288000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q1",
+   "designation": "Biometrics Architect",
+   "monthlyRate": "512000.00",
+   "computedCost": "256000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q1",
+   "designation": "Cyber Security Architect",
+   "monthlyRate": "576000.00",
+   "computedCost": "288000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q1",
+   "designation": "Business Architect",
+   "monthlyRate": "512000.00",
+   "computedCost": "128000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q1",
+   "designation": "Senior Consultant Networking",
+   "monthlyRate": "384000.00",
+   "computedCost": "192000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q1",
+   "designation": "Senior Consultant Server and Storage",
+   "monthlyRate": "384000.00",
+   "computedCost": "192000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q1",
+   "designation": "Senior Consultant change Management",
+   "monthlyRate": "384000.00",
+   "computedCost": "288000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q1",
+   "designation": "Consultant (Process/ procurement /security)",
+   "monthlyRate": "384000.00",
+   "computedCost": "96000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q1",
+   "designation": "Consultant Governance platform",
+   "monthlyRate": "384000.00",
+   "computedCost": "1152000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q1",
+   "designation": "Applications Engineer",
+   "monthlyRate": "384000.00",
+   "computedCost": "1152000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q1",
+   "designation": "Infra and network consultant",
+   "monthlyRate": "384000.00",
+   "computedCost": "1152000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q1",
+   "designation": "Cloud Engineer",
+   "monthlyRate": "384000.00",
+   "computedCost": "1152000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q2",
+   "designation": "Program Director",
+   "monthlyRate": "768000.00",
+   "computedCost": "576000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q2",
+   "designation": "Program Manager",
+   "monthlyRate": "512000.00",
+   "computedCost": "1536000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q2",
+   "designation": "Contract Management expert",
+   "monthlyRate": "384000.00",
+   "computedCost": "1152000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q2",
+   "designation": "Support Specialist – Procurement and contracts",
+   "monthlyRate": "384000.00",
+   "computedCost": "1152000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q2",
+   "designation": "Lead architect",
+   "monthlyRate": "512000.00",
+   "computedCost": "384000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q2",
+   "designation": "Application architect",
+   "monthlyRate": "576000.00",
+   "computedCost": "288000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q2",
+   "designation": "DC Architect",
+   "monthlyRate": "576000.00",
+   "computedCost": "288000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q2",
+   "designation": "Cloud Architect",
+   "monthlyRate": "576000.00",
+   "computedCost": "288000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q2",
+   "designation": "Biometrics Architect",
+   "monthlyRate": "512000.00",
+   "computedCost": "256000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q2",
+   "designation": "Cyber Security Architect",
+   "monthlyRate": "576000.00",
+   "computedCost": "288000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q2",
+   "designation": "Business Architect",
+   "monthlyRate": "512000.00",
+   "computedCost": "128000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q2",
+   "designation": "Senior Consultant Networking",
+   "monthlyRate": "384000.00",
+   "computedCost": "192000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q2",
+   "designation": "Senior Consultant Server and Storage",
+   "monthlyRate": "384000.00",
+   "computedCost": "192000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q2",
+   "designation": "Senior Consultant change Management",
+   "monthlyRate": "384000.00",
+   "computedCost": "288000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q2",
+   "designation": "Consultant (Process/ procurement /security)",
+   "monthlyRate": "384000.00",
+   "computedCost": "96000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q2",
+   "designation": "Consultant Governance platform",
+   "monthlyRate": "384000.00",
+   "computedCost": "1152000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q2",
+   "designation": "Applications Engineer",
+   "monthlyRate": "384000.00",
+   "computedCost": "1152000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q2",
+   "designation": "Infra and network consultant",
+   "monthlyRate": "384000.00",
+   "computedCost": "1152000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q2",
+   "designation": "Cloud Engineer",
+   "monthlyRate": "384000.00",
+   "computedCost": "1152000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q3",
+   "designation": "Program Director",
+   "monthlyRate": "768000.00",
+   "computedCost": "576000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q3",
+   "designation": "Program Manager",
+   "monthlyRate": "512000.00",
+   "computedCost": "1536000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q3",
+   "designation": "Contract Management expert",
+   "monthlyRate": "384000.00",
+   "computedCost": "1152000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q3",
+   "designation": "Support Specialist – Procurement and contracts",
+   "monthlyRate": "384000.00",
+   "computedCost": "1152000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q3",
+   "designation": "Lead architect",
+   "monthlyRate": "512000.00",
+   "computedCost": "384000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q3",
+   "designation": "Application architect",
+   "monthlyRate": "576000.00",
+   "computedCost": "288000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q3",
+   "designation": "DC Architect",
+   "monthlyRate": "576000.00",
+   "computedCost": "288000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q3",
+   "designation": "Cloud Architect",
+   "monthlyRate": "576000.00",
+   "computedCost": "288000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q3",
+   "designation": "Biometrics Architect",
+   "monthlyRate": "512000.00",
+   "computedCost": "256000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q3",
+   "designation": "Cyber Security Architect",
+   "monthlyRate": "576000.00",
+   "computedCost": "288000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q3",
+   "designation": "Business Architect",
+   "monthlyRate": "512000.00",
+   "computedCost": "128000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q3",
+   "designation": "Senior Consultant Networking",
+   "monthlyRate": "384000.00",
+   "computedCost": "192000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q3",
+   "designation": "Senior Consultant Server and Storage",
+   "monthlyRate": "384000.00",
+   "computedCost": "192000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q3",
+   "designation": "Senior Consultant change Management",
+   "monthlyRate": "384000.00",
+   "computedCost": "288000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q3",
+   "designation": "Consultant (Process/ procurement /security)",
+   "monthlyRate": "384000.00",
+   "computedCost": "96000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q3",
+   "designation": "Consultant Governance platform",
+   "monthlyRate": "384000.00",
+   "computedCost": "1152000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q3",
+   "designation": "Applications Engineer",
+   "monthlyRate": "384000.00",
+   "computedCost": "1152000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q3",
+   "designation": "Infra and network consultant",
+   "monthlyRate": "384000.00",
+   "computedCost": "1152000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q3",
+   "designation": "Cloud Engineer",
+   "monthlyRate": "384000.00",
+   "computedCost": "1152000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q4",
+   "designation": "Program Director",
+   "monthlyRate": "768000.00",
+   "computedCost": "576000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q4",
+   "designation": "Program Manager",
+   "monthlyRate": "512000.00",
+   "computedCost": "1536000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q4",
+   "designation": "Contract Management expert",
+   "monthlyRate": "384000.00",
+   "computedCost": "1152000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q4",
+   "designation": "Support Specialist – Procurement and contracts",
+   "monthlyRate": "384000.00",
+   "computedCost": "1152000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q4",
+   "designation": "Lead architect",
+   "monthlyRate": "512000.00",
+   "computedCost": "384000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q4",
+   "designation": "Application architect",
+   "monthlyRate": "576000.00",
+   "computedCost": "288000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q4",
+   "designation": "DC Architect",
+   "monthlyRate": "576000.00",
+   "computedCost": "288000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q4",
+   "designation": "Cloud Architect",
+   "monthlyRate": "576000.00",
+   "computedCost": "288000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q4",
+   "designation": "Biometrics Architect",
+   "monthlyRate": "512000.00",
+   "computedCost": "256000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q4",
+   "designation": "Cyber Security Architect",
+   "monthlyRate": "576000.00",
+   "computedCost": "288000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q4",
+   "designation": "Business Architect",
+   "monthlyRate": "512000.00",
+   "computedCost": "128000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q4",
+   "designation": "Senior Consultant Networking",
+   "monthlyRate": "384000.00",
+   "computedCost": "192000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q4",
+   "designation": "Senior Consultant Server and Storage",
+   "monthlyRate": "384000.00",
+   "computedCost": "192000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q4",
+   "designation": "Senior Consultant change Management",
+   "monthlyRate": "384000.00",
+   "computedCost": "288000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q4",
+   "designation": "Consultant (Process/ procurement /security)",
+   "monthlyRate": "384000.00",
+   "computedCost": "96000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q4",
+   "designation": "Consultant Governance platform",
+   "monthlyRate": "384000.00",
+   "computedCost": "1152000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q4",
+   "designation": "Applications Engineer",
+   "monthlyRate": "384000.00",
+   "computedCost": "1152000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q4",
+   "designation": "Infra and network consultant",
+   "monthlyRate": "384000.00",
+   "computedCost": "1152000.00"
+  },
+  {
+   "activityName": "D9 - Resource Deployment - Q4",
+   "designation": "Cloud Engineer",
+   "monthlyRate": "384000.00",
+   "computedCost": "1152000.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q5",
+   "designation": "Program Manager",
+   "monthlyRate": "537600.00",
+   "computedCost": "1612800.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q5",
+   "designation": "Contract Management expert",
+   "monthlyRate": "403200.00",
+   "computedCost": "1209600.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q5",
+   "designation": "Support Specialist – Procurement and contracts",
+   "monthlyRate": "403200.00",
+   "computedCost": "1209600.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q5",
+   "designation": "Applications Engineer",
+   "monthlyRate": "403200.00",
+   "computedCost": "1209600.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q5",
+   "designation": "Infra and network consultant",
+   "monthlyRate": "403200.00",
+   "computedCost": "1209600.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q5",
+   "designation": "Cloud Engineer",
+   "monthlyRate": "403200.00",
+   "computedCost": "1209600.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q6",
+   "designation": "Program Manager",
+   "monthlyRate": "537600.00",
+   "computedCost": "1612800.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q6",
+   "designation": "Contract Management expert",
+   "monthlyRate": "403200.00",
+   "computedCost": "1209600.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q6",
+   "designation": "Support Specialist – Procurement and contracts",
+   "monthlyRate": "403200.00",
+   "computedCost": "1209600.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q6",
+   "designation": "Applications Engineer",
+   "monthlyRate": "403200.00",
+   "computedCost": "1209600.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q6",
+   "designation": "Infra and network consultant",
+   "monthlyRate": "403200.00",
+   "computedCost": "1209600.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q6",
+   "designation": "Cloud Engineer",
+   "monthlyRate": "403200.00",
+   "computedCost": "1209600.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q7",
+   "designation": "Program Manager",
+   "monthlyRate": "537600.00",
+   "computedCost": "1612800.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q7",
+   "designation": "Contract Management expert",
+   "monthlyRate": "403200.00",
+   "computedCost": "1209600.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q7",
+   "designation": "Support Specialist – Procurement and contracts",
+   "monthlyRate": "403200.00",
+   "computedCost": "1209600.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q7",
+   "designation": "Applications Engineer",
+   "monthlyRate": "403200.00",
+   "computedCost": "1209600.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q7",
+   "designation": "Infra and network consultant",
+   "monthlyRate": "403200.00",
+   "computedCost": "1209600.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q7",
+   "designation": "Cloud Engineer",
+   "monthlyRate": "403200.00",
+   "computedCost": "1209600.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q8",
+   "designation": "Program Manager",
+   "monthlyRate": "537600.00",
+   "computedCost": "1612800.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q8",
+   "designation": "Contract Management expert",
+   "monthlyRate": "403200.00",
+   "computedCost": "1209600.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q8",
+   "designation": "Support Specialist – Procurement and contracts",
+   "monthlyRate": "403200.00",
+   "computedCost": "1209600.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q8",
+   "designation": "Applications Engineer",
+   "monthlyRate": "403200.00",
+   "computedCost": "1209600.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q8",
+   "designation": "Infra and network consultant",
+   "monthlyRate": "403200.00",
+   "computedCost": "1209600.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q8",
+   "designation": "Cloud Engineer",
+   "monthlyRate": "403200.00",
+   "computedCost": "1209600.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q9",
+   "designation": "Program Manager",
+   "monthlyRate": "564480.00",
+   "computedCost": "1693440.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q9",
+   "designation": "Contract Management expert",
+   "monthlyRate": "423360.00",
+   "computedCost": "1270080.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q9",
+   "designation": "Support Specialist – Procurement and contracts",
+   "monthlyRate": "423360.00",
+   "computedCost": "1270080.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q9",
+   "designation": "Applications Engineer",
+   "monthlyRate": "423360.00",
+   "computedCost": "1270080.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q9",
+   "designation": "Infra and network consultant",
+   "monthlyRate": "423360.00",
+   "computedCost": "1270080.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q9",
+   "designation": "Cloud Engineer",
+   "monthlyRate": "423360.00",
+   "computedCost": "1270080.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q10",
+   "designation": "Program Manager",
+   "monthlyRate": "564480.00",
+   "computedCost": "1693440.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q10",
+   "designation": "Contract Management expert",
+   "monthlyRate": "423360.00",
+   "computedCost": "1270080.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q10",
+   "designation": "Support Specialist – Procurement and contracts",
+   "monthlyRate": "423360.00",
+   "computedCost": "1270080.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q10",
+   "designation": "Applications Engineer",
+   "monthlyRate": "423360.00",
+   "computedCost": "1270080.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q10",
+   "designation": "Infra and network consultant",
+   "monthlyRate": "423360.00",
+   "computedCost": "1270080.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q10",
+   "designation": "Cloud Engineer",
+   "monthlyRate": "423360.00",
+   "computedCost": "1270080.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q11",
+   "designation": "Program Manager",
+   "monthlyRate": "564480.00",
+   "computedCost": "1693440.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q11",
+   "designation": "Contract Management expert",
+   "monthlyRate": "423360.00",
+   "computedCost": "1270080.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q11",
+   "designation": "Support Specialist – Procurement and contracts",
+   "monthlyRate": "423360.00",
+   "computedCost": "1270080.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q11",
+   "designation": "Applications Engineer",
+   "monthlyRate": "423360.00",
+   "computedCost": "1270080.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q11",
+   "designation": "Infra and network consultant",
+   "monthlyRate": "423360.00",
+   "computedCost": "1270080.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q11",
+   "designation": "Cloud Engineer",
+   "monthlyRate": "423360.00",
+   "computedCost": "1270080.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q12",
+   "designation": "Program Manager",
+   "monthlyRate": "564480.00",
+   "computedCost": "1693440.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q12",
+   "designation": "Contract Management expert",
+   "monthlyRate": "423360.00",
+   "computedCost": "1270080.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q12",
+   "designation": "Support Specialist – Procurement and contracts",
+   "monthlyRate": "423360.00",
+   "computedCost": "1270080.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q12",
+   "designation": "Applications Engineer",
+   "monthlyRate": "423360.00",
+   "computedCost": "1270080.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q12",
+   "designation": "Infra and network consultant",
+   "monthlyRate": "423360.00",
+   "computedCost": "1270080.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q12",
+   "designation": "Cloud Engineer",
+   "monthlyRate": "423360.00",
+   "computedCost": "1270080.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q13",
+   "designation": "Program Manager",
+   "monthlyRate": "592704.00",
+   "computedCost": "1778112.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q13",
+   "designation": "Contract Management expert",
+   "monthlyRate": "444528.00",
+   "computedCost": "1333584.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q13",
+   "designation": "Support Specialist – Procurement and contracts",
+   "monthlyRate": "444528.00",
+   "computedCost": "1333584.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q13",
+   "designation": "Applications Engineer",
+   "monthlyRate": "444528.00",
+   "computedCost": "1333584.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q13",
+   "designation": "Infra and network consultant",
+   "monthlyRate": "444528.00",
+   "computedCost": "1333584.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q13",
+   "designation": "Cloud Engineer",
+   "monthlyRate": "444528.00",
+   "computedCost": "1333584.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q14",
+   "designation": "Program Manager",
+   "monthlyRate": "592704.00",
+   "computedCost": "1778112.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q14",
+   "designation": "Contract Management expert",
+   "monthlyRate": "444528.00",
+   "computedCost": "1333584.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q14",
+   "designation": "Support Specialist – Procurement and contracts",
+   "monthlyRate": "444528.00",
+   "computedCost": "1333584.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q14",
+   "designation": "Applications Engineer",
+   "monthlyRate": "444528.00",
+   "computedCost": "1333584.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q14",
+   "designation": "Infra and network consultant",
+   "monthlyRate": "444528.00",
+   "computedCost": "1333584.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q14",
+   "designation": "Cloud Engineer",
+   "monthlyRate": "444528.00",
+   "computedCost": "1333584.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q15",
+   "designation": "Program Manager",
+   "monthlyRate": "592704.00",
+   "computedCost": "1778112.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q15",
+   "designation": "Contract Management expert",
+   "monthlyRate": "444528.00",
+   "computedCost": "1333584.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q15",
+   "designation": "Support Specialist – Procurement and contracts",
+   "monthlyRate": "444528.00",
+   "computedCost": "1333584.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q15",
+   "designation": "Applications Engineer",
+   "monthlyRate": "444528.00",
+   "computedCost": "1333584.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q15",
+   "designation": "Infra and network consultant",
+   "monthlyRate": "444528.00",
+   "computedCost": "1333584.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q15",
+   "designation": "Cloud Engineer",
+   "monthlyRate": "444528.00",
+   "computedCost": "1333584.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q16",
+   "designation": "Program Manager",
+   "monthlyRate": "592704.00",
+   "computedCost": "1778112.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q16",
+   "designation": "Contract Management expert",
+   "monthlyRate": "444528.00",
+   "computedCost": "1333584.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q16",
+   "designation": "Support Specialist – Procurement and contracts",
+   "monthlyRate": "444528.00",
+   "computedCost": "1333584.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q16",
+   "designation": "Applications Engineer",
+   "monthlyRate": "444528.00",
+   "computedCost": "1333584.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q16",
+   "designation": "Infra and network consultant",
+   "monthlyRate": "444528.00",
+   "computedCost": "1333584.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q16",
+   "designation": "Cloud Engineer",
+   "monthlyRate": "444528.00",
+   "computedCost": "1333584.00"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q17",
+   "designation": "Program Manager",
+   "monthlyRate": "622339.20",
+   "computedCost": "1867017.60"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q17",
+   "designation": "Contract Management expert",
+   "monthlyRate": "466754.40",
+   "computedCost": "1400263.20"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q17",
+   "designation": "Support Specialist – Procurement and contracts",
+   "monthlyRate": "466754.40",
+   "computedCost": "1400263.20"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q17",
+   "designation": "Applications Engineer",
+   "monthlyRate": "466754.40",
+   "computedCost": "1400263.20"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q17",
+   "designation": "Infra and network consultant",
+   "monthlyRate": "466754.40",
+   "computedCost": "1400263.20"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q18",
+   "designation": "Program Manager",
+   "monthlyRate": "622339.20",
+   "computedCost": "1867017.60"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q18",
+   "designation": "Contract Management expert",
+   "monthlyRate": "466754.40",
+   "computedCost": "1400263.20"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q18",
+   "designation": "Support Specialist – Procurement and contracts",
+   "monthlyRate": "466754.40",
+   "computedCost": "1400263.20"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q18",
+   "designation": "Applications Engineer",
+   "monthlyRate": "466754.40",
+   "computedCost": "1400263.20"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q18",
+   "designation": "Infra and network consultant",
+   "monthlyRate": "466754.40",
+   "computedCost": "1400263.20"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q19",
+   "designation": "Program Manager",
+   "monthlyRate": "622339.20",
+   "computedCost": "1867017.60"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q19",
+   "designation": "Contract Management expert",
+   "monthlyRate": "466754.40",
+   "computedCost": "1400263.20"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q19",
+   "designation": "Support Specialist – Procurement and contracts",
+   "monthlyRate": "466754.40",
+   "computedCost": "1400263.20"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q19",
+   "designation": "Applications Engineer",
+   "monthlyRate": "466754.40",
+   "computedCost": "1400263.20"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q19",
+   "designation": "Infra and network consultant",
+   "monthlyRate": "466754.40",
+   "computedCost": "1400263.20"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q20",
+   "designation": "Program Manager",
+   "monthlyRate": "622339.20",
+   "computedCost": "1867017.60"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q20",
+   "designation": "Contract Management expert",
+   "monthlyRate": "466754.40",
+   "computedCost": "1400263.20"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q20",
+   "designation": "Support Specialist – Procurement and contracts",
+   "monthlyRate": "466754.40",
+   "computedCost": "1400263.20"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q20",
+   "designation": "Applications Engineer",
+   "monthlyRate": "466754.40",
+   "computedCost": "1400263.20"
+  },
+  {
+   "activityName": "D10 - Resource Deployment - Q20",
+   "designation": "Infra and network consultant",
+   "monthlyRate": "466754.40",
+   "computedCost": "1400263.20"
+  }
+ ]
+}

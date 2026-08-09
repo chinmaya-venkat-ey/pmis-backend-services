@@ -1,0 +1,1829 @@
+{
+ "_meta": {
+  "source": "live PMC 60c67666-895f-4138-bd99-c907b571e933",
+  "note": "Resource allocations are representative (live were blank); roles are valid PMC leave-mgmt designations."
+ },
+ "resourceOrg": "Ey India",
+ "resourceRateSheet": "pmc-designation-rates.xlsx",
+ "vendors": [
+  {
+   "name": "Ey India"
+  },
+  {
+   "name": "UIDAI"
+  }
+ ],
+ "project": {
+  "name": "Project Management Consultants (PMC)",
+  "description": "UIDAI has engaged a consulting firm (PMC) to design the next-phase strategy for CIDR operations, run the RFP process to select the new BSP/MSAP/MSIP service providers, manage the transition, and provide ongoing in-life program management. The PMC is also responsible for building a Governance Tool (D11) which is the PMIS tool",
+  "startDate": "2025-11-10",
+  "endDate": "2032-05-10",
+  "owner": "tmd-ii",
+  "taxPercent": "0.00",
+  "ccnCapPercent": "25.00",
+  "totalProjectValueExclTax": "0.00",
+  "vendorNames": [
+   "Ey India",
+   "UIDAI"
+  ],
+  "leaveConfig": {
+   "halfDay": 4,
+   "fullDay": 8,
+   "saturdayWorking": "HALF_DAY",
+   "sundayWorking": "HALF_DAY",
+   "attendanceCaptured": true,
+   "sandwichLeaveApplied": true,
+   "leavesPerFrequencyCount": 6,
+   "leavesFrequency": "QUARTERLY",
+   "proratedLeavesApplied": true,
+   "carryForwardAllowed": true,
+   "leaveLapseAtQuarterEnd": true,
+   "automaticBalanceReset": true
+  },
+  "publish": true
+ },
+ "milestones": [
+  {
+   "name": "D1 - Report on existing (AS-IS) implementation and improvement  areas.",
+   "description": "",
+   "startDate": "2025-11-10",
+   "endDate": "2026-02-10",
+   "paymentType": "complete_payment",
+   "isResourceBased": false,
+   "isTransactionBased": false,
+   "category": "original",
+   "priority": "P3",
+   "position": 1,
+   "dependsOnNames": [],
+   "vendorNames": []
+  },
+  {
+   "name": "D2 - Prepare repository of the project  documents and knowledge  management plan for the existing  implementation.",
+   "description": "",
+   "startDate": "2025-11-10",
+   "endDate": "2026-02-10",
+   "paymentType": "complete_payment",
+   "isResourceBased": false,
+   "isTransactionBased": false,
+   "category": "original",
+   "priority": "P3",
+   "position": 2,
+   "dependsOnNames": [],
+   "vendorNames": []
+  },
+  {
+   "name": "D3 - Program Management Strategy, Roadmap, transition plan and  maintenance Plan.",
+   "description": "",
+   "startDate": "2026-02-10",
+   "endDate": "2026-04-10",
+   "paymentType": "complete_payment",
+   "isResourceBased": false,
+   "isTransactionBased": false,
+   "category": "original",
+   "priority": "P3",
+   "position": 3,
+   "dependsOnNames": [],
+   "vendorNames": []
+  },
+  {
+   "name": "D4 - Detailed Project Report (DPR) for enhancement strategy and roadmap  of the CIDR.",
+   "description": "",
+   "startDate": "2026-02-10",
+   "endDate": "2026-05-18",
+   "paymentType": "complete_payment",
+   "isResourceBased": false,
+   "isTransactionBased": false,
+   "category": "original",
+   "priority": "P3",
+   "position": 4,
+   "dependsOnNames": [],
+   "vendorNames": []
+  },
+  {
+   "name": "D5 - Report on Disaster Recovery Plan (DRP) and Business Continuity Plan for the CIDR Project for fully integrated BCP / DR testing exercise and improvement plan.",
+   "description": "",
+   "startDate": "2026-04-10",
+   "endDate": "2026-06-10",
+   "paymentType": "complete_payment",
+   "isResourceBased": false,
+   "isTransactionBased": false,
+   "category": "original",
+   "priority": "P3",
+   "position": 5,
+   "dependsOnNames": [],
+   "vendorNames": []
+  },
+  {
+   "name": "D6 - Report on enhanced Functional and Technical Specifications for the IT systems of the CIDR.",
+   "description": "",
+   "startDate": "2026-06-10",
+   "endDate": "2026-08-10",
+   "paymentType": null,
+   "isResourceBased": false,
+   "isTransactionBased": false,
+   "category": "original",
+   "priority": "P3",
+   "position": 6,
+   "dependsOnNames": [],
+   "vendorNames": []
+  },
+  {
+   "name": "D7 - Request for Proposals (RFPs) for selection of Managed Service Provider (MSP) to manage and enhance the CIDR.",
+   "description": "",
+   "startDate": "2026-08-10",
+   "endDate": "2026-11-10",
+   "paymentType": null,
+   "isResourceBased": false,
+   "isTransactionBased": false,
+   "category": "original",
+   "priority": "P3",
+   "position": 7,
+   "dependsOnNames": [],
+   "vendorNames": []
+  },
+  {
+   "name": "D8 - Selection of MSP(s) & signing of contract(s)",
+   "description": "",
+   "startDate": "2026-11-10",
+   "endDate": "2027-05-10",
+   "paymentType": null,
+   "isResourceBased": false,
+   "isTransactionBased": false,
+   "category": "original",
+   "priority": "P3",
+   "position": 8,
+   "dependsOnNames": [],
+   "vendorNames": []
+  },
+  {
+   "name": "D9 - Transition Management",
+   "description": "",
+   "startDate": "2027-05-10",
+   "endDate": "2028-05-10",
+   "paymentType": "partial_payment",
+   "isResourceBased": true,
+   "isTransactionBased": false,
+   "category": "original",
+   "priority": "P3",
+   "position": 9,
+   "dependsOnNames": [],
+   "vendorNames": []
+  },
+  {
+   "name": "D10 - In-life Project Management",
+   "description": "",
+   "startDate": "2027-05-10",
+   "endDate": "2032-05-10",
+   "paymentType": "partial_payment",
+   "isResourceBased": true,
+   "isTransactionBased": false,
+   "category": "original",
+   "priority": "P3",
+   "position": 10,
+   "dependsOnNames": [],
+   "vendorNames": []
+  },
+  {
+   "name": "D11 - Governance Tool",
+   "description": "",
+   "startDate": "2025-11-10",
+   "endDate": "2032-05-10",
+   "paymentType": null,
+   "isResourceBased": false,
+   "isTransactionBased": false,
+   "category": "original",
+   "priority": "P3",
+   "position": 11,
+   "dependsOnNames": [],
+   "vendorNames": []
+  }
+ ],
+ "activitiesByMilestone": {
+  "D1 - Report on existing (AS-IS) implementation and improvement  areas.": [
+   {
+    "name": "D1 - Report on existing (AS-IS) implementation and improvement  areas.",
+    "description": "",
+    "startDate": "2025-11-10",
+    "endDate": "2026-02-10",
+    "vendorName": "Ey India",
+    "priority": "P3",
+    "category": "original",
+    "position": 1,
+    "ownerDivision": "tmd-ii",
+    "concernedDivision": [
+     "tmd-i",
+     "tmd-ii"
+    ],
+    "resources": [],
+    "markComplete": true
+   }
+  ],
+  "D10 - In-life Project Management": [
+   {
+    "name": "D10 - Resource Deployment - Q1",
+    "description": "In-life staffing (Phase 3).",
+    "startDate": "2027-05-10",
+    "endDate": "2027-08-10",
+    "vendorName": "Ey India",
+    "priority": "P2",
+    "category": "original",
+    "position": 1,
+    "ownerDivision": "tmd-ii",
+    "concernedDivision": [
+     "tmd-i",
+     "tmd-ii"
+    ],
+    "resources": []
+   },
+   {
+    "name": "D10 - Resource Deployment - Q2",
+    "description": "In-life staffing (Phase 3).",
+    "startDate": "2027-08-10",
+    "endDate": "2027-11-10",
+    "vendorName": "Ey India",
+    "priority": "P2",
+    "category": "original",
+    "position": 2,
+    "ownerDivision": "tmd-ii",
+    "concernedDivision": [
+     "tmd-i",
+     "tmd-ii"
+    ],
+    "resources": []
+   },
+   {
+    "name": "D10 - Resource Deployment - Q3",
+    "description": "In-life staffing (Phase 3).",
+    "startDate": "2027-11-10",
+    "endDate": "2028-02-10",
+    "vendorName": "Ey India",
+    "priority": "P2",
+    "category": "original",
+    "position": 3,
+    "ownerDivision": "tmd-ii",
+    "concernedDivision": [
+     "tmd-i",
+     "tmd-ii"
+    ],
+    "resources": []
+   },
+   {
+    "name": "D10 - Resource Deployment - Q4",
+    "description": "In-life staffing (Phase 3).",
+    "startDate": "2028-02-10",
+    "endDate": "2028-05-10",
+    "vendorName": "Ey India",
+    "priority": "P2",
+    "category": "original",
+    "position": 4,
+    "ownerDivision": "tmd-ii",
+    "concernedDivision": [
+     "tmd-i",
+     "tmd-ii"
+    ],
+    "resources": []
+   },
+   {
+    "name": "D10 - Resource Deployment - Q5",
+    "description": "In-life staffing (Phase 3).",
+    "startDate": "2028-05-10",
+    "endDate": "2028-08-10",
+    "vendorName": "Ey India",
+    "priority": "P2",
+    "category": "original",
+    "position": 5,
+    "ownerDivision": "tmd-ii",
+    "concernedDivision": [
+     "tmd-i",
+     "tmd-ii"
+    ],
+    "resources": [
+     {
+      "designation": "Program Manager",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Contract Management expert",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Support Specialist – Procurement and contracts",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Applications Engineer",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Infra and network consultant",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Cloud Engineer",
+      "quantity": 1,
+      "duration": "3.00"
+     }
+    ]
+   },
+   {
+    "name": "D10 - Resource Deployment - Q6",
+    "description": "In-life staffing (Phase 3).",
+    "startDate": "2028-08-10",
+    "endDate": "2028-11-10",
+    "vendorName": "Ey India",
+    "priority": "P2",
+    "category": "original",
+    "position": 6,
+    "ownerDivision": "tmd-ii",
+    "concernedDivision": [
+     "tmd-i",
+     "tmd-ii"
+    ],
+    "resources": [
+     {
+      "designation": "Program Manager",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Contract Management expert",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Support Specialist – Procurement and contracts",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Applications Engineer",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Infra and network consultant",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Cloud Engineer",
+      "quantity": 1,
+      "duration": "3.00"
+     }
+    ]
+   },
+   {
+    "name": "D10 - Resource Deployment - Q7",
+    "description": "In-life staffing (Phase 3).",
+    "startDate": "2028-11-10",
+    "endDate": "2029-02-10",
+    "vendorName": "Ey India",
+    "priority": "P2",
+    "category": "original",
+    "position": 7,
+    "ownerDivision": "tmd-ii",
+    "concernedDivision": [
+     "tmd-i",
+     "tmd-ii"
+    ],
+    "resources": [
+     {
+      "designation": "Program Manager",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Contract Management expert",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Support Specialist – Procurement and contracts",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Applications Engineer",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Infra and network consultant",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Cloud Engineer",
+      "quantity": 1,
+      "duration": "3.00"
+     }
+    ]
+   },
+   {
+    "name": "D10 - Resource Deployment - Q8",
+    "description": "In-life staffing (Phase 3).",
+    "startDate": "2029-02-10",
+    "endDate": "2029-05-10",
+    "vendorName": "Ey India",
+    "priority": "P2",
+    "category": "original",
+    "position": 8,
+    "ownerDivision": "tmd-ii",
+    "concernedDivision": [
+     "tmd-i",
+     "tmd-ii"
+    ],
+    "resources": [
+     {
+      "designation": "Program Manager",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Contract Management expert",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Support Specialist – Procurement and contracts",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Applications Engineer",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Infra and network consultant",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Cloud Engineer",
+      "quantity": 1,
+      "duration": "3.00"
+     }
+    ]
+   },
+   {
+    "name": "D10 - Resource Deployment - Q9",
+    "description": "In-life staffing (Phase 3).",
+    "startDate": "2029-05-10",
+    "endDate": "2029-08-10",
+    "vendorName": "Ey India",
+    "priority": "P2",
+    "category": "original",
+    "position": 9,
+    "ownerDivision": "tmd-ii",
+    "concernedDivision": [
+     "tmd-i",
+     "tmd-ii"
+    ],
+    "resources": [
+     {
+      "designation": "Program Manager",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Contract Management expert",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Support Specialist – Procurement and contracts",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Applications Engineer",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Infra and network consultant",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Cloud Engineer",
+      "quantity": 1,
+      "duration": "3.00"
+     }
+    ]
+   },
+   {
+    "name": "D10 - Resource Deployment - Q10",
+    "description": "In-life staffing (Phase 3).",
+    "startDate": "2029-08-10",
+    "endDate": "2029-11-10",
+    "vendorName": "Ey India",
+    "priority": "P2",
+    "category": "original",
+    "position": 10,
+    "ownerDivision": "tmd-ii",
+    "concernedDivision": [
+     "tmd-i",
+     "tmd-ii"
+    ],
+    "resources": [
+     {
+      "designation": "Program Manager",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Contract Management expert",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Support Specialist – Procurement and contracts",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Applications Engineer",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Infra and network consultant",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Cloud Engineer",
+      "quantity": 1,
+      "duration": "3.00"
+     }
+    ]
+   },
+   {
+    "name": "D10 - Resource Deployment - Q11",
+    "description": "In-life staffing (Phase 3).",
+    "startDate": "2029-11-10",
+    "endDate": "2030-02-10",
+    "vendorName": "Ey India",
+    "priority": "P2",
+    "category": "original",
+    "position": 11,
+    "ownerDivision": "tmd-ii",
+    "concernedDivision": [
+     "tmd-i",
+     "tmd-ii"
+    ],
+    "resources": [
+     {
+      "designation": "Program Manager",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Contract Management expert",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Support Specialist – Procurement and contracts",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Applications Engineer",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Infra and network consultant",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Cloud Engineer",
+      "quantity": 1,
+      "duration": "3.00"
+     }
+    ]
+   },
+   {
+    "name": "D10 - Resource Deployment - Q12",
+    "description": "In-life staffing (Phase 3).",
+    "startDate": "2030-02-10",
+    "endDate": "2030-05-10",
+    "vendorName": "Ey India",
+    "priority": "P2",
+    "category": "original",
+    "position": 12,
+    "ownerDivision": "tmd-ii",
+    "concernedDivision": [
+     "tmd-i",
+     "tmd-ii"
+    ],
+    "resources": [
+     {
+      "designation": "Program Manager",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Contract Management expert",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Support Specialist – Procurement and contracts",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Applications Engineer",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Infra and network consultant",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Cloud Engineer",
+      "quantity": 1,
+      "duration": "3.00"
+     }
+    ]
+   },
+   {
+    "name": "D10 - Resource Deployment - Q13",
+    "description": "In-life staffing (Phase 3).",
+    "startDate": "2030-05-10",
+    "endDate": "2030-08-10",
+    "vendorName": "Ey India",
+    "priority": "P2",
+    "category": "original",
+    "position": 13,
+    "ownerDivision": "tmd-ii",
+    "concernedDivision": [
+     "tmd-i",
+     "tmd-ii"
+    ],
+    "resources": [
+     {
+      "designation": "Program Manager",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Contract Management expert",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Support Specialist – Procurement and contracts",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Applications Engineer",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Infra and network consultant",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Cloud Engineer",
+      "quantity": 1,
+      "duration": "3.00"
+     }
+    ]
+   },
+   {
+    "name": "D10 - Resource Deployment - Q14",
+    "description": "In-life staffing (Phase 3).",
+    "startDate": "2030-08-10",
+    "endDate": "2030-11-10",
+    "vendorName": "Ey India",
+    "priority": "P2",
+    "category": "original",
+    "position": 14,
+    "ownerDivision": "tmd-ii",
+    "concernedDivision": [
+     "tmd-i",
+     "tmd-ii"
+    ],
+    "resources": [
+     {
+      "designation": "Program Manager",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Contract Management expert",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Support Specialist – Procurement and contracts",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Applications Engineer",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Infra and network consultant",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Cloud Engineer",
+      "quantity": 1,
+      "duration": "3.00"
+     }
+    ]
+   },
+   {
+    "name": "D10 - Resource Deployment - Q15",
+    "description": "In-life staffing (Phase 3).",
+    "startDate": "2030-11-10",
+    "endDate": "2031-02-10",
+    "vendorName": "Ey India",
+    "priority": "P2",
+    "category": "original",
+    "position": 15,
+    "ownerDivision": "tmd-ii",
+    "concernedDivision": [
+     "tmd-i",
+     "tmd-ii"
+    ],
+    "resources": [
+     {
+      "designation": "Program Manager",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Contract Management expert",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Support Specialist – Procurement and contracts",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Applications Engineer",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Infra and network consultant",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Cloud Engineer",
+      "quantity": 1,
+      "duration": "3.00"
+     }
+    ]
+   },
+   {
+    "name": "D10 - Resource Deployment - Q16",
+    "description": "In-life staffing (Phase 3).",
+    "startDate": "2031-02-10",
+    "endDate": "2031-05-10",
+    "vendorName": "Ey India",
+    "priority": "P2",
+    "category": "original",
+    "position": 16,
+    "ownerDivision": "tmd-ii",
+    "concernedDivision": [
+     "tmd-i",
+     "tmd-ii"
+    ],
+    "resources": [
+     {
+      "designation": "Program Manager",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Contract Management expert",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Support Specialist – Procurement and contracts",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Applications Engineer",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Infra and network consultant",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Cloud Engineer",
+      "quantity": 1,
+      "duration": "3.00"
+     }
+    ]
+   },
+   {
+    "name": "D10 - Resource Deployment - Q17",
+    "description": "In-life staffing (Phase 3).",
+    "startDate": "2031-05-10",
+    "endDate": "2031-08-10",
+    "vendorName": "Ey India",
+    "priority": "P2",
+    "category": "original",
+    "position": 17,
+    "ownerDivision": "tmd-ii",
+    "concernedDivision": [
+     "tmd-i",
+     "tmd-ii"
+    ],
+    "resources": [
+     {
+      "designation": "Program Manager",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Contract Management expert",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Support Specialist – Procurement and contracts",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Applications Engineer",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Infra and network consultant",
+      "quantity": 1,
+      "duration": "3.00"
+     }
+    ]
+   },
+   {
+    "name": "D10 - Resource Deployment - Q18",
+    "description": "In-life staffing (Phase 3).",
+    "startDate": "2031-08-10",
+    "endDate": "2031-11-10",
+    "vendorName": "Ey India",
+    "priority": "P2",
+    "category": "original",
+    "position": 18,
+    "ownerDivision": "tmd-ii",
+    "concernedDivision": [
+     "tmd-i",
+     "tmd-ii"
+    ],
+    "resources": [
+     {
+      "designation": "Program Manager",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Contract Management expert",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Support Specialist – Procurement and contracts",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Applications Engineer",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Infra and network consultant",
+      "quantity": 1,
+      "duration": "3.00"
+     }
+    ]
+   },
+   {
+    "name": "D10 - Resource Deployment - Q19",
+    "description": "In-life staffing (Phase 3).",
+    "startDate": "2031-11-10",
+    "endDate": "2032-02-10",
+    "vendorName": "Ey India",
+    "priority": "P2",
+    "category": "original",
+    "position": 19,
+    "ownerDivision": "tmd-ii",
+    "concernedDivision": [
+     "tmd-i",
+     "tmd-ii"
+    ],
+    "resources": [
+     {
+      "designation": "Program Manager",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Contract Management expert",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Support Specialist – Procurement and contracts",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Applications Engineer",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Infra and network consultant",
+      "quantity": 1,
+      "duration": "3.00"
+     }
+    ]
+   },
+   {
+    "name": "D10 - Resource Deployment - Q20",
+    "description": "In-life staffing (Phase 3).",
+    "startDate": "2032-02-10",
+    "endDate": "2032-05-10",
+    "vendorName": "Ey India",
+    "priority": "P2",
+    "category": "original",
+    "position": 20,
+    "ownerDivision": "tmd-ii",
+    "concernedDivision": [
+     "tmd-i",
+     "tmd-ii"
+    ],
+    "resources": [
+     {
+      "designation": "Program Manager",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Contract Management expert",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Support Specialist – Procurement and contracts",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Applications Engineer",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Infra and network consultant",
+      "quantity": 1,
+      "duration": "3.00"
+     }
+    ]
+   }
+  ],
+  "D11 - Governance Tool": [
+   {
+    "name": "D11 - Governance Tool",
+    "description": "",
+    "startDate": "2025-11-10",
+    "endDate": "2032-05-10",
+    "vendorName": "Ey India",
+    "priority": "P3",
+    "category": "original",
+    "position": 1,
+    "ownerDivision": "tmd-ii",
+    "concernedDivision": [
+     "tmd-i",
+     "tmd-ii"
+    ],
+    "resources": []
+   },
+   {
+    "name": "D11 - Governance Tool",
+    "description": "",
+    "startDate": "2025-11-10",
+    "endDate": "2032-05-10",
+    "vendorName": "Ey India",
+    "priority": "P3",
+    "category": "original",
+    "position": 2,
+    "ownerDivision": "tmd-ii",
+    "concernedDivision": [
+     "tmd-i",
+     "tmd-ii"
+    ],
+    "resources": []
+   },
+   {
+    "name": "D11 - Governance Tool",
+    "description": "",
+    "startDate": "2025-11-10",
+    "endDate": "2032-05-10",
+    "vendorName": "Ey India",
+    "priority": "P3",
+    "category": "original",
+    "position": 3,
+    "ownerDivision": "tmd-ii",
+    "concernedDivision": [
+     "tmd-i",
+     "tmd-ii"
+    ],
+    "resources": []
+   },
+   {
+    "name": "D11 - Governance Tool",
+    "description": "",
+    "startDate": "2025-11-10",
+    "endDate": "2032-05-10",
+    "vendorName": "Ey India",
+    "priority": "P3",
+    "category": "original",
+    "position": 4,
+    "ownerDivision": "tmd-ii",
+    "concernedDivision": [
+     "tmd-i",
+     "tmd-ii"
+    ],
+    "resources": []
+   }
+  ],
+  "D2 - Prepare repository of the project  documents and knowledge  management plan for the existing  implementation.": [
+   {
+    "name": "D2 - Prepare repository of the project  documents and knowledge  management plan for the existing  implementation.",
+    "description": "",
+    "startDate": "2025-11-10",
+    "endDate": "2026-02-10",
+    "vendorName": "Ey India",
+    "priority": "P3",
+    "category": "original",
+    "position": 1,
+    "ownerDivision": "tmd-ii",
+    "concernedDivision": [
+     "tmd-i",
+     "tmd-ii"
+    ],
+    "resources": [],
+    "markComplete": true
+   }
+  ],
+  "D3 - Program Management Strategy, Roadmap, transition plan and  maintenance Plan.": [
+   {
+    "name": "D3 - Program Management Strategy, Roadmap, transition plan and  maintenance Plan.",
+    "description": "",
+    "startDate": "2026-02-10",
+    "endDate": "2026-04-10",
+    "vendorName": "Ey India",
+    "priority": "P3",
+    "category": "original",
+    "position": 1,
+    "ownerDivision": "tmd-ii",
+    "concernedDivision": [
+     "tmd-i",
+     "tmd-ii"
+    ],
+    "resources": [],
+    "markComplete": true
+   }
+  ],
+  "D4 - Detailed Project Report (DPR) for enhancement strategy and roadmap  of the CIDR.": [
+   {
+    "name": "D4 - Detailed Project Report (DPR) for enhancement strategy and roadmap  of the CIDR.",
+    "description": "",
+    "startDate": "2026-02-10",
+    "endDate": "2026-05-18",
+    "vendorName": "Ey India",
+    "priority": "P3",
+    "category": "original",
+    "position": 1,
+    "ownerDivision": "tmd-ii",
+    "concernedDivision": [
+     "tmd-i",
+     "tmd-ii"
+    ],
+    "resources": []
+   }
+  ],
+  "D5 - Report on Disaster Recovery Plan (DRP) and Business Continuity Plan for the CIDR Project for fully integrated BCP / DR testing exercise and improvement plan.": [
+   {
+    "name": "D5 - Report on Disaster Recovery Plan (DRP) and Business Continuity Plan for the CIDR Project for fully integrated BCP / DR testing exercise and improvement plan.",
+    "description": "",
+    "startDate": "2026-04-10",
+    "endDate": "2026-06-10",
+    "vendorName": "Ey India",
+    "priority": "P3",
+    "category": "original",
+    "position": 1,
+    "ownerDivision": "tmd-ii",
+    "concernedDivision": [
+     "tmd-i",
+     "tmd-ii"
+    ],
+    "resources": []
+   }
+  ],
+  "D6 - Report on enhanced Functional and Technical Specifications for the IT systems of the CIDR.": [
+   {
+    "name": "D6 - Report on enhanced Functional and Technical Specifications for the IT systems of the CIDR.",
+    "description": "",
+    "startDate": "2026-06-10",
+    "endDate": "2026-08-10",
+    "vendorName": "Ey India",
+    "priority": "P3",
+    "category": "original",
+    "position": 1,
+    "ownerDivision": "tmd-ii",
+    "concernedDivision": [
+     "tmd-i",
+     "tmd-ii"
+    ],
+    "resources": []
+   }
+  ],
+  "D7 - Request for Proposals (RFPs) for selection of Managed Service Provider (MSP) to manage and enhance the CIDR.": [
+   {
+    "name": "D7 - Request for Proposals (RFPs) for selection of Managed Service Provider (MSP) to manage and enhance the CIDR.",
+    "description": "",
+    "startDate": "2026-08-10",
+    "endDate": "2026-11-10",
+    "vendorName": "Ey India",
+    "priority": "P3",
+    "category": "original",
+    "position": 1,
+    "ownerDivision": "tmd-ii",
+    "concernedDivision": [
+     "tmd-i",
+     "tmd-ii"
+    ],
+    "resources": []
+   }
+  ],
+  "D8 - Selection of MSP(s) & signing of contract(s)": [
+   {
+    "name": "D8 - Selection of MSP(s) & signing of contract(s)",
+    "description": "",
+    "startDate": "2026-11-10",
+    "endDate": "2027-05-10",
+    "vendorName": "Ey India",
+    "priority": "P3",
+    "category": "original",
+    "position": 1,
+    "ownerDivision": "tmd-ii",
+    "concernedDivision": [
+     "tmd-i",
+     "tmd-ii"
+    ],
+    "resources": []
+   }
+  ],
+  "D9 - Transition Management": [
+   {
+    "name": "D9 - Resource Deployment - Q1",
+    "description": "Transition-phase staffing (Phase 2).",
+    "startDate": "2027-05-10",
+    "endDate": "2027-08-10",
+    "vendorName": "Ey India",
+    "priority": "P2",
+    "category": "original",
+    "position": 1,
+    "ownerDivision": "tmd-ii",
+    "concernedDivision": [
+     "tmd-i",
+     "tmd-ii"
+    ],
+    "resources": [
+     {
+      "designation": "Program Director",
+      "quantity": 1,
+      "duration": "0.75"
+     },
+     {
+      "designation": "Program Manager",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Contract Management expert",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Support Specialist – Procurement and contracts",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Lead architect",
+      "quantity": 1,
+      "duration": "0.75"
+     },
+     {
+      "designation": "Application architect",
+      "quantity": 1,
+      "duration": "0.50"
+     },
+     {
+      "designation": "DC Architect",
+      "quantity": 1,
+      "duration": "0.50"
+     },
+     {
+      "designation": "Cloud Architect",
+      "quantity": 1,
+      "duration": "0.50"
+     },
+     {
+      "designation": "Biometrics Architect",
+      "quantity": 1,
+      "duration": "0.50"
+     },
+     {
+      "designation": "Cyber Security Architect",
+      "quantity": 1,
+      "duration": "0.50"
+     },
+     {
+      "designation": "Business Architect",
+      "quantity": 1,
+      "duration": "0.25"
+     },
+     {
+      "designation": "Senior Consultant Networking",
+      "quantity": 1,
+      "duration": "0.50"
+     },
+     {
+      "designation": "Senior Consultant Server and Storage",
+      "quantity": 1,
+      "duration": "0.50"
+     },
+     {
+      "designation": "Senior Consultant change Management",
+      "quantity": 1,
+      "duration": "0.75"
+     },
+     {
+      "designation": "Consultant (Process/ procurement /security)",
+      "quantity": 1,
+      "duration": "0.25"
+     },
+     {
+      "designation": "Consultant Governance platform",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Applications Engineer",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Infra and network consultant",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Cloud Engineer",
+      "quantity": 1,
+      "duration": "3.00"
+     }
+    ]
+   },
+   {
+    "name": "D9 - Resource Deployment - Q2",
+    "description": "Transition-phase staffing (Phase 2).",
+    "startDate": "2027-08-10",
+    "endDate": "2027-11-10",
+    "vendorName": "Ey India",
+    "priority": "P2",
+    "category": "original",
+    "position": 2,
+    "ownerDivision": "tmd-ii",
+    "concernedDivision": [
+     "tmd-i",
+     "tmd-ii"
+    ],
+    "resources": [
+     {
+      "designation": "Program Director",
+      "quantity": 1,
+      "duration": "0.75"
+     },
+     {
+      "designation": "Program Manager",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Contract Management expert",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Support Specialist – Procurement and contracts",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Lead architect",
+      "quantity": 1,
+      "duration": "0.75"
+     },
+     {
+      "designation": "Application architect",
+      "quantity": 1,
+      "duration": "0.50"
+     },
+     {
+      "designation": "DC Architect",
+      "quantity": 1,
+      "duration": "0.50"
+     },
+     {
+      "designation": "Cloud Architect",
+      "quantity": 1,
+      "duration": "0.50"
+     },
+     {
+      "designation": "Biometrics Architect",
+      "quantity": 1,
+      "duration": "0.50"
+     },
+     {
+      "designation": "Cyber Security Architect",
+      "quantity": 1,
+      "duration": "0.50"
+     },
+     {
+      "designation": "Business Architect",
+      "quantity": 1,
+      "duration": "0.25"
+     },
+     {
+      "designation": "Senior Consultant Networking",
+      "quantity": 1,
+      "duration": "0.50"
+     },
+     {
+      "designation": "Senior Consultant Server and Storage",
+      "quantity": 1,
+      "duration": "0.50"
+     },
+     {
+      "designation": "Senior Consultant change Management",
+      "quantity": 1,
+      "duration": "0.75"
+     },
+     {
+      "designation": "Consultant (Process/ procurement /security)",
+      "quantity": 1,
+      "duration": "0.25"
+     },
+     {
+      "designation": "Consultant Governance platform",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Applications Engineer",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Infra and network consultant",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Cloud Engineer",
+      "quantity": 1,
+      "duration": "3.00"
+     }
+    ]
+   },
+   {
+    "name": "D9 - Resource Deployment - Q3",
+    "description": "Transition-phase staffing (Phase 2).",
+    "startDate": "2027-11-10",
+    "endDate": "2028-02-10",
+    "vendorName": "Ey India",
+    "priority": "P2",
+    "category": "original",
+    "position": 3,
+    "ownerDivision": "tmd-ii",
+    "concernedDivision": [
+     "tmd-i",
+     "tmd-ii"
+    ],
+    "resources": [
+     {
+      "designation": "Program Director",
+      "quantity": 1,
+      "duration": "0.75"
+     },
+     {
+      "designation": "Program Manager",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Contract Management expert",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Support Specialist – Procurement and contracts",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Lead architect",
+      "quantity": 1,
+      "duration": "0.75"
+     },
+     {
+      "designation": "Application architect",
+      "quantity": 1,
+      "duration": "0.50"
+     },
+     {
+      "designation": "DC Architect",
+      "quantity": 1,
+      "duration": "0.50"
+     },
+     {
+      "designation": "Cloud Architect",
+      "quantity": 1,
+      "duration": "0.50"
+     },
+     {
+      "designation": "Biometrics Architect",
+      "quantity": 1,
+      "duration": "0.50"
+     },
+     {
+      "designation": "Cyber Security Architect",
+      "quantity": 1,
+      "duration": "0.50"
+     },
+     {
+      "designation": "Business Architect",
+      "quantity": 1,
+      "duration": "0.25"
+     },
+     {
+      "designation": "Senior Consultant Networking",
+      "quantity": 1,
+      "duration": "0.50"
+     },
+     {
+      "designation": "Senior Consultant Server and Storage",
+      "quantity": 1,
+      "duration": "0.50"
+     },
+     {
+      "designation": "Senior Consultant change Management",
+      "quantity": 1,
+      "duration": "0.75"
+     },
+     {
+      "designation": "Consultant (Process/ procurement /security)",
+      "quantity": 1,
+      "duration": "0.25"
+     },
+     {
+      "designation": "Consultant Governance platform",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Applications Engineer",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Infra and network consultant",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Cloud Engineer",
+      "quantity": 1,
+      "duration": "3.00"
+     }
+    ]
+   },
+   {
+    "name": "D9 - Resource Deployment - Q4",
+    "description": "Transition-phase staffing (Phase 2).",
+    "startDate": "2028-02-10",
+    "endDate": "2028-05-10",
+    "vendorName": "Ey India",
+    "priority": "P2",
+    "category": "original",
+    "position": 4,
+    "ownerDivision": "tmd-ii",
+    "concernedDivision": [
+     "tmd-i",
+     "tmd-ii"
+    ],
+    "resources": [
+     {
+      "designation": "Program Director",
+      "quantity": 1,
+      "duration": "0.75"
+     },
+     {
+      "designation": "Program Manager",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Contract Management expert",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Support Specialist – Procurement and contracts",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Lead architect",
+      "quantity": 1,
+      "duration": "0.75"
+     },
+     {
+      "designation": "Application architect",
+      "quantity": 1,
+      "duration": "0.50"
+     },
+     {
+      "designation": "DC Architect",
+      "quantity": 1,
+      "duration": "0.50"
+     },
+     {
+      "designation": "Cloud Architect",
+      "quantity": 1,
+      "duration": "0.50"
+     },
+     {
+      "designation": "Biometrics Architect",
+      "quantity": 1,
+      "duration": "0.50"
+     },
+     {
+      "designation": "Cyber Security Architect",
+      "quantity": 1,
+      "duration": "0.50"
+     },
+     {
+      "designation": "Business Architect",
+      "quantity": 1,
+      "duration": "0.25"
+     },
+     {
+      "designation": "Senior Consultant Networking",
+      "quantity": 1,
+      "duration": "0.50"
+     },
+     {
+      "designation": "Senior Consultant Server and Storage",
+      "quantity": 1,
+      "duration": "0.50"
+     },
+     {
+      "designation": "Senior Consultant change Management",
+      "quantity": 1,
+      "duration": "0.75"
+     },
+     {
+      "designation": "Consultant (Process/ procurement /security)",
+      "quantity": 1,
+      "duration": "0.25"
+     },
+     {
+      "designation": "Consultant Governance platform",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Applications Engineer",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Infra and network consultant",
+      "quantity": 1,
+      "duration": "3.00"
+     },
+     {
+      "designation": "Cloud Engineer",
+      "quantity": 1,
+      "duration": "3.00"
+     }
+    ]
+   }
+  ]
+ },
+ "costItems": [
+  {
+   "costTypeCode": "fixed",
+   "phase": "1",
+   "cost": "58730000.00",
+   "perTransactionCost": null,
+   "plannedTransactions": null,
+   "lineLabel": null,
+   "frequencyCode": null,
+   "milestoneNames": [
+    "D5 - Report on Disaster Recovery Plan (DRP) and Business Continuity Plan for the CIDR Project for fully integrated BCP / DR testing exercise and improvement plan.",
+    "D8 - Selection of MSP(s) & signing of contract(s)",
+    "D3 - Program Management Strategy, Roadmap, transition plan and  maintenance Plan.",
+    "D2 - Prepare repository of the project  documents and knowledge  management plan for the existing  implementation.",
+    "D1 - Report on existing (AS-IS) implementation and improvement  areas.",
+    "D4 - Detailed Project Report (DPR) for enhancement strategy and roadmap  of the CIDR.",
+    "D7 - Request for Proposals (RFPs) for selection of Managed Service Provider (MSP) to manage and enhance the CIDR.",
+    "D6 - Report on enhanced Functional and Technical Specifications for the IT systems of the CIDR."
+   ],
+   "taxPercent": 18
+  },
+  {
+   "costTypeCode": "resource_cost",
+   "phase": "2",
+   "cost": "3500375.76",
+   "perTransactionCost": null,
+   "plannedTransactions": null,
+   "lineLabel": "Resources for Transition Management",
+   "frequencyCode": null,
+   "milestoneNames": [
+    "D9 - Transition Management"
+   ],
+   "taxPercent": 18
+  },
+  {
+   "costTypeCode": "resource_cost",
+   "phase": "3",
+   "cost": "138658376.00",
+   "perTransactionCost": null,
+   "plannedTransactions": null,
+   "lineLabel": "Resources for In-life Project  Management",
+   "frequencyCode": null,
+   "milestoneNames": [
+    "D10 - In-life Project Management"
+   ],
+   "taxPercent": 18
+  },
+  {
+   "costTypeCode": "one_time",
+   "phase": null,
+   "cost": "5000000.00",
+   "perTransactionCost": null,
+   "plannedTransactions": null,
+   "lineLabel": null,
+   "frequencyCode": null,
+   "milestoneNames": [],
+   "taxPercent": 18
+  },
+  {
+   "costTypeCode": "recurring_cost",
+   "phase": "D11",
+   "cost": "5000000.00",
+   "perTransactionCost": null,
+   "plannedTransactions": null,
+   "lineLabel": null,
+   "frequencyCode": "yearly",
+   "milestoneNames": [
+    "D11 - Governance Tool"
+   ],
+   "taxPercent": 18
+  }
+ ],
+ "termOverrides": [
+  {
+   "phase": "1",
+   "milestoneName": "D1 - Report on existing (AS-IS) implementation and improvement  areas.",
+   "percentOfPayment": "5.00",
+   "ldBasisPercent": 8,
+   "frequencyCode": "quarterly"
+  },
+  {
+   "phase": "1",
+   "milestoneName": "D2 - Prepare repository of the project  documents and knowledge  management plan for the existing  implementation.",
+   "percentOfPayment": "5.00",
+   "ldBasisPercent": 8,
+   "frequencyCode": "quarterly"
+  },
+  {
+   "phase": "1",
+   "milestoneName": "D3 - Program Management Strategy, Roadmap, transition plan and  maintenance Plan.",
+   "percentOfPayment": "5.00",
+   "ldBasisPercent": 8,
+   "frequencyCode": "quarterly"
+  },
+  {
+   "phase": "1",
+   "milestoneName": "D4 - Detailed Project Report (DPR) for enhancement strategy and roadmap  of the CIDR.",
+   "percentOfPayment": "5.00",
+   "ldBasisPercent": 8,
+   "frequencyCode": "quarterly"
+  },
+  {
+   "phase": "1",
+   "milestoneName": "D5 - Report on Disaster Recovery Plan (DRP) and Business Continuity Plan for the CIDR Project for fully integrated BCP / DR testing exercise and improvement plan.",
+   "percentOfPayment": "5.00",
+   "ldBasisPercent": 10,
+   "frequencyCode": "quarterly"
+  },
+  {
+   "phase": "1",
+   "milestoneName": "D6 - Report on enhanced Functional and Technical Specifications for the IT systems of the CIDR.",
+   "percentOfPayment": "5.00",
+   "ldBasisPercent": 8,
+   "frequencyCode": "quarterly"
+  },
+  {
+   "phase": "1",
+   "milestoneName": "D7 - Request for Proposals (RFPs) for selection of Managed Service Provider (MSP) to manage and enhance the CIDR.",
+   "percentOfPayment": "15.00",
+   "ldBasisPercent": 20,
+   "frequencyCode": "quarterly"
+  },
+  {
+   "phase": "1",
+   "milestoneName": "D8 - Selection of MSP(s) & signing of contract(s)",
+   "percentOfPayment": "20.00",
+   "ldBasisPercent": 30,
+   "frequencyCode": "quarterly"
+  },
+  {
+   "phase": "2",
+   "milestoneName": "D9 - Transition Management",
+   "percentOfPayment": "100.00",
+   "ldBasisPercent": null,
+   "frequencyCode": "quarterly"
+  },
+  {
+   "phase": "3",
+   "milestoneName": "D10 - In-life Project Management",
+   "percentOfPayment": "100.00",
+   "ldBasisPercent": null,
+   "frequencyCode": "quarterly"
+  }
+ ],
+ "validRoles": [
+  "Program Director",
+  "Program Manager",
+  "Contract Management expert",
+  "Support Specialist – Procurement and contracts",
+  "Lead architect",
+  "Application architect",
+  "DC Architect",
+  "Cloud Architect",
+  "Biometrics Architect",
+  "Cyber Security Architect",
+  "Business Architect",
+  "Senior Consultant Networking",
+  "Senior Consultant Server and Storage",
+  "Senior Consultant change Management",
+  "Consultant (Process/ procurement /security)",
+  "Consultant Governance platform",
+  "Applications Engineer",
+  "Infra and network consultant",
+  "Cloud Engineer"
+ ]
+}

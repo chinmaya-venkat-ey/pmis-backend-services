@@ -17,7 +17,7 @@ docker run --rm pmis-pmc-setup --name "Project Management Consultants (PMC) - co
 ```
 
 Each `docker run` creates a **fresh copy** end-to-end: project → 11 milestones →
-activities (D9 = 4 quarterly + D10 = 20 quarterly resource activities, **D1–D3
+activities (D9 = 4 quarterly + D10 = 20 quarterly resource activities, **D1–D5
 marked completed**) → cost items → payment terms → publish, then **replicates the
 team owners/approvers** from the source project. Default target is `--env remote`.
 
@@ -169,8 +169,11 @@ resource-alignment sheet (19 roles; `pmc-designation-rates.xlsx`). Key points:
   contract year → one rate → no straddle across the Nov-10 contract-year boundary.
 - **D10 no longer overlaps D9** — it runs 2028-05-10 → 2032-05-10 (4 funded years =
   sheet Phase-3 Y2–Y5). D9 stays 2027-05-10 → 2028-05-10.
-- **D1–D3 activities** are flagged `markComplete` in the fixture; the script PATCHes them
-  to `status=completed` after creation (cascades to the milestone roll-up).
+- **D1–D5 activities** are flagged `markComplete` in the fixture; the script PATCHes them
+  to `status=completed` after creation (cascades to the milestone roll-up). Each completed
+  activity **and** its milestone also get **`actualEndDate` = their planned `endDate`**, so
+  an LD/SLA evaluation has a real completion date to derive on-time/late from (a completed
+  milestone with no actual-end date reads as "no completion date" → no LD).
 - **Milestone names + dates** match the current remote PMC-copy.
 
 **Verified on the LOCAL harness** (leave-mgmt mock carries the same 19 roles/shifted

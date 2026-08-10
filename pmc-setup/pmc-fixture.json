@@ -1135,7 +1135,8 @@
      "tmd-i",
      "tmd-ii"
     ],
-    "resources": []
+    "resources": [],
+    "markComplete": true
    }
   ],
   "D5 - Report on Disaster Recovery Plan (DRP) and Business Continuity Plan for the CIDR Project for fully integrated BCP / DR testing exercise and improvement plan.": [
@@ -1153,7 +1154,8 @@
      "tmd-i",
      "tmd-ii"
     ],
-    "resources": []
+    "resources": [],
+    "markComplete": true
    }
   ],
   "D6 - Report on enhanced Functional and Technical Specifications for the IT systems of the CIDR.": [

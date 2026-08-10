@@ -320,16 +320,21 @@ print(json.dumps(m))')
 # ----------------------------------------------------------------- 5. activities (+ resources)
 hr; log "creating activities (with resource allocations) …"
 acount=0; rcount=0; ccount=0
-while IFS=$'\t' read -r mid abody hasres mark; do
+while IFS=$'\t' read -r mid abody hasres mark aend; do
   [ -n "$mid" ] || continue
   resp=$(req POST "$PROJ_BASE/api/v3/milestones/$mid/activities/create" "$abody")
   aid=$(echo "$resp" | extract_id)
   [ -n "$aid" ] || die "activity create failed (HTTP $(rc)): $resp"
   acount=$((acount+1)); [ "$hasres" = "1" ] && rcount=$((rcount+1))
-  # markComplete (D1-D3 deliverables): flip status -> completed (cascades to the
+  # markComplete (D1-D5 deliverables): flip status -> completed (cascades to the
   # milestone roll-up). Direct status set — bypasses the approval workflow.
+  # Also stamp actualEndDate = planned endDate so LD/SLA has a real completion date to
+  # derive on-time/late from — a completed activity/milestone with no actual end reads
+  # as "no completion date" and yields no LD.
   if [ "$mark" = "1" ]; then
-    cresp=$(req PATCH "$PROJ_BASE/api/v3/activities/$aid" '{"status":"completed"}')
+    cbody='{"status":"completed"}'
+    [ -n "$aend" ] && cbody="{\"status\":\"completed\",\"actualEndDate\":\"$aend\"}"
+    cresp=$(req PATCH "$PROJ_BASE/api/v3/activities/$aid" "$cbody")
     [ "$(rc)" = "200" ] && ccount=$((ccount+1)) || warn "mark-complete activity $aid HTTP $(rc): $cresp"
   fi
 done < <(py 'import os,json
@@ -357,8 +362,26 @@ for msname, acts in f["activitiesByMilestone"].items():
         if a.get("resources"): body["resources"]=[
             {"designation":r["designation"],"quantity":int(r["quantity"]),"duration":str(r["duration"])} for r in a["resources"]]
         body={k:v for k,v in body.items() if v is not None}
-        print(mid+"\t"+json.dumps(body)+"\t"+("1" if a.get("resources") else "0")+"\t"+("1" if a.get("markComplete") else "0"))')
+        print(mid+"\t"+json.dumps(body)+"\t"+("1" if a.get("resources") else "0")+"\t"+("1" if a.get("markComplete") else "0")+"\t"+(body.get("endDate") or ""))')
 ok "activities created: $acount (with resource allocations: $rcount, marked completed: $ccount)"
+
+# stamp actual end = planned end on each COMPLETED (markComplete) milestone. The milestone
+# auto-completes via the activity roll-up; this only records its completion DATE so an LD/SLA
+# evaluation can derive on-time/late (a completed milestone with no actual end reads as no-LD).
+mecount=0
+while IFS=$'\t' read -r msid msend; do
+  [ -n "$msid" ] || continue
+  meresp=$(req PATCH "$PROJ_BASE/api/v3/milestones/$msid" "{\"actualEndDate\":\"$msend\"}")
+  [ "$(rc)" = "200" ] && mecount=$((mecount+1)) || warn "milestone actual-end $msid HTTP $(rc): $meresp"
+done < <(py 'import os,json
+f=json.load(open(os.environ["FX"])); mmap=json.loads(os.environ["MMAP"])
+def dt(d,end=False): return None if not d else d+("T23:59:59+05:30" if end else "T00:00:00+05:30")
+mc_names={ms for ms,acts in f["activitiesByMilestone"].items() if any(a.get("markComplete") for a in acts)}
+end_by_name={m["name"]: dt(m.get("endDate"), True) for m in f["milestones"]}
+for msname in sorted(mc_names):
+    mid=mmap.get(msname); end=end_by_name.get(msname)
+    if mid and end: print(mid+"\t"+end)')
+ok "completed-milestone actual-end dates set: $mecount"
 
 # ----------------------------------------------------------------- 6. cost items
 hr; log "creating cost items …"

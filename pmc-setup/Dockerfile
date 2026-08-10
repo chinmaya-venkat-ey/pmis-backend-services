@@ -1,7 +1,7 @@
 # PMC project setup — self-contained image.
 # Builds the "Project Management Consultants (PMC)" project end-to-end via the
 # PMIS REST APIs: creates the project + 11 milestones + activities (D9 = 4
-# quarterly + D10 = 20 quarterly resource activities, D1-D3 marked completed),
+# quarterly + D10 = 20 quarterly resource activities, D1-D5 marked completed),
 # cost items, payment terms; replicates team owners/approvers from a source
 # project; and OPTIONALLY overrides the D9/D10 resource cost values to the
 # resource-alignment sheet.

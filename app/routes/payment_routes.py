@@ -54,6 +54,7 @@ from app.schemas.payment import (
     PhaseSequenceUpdateRequest,
     ProjectFrequencyUpdateRequest,
 )
+from app.schemas.phase import ProjectPhasesResponse
 
 
 # ============================================================ cost items (scoped)
@@ -296,6 +297,27 @@ def get_payment_page(
     if authorization and authorization.lower().startswith("bearer "):
         bearer = authorization.split(None, 1)[1].strip() or None
     return controller.get_page(project_uuid, bearer_token=bearer)
+
+
+@payment_page_router.get(
+    "/{project_uuid}/phases",
+    response_model=ProjectPhasesResponse,
+    summary="List a project's phases with their date span + delivery-model flags "
+            "(resource-based / transaction-based). Lightweight — no finance totals.",
+    description=(
+        "Returns each phase (as used on the finance page — '1', '2', 'D11', …) "
+        "with its date span (earliest milestone start / latest milestone end) and "
+        "whether it is resource-based / transaction-based. Ordered earliest phase "
+        "first."
+    ),
+    dependencies=[Depends(require_project_permission(PAYMENT_READ))],
+)
+def list_project_phases(
+    project_uuid: str,
+    db: Annotated[Session, Depends(get_db)],
+):
+    from app.services.phase_summary_service import PhaseSummaryService
+    return PhaseSummaryService(db).list_phases(project_uuid)
 
 
 @payment_page_router.get(

@@ -169,6 +169,36 @@ class ProjectCostItemRepository:
         ).all()
         return {phase: (start, end) for phase, start, end in rows}
 
+    def phase_summaries(self, project_id: str) -> List[Tuple]:
+        """Per-phase span + delivery-model flags, over the SAME live phase-dated
+        cost rows as :meth:`phase_milestone_date_bounds` (so the phase set matches
+        the payment page). Returns a list of
+        ``(phase, min_start, max_end, is_resource_based, is_transaction_based)``.
+        The flags are ``bool_or`` across the phase's milestones — a phase counts
+        as resource-/transaction-based if any of its milestones is."""
+        rows = self.db.execute(
+            select(
+                ProjectCostItem.phase,
+                func.min(Milestone.start_date),
+                func.max(Milestone.end_date),
+                func.bool_or(Milestone.is_resource_based),
+                func.bool_or(Milestone.is_transaction_based),
+            )
+            .select_from(CostItemMilestone)
+            .join(ProjectCostItem, ProjectCostItem.id == CostItemMilestone.cost_item_id)
+            .join(Milestone, Milestone.id == CostItemMilestone.milestone_id)
+            .where(ProjectCostItem.project_id == project_id)
+            .where(ProjectCostItem.deleted_at.is_(None))
+            .where(ProjectCostItem.cost_type_code.in_(_PHASE_DATED_TYPES))
+            .where(ProjectCostItem.phase.is_not(None))
+            .where(Milestone.deleted_at.is_(None))
+            .group_by(ProjectCostItem.phase)
+        ).all()
+        return [
+            (phase, start, end, bool(rb), bool(tb))
+            for phase, start, end, rb, tb in rows
+        ]
+
     def milestone_date_map(self, project_id: str) -> dict:
         """Return ``{milestone_id: (start_date, end_date)}`` for milestones bound
         to LIVE FIXED cost rows in this project — drives the per-milestone cycle

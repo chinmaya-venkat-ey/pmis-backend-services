@@ -27,6 +27,19 @@ from app.services.project_service import ProjectService
 
 # #322: classifier for a project's late-start (actual-start) reason documents.
 ACTUAL_START_REASON_CATEGORY = "actual_start_reason"
+# Date-change reason documents (parity with #322) for the project's planned
+# start, planned end, and actual end dates. One classifier per date field.
+PLANNED_START_REASON_CATEGORY = "planned_start_reason"
+PLANNED_END_REASON_CATEGORY = "planned_end_reason"
+ACTUAL_END_REASON_CATEGORY = "actual_end_reason"
+# Every date-change reason category. These are kept OUT of the general project
+# attachment list — each has its own dedicated upload/list endpoint.
+DATE_REASON_CATEGORIES = (
+    ACTUAL_START_REASON_CATEGORY,
+    PLANNED_START_REASON_CATEGORY,
+    PLANNED_END_REASON_CATEGORY,
+    ACTUAL_END_REASON_CATEGORY,
+)
 
 
 class ProjectController:
@@ -334,7 +347,8 @@ class ProjectController:
         authorization: Optional[str] = None,
     ) -> Dict[str, Any]:
         # #323: filter restricted documents out of the project attachment list.
-        # #322: the actual-start reason documents have their own endpoint, so
+        # #322 + date-change parity: the date-change reason documents (actual
+        # start, planned start/end, actual end) each have their own endpoint, so
         # they are excluded from the general project attachment list.
         from app.services.document_access import build_resolver
         resolver = build_resolver(
@@ -343,7 +357,7 @@ class ProjectController:
         )
         return self.attachments.list_for_project(
             project_id, access_resolver=resolver,
-            exclude_category=ACTUAL_START_REASON_CATEGORY,
+            exclude_category=DATE_REASON_CATEGORIES,
         )
 
     def upload_actual_start_attachments(
@@ -373,4 +387,34 @@ class ProjectController:
         return self.attachments.list_for_project(
             project_id, access_resolver=resolver,
             category=ACTUAL_START_REASON_CATEGORY,
+        )
+
+    # ---- date-change reason attachments (planned start/end, actual end) ----
+    # Parity with #322's actual-start endpoints; one category per date field.
+
+    def upload_date_reason_attachments(
+        self, project_id: str, files, *, category: str, caller_user_id: str,
+    ) -> Dict[str, Any]:
+        """Attach supporting documents to a project's date-change reason
+        (planned start, planned end, or actual end). ``AttachmentService.upload``
+        resolves the project and 404s if missing."""
+        return self.attachments.upload(
+            "project", project_id, files,
+            caller_user_id=caller_user_id, category=category,
+        )
+
+    def list_date_reason_attachments(
+        self, project_id: str, *, category: str,
+        caller_user_id: Optional[str] = None,
+        caller_is_admin: bool = False,
+        authorization: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """A date-change reason's documents (still #323-access-filtered)."""
+        from app.services.document_access import build_resolver
+        resolver = build_resolver(
+            self.db, caller_user_id=caller_user_id,
+            caller_is_admin=caller_is_admin, authorization=authorization,
+        )
+        return self.attachments.list_for_project(
+            project_id, access_resolver=resolver, category=category,
         )

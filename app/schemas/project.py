@@ -186,6 +186,10 @@ class ProjectResponse(ResponseModel):
     actual_end_date: Optional[datetime] = None
     contract_signing_date: Optional[datetime] = None   # #321
     actual_start_remarks: Optional[str] = None          # #322
+    # Date-change remarks (parity with #322) for planned start/end + actual end.
+    start_date_remarks: Optional[str] = None
+    end_date_remarks: Optional[str] = None
+    actual_end_remarks: Optional[str] = None
 
     parent_id: Optional[str] = None
 
@@ -273,6 +277,10 @@ class ProjectCreateRequest(BaseModel):
     contract_signing_date: Optional[datetime] = None
     actual_start_date: Optional[datetime] = None
     actual_start_remarks: Annotated[Optional[str], Field(default=None, max_length=2000)] = None
+    # Date-change remarks (parity with #322) for planned start/end + actual end.
+    start_date_remarks: Annotated[Optional[str], Field(default=None, max_length=2000)] = None
+    end_date_remarks: Annotated[Optional[str], Field(default=None, max_length=2000)] = None
+    actual_end_remarks: Annotated[Optional[str], Field(default=None, max_length=2000)] = None
 
     vendor_ids: List[str] = Field(default_factory=list)
 
@@ -342,6 +350,10 @@ class ProjectUpdateRequest(BaseModel):
     actual_end_date: Optional[datetime] = None
     contract_signing_date: Optional[datetime] = None   # #321
     actual_start_remarks: Annotated[Optional[str], Field(default=None, max_length=2000)] = None  # #322
+    # Date-change remarks (parity with #322) for planned start/end + actual end.
+    start_date_remarks: Annotated[Optional[str], Field(default=None, max_length=2000)] = None
+    end_date_remarks: Annotated[Optional[str], Field(default=None, max_length=2000)] = None
+    actual_end_remarks: Annotated[Optional[str], Field(default=None, max_length=2000)] = None
     vendor_ids: Optional[List[str]] = None
 
     # Finance fields (Doc-finance) — optional on PATCH. Editing finance via

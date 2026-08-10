@@ -98,6 +98,12 @@ class Project(Base):
     # actual start date (with optional attachments via the project attachment
     # path). Nullable/additive.
     actual_start_remarks: Mapped[Optional[str]] = mapped_column(String(2000))
+    # Date-change remarks (parity with #322) — reason/remarks captured when the
+    # PLANNED start, PLANNED end, or ACTUAL end date is edited (with optional
+    # attachments via the project attachment path). Nullable/additive.
+    start_date_remarks: Mapped[Optional[str]] = mapped_column(String(2000))
+    end_date_remarks: Mapped[Optional[str]] = mapped_column(String(2000))
+    actual_end_remarks: Mapped[Optional[str]] = mapped_column(String(2000))
 
     # Finance fields — INR rupees stored as NUMERIC(18, 2). All default to
     # safe zero/no-op values so existing rows continue to behave as before

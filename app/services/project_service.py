@@ -192,6 +192,10 @@ class ProjectService:
             contract_signing_date=getattr(payload, "contract_signing_date", None),
             actual_start_date=getattr(payload, "actual_start_date", None),
             actual_start_remarks=getattr(payload, "actual_start_remarks", None),
+            # Date-change remarks (parity with #322) — additive/optional.
+            start_date_remarks=getattr(payload, "start_date_remarks", None),
+            end_date_remarks=getattr(payload, "end_date_remarks", None),
+            actual_end_remarks=getattr(payload, "actual_end_remarks", None),
             created_by=caller_user_id,
             updated_by=caller_user_id,
         )

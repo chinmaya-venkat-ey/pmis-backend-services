@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import List, Optional, Tuple
+from typing import List, Optional, Sequence, Tuple, Union
 
 from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
@@ -65,7 +65,8 @@ class CommentRepository:
     def list_attachments_for_target(
         self, target_kind: str, target_id: str, *,
         offset: int = 1, page_size: int = 50, include_deleted: bool = False,
-        category: Optional[str] = None, exclude_category: Optional[str] = None,
+        category: Optional[str] = None,
+        exclude_category: Optional[Union[str, Sequence[str]]] = None,
     ) -> Tuple[List[Comment], int]:
         """List body-IS-NULL comment rows (attachment-only sends) for a
         target. Monolith parity: ordered OLDEST FIRST (``created_at
@@ -73,8 +74,9 @@ class CommentRepository:
         newest-first.
 
         ``category`` restricts to rows with that exact classifier (e.g.
-        ``'actual_start_reason'``); ``exclude_category`` drops rows with it
-        (e.g. the general attachment list hides the actual-start documents)."""
+        ``'actual_start_reason'``); ``exclude_category`` drops rows with it —
+        either a single classifier or a collection of them (e.g. the general
+        attachment list hides all the date-change reason documents)."""
         clauses = [
             Comment.target_kind == target_kind,
             Comment.target_id == target_id,
@@ -83,8 +85,12 @@ class CommentRepository:
         if category is not None:
             clauses.append(Comment.category == category)
         if exclude_category is not None:
+            excluded = (
+                [exclude_category] if isinstance(exclude_category, str)
+                else list(exclude_category)
+            )
             clauses.append(
-                (Comment.category != exclude_category) | Comment.category.is_(None)
+                Comment.category.notin_(excluded) | Comment.category.is_(None)
             )
         if not include_deleted:
             clauses.append(Comment.deleted_at.is_(None))

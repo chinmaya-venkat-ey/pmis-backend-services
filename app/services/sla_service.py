@@ -48,6 +48,24 @@ def _derive_contract_type(sla_ref: Optional[str]) -> Optional[str]:
     return prefix if prefix in _CONTRACT_TYPES else None
 
 
+def _derive_ld_formula_rule(ld_computation_base: Optional[str]) -> str:
+    """Track-correct default LD classifier when onboarding doesn't specify one.
+
+    ``ld_formula_rule`` is the settlement Track classifier; a NULL rule makes the
+    SLA fall out of BOTH tracks and produce no LD (see quarterly_settlement_service
+    ``_TRACK_B_RULES`` + the Track-A ``PER_UNIT_TIME_DELIVERABLE``). Historically
+    onboarding never set it, so every wizard-onboarded SLA was silently excluded
+    from settlement. Default from the (already-captured) LD base:
+
+      * FIXED_AMOUNT (deliverable, RFP §5.28.2) -> ``PER_UNIT_TIME_DELIVERABLE`` (Track A)
+      * QUARTERLY_PAYMENT / ANNUAL_PAYMENT (resource/quarterly, §5.28.3/4) -> ``LADDER`` (Track B)
+
+    This is TRACK-correct (and within Track B the money sums identically regardless
+    of the specific rule). Callers may still pass an explicit ``ld_formula_rule`` to
+    override this default with the exact per-SLA rule."""
+    return "PER_UNIT_TIME_DELIVERABLE" if (ld_computation_base or "").upper() == "FIXED_AMOUNT" else "LADDER"
+
+
 # ---------------------------------------------------------------------------
 # DSL generator
 # ---------------------------------------------------------------------------
@@ -513,6 +531,7 @@ class SlaService:
             measurement_interval=payload.measurement_interval,
             reporting_interval=payload.reporting_interval,
             ld_computation_base=payload.applied_on,
+            ld_formula_rule=getattr(payload, "ld_formula_rule", None),
             effective_from=payload.effective_from,
             effective_until=payload.effective_until,
             metrics=metrics,
@@ -725,6 +744,11 @@ class SlaService:
             compound_metric_rule=payload.compound_metric_rule,
             ld_aggregation_method=payload.ld_aggregation_method,
             ld_computation_base=payload.ld_computation_base,
+            # Settlement Track classifier — REQUIRED for the SLA to produce LD.
+            # Use the caller's value if given, else a track-correct default from
+            # the LD base (a NULL rule silently excludes the SLA from settlement).
+            ld_formula_rule=(getattr(payload, "ld_formula_rule", None)
+                             or _derive_ld_formula_rule(payload.ld_computation_base)),
             metadata_=payload.metadata,
             # Per-mapping variables (typed list). The mapping form renders
             # one input per entry; empty list means "no placeholders, just

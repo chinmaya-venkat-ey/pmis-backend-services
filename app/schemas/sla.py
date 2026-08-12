@@ -199,6 +199,11 @@ class SlaOnboardRequest(BaseModel):
         "QUARTERLY_PAYMENT",
         pattern=r"^(QUARTERLY_PAYMENT|ANNUAL_PAYMENT|FIXED_AMOUNT)$",
     )
+    # Settlement Track classifier. Optional: when omitted the service derives a
+    # track-correct default from ld_computation_base (FIXED_AMOUNT ->
+    # PER_UNIT_TIME_DELIVERABLE, else LADDER). Send the exact per-SLA rule to
+    # override. A NULL rule would exclude the SLA from settlement entirely.
+    ld_formula_rule: Optional[str] = None
     # effective_from is required on new SLAs (the only date the RFP
     # implicitly requires). effective_until stays optional — empty
     # means "open-ended", the most common case.
@@ -730,8 +735,13 @@ class SlaFromRfpRequest(BaseModel):
     applied_on: str = Field(
         "QUARTERLY_PAYMENT",
         pattern=r"^(QUARTERLY_PAYMENT|ANNUAL_PAYMENT|FIXED_AMOUNT)$",
-        description='LD base. QUARTERLY_PAYMENT = NPQP; FIXED_AMOUNT = deliverable cost.',
+        description='LD base. QUARTERLY_PAYMENT = PQP; FIXED_AMOUNT = deliverable cost.',
     )
+    # Settlement Track classifier — optional; the service derives a track-correct
+    # default from applied_on when omitted (else the SLA gets no LD). Send the
+    # exact per-SLA rule (PER_UNIT_TIME_DELIVERABLE / LADDER / PER_OCCURRENCE / …)
+    # to override.
+    ld_formula_rule: Optional[str] = None
     effective_from: date = Field(default_factory=lambda: date(2024, 4, 1))
     effective_until: Optional[date] = None
 

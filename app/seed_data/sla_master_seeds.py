@@ -796,12 +796,13 @@ PMU_SEEDS: List[Dict[str, Any]] = [
          #   L0  >=16 BD AND >=144 hrs
          #   L2  12-15 BD AND 108-135 hrs
          #   L4  <12 BD AND <108 hrs
-         # We seed bands for BOTH metrics so the point_accumulation
-         # evaluator (compound_metric_rule=COMBINED in a future phase)
-         # can verify both conditions. Today the evaluator picks the
-         # highest severity seen across either metric — which is the
-         # right answer when both metrics drift together (BD drops →
-         # hours drop). The guard catches the drift-apart case.
+         # We seed bands for BOTH metrics. compound_metric_rule=COMBINED tells
+         # the point_accumulation evaluator to score EACH banded metric against
+         # its own observation and take the WORST severity — implementing the
+         # RFP "Sev 0 iff BD>=16 AND hours>=144" joint condition (a shortfall on
+         # either metric drops to the worse band). No guard is needed for the
+         # drift-apart case anymore: if hours fall short while BD looks fine, the
+         # hours band now contributes its own (worse) severity directly.
          # Band ranges follow the evaluator's min-EXCLUSIVE / max-INCLUSIVE
          # convention (value > range_min AND value <= range_max), so an
          # inclusive ">= 16" threshold is encoded as range_min = 15 (like
@@ -833,16 +834,10 @@ PMU_SEEDS: List[Dict[str, Any]] = [
               "range_min": None, "range_max": "107",
               "range_unit": "hours", "severity_level": 4, "sort_order": 6},
          ],
-         guard_conditions=[
-             # Guard against the drift-apart case: if BD looks OK but
-             # hours don't (e.g. someone logged 16 days but only 100
-             # hrs), the guard fires and the evaluator records it.
-             {"metric_key": "resource_logged_hours",
-              "operator": "LT", "threshold_value": "144",
-              "action": "EXCLUDE",
-              "action_description":
-                  "Hours below 144 — verify business-day severity with manual review."}
-         ]),
+         # No guard: hours are now scored directly via compound (COMBINED)
+         # severity, so a sub-144-hours entry contributes its own severity
+         # instead of being blanket-EXCLUDED (which suppressed real breaches).
+         guard_conditions=[]),
 
     # RFP §5.28.3.f — onboarding variance L-K (K = approval date, L = actual)
     _sla("PMU-SLA008", "PMU", "point_accumulation",

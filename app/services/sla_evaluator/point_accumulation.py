@@ -62,6 +62,15 @@ class PointAccumulationEvaluator(FormulaEvaluator):
         result = EvaluatedResult()
         result.guards = self._evaluate_guards(ctx)
 
+        # Compound (multi-metric AND) SLAs — e.g. PMU-SLA007 (business-days AND
+        # hours). RFP §5.28.3.e: compliant (Sev 0) only when EVERY metric meets
+        # its target; otherwise severity is the WORST across metrics. Score each
+        # banded metric against its own observation and take the max. (Previously
+        # only the primary metric was scored and the secondary was handled by a
+        # blunt EXCLUDE guard that suppressed real breaches.)
+        if (getattr(ctx.sla, "compound_metric_rule", "") or "").upper() == "COMBINED":
+            return self._evaluate_compound(ctx, result)
+
         primary = self._primary_metric(ctx)
         if primary is None:
             result.notes.append("No primary metric defined; cannot evaluate.")
@@ -137,6 +146,57 @@ class PointAccumulationEvaluator(FormulaEvaluator):
 
         result.accumulated_points = accumulated
         result.severity_level = highest_level
+        return result
+
+    def _evaluate_compound(
+        self, ctx: EvaluationContext, result: EvaluatedResult,
+    ) -> EvaluatedResult:
+        """Multi-metric AND scoring (compound_metric_rule=COMBINED).
+
+        Each metric that has condition bands is scored against its own
+        SINGLE_VALUE observation; the SLA's severity is the WORST (highest)
+        across metrics, and the accumulated points come from that worst band.
+        This implements the RFP "Sev 0 iff ALL metrics meet target" joint
+        condition — e.g. PMU-SLA007 needs business-days >= 16 AND hours >= 144
+        for Sev 0; falling short on EITHER drops to the worse severity.
+        """
+        worst_level: Optional[int] = None
+        worst_points = Decimal("0")
+        scored_any = False
+        for metric in ctx.metrics:
+            mbands = [b for b in ctx.bands if b.metric_key == metric.metric_key]
+            if not mbands:
+                continue
+            obs = self._observation_for(ctx, metric.metric_key)
+            if obs is None or obs.shape != "SINGLE_VALUE" or obs.single_value is None:
+                continue
+            band = self._first_band_for(obs.single_value, mbands)
+            if band is None:
+                continue
+            scored_any = True
+            pts = self._band_points(band, ctx)
+            result.breaches.append(
+                BreachDetail(
+                    metric_key=metric.metric_key,
+                    band_label=band.band_label,
+                    observed_value=obs.single_value,
+                    severity_level=band.severity_level,
+                    points_contribution=pts,
+                )
+            )
+            level = band.severity_level if band.severity_level is not None else -1
+            worst = worst_level if worst_level is not None else -1
+            if level > worst:
+                worst_level = band.severity_level
+                worst_points = pts
+        if not scored_any:
+            result.notes.append(
+                "Compound SLA: no scorable SINGLE_VALUE observations for any "
+                "banded metric."
+            )
+            return result
+        result.accumulated_points = worst_points
+        result.severity_level = worst_level
         return result
 
     @staticmethod

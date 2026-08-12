@@ -66,6 +66,65 @@ def _derive_ld_formula_rule(ld_computation_base: Optional[str]) -> str:
     return "PER_UNIT_TIME_DELIVERABLE" if (ld_computation_base or "").upper() == "FIXED_AMOUNT" else "LADDER"
 
 
+# Valid settlement-Track classifiers (keep in sync with
+# quarterly_settlement_service._TRACK_B_RULES + the Track-A PER_UNIT_TIME_DELIVERABLE).
+# A rule outside this set is never classified into a Track at settlement, so the
+# SLA silently produces no LD — reject it at onboarding rather than store it.
+_VALID_LD_FORMULA_RULES = frozenset({
+    "PER_UNIT_TIME_DELIVERABLE",                                  # Track A
+    "LADDER", "PER_UNIT_TIME_QUARTERLY", "PER_OCCURRENCE",        # Track B
+    "PER_UNIT_OVER_THRESHOLD", "AVAILABILITY_UPTIME", "DAYS_WEIGHTED",
+})
+
+
+def _validate_structural(payload: SlaOnboardRequest) -> None:
+    """Reject structurally-broken SLAs the schema accepts but the engine can't
+    score correctly. These are exactly the defects that reached live data via the
+    onboarding wizard and had to be remediated by migrations 0032/0034; catching
+    them here stops new ones being created (defence-in-depth behind the FE fixes).
+
+    Guards (all raise ValidationError -> HTTP 422):
+      1. **Match-all band** — a condition band with BOTH bounds NULL matches every
+         value (band test is ``range_min < value <= range_max``; with both NULL it
+         is vacuously true), so the first such band always wins and severity is
+         meaningless. A single NULL bound (e.g. ``range_max`` only = "<= N", the
+         legitimate baseline shape) is allowed.
+      2. **COMBINED compound with an unbanded metric** — worst-severity compound
+         scoring silently skips any metric that has no bands, so a COMBINED SLA
+         missing one metric's bands scores on a subset and under-penalises.
+      3. **Unknown ld_formula_rule** — a rule outside the settlement Track
+         vocabulary is never put in a Track -> no LD. (NULL is fine; it is derived.)
+    """
+    # 1. match-all bands
+    for b in payload.condition_bands:
+        if b.range_min is None and b.range_max is None:
+            raise ValidationError(
+                f"Condition band '{b.band_label}' (metric '{b.metric_key}') has neither "
+                f"a lower nor an upper bound, so it matches every value and makes severity "
+                f"meaningless. Give the band at least one bound.",
+                code="unbounded_condition_band",
+            )
+    # 2. COMBINED compound must band every metric it declares
+    if (payload.compound_metric_rule or "").upper() == "COMBINED":
+        banded = {b.metric_key for b in payload.condition_bands}
+        for m in payload.metrics:
+            if m.metric_key not in banded:
+                raise ValidationError(
+                    f"compound_metric_rule=COMBINED but metric '{m.metric_key}' has no "
+                    f"condition bands; compound scoring would silently ignore it. Add "
+                    f"bands for every combined metric.",
+                    code="combined_metric_without_bands",
+                )
+    # 3. ld_formula_rule must be a known settlement Track (NULL derives a default later)
+    rule = getattr(payload, "ld_formula_rule", None)
+    if rule is not None and rule not in _VALID_LD_FORMULA_RULES:
+        raise ValidationError(
+            f"Unknown ld_formula_rule '{rule}'. Must be one of "
+            f"{sorted(_VALID_LD_FORMULA_RULES)} (or omitted to derive a track-correct default).",
+            code="unknown_ld_formula_rule",
+        )
+
+
 # ---------------------------------------------------------------------------
 # DSL generator
 # ---------------------------------------------------------------------------
@@ -721,6 +780,10 @@ class SlaService:
         param_keys = [p.param_key for p in payload.parameters]
         if len(param_keys) != len(set(param_keys)):
             raise ValidationError("Duplicate param_key values in parameters", code="duplicate_param_key")
+
+        # Structural guards — reject match-all bands, COMBINED-without-bands, and
+        # unknown settlement rules before any write (see _validate_structural).
+        _validate_structural(payload)
 
         # Create definition. project_id is now first-class — when the
         # caller supplies it the SLA belongs to that project, otherwise it

@@ -228,13 +228,21 @@ class QuarterlySettlementService:
             )
 
         npqp = npqp_resp.npqp
-        ld_amount = (capped_ld / Decimal("100")) * npqp
+        # LD base = PQP (Planned Quarterly Payment = F), NOT NPQP, per the
+        # corrigendum amendments to RFP §5.28 (#48–#50): NPQP (=F+QGR, §5.28.1.e)
+        # was DELETED and the LD formula re-read as "LD = Σ%LD × PQP", with the
+        # quarterly cap re-based to 10% of PQP (§5.27.6, #47). QGR is removed from
+        # the penalty base but still added back into the AQP below (§5.28.1.h), so
+        # it no longer inflates the penalty. PQP is F (the planned resource
+        # payment); npqp_resp.f_amount already carries it and is stored on the row.
+        pqp = npqp_resp.f_amount
+        ld_amount = (capped_ld / Decimal("100")) * pqp
         # PA — actual attendance-adjusted payment (RFP §5.28.1.d.g). Distinct
-        # from F: F is what the resource-deployment plan says the consultant
-        # would be paid at full attendance; PA is what leave-mgmt's per-month
-        # cost actually resolves to after leaves / absences. LD is calculated
-        # on NPQP (F+QGR) per §5.28.1.d.f but deducted from PA per §5.28.1.d.h,
-        # so a shortfall on attendance reduces the AQP linearly.
+        # from F/PQP: F/PQP is what the resource-deployment plan says the
+        # consultant would be paid at full attendance; PA is what leave-mgmt's
+        # per-month cost actually resolves to after leaves / absences. LD is
+        # calculated on PQP (§5.28.1.f, amended) but deducted from PA
+        # (§5.28.1.h), so a shortfall on attendance reduces the AQP linearly.
         pa = npqp_resp.pa_amount
         aqp = (pa - ld_amount) + npqp_resp.qgr_amount
 
@@ -326,7 +334,7 @@ class QuarterlySettlementService:
         closed_by: str,
     ) -> SlaSettlementPeriod:
         """Finance-role override — replace sum_ld_percent + recompute
-        capped_ld/LD_amount/AQP with the same NPQP as the auto-close."""
+        capped_ld/LD_amount/AQP on the same PQP payment base as the auto-close."""
         existing = self.repo.get(project_id=project_id, qk=qk)
         if existing is None:
             raise NotFoundError(
@@ -354,12 +362,14 @@ class QuarterlySettlementService:
                 code="cap_rule_missing",
             )
         capped_ld = min(new_sum_ld_percent, cap_pct)
-        # Reuse the existing NPQP — override changes only the LD %, not
-        # the payment base.
+        # LD base = PQP (= F) to match the auto-close (corrigendum §5.28.1.f).
+        # Override changes only the LD %, not the payment base. NPQP is kept
+        # for the stored row (reference), but is no longer the penalty base.
+        pqp = existing.f_amount or Decimal("0")
         npqp = existing.npqp or Decimal("0")
         pa = existing.pa_amount or Decimal("0")
         qgr = existing.qgr_amount or Decimal("0")
-        ld_amount = (capped_ld / Decimal("100")) * npqp
+        ld_amount = (capped_ld / Decimal("100")) * pqp
         aqp = (pa - ld_amount) + qgr
 
         return self.repo.upsert(

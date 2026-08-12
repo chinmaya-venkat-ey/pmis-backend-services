@@ -423,7 +423,48 @@ def list_sla_input_variables(
             "categories":    [],
         }
 
-    items = sorted(seen.values(), key=lambda x: x["label"].lower())
+    # Collapse entries that share the same visible LABEL under different machine
+    # KEYS. `seen` is deduped by key (metric_key / field_name), but the FE renders
+    # the `label` (display_name) — so the same concept present under a free-text SLA
+    # slug AND a curated data_field key (e.g. "weeks_delayed" + "deliverable_delay_weeks",
+    # both labelled "Weeks delayed") shows as duplicate rows. Merge same-label entries
+    # into one, preferring the curated data_field key as canonical; but KEEP them
+    # separate when unit or direction genuinely differ (distinct measurements that
+    # merely share a label).
+    def _norm_label(lbl: str) -> str:
+        return " ".join((lbl or "").split()).lower()
+
+    by_label: Dict[str, list] = {}
+    for entry in seen.values():
+        by_label.setdefault(_norm_label(entry["label"]), []).append(entry)
+
+    deduped: list = []
+    for group in by_label.values():
+        if len(group) == 1:
+            deduped.append(group[0])
+            continue
+        units = {g.get("unit") for g in group if g.get("unit")}
+        directions = {g.get("direction") for g in group if g.get("direction")}
+        if len(units) > 1 or len(directions) > 1:
+            deduped.extend(group)  # genuinely different measurements — keep both
+            continue
+        # Canonical = the curated data_field entry if present, else the first.
+        group.sort(key=lambda g: 0 if g.get("source") == "data_field" else 1)
+        canon = group[0]
+        for other in group[1:]:
+            for ref in other.get("used_by", []):
+                if ref not in canon["used_by"]:
+                    canon["used_by"].append(ref)
+            for cat in other.get("categories", []):
+                if cat not in canon["categories"]:
+                    canon["categories"].append(cat)
+            for meta in ("data_type", "direction", "description",
+                         "applicable_to", "example_value", "unit"):
+                if not canon.get(meta) and other.get(meta):
+                    canon[meta] = other[meta]
+        deduped.append(canon)
+
+    items = sorted(deduped, key=lambda x: x["label"].lower())
     elements = [
         hal_resource(
             "SlaInputVariable", item,

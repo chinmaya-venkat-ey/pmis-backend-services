@@ -139,3 +139,46 @@ class LeaveManagementClient:
             {"projectId": project_id, "year": year, "quarter": quarter},
             bearer_token=bearer_token,
         )
+
+    # ---------------------------------------------------------- SLA auto-eval
+    # STUB feeds for SLA auto-evaluation. These endpoints are NOT yet built by
+    # leave-management — the request params + response shapes below are our
+    # best-guess contract and WILL need alignment with the owning developer when
+    # the endpoints are delivered (search for "contract-align"). Until then, and
+    # like every method here, they soft-fail to ``None`` when the base URL or
+    # bearer is missing, so the callers (SLA metric providers) stay inert.
+
+    def get_availability(
+        self,
+        project_id: str,
+        year: int,
+        month: int,
+        bearer_token: Optional[str] = None,
+    ) -> Optional[List[Dict[str, Any]]]:
+        """SLA007 — per-resource business-days present AND hours logged for one
+        project-month. Expected (contract-align): a JSON array of
+        ``{resourceId, businessDaysPresent, hoursLogged}``. Derivable in
+        leave-mgmt from per-day attendance (status present + working_hours)."""
+        body = self._get(
+            "/api/attendance/availability",
+            {"projectId": project_id, "year": year, "month": month},
+            bearer_token=bearer_token,
+        )
+        return body if isinstance(body, list) else None
+
+    def get_replacements(
+        self,
+        project_id: str,
+        from_date: str,
+        to_date: str,
+        bearer_token: Optional[str] = None,
+    ) -> Optional[Any]:
+        """SLA005 — resource replacements in a window. Expected (contract-align):
+        either ``{"count": N}`` or a JSON array of replacement events (the
+        provider accepts both). Derivable in leave-mgmt from the resource
+        assignment/replacement records."""
+        return self._get(
+            "/api/resources/replacements",
+            {"projectId": project_id, "fromDate": from_date, "toDate": to_date},
+            bearer_token=bearer_token,
+        )

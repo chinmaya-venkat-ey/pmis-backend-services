@@ -33,11 +33,13 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.clients.db_activity_resolver import DbActivityResolver
+from app.config import settings
 from app.core.errors import NotFoundError, ValidationError
 from app.models.sla_activity_mapping import SlaActivityMapping
 from app.models.sla_definition import SlaDefinition
 from app.models.sla_evaluation_result import SlaEvaluationResult
 from app.models.sla_lookup_row import SlaLookupRow
+from app.models.sla_metric import SlaMetric
 from app.models.sla_observation import SlaObservation
 from app.models.sla_parameter_value import SlaParameterValue
 from app.models.sla_quarterly_aggregate import SlaQuarterlyAggregate
@@ -360,7 +362,9 @@ class SlaComplianceService:
 
     # ================================================================= per-mapping run
 
-    def evaluate_and_persist(self, mapping_id: str, on_date: _date) -> str:
+    def evaluate_and_persist(
+        self, mapping_id: str, on_date: _date, bearer_token: Optional[str] = None,
+    ) -> str:
         loaded = self.mapping_repo.load_with_sla(mapping_id)
         if loaded is None:
             raise NotFoundError(f"Mapping '{mapping_id}' not found", code="mapping_not_found")
@@ -388,16 +392,29 @@ class SlaComplianceService:
             observed: Any = self._convert_delay_days_to_unit(delay_days_int, unit)
             source = "auto"
         else:
+            # Precedence: a human-recorded observation always wins over an
+            # auto-provider (a manual entry must not be overridden by a feed).
+            # Only when none exists do we try a registered metric provider
+            # (opt-in via settings.sla_auto_providers_enabled), and only then
+            # fall through to pending_observation.
             obs = self._latest_observation(mapping_id)
-            if obs is None:
-                self._persist(mapping, sla, formula_type, on_date, None,
-                              status="pending_observation", met=False, breached=False,
-                              days=days, observed=None, project_id=project_id,
-                              milestone_id=milestone_id, ld=(None, None, None,
-                              getattr(sla, "ld_computation_base", None)))
-                return "pending_observation"
-            observed = obs.observed_value
-            source = "recorded"
+            if obs is not None:
+                observed = obs.observed_value
+                source = "recorded"
+            else:
+                provided = self._provider_value(
+                    mapping, sla, activity, project_id, on_date, bearer_token,
+                )
+                if provided is not None:
+                    observed = provided
+                    source = "auto"
+                else:
+                    self._persist(mapping, sla, formula_type, on_date, None,
+                                  status="pending_observation", met=False, breached=False,
+                                  days=days, observed=None, project_id=project_id,
+                                  milestone_id=milestone_id, ld=(None, None, None,
+                                  getattr(sla, "ld_computation_base", None)))
+                    return "pending_observation"
 
         try:
             result = self.evaluator.evaluate_by_sla_ref(
@@ -413,6 +430,29 @@ class SlaComplianceService:
                       met=met, breached=breached, days=days, observed=observed,
                       project_id=project_id, milestone_id=milestone_id, ld=ld)
         return status
+
+    def _provider_value(self, mapping, sla, activity, project_id, on_date, bearer_token):
+        """Try a registered auto-provider for this SLA's metrics. Returns the
+        raw observed value (scalar or {metric_key: value}) or None. Opt-in and
+        fail-soft — any error just falls through to manual observation."""
+        if not settings.sla_auto_providers_enabled:
+            return None
+        try:
+            from app.services.sla_metric_providers import ProviderContext, resolve_provider
+            metric_keys = set(self.db.execute(
+                select(SlaMetric.metric_key).where(SlaMetric.sla_id == sla.id)
+            ).scalars().all())
+            provider = resolve_provider(metric_keys)
+            if provider is None:
+                return None
+            qk = quarter_of(on_date, self._anchor_for_activity(mapping.activity_id))
+            return provider.provide(ProviderContext(
+                db=self.db, mapping=mapping, sla=sla, activity=activity,
+                project_id=project_id, quarter=qk, bearer_token=bearer_token,
+            ))
+        except Exception as exc:  # noqa: BLE001 — a bad provider must not break eval
+            logger.warning("auto provider failed for mapping=%s: %s", mapping.id, exc)
+            return None
 
     def _persist(self, mapping, sla, formula_type, on_date, result, *, status, met,
                  breached, days, observed, project_id, milestone_id, ld):
@@ -467,7 +507,9 @@ class SlaComplianceService:
 
     # ================================================================= daily cron
 
-    def run_daily(self, on_date: Optional[_date] = None) -> Dict[str, Any]:
+    def run_daily(
+        self, on_date: Optional[_date] = None, bearer_token: Optional[str] = None,
+    ) -> Dict[str, Any]:
         on_date = on_date or datetime.now(timezone.utc).date()
         active = self.db.execute(
             select(SlaActivityMapping).where(SlaActivityMapping.status == "ACTIVE")
@@ -475,7 +517,7 @@ class SlaComplianceService:
         counts: Dict[str, int] = defaultdict(int)
         for m in active:
             try:
-                counts[self.evaluate_and_persist(m.id, on_date)] += 1
+                counts[self.evaluate_and_persist(m.id, on_date, bearer_token)] += 1
             except Exception:  # noqa: BLE001 — one bad mapping must not stop the run
                 counts["error"] += 1
 

@@ -93,6 +93,16 @@ class Settings(BaseSettings):
     # bearer available. Missing bearer → NpqpService returns 'unavailable'.
     leave_management_base_url: Optional[str] = Field(default=None)
     leave_management_timeout_seconds: float = Field(default=10.0)
+
+    # === SLA auto-evaluation providers (opt-in) ===
+    # When true, SLAs that would otherwise need a manual observation can source
+    # their observed value from a registered metric provider during the normal
+    # rollup (see app/services/sla_metric_providers/). Defaults to FALSE so this
+    # penalty module never auto-scores off a feed until it is deliberately turned
+    # on AND the feed's base URL is configured. A manual observation always wins
+    # over a provider. Providers are also inert without a forwardable bearer
+    # (so the cron path stays no-op until a service token exists).
+    sla_auto_providers_enabled: bool = Field(default=False)
     # Retired env vars (previously required for service-account login flow;
     # kept as unused config keys temporarily so container deploys don't error
     # on unknown env vars — safe to remove from container env at any time):

@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.core.errors import ForbiddenError, ValidationError
 from app.core.response import api_response
-from app.dependencies import get_optional_current_user_id
+from app.dependencies import get_bearer_token, get_optional_current_user_id
 from app.db import get_db
 from app.models.sla_evaluation_result import SlaEvaluationResult
 from app.schemas.sla_compliance import ObservationRequest
@@ -408,8 +408,11 @@ def sla_for_activity(
 def evaluate_all_now(
     db: Annotated[Session, Depends(get_db)],
     user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
+    bearer: Annotated[Optional[str], Depends(get_bearer_token)] = None,
 ):
-    summary = SlaComplianceService(db).run_daily()
+    # Forward the caller's JWT so auto-providers (if enabled) can reach their
+    # cross-service feeds; without it they stay inert (manual fallback).
+    summary = SlaComplianceService(db).run_daily(bearer_token=bearer)
     return api_response(data=summary)
 
 
@@ -426,10 +429,11 @@ def evaluate_mapping_now(
     mapping_id: str,
     db: Annotated[Session, Depends(get_db)],
     user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
+    bearer: Annotated[Optional[str], Depends(get_bearer_token)] = None,
 ):
     from datetime import datetime, timezone
     status = SlaComplianceService(db).evaluate_and_persist(
-        mapping_id, datetime.now(timezone.utc).date(),
+        mapping_id, datetime.now(timezone.utc).date(), bearer_token=bearer,
     )
     return api_response(data={"mapping_id": mapping_id, "status": status})
 

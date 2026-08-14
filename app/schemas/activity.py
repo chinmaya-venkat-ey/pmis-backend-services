@@ -10,6 +10,7 @@ from pydantic.alias_generators import to_camel
 
 from app.schemas._base import ResponseModel
 from app.schemas.comment import CommentResponse
+from app.utilities.date_rules import to_ist_calendar_date
 
 
 # Shared config — accept camelCase aliases AND snake_case (monolith parity).
@@ -75,6 +76,19 @@ class ActivityPlannedResourceItem(BaseModel):
     quantity: Annotated[int, Field(ge=1)]
     duration: Annotated[Decimal, Field(ge=0, le=3)]
     planned_deployment_date: date
+
+    @field_validator("planned_deployment_date", mode="before")
+    @classmethod
+    def _normalize_deployment_date(cls, v):
+        """Guard: store the IST-local calendar day the user picked.
+
+        A plain ``YYYY-MM-DD`` (what the FE sends) passes through unchanged;
+        a client that serialises the date as a full instant (e.g. IST
+        midnight as a UTC ``Z`` timestamp, which lands on the previous UTC
+        day) is projected onto the IST calendar so the stored date never
+        shifts by a timezone. See ``date_rules.to_ist_calendar_date``.
+        """
+        return to_ist_calendar_date(v)
 
 
 class ActivityPlannedResourceResponse(ResponseModel):

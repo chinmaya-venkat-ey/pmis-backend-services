@@ -28,8 +28,8 @@ Notes:
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import date, datetime, timedelta, timezone
+from typing import Optional, Union
 
 from app.core.errors import ValidationError
 
@@ -49,6 +49,53 @@ def _to_ist_calendar_midnight(dt: Optional[datetime]) -> Optional[datetime]:
         dt = dt.replace(tzinfo=timezone.utc)
     ist_dt = dt.astimezone(IST)
     return datetime(ist_dt.year, ist_dt.month, ist_dt.day, tzinfo=IST)
+
+
+def to_ist_calendar_date(
+    value: Union[str, date, datetime, None],
+) -> Optional[date]:
+    """Normalise any calendar-date input to the IST-local calendar ``date``.
+
+    Guards a pure-``date`` field (e.g. an allocation's planned deployment
+    date) against clients that serialise the picked day as a full instant.
+    A local IST midnight sent as a UTC ``Z`` timestamp lands on the previous
+    UTC day; taking its IST-local date recovers the day the user picked so
+    the stored/returned value never shifts by a timezone.
+
+    Accepts:
+      * ``None``                 → ``None``
+      * ``date`` (not datetime)  → returned unchanged
+      * ``datetime``             → its IST-local calendar date
+      * ``str`` plain ``YYYY-MM-DD``            → that date, verbatim
+      * ``str`` ISO datetime (``T`` present, optional ``Z``/offset)
+                                 → its IST-local calendar date
+
+    A plain date (what the FE sends today) is therefore untouched; only a
+    datetime-shaped value is projected onto the IST calendar. Anything
+    unparseable is returned as-is so Pydantic raises its own clear error.
+    """
+    if value is None or value == "":
+        return None
+    # NB: ``datetime`` is a subclass of ``date`` — check it first.
+    if isinstance(value, datetime):
+        return _to_ist_calendar_midnight(value).date()
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        s = value.strip()
+        if "T" not in s and " " not in s:
+            # Plain calendar date — keep exactly what was sent.
+            try:
+                return date.fromisoformat(s)
+            except ValueError:
+                return value
+        try:
+            # ``fromisoformat`` only learned ``Z`` in 3.11; normalise it.
+            dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        except ValueError:
+            return value
+        return _to_ist_calendar_midnight(dt).date()
+    return value
 
 
 def _normalize(v: Optional[datetime]) -> Optional[datetime]:

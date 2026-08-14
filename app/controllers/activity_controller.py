@@ -56,6 +56,7 @@ class ActivityController:
         resp.resources = [
             ActivityPlannedResourceResponse(
                 designation=pr.designation, quantity=pr.quantity, duration=pr.duration,
+                planned_deployment_date=pr.planned_deployment_date,
                 monthly_rate=pr.monthly_rate, computed_cost=pr.computed_cost,
             )
             for pr in pr_rows

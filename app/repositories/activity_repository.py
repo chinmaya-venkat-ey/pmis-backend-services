@@ -248,6 +248,7 @@ class ActivityRepository:
                 activity_id=activity_id, project_id=project_id,
                 designation=r["designation"], quantity=r["quantity"],
                 duration=r["duration"],
+                planned_deployment_date=r.get("planned_deployment_date"),
                 monthly_rate=r.get("monthly_rate"),
                 computed_cost=r.get("computed_cost"),
                 position=pos,

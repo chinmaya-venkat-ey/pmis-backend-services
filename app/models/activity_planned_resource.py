@@ -18,13 +18,14 @@ corresponds to one quarter) with 2-dp precision — no deployment dates.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional
 from uuid import uuid4
 
 from sqlalchemy import (
     CheckConstraint,
+    Date,
     DateTime,
     ForeignKey,
     Index,
@@ -61,8 +62,14 @@ class ActivityPlannedResource(Base):
     # The designation NAME (the Java service's ``role`` string; free text, NOT an FK).
     designation: Mapped[str] = mapped_column(String(255))
     quantity: Mapped[int] = mapped_column(Integer, default=1)
-    # Flat number of months in [0, 3] (2dp) — no deployment dates.
+    # Flat number of months in [0, 3] (2dp).
     duration: Mapped[Decimal] = mapped_column(Numeric(4, 2))
+    # Planned deployment calendar date for THIS allocation row (REQUIRED). One date
+    # per row: deploying N of a designation on the same day = one row with
+    # quantity=N; a split across dates = separate rows (e.g. qty 2 on date A + qty 1
+    # on date B). NOT NULL — every allocation must carry its planned deployment date
+    # (migration backfills any pre-existing rows with the activity's start date).
+    planned_deployment_date: Mapped[date] = mapped_column(Date, nullable=False)
     # SNAPSHOT of the monthly rate resolved from the Java designation-rates service
     # at create/edit time (for the activity's contract year), and the derived cost
     # = quantity × monthly_rate × duration. Stored so reads + finance never call the

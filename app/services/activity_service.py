@@ -87,6 +87,7 @@ def _snapshot_resource_rows(project, activity_start, vendor_id, items, bearer_to
         cost = resource_rate.row_cost(rate, i.quantity, i.duration)
         out.append({
             "designation": i.designation, "quantity": i.quantity, "duration": i.duration,
+            "planned_deployment_date": i.planned_deployment_date,
             "monthly_rate": rate, "computed_cost": cost,
         })
     return out

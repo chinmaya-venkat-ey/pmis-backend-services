@@ -1,7 +1,7 @@
 """Activity schemas + activity-resource sub-schema."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Annotated, Any, List, Optional
 
@@ -65,13 +65,16 @@ class ActivityPlannedResourceItem(BaseModel):
 
     ``designation`` is the leave-mgmt ``role`` name (the rate is resolved LIVE at
     compute time, never sent here). ``duration`` is a flat number of months in
-    [0, 3]."""
+    [0, 3]. ``planned_deployment_date`` is the calendar date this allocation is
+    planned to deploy — one date per row (split across dates = separate rows).
+    ``quantity``, ``duration`` and ``planned_deployment_date`` are all required."""
 
     model_config = _REQUEST_CONFIG
 
     designation: Annotated[str, Field(min_length=1, max_length=255)]
-    quantity: Annotated[int, Field(ge=1)] = 1
+    quantity: Annotated[int, Field(ge=1)]
     duration: Annotated[Decimal, Field(ge=0, le=3)]
+    planned_deployment_date: date
 
 
 class ActivityPlannedResourceResponse(ResponseModel):
@@ -80,6 +83,7 @@ class ActivityPlannedResourceResponse(ResponseModel):
     designation: str
     quantity: int
     duration: Decimal
+    planned_deployment_date: date  # required calendar date for this allocation row
     monthly_rate: Optional[Decimal] = None    # live from leave-mgmt (0 if unavailable)
     computed_cost: Optional[Decimal] = None   # quantity × monthlyRate × duration
 

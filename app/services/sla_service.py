@@ -35,9 +35,17 @@ from app.schemas.sla import (
 # "<CONTRACT>-SLA###" so the prefix identifies the contract type (#362).
 _CONTRACT_TYPES = frozenset({"BSP", "MSAP", "MSIP", "PMU"})
 
+# Project-label prefixes that map to a contract type. "PMC" (Project Management
+# Consultants) is the PMU-for-MSP consultant engagement — a project label, not a
+# separate contract — so its SLAs run under the PMU rules. Without this mapping a
+# PMC-SLA* def onboards with contract_type=NULL, and settlement can't resolve the
+# PMU LD cap → blocked_missing_cap → all money fields null.
+_CONTRACT_TYPE_ALIASES = {"PMC": "PMU"}
+
 
 def _derive_contract_type(sla_ref: Optional[str]) -> Optional[str]:
-    """Contract type from the sla_ref prefix (e.g. "BSP-SLA001" -> "BSP").
+    """Contract type from the sla_ref prefix (e.g. "BSP-SLA001" -> "BSP",
+    "PMC-SLA001" -> "PMU" via the alias map).
 
     Returns None when the ref has no recognisable contract-type prefix, so a
     genuinely project-scoped SLA with a non-standard ref still onboards (its
@@ -45,7 +53,9 @@ def _derive_contract_type(sla_ref: Optional[str]) -> Optional[str]:
     if not sla_ref or "-" not in sla_ref:
         return None
     prefix = sla_ref.split("-", 1)[0].strip().upper()
-    return prefix if prefix in _CONTRACT_TYPES else None
+    if prefix in _CONTRACT_TYPES:
+        return prefix
+    return _CONTRACT_TYPE_ALIASES.get(prefix)
 
 
 def _derive_ld_formula_rule(ld_computation_base: Optional[str]) -> str:

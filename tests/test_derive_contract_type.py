@@ -15,6 +15,15 @@ def test_case_insensitive_prefix():
     assert _derive_contract_type("pmu-sla007") == "PMU"
 
 
+def test_pmc_alias_maps_to_pmu():
+    # "PMC" (Project Management Consultants) is the PMU-for-MSP engagement, a
+    # project label → PMU rules. Without this, PMC-SLA* onboarded with a NULL
+    # contract_type and settlement blocked on the missing cap.
+    assert _derive_contract_type("PMC-SLA001") == "PMU"
+    assert _derive_contract_type("pmc-sla007") == "PMU"
+    assert _derive_contract_type("PMC-SLA001_") == "PMU"
+
+
 def test_unknown_or_missing_prefix_returns_none():
     # A non-standard / project-scoped ref keeps contract_type NULL (as before).
     assert _derive_contract_type("custom-ref-99") is None

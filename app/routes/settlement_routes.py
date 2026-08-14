@@ -196,7 +196,14 @@ def get_settlement(
     qk = _resolve_quarter(quarter, db, project_id)
     svc = QuarterlySettlementService(db)
     existing = svc.repo.get(project_id=project_id, qk=qk)
-    if existing is None or existing.status == "open":
+    # Recompute when there's no row, an 'open' row, OR a transient 'blocked_*'
+    # row (blocked_missing_cap / blocked_missing_npqp). A block means "couldn't
+    # compute yet" — once the underlying config/data is fixed (e.g. a missing
+    # contract_type/cap is set) the row must be able to recover on next access.
+    # Final rows (auto_closed / closed / overridden / invoiced) are NOT recomputed.
+    if existing is None or existing.status == "open" or (
+        existing.status or ""
+    ).startswith("blocked_"):
         # Forward the caller's JWT so leave-mgmt validates against the
         # actual user, not a service account.
         row = svc.close(

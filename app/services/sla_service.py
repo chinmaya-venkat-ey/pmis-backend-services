@@ -757,6 +757,22 @@ class SlaService:
         # (refs are "<CONTRACT>-SLA###", e.g. "BSP-SLA001" -> "BSP"), which is
         # the canonical convention across every seeded RFP SLA.
         contract_type = payload.contract_type or _derive_contract_type(payload.sla_ref)
+        # An SLA with no resolvable contract_type cannot settle: the quarterly LD
+        # cap (and per-SLA rates / carry-forward severities) are keyed on it, so a
+        # blank type makes EVERY settlement block with 'blocked_missing_cap' and
+        # write all money fields NULL. Reject at onboarding instead of creating a
+        # silently-broken def (this is how the live PMC-SLA* defs — ref prefix
+        # "PMC", not a contract code — ended up unsettleable). Fix: use a
+        # '<CONTRACT>-SLA###' ref (BSP/MSAP/MSIP/PMU, or the PMC->PMU alias) or
+        # send contract_type explicitly.
+        if not contract_type:
+            raise ValidationError(
+                f"Could not determine contract_type for SLA '{payload.sla_ref}'. "
+                f"Use a '<CONTRACT>-SLA###' ref where <CONTRACT> is one of "
+                f"{sorted(_CONTRACT_TYPES)} (e.g. 'PMU-SLA001'), or send "
+                f"contract_type explicitly. A blank contract_type blocks settlement.",
+                code="missing_contract_type",
+            )
 
         # Duplicate check 1 — same title in same contract_type. Skipped
         # when contract_type is None (project-scoped flow); duplicate

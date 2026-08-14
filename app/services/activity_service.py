@@ -65,9 +65,12 @@ _VALID_CATEGORIES = (_CATEGORY_ORIGINAL, _CATEGORY_ASG, _CATEGORY_CCN)
 
 def _snapshot_resource_rows(project, activity_start, vendor_id, items, bearer_token):
     """Map ``ActivityPlannedResourceItem[]`` → repo dicts, resolving each row's
-    monthly rate from the Java designation-rates service (for the activity's
-    contract year, per project+org) and SNAPSHOTTING rate + cost. Leave-mgmt
-    down / no card → rate 0 (cost 0)."""
+    monthly rate from the Java designation-rates service and SNAPSHOTTING rate +
+    cost. The contract year is resolved PER ROW from that row's
+    ``planned_deployment_date`` (anchored on the project start) — so an allocation
+    that deploys in a later contract year is priced at that year's card, not the
+    project-start year. Falls back to the activity start only if a row somehow
+    lacks a deployment date. Leave-mgmt down / no card → rate 0 (cost 0)."""
     items = list(items or [])
     if not items:
         return []
@@ -78,11 +81,12 @@ def _snapshot_resource_rows(project, activity_start, vendor_id, items, bearer_to
             getattr(project, "id", None), vendor_id, bearer_token,
         )
     )
-    year_no = resource_rate.contract_year_no(
-        activity_start, getattr(project, "start_date", None),
-    )
+    project_start = getattr(project, "start_date", None)
     out = []
     for i in items:
+        year_no = resource_rate.contract_year_no(
+            i.planned_deployment_date or activity_start, project_start,
+        )
         rate = resource_rate.rate_for_year(cards.get(i.designation), year_no)
         cost = resource_rate.row_cost(rate, i.quantity, i.duration)
         out.append({

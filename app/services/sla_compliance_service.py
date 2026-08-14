@@ -642,7 +642,14 @@ class SlaComplianceService:
             and not this_quarter_resolved
         ):
             prev_qk = previous_quarter(qk, self._anchor_for_activity(mapping.activity_id))
-            prev = self.qtr_agg_repo.get(mapping_id=mapping_id, qk=prev_qk)
+            # Guard the first-quarter self-carry: previous_quarter clamps to
+            # index 0, so previous_quarter(Y1-Q1) == Y1-Q1. Without this, a daily
+            # re-roll of the first quarter reads that quarter's OWN just-written
+            # aggregate and adds carry points on top of its own observed points —
+            # doubling accumulated_points (and the LD%) for the first breach quarter.
+            prev = None if prev_qk == qk else self.qtr_agg_repo.get(
+                mapping_id=mapping_id, qk=prev_qk,
+            )
             if prev is not None and (prev.derived_severity or 0) >= 1:
                 # Carry-forward severity is DATA-DRIVEN — sourced from
                 # contract_ld_rules per SLA family (RFP-specific values

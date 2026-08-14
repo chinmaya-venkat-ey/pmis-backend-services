@@ -9,7 +9,9 @@ from pydantic import BaseModel, Field
 
 
 class NpqpResourceCost(BaseModel):
-    """One resource's contribution to F for one month of the quarter."""
+    """One row of the F/PA breakdown — a PLANNED allocation (by designation,
+    from project.activity_planned_resources) or an ACTUAL per-resource monthly
+    cost (from leave-mgmt)."""
     resource_id: str = Field(serialization_alias="resourceId")
     employee_name: Optional[str] = Field(default=None, serialization_alias="employeeName")
     year: int
@@ -28,10 +30,10 @@ class NpqpResponse(BaseModel):
     f_amount: Decimal = Field(
         serialization_alias="fAmount",
         description="F — Planned Quarterly Payment (RFP §5.28.1.d.c). Sum of "
-                    "the monthly rates on the resource deployment plan "
-                    "(leave.project_resource) for every resource active in each "
-                    "month of the quarter. Full month's rate counts for any "
-                    "resource assigned during the month.",
+                    "computed_cost (quantity × monthly_rate × duration) over the "
+                    "project.activity_planned_resources allocations whose "
+                    "planned_deployment_date falls in the project-anchored quarter "
+                    "— the same per-activity plan the finance page shows.",
     )
     pa_amount: Decimal = Field(
         default=Decimal("0"),

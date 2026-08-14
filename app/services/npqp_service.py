@@ -4,10 +4,10 @@ Computes NPQP = F + QGR for a project × quarter, per RFP §5.28.1.d.
 
 F   = "Planned Quarterly Payment applicable (aggregate of monthly payment
       of all resources to be deployed as per resource deployment plan
-      Plus CCN resources, if any)." (§5.28.1.d.c). Read cross-schema
-      from ``leave.project_resource``: for every month of the quarter,
-      sum the monthly rate (``rate_card_by_year[rate_year]``) of every
-      resource whose assignment covers that month.
+      Plus CCN resources, if any)." (§5.28.1.d.c). Read cross-schema from
+      ``project.activity_planned_resources`` — the SAME per-activity plan the
+      finance page uses — by summing ``computed_cost`` over the allocations whose
+      ``planned_deployment_date`` falls in the (project-anchored) quarter.
 
 PA  = "Payable amount for Actual resource deployment" (§5.28.1.d.g).
       Sourced from leave-mgmt via GET /api/attendance/cost/monthly. That
@@ -30,7 +30,7 @@ Consumed by:
 """
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date
 from decimal import Decimal
 from typing import List, Optional, Tuple
 
@@ -93,74 +93,73 @@ class NpqpService:
     #
     # RFP §5.28.1.d.c definition of F — "aggregate of monthly payment of all
     # resources to be deployed as per resource deployment plan". Read from
-    # leave.project_resource (cross-schema, same PG cluster) so the number
-    # reflects PLANNED deployment, not actual attendance. Full month's rate
-    # counts for every month a resource's assignment window overlaps —
-    # partial-month proration is a PA concern, not an F concern.
+    # project.activity_planned_resources — the SAME per-activity plan the
+    # finance / payment page uses (the Java designation rate is snapshotted onto
+    # each allocation at write time). Each allocation's ``computed_cost`` =
+    # quantity × monthly_rate × duration (a flat month count within one quarter),
+    # so F is the quarter's actual PLANNED spend and reconciles with finance.
+    #
+    # Historical note: F previously read ``leave.project_resource``. That was the
+    # planned source in the July-2026 consolidation, but resource costing was
+    # later re-architected onto ``project.activity_planned_resources``; leave now
+    # supplies ONLY the ACTUAL side — attendance → PA below. The old leave table
+    # had no assignment end dates, so it counted every resource in every quarter
+    # indefinitely, inflating F far beyond the contract value.
 
     def _compute_planned_f(
         self, project_id: str, qk: QuarterKey,
     ) -> Tuple[Decimal, List[NpqpResourceCost]]:
-        """(F_total, per-month planned rows) for the quarter, read from
-        the resource deployment plan.
+        """(F_total, per-allocation planned rows) for the quarter, read from the
+        project's resource deployment plan (``project.activity_planned_resources``).
 
-        For each of the quarter's 3 months, sum ``rate_card_by_year[rate_year]``
-        over every ``leave.project_resource`` row whose assignment_start_date
-        is on or before the month-end AND (assignment_end_date is NULL or
-        on or after the month-start). ``active=true`` gates out retired
-        assignments. Missing / malformed rate values contribute zero and
-        are logged.
+        F = Σ ``computed_cost`` of every allocation whose ``planned_deployment_date``
+        falls inside the quarter ``[qk.quarter_start, qk.quarter_end]`` (the
+        project-anchored bounds — so F follows PROJECT quarters, not the calendar).
+        ``computed_cost`` is the snapshot finance stores (quantity × monthly_rate ×
+        duration); when it is NULL the product is recomputed from the row.
+        Soft-deleted rows are excluded.
         """
+        rows = self.db.execute(
+            text(
+                """
+                SELECT apr.designation,
+                       apr.quantity,
+                       apr.monthly_rate,
+                       apr.duration,
+                       apr.computed_cost,
+                       apr.planned_deployment_date
+                  FROM project.activity_planned_resources apr
+                 WHERE apr.project_id = :pid
+                   AND apr.deleted_at IS NULL
+                   AND apr.planned_deployment_date >= :qstart
+                   AND apr.planned_deployment_date <= :qend
+                """
+            ),
+            {"pid": project_id, "qstart": qk.quarter_start, "qend": qk.quarter_end},
+        ).all()
+
         f_total = Decimal("0")
-        per_month: List[NpqpResourceCost] = []
-        for (year, month) in _months_of_quarter(qk):
-            m_start = date(year, month, 1)
-            # last day of month via next-month offset
-            if month == 12:
-                m_end = date(year, 12, 31)
+        per_alloc: List[NpqpResourceCost] = []
+        for r in rows:
+            if r.computed_cost is not None:
+                cost = Decimal(str(r.computed_cost))
             else:
-                m_end = date(year, month + 1, 1) - timedelta(days=1)
-            rows = self.db.execute(
-                text(
-                    """
-                    SELECT
-                        pr.resource_id,
-                        mr.name AS employee_name,
-                        pr.rate_card_by_year,
-                        pr.rate_year,
-                        pr.role
-                      FROM leave.project_resource pr
-                      JOIN leave.master_resource mr ON mr.id = pr.resource_id
-                     WHERE pr.active = true
-                       AND pr.project_id = :pid
-                       AND pr.assignment_start_date <= :m_end
-                       AND (pr.assignment_end_date IS NULL
-                            OR pr.assignment_end_date >= :m_start)
-                    """
+                # Snapshot missing → recompute from the row (matches finance's formula).
+                rate = Decimal(str(r.monthly_rate or 0))
+                cost = rate * Decimal(str(r.quantity or 0)) * Decimal(str(r.duration or 0))
+            f_total += cost
+            d = r.planned_deployment_date
+            per_alloc.append(NpqpResourceCost(
+                # A planned allocation is by DESIGNATION, not a named resource.
+                resource_id="",
+                employee_name=r.designation,
+                year=d.year, month=d.month,
+                monthly_rate=(
+                    Decimal(str(r.monthly_rate)) if r.monthly_rate is not None else None
                 ),
-                {"pid": project_id, "m_start": m_start, "m_end": m_end},
-            ).all()
-            for r in rows:
-                rate_card = r.rate_card_by_year or {}
-                rate_year = r.rate_year or "Year-1"
-                try:
-                    monthly_rate = Decimal(str(rate_card.get(rate_year) or 0))
-                except (ArithmeticError, ValueError):
-                    monthly_rate = Decimal("0")
-                    logger.warning(
-                        "NpqpService: unparseable rate for project=%s resource=%s "
-                        "rate_year=%s — treating as 0",
-                        project_id, r.resource_id, rate_year,
-                    )
-                f_total += monthly_rate
-                per_month.append(NpqpResourceCost(
-                    resource_id=str(r.resource_id),
-                    employee_name=r.employee_name,
-                    year=year, month=month,
-                    monthly_rate=monthly_rate,
-                    cost=monthly_rate,   # for planned rows, planned = cost
-                ))
-        return f_total, per_month
+                cost=cost,
+            ))
+        return f_total, per_alloc
 
     # ------------------------------------------------------------------ PA (actual)
 

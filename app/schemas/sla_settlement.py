@@ -54,7 +54,7 @@ class SettlementOverrideRequest(BaseModel):
         ge=0,
         alias="sumLdPercent",
         description="New sum-of-per-SLA-LD-% value. Will be re-capped at "
-                    "10% × NPQP per RFP §5.27.6 before persistence.",
+                    "10% × PQP per RFP §5.27.6 (corrigendum) before persistence.",
     )
     override_reason: str = Field(
         min_length=1,

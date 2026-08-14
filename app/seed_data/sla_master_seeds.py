@@ -629,13 +629,13 @@ PMU_SEEDS: List[Dict[str, Any]] = [
     # RFP §5.28.3.a
     _sla("PMU-SLA003", "PMU", "fixed_escalation",
          "Resolution of contract / technical queries beyond 3 working days",
-         description="Per RFP §5.28.3.a — 0.1% LD on NPQP per day of delay "
-                     "beyond the 3 working day SLA, until resolved.",
+         description="Per RFP §5.28.3.a (corrigendum NPQP→PQP) — 0.1% LD on PQP "
+                     "per day of delay beyond the 3 working day SLA, until resolved.",
          category="Query Resolution",
          scope_text="Applies to contractual or technical queries initiated by "
                     "UIDAI under deliverable D10 (Phase 2 & Phase 3).",
          data_source="Manual — query register tracked by UIDAI",
-         calculation_method="LD = 0.1% × days delayed beyond 3 working days × NPQP. "
+         calculation_method="LD = 0.1% × days delayed beyond 3 working days × PQP. "
                             "The 3-day grace window is excluded from the count.",
          reports_submitted_to=_PMU_TMD,
          measurement_interval="MONTHLY",

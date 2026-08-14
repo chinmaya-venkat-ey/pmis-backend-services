@@ -11,7 +11,7 @@ Two modes, dispatched on ``ctx.sla.ld_formula_rule``:
 
   * ``PER_UNIT_TIME_QUARTERLY`` (SLA 003 — RFP §5.28.3.a):
       LD % = rate_pct_per_day × days_of_delay
-      base = NPQP (folded in at quarter settlement, not here)
+      base = PQP (folded in at quarter settlement, not here)
       rate looked up from contract.contract_ld_rules
       (``sla_003_rate_pct_per_day``).
 

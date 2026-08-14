@@ -19,7 +19,7 @@ QGR = per-project × phase amount from project.project_qgr_config.
       Cross-schema read (same DB, PMIS-project-management owns the writes).
       When no effective row exists → 0.
 
-NPQP = F + QGR (§5.28.1.d.e). LD is calculated on NPQP but deducted from
+NPQP = F + QGR (§5.28.1.d.e). LD is calculated on PQP (=F, per corrigendum) but deducted from
        PA per §5.28.1.d.f/h — that's why F and PA must NOT collapse into
        one number.
 

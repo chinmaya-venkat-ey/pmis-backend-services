@@ -41,7 +41,7 @@ class NpqpResponse(BaseModel):
                     "'cost' figures, which fold in attendance, paid leave, half-day, "
                     "and RFP §5.24.1 relaxation. Distinct from F because ACTUAL "
                     "attendance can be less than PLANNED (missed days, un-approved "
-                    "leave). LD is calculated on NPQP but deducted from PA.",
+                    "leave). LD is calculated on PQP (=F) but deducted from PA.",
     )
     qgr_amount: Decimal = Field(
         default=Decimal("0"),

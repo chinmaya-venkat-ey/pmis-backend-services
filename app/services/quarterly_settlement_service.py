@@ -3,10 +3,14 @@
 The money layer: turns per-mapping aggregates (Phase B) + NPQP (Phase C)
 into a single settlement row per (project, quarter) per RFP §5.28.1.d.h:
 
-    LD_amount = min(Σ per-SLA LD%, contract_cap%) × NPQP  (§5.27.6 cap;
+    LD_amount = min(Σ per-SLA LD%, contract_cap%) × PQP  (§5.27.6 cap;
                                                           contract_cap%
                                                           from contract_ld_rules)
     AQP        = (PA − LD) + QGR                    (§5.28.1.d.h)
+
+    (PQP = F, the planned quarterly payment. The corrigendum amended the LD base
+     from NPQP=F+QGR to PQP; QGR is removed from the penalty base and added back
+     into AQP above. NPQP is still computed + stored as a reference value.)
 
 PA — payable for actual resource deployment for the quarter — is
 sourced from the payment page (leave-mgmt already gives us F, which is
@@ -45,10 +49,10 @@ from app.utilities.quarter import QuarterKey, quarter_of
 logger = get_logger(__name__)
 
 
-# Track B — SLA rules that participate in the quarterly-NPQP settlement.
+# Track B — SLA rules that participate in the quarterly settlement.
 # The SUM of these is capped per the contract's cap (from contract_ld_rules).
 #   LADDER                     resource-based points ladder (SLA 004-011)
-#   PER_UNIT_TIME_QUARTERLY    per-day × NPQP (SLA 003)
+#   PER_UNIT_TIME_QUARTERLY    per-day × PQP (SLA 003)
 #   PER_OCCURRENCE             occurrence-count → severity (SLA 004 alt)
 #   AVAILABILITY_UPTIME        MSIP §1.5.4 (evaluator TODO)
 #   DAYS_WEIGHTED              BSP (evaluator TODO)
@@ -202,7 +206,7 @@ class QuarterlySettlementService:
         #    validates against the CALLER, not a service account.
         npqp_resp = self.npqp.compute(project_id, qk, bearer_token=bearer_token)
 
-        # 4. LD ₹ = capped% × NPQP. Block when NPQP couldn't be computed.
+        # 4. LD ₹ = capped% × PQP (=F). Block when NPQP (F/PA) couldn't be computed.
         if npqp_resp.status != "ok":
             logger.warning(
                 "Settlement close for %s %s blocked — NPQP status=%s",

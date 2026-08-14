@@ -400,7 +400,7 @@ class SlaEvaluatorService:
     # ------------------------------------------------------------------ mapping form schema
 
     _APPLIED_ON_LABEL = {
-        "QUARTERLY_PAYMENT": "Net Planned Quarterly Payment (NPQP)",
+        "QUARTERLY_PAYMENT": "Planned Quarterly Payment (PQP)",
         "ANNUAL_PAYMENT":    "Annual Contract Value",
         "FIXED_AMOUNT":      "Deliverable Cost (set per mapping)",
     }

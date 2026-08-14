@@ -4,7 +4,7 @@ One row per (project, fiscal_year, quarter). Persisted by
 QuarterlySettlementService.close (Phase D). Encodes RFP §5.28.1.d.h:
 
     AQP = (PA − LD) + QGR
-    LD  = min(Σ per-SLA LD %, 10%) × NPQP
+    LD  = min(Σ per-SLA LD %, 10%) × PQP
     NPQP = F + QGR
 
 Lifecycle:

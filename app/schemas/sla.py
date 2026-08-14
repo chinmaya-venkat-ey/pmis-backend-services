@@ -181,8 +181,9 @@ class SlaOnboardRequest(BaseModel):
     sla_ref: str = Field(..., max_length=50, pattern=r"^[A-Z0-9_-]+$")
     title: str = Field(..., min_length=1, max_length=500)
     description: Optional[str] = None
-    # Cadence + LD base default to "QUARTERLY / QUARTERLY / NPQP" — what
-    # PMU RFP §5.27.6 spells out for every SLA that doesn't say otherwise.
+    # Cadence + LD base default to "QUARTERLY / QUARTERLY / PQP" — what
+    # PMU RFP §5.27.6 (as amended by the corrigendum, NPQP→PQP) spells out for
+    # every SLA that doesn't say otherwise.
     # Required only if the RFP explicitly states a different value.
     measurement_interval: str = Field(
         "QUARTERLY", pattern=r"^(DAILY|WEEKLY|MONTHLY|QUARTERLY|ONE_TIME)$",

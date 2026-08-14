@@ -7,7 +7,7 @@ summed once, looked up on the LD ladder once, and yield a single
 ``ld_percent`` for that mapping in that quarter.
 
 Downstream, SlaSettlementPeriod sums ld_percent across every mapping in
-the project × quarter, caps at 10%, multiplies by NPQP.
+the project × quarter, caps at 10%, multiplies by PQP.
 
 Writer: SlaComplianceService.rollup_quarterly (Phase B).
 Reader: QuarterlySettlementService.close (Phase D) and the audit API.

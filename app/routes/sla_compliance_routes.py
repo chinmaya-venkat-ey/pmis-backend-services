@@ -603,7 +603,7 @@ def sla_by_project(db: Annotated[Session, Depends(get_db)],
         "LD %, and audit trail. The endpoint refreshes the rollup "
         "before responding (idempotent, cheap upserts). "
         "`totalLdPercentUncapped` is the sum-of-per-SLA-LD-%s BEFORE "
-        "the 10%-NPQP quarter cap; the settlement endpoint applies "
+        "the 10%-PQP quarter cap; the settlement endpoint applies "
         "the cap.\n\n"
         "Response envelope: standard api_response wrapper."
     ),

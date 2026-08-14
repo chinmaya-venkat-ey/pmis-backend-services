@@ -112,12 +112,16 @@ class NpqpService:
         """(F_total, per-allocation planned rows) for the quarter, read from the
         project's resource deployment plan (``project.activity_planned_resources``).
 
-        F = Σ ``computed_cost`` of every allocation whose ``planned_deployment_date``
-        falls inside the quarter ``[qk.quarter_start, qk.quarter_end]`` (the
-        project-anchored bounds — so F follows PROJECT quarters, not the calendar).
-        ``computed_cost`` is the snapshot finance stores (quantity × monthly_rate ×
-        duration); when it is NULL the product is recomputed from the row.
-        Soft-deleted rows are excluded.
+        F = Σ ``computed_cost`` of every allocation whose ACTIVITY sits in this
+        quarter — i.e. the activity's IST start date falls in
+        ``[qk.quarter_start, qk.quarter_end]`` (the project-anchored bounds, so F
+        follows PROJECT quarters, not the calendar). Bucketing by the ACTIVITY's
+        quarter — not the row's ``planned_deployment_date`` — keeps F on the SAME
+        quarter as that activity's SLA rollup (the activity is the quarter-proxy);
+        a deployment date a day either side of a quarter boundary can't split a
+        resource away from its activity's quarter. ``computed_cost`` is the
+        snapshot finance stores (quantity × monthly_rate × duration); when NULL the
+        product is recomputed. Soft-deleted rows are excluded.
         """
         rows = self.db.execute(
             text(
@@ -129,10 +133,11 @@ class NpqpService:
                        apr.computed_cost,
                        apr.planned_deployment_date
                   FROM project.activity_planned_resources apr
+                  JOIN project.activities a ON a.id = apr.activity_id
                  WHERE apr.project_id = :pid
                    AND apr.deleted_at IS NULL
-                   AND apr.planned_deployment_date >= :qstart
-                   AND apr.planned_deployment_date <= :qend
+                   AND (a.start_date AT TIME ZONE 'Asia/Kolkata')::date
+                       BETWEEN :qstart AND :qend
                 """
             ),
             {"pid": project_id, "qstart": qk.quarter_start, "qend": qk.quarter_end},

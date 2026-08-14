@@ -47,6 +47,22 @@ class SlaQuarterlyAggregateRepository:
             )).order_by(SlaQuarterlyAggregate.sla_ref)
         ).scalars().all())
 
+    # ------------------------------------------------------------------ delete
+
+    def delete(self, *, mapping_id: str, qk: QuarterKey) -> int:
+        """Remove the (mapping_id, fiscal_year, quarter) aggregate if present.
+
+        Used to purge a STALE row when a mapping no longer belongs to a quarter
+        it was previously (mis-)bucketed into — e.g. a breach recorded in Q3 for
+        a Q2 activity, now that the rollup buckets by the activity's quarter.
+        Returns the number of rows removed (0 or 1)."""
+        existing = self.get(mapping_id=mapping_id, qk=qk)
+        if existing is None:
+            return 0
+        self.db.delete(existing)
+        self.db.commit()
+        return 1
+
     # ------------------------------------------------------------------ upsert
 
     def upsert(

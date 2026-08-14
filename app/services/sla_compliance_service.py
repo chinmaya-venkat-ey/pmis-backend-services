@@ -24,12 +24,12 @@ from __future__ import annotations
 import math
 import re as _re
 from collections import defaultdict
-from datetime import date as _date, datetime, timezone
+from datetime import date as _date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from app.clients.db_activity_resolver import DbActivityResolver
@@ -83,6 +83,28 @@ def _carry_forward_severity_for(
 
 
 logger = get_logger(__name__)
+
+_IST = timezone(timedelta(hours=5, minutes=30))
+
+
+def _activity_start_ist(activity: Optional[Dict[str, Any]]) -> Optional[_date]:
+    """The mapped activity's start date as an IST calendar date.
+
+    The resolver returns ``startDate`` as an ISO string (e.g.
+    ``2026-04-08T18:30:00+00:00``). A resource/milestone activity is a
+    quarter-proxy, so its start date decides which quarter the whole mapping
+    belongs to. Returns None when the date is missing / unparseable."""
+    raw = activity.get("startDate") if activity else None
+    if not raw:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(_IST)
+    return dt.date()
+
 
 # Formulas whose observation (days delayed) can be auto-derived from the
 # activity's own dates. Everything else needs a recorded observation.
@@ -608,7 +630,38 @@ class SlaComplianceService:
             return None
         mapping, sla, _formula_type = loaded
 
-        # Pull every evaluation row in this mapping × quarter.
+        # A resource/milestone activity is a QUARTER-PROXY: the whole mapping
+        # belongs to the quarter its ACTIVITY sits in, regardless of when each
+        # observation happened to be recorded. Bucket by the activity's anchored
+        # quarter — NOT by each eval's record date. Without this, an observation
+        # recorded "today" (evaluate_and_persist stamps datetime.now()) lands in
+        # today's quarter: a Q2 activity whose activity window extends into July
+        # and whose breach is recorded in Q3 would surface in Q3 (where F=0),
+        # instead of Q2 (where its resource cost lives). When the activity /
+        # anchor can't be resolved, fall back to the legacy evaluated_on window
+        # so undated projects don't regress.
+        act = self.resolver.get_activity(mapping.activity_id) or {}
+        act_start = _activity_start_ist(act)
+        anchor = self._project_anchor(act.get("projectId") or act.get("project_id"))
+        act_qk = quarter_of(act_start, anchor) if (act_start and anchor) else None
+        if act_qk is not None and act_qk.quarter_start != qk.quarter_start:
+            # This mapping's activity belongs to a DIFFERENT quarter — it does
+            # not contribute to qk at all. Purge any stale aggregate the old
+            # record-date bucketing may have written here so the wrong-quarter
+            # view self-corrects on re-roll.
+            self.qtr_agg_repo.delete(mapping_id=mapping_id, qk=qk)
+            return None
+
+        # Pull the mapping's evaluation rows. When the activity quarter is known
+        # it is the authority, so take ALL of the mapping's rows (their record
+        # dates are not the quarter driver); otherwise fall back to the
+        # evaluated_on window for this quarter.
+        conds = [SlaEvaluationResult.mapping_id == mapping_id]
+        if act_qk is None:
+            conds += [
+                SlaEvaluationResult.evaluated_on >= qk.quarter_start,
+                SlaEvaluationResult.evaluated_on <= qk.quarter_end,
+            ]
         rows = self.db.execute(
             select(
                 SlaEvaluationResult.id,
@@ -616,11 +669,7 @@ class SlaComplianceService:
                 SlaEvaluationResult.project_id,
                 SlaEvaluationResult.activity_id,
                 SlaEvaluationResult.met,
-            ).where(
-                SlaEvaluationResult.mapping_id == mapping_id,
-                SlaEvaluationResult.evaluated_on >= qk.quarter_start,
-                SlaEvaluationResult.evaluated_on <= qk.quarter_end,
-            ).order_by(SlaEvaluationResult.evaluated_on)
+            ).where(*conds).order_by(SlaEvaluationResult.evaluated_on)
         ).all()
 
         # Sum points from actual observations; track if any evaluation
@@ -683,12 +732,16 @@ class SlaComplianceService:
         ld_pct = ld_percent_for_points(total_points, scoring["ld_band_pairs"])
 
         # Highest severity in this quarter = max(observed row severities, carry_severity).
-        sev_row = self.db.execute(
-            select(func.max(SlaEvaluationResult.severity_level)).where(
-                SlaEvaluationResult.mapping_id == mapping_id,
+        # Same bucketing rule as the points query above: the activity quarter is
+        # the authority when known, else fall back to the evaluated_on window.
+        sev_conds = [SlaEvaluationResult.mapping_id == mapping_id]
+        if act_qk is None:
+            sev_conds += [
                 SlaEvaluationResult.evaluated_on >= qk.quarter_start,
                 SlaEvaluationResult.evaluated_on <= qk.quarter_end,
-            )
+            ]
+        sev_row = self.db.execute(
+            select(func.max(SlaEvaluationResult.severity_level)).where(*sev_conds)
         ).scalar()
         derived_sev = None
         if sev_row is not None:
@@ -753,8 +806,42 @@ class SlaComplianceService:
         carry-forward-only mappings (SLA 008/009 that had a breach in
         the previous quarter and have no evaluation this quarter yet).
         """
-        # 1. Mappings with evaluations in the current quarter.
-        current_ids = set(self.db.execute(
+        # 1a. Mappings whose ACTIVITY sits in this quarter — the ones that should
+        #     aggregate here. A resource/milestone activity is a quarter-proxy, so
+        #     the activity's anchored quarter (NOT the eval record date) decides
+        #     membership; quarter_of(start, anchor) == qk iff the activity's IST
+        #     start date falls in [qk.quarter_start, qk.quarter_end]. Cross-schema
+        #     read of project.activities (same DB, same pattern as npqp_service).
+        activity_ids = set(self.db.execute(
+            text(
+                """
+                SELECT m.id
+                  FROM contract.sla_activity_mappings m
+                  JOIN project.activities a ON a.id = m.activity_id
+                 WHERE a.project_id = :pid
+                   AND (a.start_date AT TIME ZONE 'Asia/Kolkata')::date
+                       BETWEEN :qstart AND :qend
+                """
+            ),
+            {"pid": project_id, "qstart": qk.quarter_start, "qend": qk.quarter_end},
+        ).scalars().all())
+
+        # 1b. Mappings that ALREADY have an aggregate in this quarter — so a stale
+        #     row the old record-date bucketing wrote into the wrong quarter gets
+        #     re-rolled (and purged by rollup_mapping_for_quarter when its activity
+        #     turns out to belong elsewhere).
+        existing_ids = set(self.db.execute(
+            select(SlaQuarterlyAggregate.mapping_id).where(
+                SlaQuarterlyAggregate.project_id == project_id,
+                SlaQuarterlyAggregate.fiscal_year == qk.fiscal_year,
+                SlaQuarterlyAggregate.quarter == qk.quarter,
+            )
+        ).scalars().all())
+
+        # 1c. Legacy fallback — mappings whose evals landed in this quarter by
+        #     record date (used only when the activity/anchor can't be resolved so
+        #     rollup_mapping_for_quarter keeps the old evaluated_on window).
+        eval_ids = set(self.db.execute(
             select(SlaEvaluationResult.mapping_id).where(
                 SlaEvaluationResult.project_id == project_id,
                 SlaEvaluationResult.evaluated_on >= qk.quarter_start,
@@ -776,7 +863,7 @@ class SlaComplianceService:
         ).scalars().all())
 
         results: List[SlaQuarterlyAggregate] = []
-        for mid in current_ids | carry_candidates:
+        for mid in activity_ids | existing_ids | eval_ids | carry_candidates:
             row = self.rollup_mapping_for_quarter(mid, qk)
             if row is not None:
                 results.append(row)

@@ -81,6 +81,28 @@ def _resolve_cap_from_rules(rules: Dict[str, Decimal]) -> Optional[Decimal]:
     return Decimal(str(val)) if val is not None else None
 
 
+def _collapse_ld_by_sla(aggregates) -> Dict[str, Decimal]:
+    """One LD% per SLA per quarter — the worst (max) ld_percent across that
+    SLA's per-mapping aggregate rows.
+
+    RFP §5.28.1 scores each SLA ONCE per quarter (severity capped at Sev4 →
+    ≤4%), and the quarter total is Σ(per-SLA %LD). But Phase B writes one
+    ``sla_quarterly_aggregate`` row PER MAPPING (sla_id × activity), so an SLA
+    mapped to N activities/resources yields N rows. Summing those raw would
+    over-count the same SLA (2 breaching activities → 8% instead of 4%). Taking
+    the max per sla_id = the SLA's own worst quarter severity = one LD% per SLA,
+    matching the RFP. Rows with a NULL ld_percent are ignored.
+    """
+    ld_by_sla: Dict[str, Decimal] = {}
+    for a in aggregates:
+        if a.ld_percent is None:
+            continue
+        pct = Decimal(str(a.ld_percent))
+        if pct > ld_by_sla.get(a.sla_id, Decimal("-1")):
+            ld_by_sla[a.sla_id] = pct
+    return ld_by_sla
+
+
 class QuarterlySettlementService:
     def __init__(
         self,
@@ -156,10 +178,11 @@ class QuarterlySettlementService:
         ]
 
         # 3. Sum per-SLA LD % (uncapped) → cap at the RFP quarter cap.
-        sum_ld = sum(
-            (Decimal(str(a.ld_percent)) for a in aggregates if a.ld_percent is not None),
-            Decimal("0"),
-        )
+        #    RFP §5.28.1 scores each SLA ONCE per quarter (Sev4 → ≤4%), but Phase B
+        #    writes one aggregate row PER MAPPING (sla × activity); an SLA on N
+        #    activities must NOT be summed N times. Collapse to one LD% per sla_id
+        #    (the worst across its mappings) BEFORE summing across SLAs.
+        sum_ld = sum(_collapse_ld_by_sla(aggregates).values(), Decimal("0"))
         # Cap is DATA-DRIVEN — sourced from contract_ld_rules keyed on the
         # project's contract type. Every contract's RFP has its own cap
         # clause (PMU §5.27.6, MSAP Annexure-3E, MSIP §1.5.5, BSP §22 —

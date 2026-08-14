@@ -708,6 +708,20 @@ class SlaComplianceService:
             project_id = act.get("projectId") or act.get("project_id") or ""
             activity_id = mapping.activity_id
 
+        # Anchor guard — never PERSIST a calendar-year (un-anchored) label for a
+        # project that HAS a start-date anchor. Quarters are project-anchored, so
+        # the stored fiscal_year must be the contract-relative year (1, 2, …), not
+        # the calendar year (2026). The current code already anchors upstream; this
+        # is a write-layer safety net so a mixed deployment (e.g. a stale pre-
+        # anchoring build sharing the DB, or any caller that passed an un-anchored
+        # qk) cannot create a duplicate calendar-year row shadowing the anchored
+        # one. Re-deriving off qk.quarter_start keeps the SAME quarter window;
+        # only the (fiscal_year, quarter) label is normalised.
+        if project_id and not getattr(qk, "anchored", False):
+            anchor = self._project_anchor(project_id)
+            if anchor is not None:
+                qk = quarter_of(qk.quarter_start, anchor)
+
         notes: Dict[str, Any] = {"sourceRowCount": len(source_ids)}
         if carry_note:
             notes["carryForward"] = carry_note

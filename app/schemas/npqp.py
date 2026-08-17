@@ -54,7 +54,14 @@ class NpqpResponse(BaseModel):
         description="Quarterly Guaranteed Revenue (RFP §5.23.2). "
                     "Present only if project_qgr_config has an effective row.",
     )
-    npqp: Decimal = Field(description="F + QGR (RFP §5.28.1.d.e)")
+    npqp: Decimal = Field(
+        description=(
+            "F + QGR — DELETED-CLAUSE reference only. RFP §5.28.1.d.e (NPQP) was "
+            "DELETED by the corrigendum; NPQP is NOT the LD base. LD is charged on "
+            "PQP (= F); QGR is added back only in AQP = (PA − LD) + QGR. Kept for "
+            "display/audit; do not compute penalties from it."
+        )
+    )
     status: str = Field(
         description="'ok' | 'leave_mgmt_unavailable' | 'no_resources' | "
                     "'no_deployment_plan'. Settlement close blocks (marks "

@@ -115,18 +115,9 @@ _DATE_DERIVABLE = {"fixed_escalation"}
 # formula doesn't emit severity_level natively, so we bucket the
 # effective LD % into the same 0-4 scale banded SLAs use, so the FE
 # renders a uniform "Severity" column across every SLA type. Thresholds
-# roughly track the PMU RFP's severity progression:
-#   ≤ 0%   → 0 (no breach; met=true takes this path)
-#   ≤ 1%   → 1
-#   ≤ 2%   → 2
-#   ≤ 5%   → 3
-#   >  5%  → 4 (capped tier / significant breach)
-def _severity_from_ld_pct(ld_pct: Decimal) -> int:
-    if ld_pct <= 0:      return 0
-    if ld_pct <= 1:      return 1
-    if ld_pct <= 2:      return 2
-    if ld_pct <= 5:      return 3
-    return 4
+# Severity from an effective LD % — single source of truth in ld_bands
+# (was duplicated byte-for-byte here and in the evaluator).
+from app.services.ld_bands import severity_from_ld_pct as _severity_from_ld_pct
 
 
 def _parse_date(v: Any) -> Optional[_date]:
@@ -163,8 +154,10 @@ class SlaComplianceService:
     # ── quarter anchoring helpers ────────────────────────────────────────────
 
     def _project_anchor(self, project_id: Optional[str]) -> Optional[_date]:
-        """Memoised planned-start-date lookup (the quarter anchor). None when
-        the project is unknown / undated → callers fall back to calendar."""
+        """Memoised quarter-anchor lookup — the RESOURCE-PHASE start (earliest
+        resource-based milestone), via project_anchor; falls back to the project
+        start when there is no resource-based milestone. None when the project is
+        unknown / undated → callers fall back to calendar quarters."""
         if not project_id:
             return None
         if project_id not in self._anchor_cache:
@@ -658,6 +651,18 @@ class SlaComplianceService:
         # evaluated_on window for this quarter.
         conds = [SlaEvaluationResult.mapping_id == mapping_id]
         if act_qk is None:
+            # DEGRADED MODE: the activity or its anchor couldn't be resolved, so
+            # this mapping is bucketed by the evaluation RECORD date instead of
+            # its activity quarter — the exact record-date behavior the
+            # activity-quarter logic replaces (F and LD can then land in
+            # different quarters). Kept so undated/unresolvable projects still
+            # roll up, but logged so a silently mis-bucketing project is visible.
+            logger.warning(
+                "SLA rollup fell back to evaluated_on (record-date) bucketing for "
+                "mapping=%s in %s — activity/anchor unresolved (activity_id=%s); "
+                "F and LD may bucket into different quarters.",
+                mapping_id, qk.label(), mapping.activity_id,
+            )
             conds += [
                 SlaEvaluationResult.evaluated_on >= qk.quarter_start,
                 SlaEvaluationResult.evaluated_on <= qk.quarter_end,
@@ -710,7 +715,20 @@ class SlaComplianceService:
                 cf_sev = _carry_forward_severity_for(sla.sla_ref, rules)
                 if cf_sev is None:
                     cf_sev = int(prev.derived_severity)
-                cf_points = DEFAULT_LEVEL_POINTS.get(cf_sev, Decimal("0"))
+                # Convert the carry-forward severity LEVEL → points via the
+                # project's OWN severity_master (the same table normal scoring
+                # uses), not the hardcoded RFP defaults — otherwise a project that
+                # customized its severity points would get carry-forward points on
+                # the wrong scale (wrong carry-forward LD). Falls back to the RFP
+                # defaults only when the project configured no severity_master.
+                cf_project_id = act.get("projectId") or act.get("project_id")
+                cf_level_map = (
+                    (cf_project_id and self.evaluator._build_level_points_map(cf_project_id))
+                    or DEFAULT_LEVEL_POINTS
+                )
+                cf_points = cf_level_map.get(
+                    cf_sev, DEFAULT_LEVEL_POINTS.get(cf_sev, Decimal("0")),
+                )
                 total_points += cf_points
                 carry_points = cf_points
                 carry_severity = cf_sev

@@ -30,6 +30,24 @@ def resolve_band_pairs(rows: Sequence) -> List[Tuple[Decimal, Decimal]]:
     return [(t, p) for (t, p, _label) in DEFAULT_LD_BANDS]
 
 
+def severity_from_ld_pct(ld_pct: Decimal) -> int:
+    """Bucket an effective LD % back into the 0-4 severity scale (the coarse
+    REVERSE of the points→ld% chart), so a linear / fixed-escalation result carries
+    a ``severity_level`` in the same shape point-accumulation SLAs emit natively.
+    Thresholds track the PMU RFP severity progression: ``≤0→0, ≤1→1, ≤2→2, ≤5→3,
+    >5→4``. Single source of truth — imported by both the evaluator and the
+    compliance rollup (previously duplicated byte-for-byte)."""
+    if ld_pct <= 0:
+        return 0
+    if ld_pct <= 1:
+        return 1
+    if ld_pct <= 2:
+        return 2
+    if ld_pct <= 5:
+        return 3
+    return 4
+
+
 def ld_percent_for_points(
     points, pairs: Sequence[Tuple[Decimal, Decimal]]
 ) -> Optional[Decimal]:

@@ -37,7 +37,11 @@ from app.schemas.sla_settlement import (
     SettlementOverrideRequest,
 )
 from app.services.quarterly_settlement_service import QuarterlySettlementService
-from app.utilities.project_anchor import project_anchor, project_phase_end
+from app.utilities.project_anchor import (
+    project_anchor,
+    project_phase_end,
+    resolve_quarter_key,
+)
 from app.utilities.quarter import (
     QuarterKey,
     parse_quarter_key,
@@ -67,10 +71,10 @@ _SETTLEMENT_ROW_EXAMPLE = {
     "id": "2744efdd-e056-414c-a178-059a690e9c42",
     "projectId": "60c67666-895f-4138-bd99-c907b571e933",
     "contractType": "PMU",
-    "fiscalYear": 2026,
+    "fiscalYear": 1,
     "quarter": 3,
-    "quarterStart": "2026-07-01",
-    "quarterEnd": "2026-09-30",
+    "quarterStart": "2026-07-07",
+    "quarterEnd": "2026-10-06",
     "sumLdPercent": "44.0000",
     "cappedLdPercent": "10.0000",
     "fAmount": "1215801.65",
@@ -118,21 +122,10 @@ def _bearer_from_header(authorization: Optional[str]) -> Optional[str]:
 
 
 def _resolve_quarter(quarter: Optional[str], db: Session, project_id: str):
-    # Quarters are anchored on the project's start date; resolve the anchor so
-    # 'Y1-Q2' labels and bare ISO dates both map to the right project-relative
-    # quarter (anchor None → legacy calendar for undated projects).
-    anchor = project_anchor(db, project_id)
-    if not quarter:
-        return quarter_of(_dt_date.today(), anchor)
-    try:
-        if "-Q" in quarter.upper():
-            return parse_quarter_key(quarter, anchor)
-        return quarter_of(_dt_date.fromisoformat(quarter), anchor)
-    except (ValueError, IndexError) as exc:
-        raise ValidationError(
-            f"Invalid quarter '{quarter}' — use 'Y1-Q2' or an ISO date.",
-            code="invalid_quarter",
-        ) from exc
+    # Thin wrapper over the shared resolver so the settlement / npqp / aggregate
+    # routes share one anchor-resolution + label-parse rule (the anchor is the
+    # resource-phase start; anchor None → legacy calendar for undated projects).
+    return resolve_quarter_key(db, project_id, quarter)
 
 
 @router.get(

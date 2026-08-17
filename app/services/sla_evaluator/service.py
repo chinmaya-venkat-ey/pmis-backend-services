@@ -62,19 +62,9 @@ _EVALUATORS: Dict[str, FormulaEvaluator] = {
 }
 
 
-def _severity_from_ld_pct(ld_pct: Decimal) -> int:
-    """Bucket an effective LD % into the 0-4 severity scale banded SLAs use.
-
-    Applied to linear-LD (fixed_escalation) results so the response's
-    ``severity_level`` matches the shape point_accumulation SLAs emit
-    natively. Thresholds track the PMU RFP severity progression:
-    ≤ 1% → 1, ≤ 2% → 2, ≤ 5% → 3, > 5% → 4.
-    """
-    if ld_pct <= 0:      return 0
-    if ld_pct <= 1:      return 1
-    if ld_pct <= 2:      return 2
-    if ld_pct <= 5:      return 3
-    return 4
+# Severity from an effective LD % — single source of truth in ld_bands (was
+# duplicated byte-for-byte here and in sla_compliance_service).
+from app.services.ld_bands import severity_from_ld_pct as _severity_from_ld_pct
 
 
 class SlaEvaluatorService:

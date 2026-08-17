@@ -29,6 +29,13 @@ from app.schemas.sla import (
     SlaParameterResponse,
     SlaUpdateRequest,
 )
+# The settlement-track taxonomy is defined once in app.utilities.ld_tracks; the
+# onboarding-valid set + the default classifier are DERIVED from it so they can
+# never drift from quarterly_settlement_service._TRACK_B_RULES.
+from app.utilities.ld_tracks import (
+    VALID_LD_FORMULA_RULES as _VALID_LD_FORMULA_RULES,
+    default_ld_formula_rule as _derive_ld_formula_rule,
+)
 
 
 # The four contract types (BSP / MSAP / MSIP / PMU). SLA refs are
@@ -56,35 +63,6 @@ def _derive_contract_type(sla_ref: Optional[str]) -> Optional[str]:
     if prefix in _CONTRACT_TYPES:
         return prefix
     return _CONTRACT_TYPE_ALIASES.get(prefix)
-
-
-def _derive_ld_formula_rule(ld_computation_base: Optional[str]) -> str:
-    """Track-correct default LD classifier when onboarding doesn't specify one.
-
-    ``ld_formula_rule`` is the settlement Track classifier; a NULL rule makes the
-    SLA fall out of BOTH tracks and produce no LD (see quarterly_settlement_service
-    ``_TRACK_B_RULES`` + the Track-A ``PER_UNIT_TIME_DELIVERABLE``). Historically
-    onboarding never set it, so every wizard-onboarded SLA was silently excluded
-    from settlement. Default from the (already-captured) LD base:
-
-      * FIXED_AMOUNT (deliverable, RFP §5.28.2) -> ``PER_UNIT_TIME_DELIVERABLE`` (Track A)
-      * QUARTERLY_PAYMENT / ANNUAL_PAYMENT (resource/quarterly, §5.28.3/4) -> ``LADDER`` (Track B)
-
-    This is TRACK-correct (and within Track B the money sums identically regardless
-    of the specific rule). Callers may still pass an explicit ``ld_formula_rule`` to
-    override this default with the exact per-SLA rule."""
-    return "PER_UNIT_TIME_DELIVERABLE" if (ld_computation_base or "").upper() == "FIXED_AMOUNT" else "LADDER"
-
-
-# Valid settlement-Track classifiers (keep in sync with
-# quarterly_settlement_service._TRACK_B_RULES + the Track-A PER_UNIT_TIME_DELIVERABLE).
-# A rule outside this set is never classified into a Track at settlement, so the
-# SLA silently produces no LD — reject it at onboarding rather than store it.
-_VALID_LD_FORMULA_RULES = frozenset({
-    "PER_UNIT_TIME_DELIVERABLE",                                  # Track A
-    "LADDER", "PER_UNIT_TIME_QUARTERLY", "PER_OCCURRENCE",        # Track B
-    "PER_UNIT_OVER_THRESHOLD", "AVAILABILITY_UPTIME", "DAYS_WEIGHTED",
-})
 
 
 def _validate_structural(payload: SlaOnboardRequest) -> None:

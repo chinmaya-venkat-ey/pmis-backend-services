@@ -13,18 +13,15 @@ Response envelope (standard api_response wrapper):
 """
 from __future__ import annotations
 
-from datetime import date as _dt_date
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, Header
 from sqlalchemy.orm import Session
 
-from app.core.errors import ValidationError
 from app.core.response import api_response
 from app.db import get_db
 from app.services.npqp_service import NpqpService
-from app.utilities.project_anchor import project_anchor
-from app.utilities.quarter import parse_quarter_key, quarter_of
+from app.utilities.project_anchor import resolve_quarter_key
 
 
 router = APIRouter(tags=["npqp"])
@@ -93,20 +90,7 @@ def get_npqp(
     quarter: Optional[str] = None,
     authorization: Annotated[Optional[str], Header()] = None,
 ):
-    anchor = project_anchor(db, project_id)  # quarters are project-start-anchored
-    if not quarter:
-        qk = quarter_of(_dt_date.today(), anchor)
-    else:
-        try:
-            if "-Q" in quarter.upper():
-                qk = parse_quarter_key(quarter, anchor)
-            else:
-                qk = quarter_of(_dt_date.fromisoformat(quarter), anchor)
-        except (ValueError, IndexError) as exc:
-            raise ValidationError(
-                f"Invalid quarter '{quarter}' — use 'Y1-Q2' or an ISO date.",
-                code="invalid_quarter",
-            ) from exc
+    qk = resolve_quarter_key(db, project_id, quarter)
 
     # Forward caller's JWT to leave-mgmt (JWT-forwarding auth model).
     bearer = None

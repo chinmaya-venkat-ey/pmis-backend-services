@@ -65,7 +65,11 @@ class QuarterlyAggregateResponse(BaseModel):
     quarter_end: date = Field(serialization_alias="quarterEnd")
     total_ld_percent_uncapped: Decimal = Field(
         serialization_alias="totalLdPercentUncapped",
-        description="Sum of per-mapping ld_percent, BEFORE the 10% quarter cap.",
+        description=(
+            "Σ of ONE %LD per SLA (each SLA's worst across its per-mapping rows, "
+            "RFP §5.28.1.d.f), BEFORE the 10% quarter cap. Matches the settlement's "
+            "sumLdPercent (collapsed per SLA); it is NOT a raw per-mapping sum."
+        ),
     )
     items: List[QuarterlyAggregateItem]
 

@@ -29,8 +29,7 @@ from app.schemas.sla_quarterly_aggregate import (
     QuarterlyAggregateResponse,
 )
 from app.services.sla_compliance_service import SlaComplianceService
-from app.utilities.project_anchor import project_anchor
-from app.utilities.quarter import parse_quarter_key, quarter_of
+from app.utilities.project_anchor import resolve_quarter_key
 
 router = APIRouter(tags=["sla-compliance"])
 
@@ -645,21 +644,7 @@ def sla_quarterly_aggregate(
     db: Annotated[Session, Depends(get_db)],
     quarter: Optional[str] = None,   # ?quarter=Y1-Q2 or ?quarter=2026-05-10
 ):
-    from datetime import date as _dt_date
-    anchor = project_anchor(db, project_id)  # quarters are project-start-anchored
-    if not quarter:
-        qk = quarter_of(_dt_date.today(), anchor)
-    else:
-        try:
-            if "-Q" in quarter.upper():
-                qk = parse_quarter_key(quarter, anchor)
-            else:
-                qk = quarter_of(_dt_date.fromisoformat(quarter), anchor)
-        except (ValueError, IndexError) as exc:
-            raise ValidationError(
-                f"Invalid quarter '{quarter}' — use 'Y1-Q2' or an ISO date.",
-                code="invalid_quarter",
-            ) from exc
+    qk = resolve_quarter_key(db, project_id, quarter)
 
     svc = SlaComplianceService(db)
     # Refresh first so the response reflects the latest evaluation rows —

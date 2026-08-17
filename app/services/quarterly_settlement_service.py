@@ -42,6 +42,7 @@ from app.repositories.sla_settlement_period_repository import (
 )
 from app.services.npqp_service import NpqpService
 from app.services.sla_compliance_service import SlaComplianceService
+from app.utilities.ld_tracks import TRACK_B_RULES as _TRACK_B_RULES
 from app.utilities.logger import get_logger
 from app.utilities.quarter import QuarterKey, quarter_of
 
@@ -49,25 +50,11 @@ from app.utilities.quarter import QuarterKey, quarter_of
 logger = get_logger(__name__)
 
 
-# Track B — SLA rules that participate in the quarterly settlement.
-# The SUM of these is capped per the contract's cap (from contract_ld_rules).
-#   LADDER                     resource-based points ladder (SLA 004-011)
-#   PER_UNIT_TIME_QUARTERLY    per-day × PQP (SLA 003)
-#   PER_OCCURRENCE             occurrence-count → severity (SLA 004 alt)
-#   AVAILABILITY_UPTIME        MSIP §1.5.4 (evaluator TODO)
-#   DAYS_WEIGHTED              BSP (evaluator TODO)
-#
-# Track A — SLA rules whose LD attaches to a specific deliverable's own
-# invoice (RFP §5.28.2.b/c). NOT summed into the quarter cap:
-#   PER_UNIT_TIME_DELIVERABLE  SLA 001/002, MSIP milestone
-_TRACK_B_RULES = frozenset({
-    "LADDER",
-    "PER_UNIT_TIME_QUARTERLY",
-    "PER_OCCURRENCE",
-    "PER_UNIT_OVER_THRESHOLD",   # RFP §5.28.3.b (SLA 005)
-    "AVAILABILITY_UPTIME",
-    "DAYS_WEIGHTED",
-})
+# Track B = the SLA rules that participate in the quarterly settlement (their Σ%LD
+# is capped per the contract cap); Track A LD attaches to a deliverable's own
+# invoice and is NOT summed here. The taxonomy is defined once in
+# ``app.utilities.ld_tracks`` — imported above as ``_TRACK_B_RULES`` — so
+# onboarding validation and this settlement classifier can never drift.
 
 
 def _resolve_cap_from_rules(rules: Dict[str, Decimal]) -> Optional[Decimal]:

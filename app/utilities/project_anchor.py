@@ -27,7 +27,9 @@ from typing import Optional
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
+from app.core.errors import ValidationError
 from app.models._cross_schema import Project
+from app.utilities.quarter import QuarterKey, parse_quarter_key, quarter_of
 
 # IST is a fixed +05:30 offset (no DST) — matches project-management's
 # IST-everywhere convention for turning a stored instant into a calendar date.
@@ -101,3 +103,27 @@ def project_phase_end(db: Session, project_id: Optional[str]) -> Optional[date]:
         select(Project.end_date).where(Project.id == project_id)
     ).first()
     return _to_ist_date(row[0]) if row else None
+
+
+def resolve_quarter_key(
+    db: Session, project_id: str, quarter: Optional[str],
+) -> QuarterKey:
+    """Resolve a ``?quarter=`` argument to a :class:`QuarterKey` on the project's
+    (resource-phase) anchor. Accepts ``"Y1-Q2"`` (contract-relative), an ISO date
+    inside the target quarter, or ``None`` (→ today's quarter). Raises
+    ``ValidationError(code="invalid_quarter")`` on a malformed value.
+
+    The single place the settlement / npqp / quarterly-aggregate routes derive a
+    quarter, so the anchor resolution + label parsing can't drift between them."""
+    anchor = project_anchor(db, project_id)
+    if not quarter:
+        return quarter_of(date.today(), anchor)
+    try:
+        if "-Q" in quarter.upper():
+            return parse_quarter_key(quarter, anchor)
+        return quarter_of(date.fromisoformat(quarter), anchor)
+    except (ValueError, IndexError) as exc:
+        raise ValidationError(
+            f"Invalid quarter '{quarter}' — use 'Y1-Q2' or an ISO date.",
+            code="invalid_quarter",
+        ) from exc

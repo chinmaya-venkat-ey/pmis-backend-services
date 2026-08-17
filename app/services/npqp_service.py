@@ -1,13 +1,15 @@
 """NpqpService — Phase C.
 
-Computes NPQP = F + QGR for a project × quarter, per RFP §5.28.1.d.
+Computes F, PA and QGR for a project × quarter (RFP §5.28.1.d), plus the
+DELETED-clause reference ``NPQP = F + QGR`` (§5.28.1.d.e was DELETED by the
+corrigendum — NPQP is a display/audit value only, NOT the LD base).
 
 F   = "Planned Quarterly Payment applicable (aggregate of monthly payment
       of all resources to be deployed as per resource deployment plan
       Plus CCN resources, if any)." (§5.28.1.d.c). Read cross-schema from
       ``project.activity_planned_resources`` — the SAME per-activity plan the
       finance page uses — by summing ``computed_cost`` over the allocations whose
-      ``planned_deployment_date`` falls in the (project-anchored) quarter.
+      ``planned_deployment_date`` falls in the (resource-phase-anchored) quarter.
 
 PA  = "Payable amount for Actual resource deployment" (§5.28.1.d.g).
       Sourced from leave-mgmt via GET /api/attendance/cost/monthly. That
@@ -19,9 +21,10 @@ QGR = per-project × phase amount from project.project_qgr_config.
       Cross-schema read (same DB, PMIS-project-management owns the writes).
       When no effective row exists → 0.
 
-NPQP = F + QGR (§5.28.1.d.e). LD is calculated on PQP (=F, per corrigendum) but deducted from
-       PA per §5.28.1.d.f/h — that's why F and PA must NOT collapse into
-       one number.
+NPQP = F + QGR is a DELETED-clause reference only (§5.28.1.d.e was deleted by the
+       corrigendum). It is computed/stored for display/audit but is NOT the LD
+       base: LD is calculated on PQP (= F) and deducted from PA (§5.28.1.f/h) —
+       that's why F and PA must NOT collapse into one number.
 
 Consumed by:
   * QuarterlySettlementService.close (Phase D) — needs F for the LD %

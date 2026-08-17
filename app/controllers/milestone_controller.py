@@ -131,3 +131,11 @@ class MilestoneController:
     def restore(self, milestone_id: str, *, caller_user_id: Optional[str]) -> MilestoneResponse:
         row = self.service.restore(milestone_id, caller_user_id=caller_user_id)
         return self._to_response(row)
+
+    def realign_activities(self, milestone_id: str, *, caller_user_id: Optional[str]) -> dict:
+        """Snap a resource-based milestone's existing activities onto their
+        anchored quarter windows (dates only — ids / allocations / SLA mappings
+        preserved). Returns the realign summary as-is (no MilestoneResponse)."""
+        return self.service.realign_resource_activities(
+            milestone_id, caller_user_id=caller_user_id,
+        )

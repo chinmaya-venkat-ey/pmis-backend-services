@@ -242,3 +242,25 @@ def restore_milestone(
     caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
 ):
     return controller.restore(milestone_id, caller_user_id=caller_user_id)
+
+
+@router.post(
+    "/{milestone_id}/realign-activities",
+    summary="Realign a resource-based milestone's activities onto quarter windows",
+    description=(
+        "Snap every existing activity of a resource-based milestone onto the "
+        "anchored quarter window that currently contains its start date — dates "
+        "only. Activity ids / positions, their planned-resource allocations, and "
+        "the contract SLA mappings that reference them are all preserved; "
+        "allocation deployment dates falling outside the new window are clamped "
+        "back in. Idempotent — re-running once aligned is a no-op. Run per "
+        "project after the phase-anchor rollout."
+    ),
+    dependencies=[Depends(require_project_permission(MILESTONES_CREATE))],
+)
+def realign_milestone_activities(
+    milestone_id: str,
+    controller: Annotated[MilestoneController, Depends(get_milestone_controller)],
+    caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
+):
+    return controller.realign_activities(milestone_id, caller_user_id=caller_user_id)

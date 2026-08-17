@@ -38,7 +38,7 @@ from app.schemas.sla_settlement import (
 )
 from app.services.quarterly_settlement_service import QuarterlySettlementService
 from app.utilities.project_anchor import project_anchor
-from app.utilities.quarter import parse_quarter_key, quarter_of
+from app.utilities.quarter import QuarterKey, parse_quarter_key, quarter_of
 
 
 class SettlementInvoicedRequest(BaseModel):
@@ -152,8 +152,25 @@ def _resolve_quarter(quarter: Optional[str], db: Session, project_id: str):
 def list_settlements(
     project_id: str,
     db: Annotated[Session, Depends(get_db)],
+    authorization: Annotated[Optional[str], Header()] = None,
+    refresh: bool = False,
 ):
     svc = QuarterlySettlementService(db)
+    if refresh:
+        # Force-refresh every non-frozen quarter for this project in one call, so
+        # the net-payment page can pick up code/data fixes (e.g. F moving to the
+        # activity plan) across all quarters at once. Rebuild each row's anchored
+        # QuarterKey from its stored bounds.
+        bearer = _bearer_from_header(authorization)
+        for r in svc.repo.list_for_project(project_id):
+            qk = QuarterKey(
+                fiscal_year=r.fiscal_year, quarter=r.quarter,
+                quarter_start=r.quarter_start, quarter_end=r.quarter_end,
+                anchored=True,
+            )
+            _recompute_or_existing(
+                svc, project_id, qk, r, refresh=True, bearer_token=bearer,
+            )
     rows = svc.repo.list_for_project(project_id)
     resp = SettlementListResponse(
         project_id=project_id,
@@ -192,27 +209,46 @@ def get_settlement(
     quarter: str,
     db: Annotated[Session, Depends(get_db)],
     authorization: Annotated[Optional[str], Header()] = None,
+    refresh: bool = False,
 ):
     qk = _resolve_quarter(quarter, db, project_id)
     svc = QuarterlySettlementService(db)
     existing = svc.repo.get(project_id=project_id, qk=qk)
-    # Recompute when there's no row, an 'open' row, OR a transient 'blocked_*'
-    # row (blocked_missing_cap / blocked_missing_npqp). A block means "couldn't
-    # compute yet" — once the underlying config/data is fixed (e.g. a missing
-    # contract_type/cap is set) the row must be able to recover on next access.
-    # Final rows (auto_closed / closed / overridden / invoiced) are NOT recomputed.
-    if existing is None or existing.status == "open" or (
-        existing.status or ""
-    ).startswith("blocked_"):
-        # Forward the caller's JWT so leave-mgmt validates against the
-        # actual user, not a service account.
-        row = svc.close(
-            project_id, qk, mode="auto",
-            bearer_token=_bearer_from_header(authorization),
-        )
-    else:
-        row = existing
+    row = _recompute_or_existing(
+        svc, project_id, qk, existing, refresh=refresh,
+        bearer_token=_bearer_from_header(authorization),
+    )
     return api_response(data=SettlementItem.model_validate(row).model_dump(by_alias=True))
+
+
+# Statuses that are a deliberate, final commitment — never silently recomputed.
+# 'overridden' is a finance decision (a manual sum_ld); 'invoiced' is billed and
+# immutable. Everything else is a DERIVED value that must be free to refresh.
+_FROZEN_SETTLEMENT_STATUSES = ("overridden", "invoiced")
+
+
+def _recompute_or_existing(svc, project_id, qk, existing, *, refresh, bearer_token):
+    """Return a fresh (re-closed) settlement row or the stored one.
+
+    Always recomputes a missing / ``open`` / transient ``blocked_*`` row (a block
+    means "couldn't compute yet" — it must recover once the config/data is fixed).
+    With ``refresh=True`` it ALSO recomputes a settled-but-stale row (e.g. an
+    ``auto_closed`` quarter whose F was computed by older code, before F moved to
+    the activity plan) — everything except the frozen states above. This is the
+    force-refresh the settlement/net-payment page uses to pick up code/data fixes
+    without waiting for a new quarter.
+    """
+    status = (existing.status if existing is not None else "") or ""
+    recompute = (
+        existing is None
+        or status == "open"
+        or status.startswith("blocked_")
+        or (refresh and status not in _FROZEN_SETTLEMENT_STATUSES)
+    )
+    if not recompute:
+        return existing
+    # Forward the caller's JWT so leave-mgmt validates against the actual user.
+    return svc.close(project_id, qk, mode="auto", bearer_token=bearer_token)
 
 
 @router.post(

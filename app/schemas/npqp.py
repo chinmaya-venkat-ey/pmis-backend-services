@@ -39,11 +39,14 @@ class NpqpResponse(BaseModel):
         default=Decimal("0"),
         serialization_alias="paAmount",
         description="PA — Payable amount for Actual resource deployment "
-                    "(RFP §5.28.1.d.g). Sum of leave-mgmt's per-resource per-month "
-                    "'cost' figures, which fold in attendance, paid leave, half-day, "
-                    "and RFP §5.24.1 relaxation. Distinct from F because ACTUAL "
-                    "attendance can be less than PLANNED (missed days, un-approved "
-                    "leave). LD is calculated on PQP (=F) but deducted from PA.",
+                    "(RFP §5.28.1.d.g) = F (the activity plan) prorated by the "
+                    "project's attendance ratio from leave-mgmt (Σ actual cost ÷ "
+                    "Σ planned rate, clamped to [0,1]). leave-mgmt folds in "
+                    "attendance/paid-leave/half-day/§5.24.1 relaxation; because the "
+                    "leave roster is a different resource set than the plan, it is "
+                    "used as an attendance FACTOR against F, not an absolute cost — "
+                    "so PA ≤ F and reconciles with finance. LD is on PQP (=F), "
+                    "deducted from PA.",
     )
     qgr_amount: Decimal = Field(
         default=Decimal("0"),

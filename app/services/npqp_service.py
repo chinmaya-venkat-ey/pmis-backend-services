@@ -214,10 +214,18 @@ class NpqpService:
         #    leave-mgmt availability; needs only cross-schema DB access.
         f_total, planned_rows = self._compute_planned_f(project_id, qk)
 
-        # 2. PA (actual) — from leave-mgmt monthly cost. When leave-mgmt
-        #    can't answer, PA is unknown; the settlement layer treats a
-        #    non-'ok' NPQP status as "block" instead of guessing.
-        pa_total = Decimal("0")
+        # 2. PA (actual) = the planned F prorated by the project's ATTENDANCE
+        #    RATIO from leave-mgmt (Σ attendance-folded cost ÷ Σ planned rate over
+        #    the leave-tracked resources). F comes from the activity PLAN and the
+        #    leave roster is a DIFFERENT resource set (no designation→person link),
+        #    so leave is used only as an attendance FACTOR against the plan — never
+        #    as an absolute cost. Summing the leave roster directly (the old
+        #    behaviour) made PA follow the often-stale/larger leave roster and
+        #    exceed the planned/finance value; proration keeps PA ≤ F and reconciled
+        #    with finance while still reflecting actual attendance. When leave can't
+        #    answer, PA is unknown and the settlement blocks.
+        leave_actual = Decimal("0")   # Σ attendance-folded cost from leave
+        leave_planned = Decimal("0")  # Σ planned monthly rate from leave (ratio base)
         actual_rows: List[NpqpResourceCost] = []
         leave_ok = True
         for (year, month) in _months_of_quarter(qk):
@@ -232,15 +240,31 @@ class NpqpService:
                     project_id, year, month,
                 )
                 continue
-            pa_total += pa_month
+            leave_actual += pa_month
+            for r in rows:
+                if r.monthly_rate is not None:
+                    leave_planned += Decimal(str(r.monthly_rate))
             actual_rows.extend(rows)
+
+        pa_total = Decimal("0")
+        attendance_ratio: Optional[Decimal] = None
+        if leave_ok:
+            if leave_planned > 0:
+                # actual ≤ planned → clamp the ratio to [0, 1].
+                attendance_ratio = min(
+                    Decimal("1"), max(Decimal("0"), leave_actual / leave_planned),
+                )
+            else:
+                # leave reachable but no rate data → assume full attendance.
+                attendance_ratio = Decimal("1")
+            pa_total = (f_total * attendance_ratio).quantize(Decimal("0.01"))
 
         # 3. QGR — from project.project_qgr_config.
         qgr = self._qgr_for(project_id, qk.quarter_end)
 
         # 4. Status precedence: no deployment plan is worse than no
         #    leave-mgmt (we can't even compute F, so LD % has nothing
-        #    to multiply). No planned rows AND no actual rows → the
+        #    to multiply). No planned rows AND no leave data → the
         #    project simply has no staffing this quarter.
         if not planned_rows and not actual_rows:
             status = "no_resources"
@@ -251,10 +275,9 @@ class NpqpService:
         else:
             status = "ok"
 
-        # ``per_month`` remains the audit trail — expose the ACTUAL rows
-        # when we have them (they carry per-resource attendance context),
-        # else fall back to the planned rows so the response is never empty.
-        per_month = actual_rows or planned_rows
+        # ``per_month`` is the audit trail — the PLAN rows (F is now the PA base,
+        # PA = F × attendance_ratio), so the breakdown reconciles with F and PA.
+        per_month = planned_rows
 
         return NpqpResponse(
             project_id=project_id,

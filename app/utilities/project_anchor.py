@@ -71,3 +71,33 @@ def project_anchor(db: Session, project_id: Optional[str]) -> Optional[date]:
         select(Project.start_date).where(Project.id == project_id)
     ).first()
     return _to_ist_date(row[0]) if row else None
+
+
+def project_phase_end(db: Session, project_id: Optional[str]) -> Optional[date]:
+    """The resource-phase END as an IST date: the LATEST resource-based
+    milestone end, falling back to the project's own ``end_date`` when there is
+    no resource-based milestone, and ``None`` when unknown / undated.
+
+    Paired with :func:`project_anchor` (the phase START) it bounds the project's
+    valid settlement-quarter span — the settlement refresh enumerates quarters
+    across ``[anchor, phase_end]`` (clamped to today) and prunes any stored
+    period outside it."""
+    if not project_id:
+        return None
+    rb_end = db.execute(
+        text(
+            """
+            SELECT MAX(end_date)
+              FROM project.milestones
+             WHERE project_id = :pid
+               AND is_resource_based = TRUE
+            """
+        ),
+        {"pid": project_id},
+    ).scalar()
+    if rb_end is not None:
+        return _to_ist_date(rb_end)
+    row = db.execute(
+        select(Project.end_date).where(Project.id == project_id)
+    ).first()
+    return _to_ist_date(row[0]) if row else None

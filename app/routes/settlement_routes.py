@@ -37,8 +37,13 @@ from app.schemas.sla_settlement import (
     SettlementOverrideRequest,
 )
 from app.services.quarterly_settlement_service import QuarterlySettlementService
-from app.utilities.project_anchor import project_anchor
-from app.utilities.quarter import QuarterKey, parse_quarter_key, quarter_of
+from app.utilities.project_anchor import project_anchor, project_phase_end
+from app.utilities.quarter import (
+    QuarterKey,
+    parse_quarter_key,
+    quarter_of,
+    quarters_through,
+)
 
 
 class SettlementInvoicedRequest(BaseModel):
@@ -157,20 +162,7 @@ def list_settlements(
 ):
     svc = QuarterlySettlementService(db)
     if refresh:
-        # Force-refresh every non-frozen quarter for this project in one call, so
-        # the net-payment page can pick up code/data fixes (e.g. F moving to the
-        # activity plan) across all quarters at once. Rebuild each row's anchored
-        # QuarterKey from its stored bounds.
-        bearer = _bearer_from_header(authorization)
-        for r in svc.repo.list_for_project(project_id):
-            qk = QuarterKey(
-                fiscal_year=r.fiscal_year, quarter=r.quarter,
-                quarter_start=r.quarter_start, quarter_end=r.quarter_end,
-                anchored=True,
-            )
-            _recompute_or_existing(
-                svc, project_id, qk, r, refresh=True, bearer_token=bearer,
-            )
+        _refresh_all_quarters(svc, db, project_id, authorization)
     rows = svc.repo.list_for_project(project_id)
     resp = SettlementListResponse(
         project_id=project_id,
@@ -249,6 +241,63 @@ def _recompute_or_existing(svc, project_id, qk, existing, *, refresh, bearer_tok
         return existing
     # Forward the caller's JWT so leave-mgmt validates against the actual user.
     return svc.close(project_id, qk, mode="auto", bearer_token=bearer_token)
+
+
+def _refresh_all_quarters(svc, db: Session, project_id: str, authorization):
+    """Force-refresh a project's whole settlement history in one call, and
+    SELF-HEAL the quarter set against the current anchor.
+
+    The quarter anchor moved from the project start to the resource-phase start,
+    so a project can carry stale settlement rows whose ``(fiscal_year, quarter)``
+    was bucketed under the OLD anchor (e.g. calendar or project-start quarters)
+    and no longer maps to any real quarter of the phase — leaving duplicate /
+    mislabelled rows that double-count F. So, when the project has an anchor, we:
+
+      1. enumerate the VALID quarters across ``[anchor, min(phase_end, today)]``
+         and recompute each (creating any missing, correcting stale windows), and
+      2. PRUNE every stored non-frozen row whose ``(fiscal_year, quarter)`` is not
+         in that valid set — the orphans. ``invoiced`` / ``overridden`` rows are
+         authoritative and never pruned (an orphaned frozen row is left as-is).
+
+    Undated projects (anchor ``None``) keep the legacy behaviour: refresh each
+    stored row in place, no enumeration, no prune (calendar quarters, no phase to
+    bound against)."""
+    bearer = _bearer_from_header(authorization)
+    anchor = project_anchor(db, project_id)
+
+    if anchor is None:
+        for r in svc.repo.list_for_project(project_id):
+            qk = QuarterKey(
+                fiscal_year=r.fiscal_year, quarter=r.quarter,
+                quarter_start=r.quarter_start, quarter_end=r.quarter_end,
+                anchored=False,
+            )
+            _recompute_or_existing(
+                svc, project_id, qk, r, refresh=True, bearer_token=bearer,
+            )
+        return
+
+    # Bound the valid span at today's quarter — never eagerly open a FUTURE
+    # quarter that hasn't started (settlements close on quarter_end+1).
+    phase_end = project_phase_end(db, project_id)
+    through = min(phase_end, _dt_date.today()) if phase_end else _dt_date.today()
+    valid = quarters_through(anchor, through)
+    valid_labels = {(qk.fiscal_year, qk.quarter) for qk in valid}
+
+    # 1. recompute/create each valid quarter (corrects windows under the anchor).
+    for qk in valid:
+        existing = svc.repo.get(project_id=project_id, qk=qk)
+        _recompute_or_existing(
+            svc, project_id, qk, existing, refresh=True, bearer_token=bearer,
+        )
+
+    # 2. prune non-frozen orphans left by the anchor change.
+    for r in svc.repo.list_for_project(project_id):
+        if (
+            (r.fiscal_year, r.quarter) not in valid_labels
+            and (r.status or "") not in _FROZEN_SETTLEMENT_STATUSES
+        ):
+            svc.repo.delete(r)
 
 
 @router.post(

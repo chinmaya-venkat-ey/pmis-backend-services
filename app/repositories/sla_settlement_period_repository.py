@@ -45,6 +45,22 @@ class SlaSettlementPeriodRepository:
             )
         ).scalars().all())
 
+    # ------------------------------------------------------------------ delete
+
+    def delete(self, row: SlaSettlementPeriod) -> None:
+        """Hard-delete a settlement period. Used by the refresh to prune orphan
+        rows left behind by an anchor change (a stored ``(fiscal_year, quarter)``
+        that no longer maps to any real quarter of the project's phase). Callers
+        MUST exclude ``invoiced`` / ``overridden`` rows — those are authoritative
+        finance commitments, never pruned."""
+        if row.status == "invoiced":
+            raise ValueError(
+                f"Refusing to delete an invoiced settlement "
+                f"({row.project_id} Y{row.fiscal_year}-Q{row.quarter})."
+            )
+        self.db.delete(row)
+        self.db.commit()
+
     # ------------------------------------------------------------------ upsert
 
     def upsert(

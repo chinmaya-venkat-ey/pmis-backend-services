@@ -130,6 +130,19 @@ def quarter_of(d: date, anchor: Optional[date] = None) -> QuarterKey:
     return _key_from_index(_anchored_quarter_index(d, anchor), anchor)
 
 
+def quarters_through(anchor: date, through: date) -> list[QuarterKey]:
+    """Every anchored quarter from ``Y1-Q1`` through the quarter that CONTAINS
+    ``through`` (inclusive) — the project's valid settlement-quarter set.
+
+    ``through`` before the anchor collapses to just ``Y1-Q1`` (the index is
+    clamped at 0). Anchored-only: callers with no anchor (undated projects) use
+    the legacy calendar path and never enumerate. Used by the settlement refresh
+    to regenerate the correct quarters and prune orphans left by an anchor
+    change."""
+    last = _anchored_quarter_index(through, anchor) if through >= anchor else 0
+    return [_key_from_index(k, anchor) for k in range(last + 1)]
+
+
 def previous_quarter(qk: QuarterKey, anchor: Optional[date] = None) -> QuarterKey:
     """Quarter immediately preceding ``qk``.
 

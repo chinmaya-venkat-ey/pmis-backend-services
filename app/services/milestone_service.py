@@ -47,7 +47,7 @@ from app.utilities.catalogs import (
 )
 from app.utilities.date_rules import IST, to_ist_calendar_date, validate_entity_dates
 from app.utilities.project_lock import assert_milestone_activity_writable
-from app.utilities.quarter_windows import quarter_window_of, quarter_windows
+from app.utilities.quarter_windows import quarter_window_of
 from app.utilities.required_fields import assert_required_not_cleared
 from app.utilities.vendor_resolver import resolve_and_validate_vendor_ids
 
@@ -243,72 +243,8 @@ class MilestoneService:
                 action="create_asg", actor_user_id=caller_user_id,
                 changes={"category": _CATEGORY_ASG},
             )
-        # Resource-based auto-tiler: lay the phase out as one activity per
-        # anchored quarter so its SLA quarters line up 1:1 with contract's
-        # phase-anchored settlement grid (idempotent — see the helper).
-        if row.is_resource_based:
-            self._autogenerate_quarter_activities(row, caller_user_id=caller_user_id)
         self.db.commit()
         return row
-
-    def _autogenerate_quarter_activities(self, milestone, *, caller_user_id):
-        """Tile a resource-based milestone's ``[start_date, end_date]`` into one
-        activity per anchored quarter (``quarter_windows``), named ``Q1``,
-        ``Q2`` … so the phase's activities distribute one-per-quarter with no
-        gaps — matching contract-management's phase-anchored SLA quarters.
-
-        Runs inside the caller's open transaction (no commit of its own).
-        Idempotent no-op when the milestone is not resource-based, is missing
-        either date, or already has ANY live activity — so an existing
-        milestone whose activities carry SLA mappings is never regenerated
-        here (that is the realign endpoint's job). Generated activities carry
-        no resource allocations; the user fills those in later and each
-        allocation's ``duration`` then follows its activity's quarter window.
-        Returns the created rows (``[]`` when it no-ops)."""
-        if not getattr(milestone, "is_resource_based", False):
-            return []
-        windows = quarter_windows(milestone.start_date, milestone.end_date)
-        if not windows:
-            return []
-        # Never clobber existing (possibly SLA-mapped) activities.
-        if self.activities.list_by_milestone_ids([milestone.id]):
-            return []
-        base_position = self.activities.next_position_for_milestone(milestone.id)
-        created = []
-        for idx, (ws, we) in enumerate(windows):
-            row = self.activities.create(
-                project_id=milestone.project_id,
-                milestone_id=milestone.id,
-                name=f"Q{idx + 1}",
-                description=None,
-                start_date=_ist_midnight(ws),
-                end_date=_ist_midnight(we),
-                actual_start_date=None,
-                actual_end_date=None,
-                status="not_completed",
-                activity_started=False,
-                priority=None,
-                owner_division=None,
-                concerned_divisions=None,
-                vendor_id=None,
-                position=base_position + idx,
-                category=milestone.category,
-                ccn_value=milestone.ccn_value,
-                created_by=caller_user_id,
-                updated_by=caller_user_id,
-            )
-            self.audit.write(
-                project_id=milestone.project_id,
-                target_kind="activity", target_id=row.id,
-                action="create", actor_user_id=caller_user_id,
-                changes={
-                    "name": row.name,
-                    "milestone_id": milestone.id,
-                    "auto_generated": "resource_quarter",
-                },
-            )
-            created.append(row)
-        return created
 
     def realign_resource_activities(self, milestone_id: str, *, caller_user_id):
         """Snap an EXISTING resource-based milestone's activities onto its
@@ -547,17 +483,6 @@ class MilestoneService:
             and is_terminal_status(updates["status"])
         ):
             self._cascade_to_parent(row, caller_user_id=caller_user_id)
-
-        # Auto-tile quarters when a milestone becomes resource-based or its
-        # window changes AND it has no activities yet (the helper's idempotent
-        # guard). Existing SLA-mapped activities are realigned via the
-        # dedicated endpoint, never regenerated here.
-        if row.is_resource_based and (
-            "is_resource_based" in updates
-            or "start_date" in updates
-            or "end_date" in updates
-        ):
-            self._autogenerate_quarter_activities(row, caller_user_id=caller_user_id)
 
         self.db.commit()
         return row

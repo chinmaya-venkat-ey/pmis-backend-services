@@ -1,21 +1,30 @@
-"""Resolve a project's quarter ANCHOR — its planned start date.
+"""Resolve a project's quarter ANCHOR — the resource-phase start.
 
-Quarters in this service are measured FROM the project start date (see
-``app.utilities.quarter``), mirroring project-management's contract-relative
-period math. This helper reads the planned ``start_date`` from the shared
-``project.projects`` table (cross-schema, same read-only pattern as the SLA
-cron's activity lookups) and normalises it to an IST calendar date.
+Quarters in this service are measured FROM the anchor (see
+``app.utilities.quarter``). The anchor is the **resource-based phase start** —
+the earliest resource-based milestone's ``start_date`` — because a project's
+inception can be months or years before any resources deploy, and anchoring on
+the project start would scatter the resource activities across quarters that
+don't line up with the phase (leaving some quarters empty and mis-bucketing
+others across a boundary). When a project has NO resource-based milestone we
+fall back to its own planned ``start_date`` (the legacy project-start anchor);
+``None`` when the project is unknown / undated — callers then fall back to
+legacy calendar quarters.
 
-Returns ``None`` when the project is unknown or has no start date — callers
-then fall back to legacy calendar quarters so undated projects still resolve
-to a stable bucket.
+NOTE: this is the SLA/settlement QUARTER anchor only. The rate-card contract
+YEAR stays anchored on the project start in project-management
+(``resource_rate.contract_year_no``) — rates are contract-year-based and F reads
+the already-snapshotted ``computed_cost``, so the two anchors are independent.
+
+Reads cross-schema from ``project.milestones`` / ``project.projects`` (same
+read-only pattern as the SLA activity lookups) and normalises to an IST date.
 """
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.models._cross_schema import Project
@@ -36,10 +45,28 @@ def _to_ist_date(value) -> Optional[date]:
 
 
 def project_anchor(db: Session, project_id: Optional[str]) -> Optional[date]:
-    """Planned project start date (the quarter anchor) as an IST date, or
-    ``None`` when the project is unknown / has no start date."""
+    """The SLA/settlement quarter anchor as an IST date: the earliest
+    resource-based milestone start (the resource-phase start), falling back to
+    the project's own ``start_date`` when there is no resource-based milestone,
+    and ``None`` when the project is unknown / undated. See the module docstring.
+    """
     if not project_id:
         return None
+    # Resource-phase start = earliest resource-based milestone's start.
+    rb_start = db.execute(
+        text(
+            """
+            SELECT MIN(start_date)
+              FROM project.milestones
+             WHERE project_id = :pid
+               AND is_resource_based = TRUE
+            """
+        ),
+        {"pid": project_id},
+    ).scalar()
+    if rb_start is not None:
+        return _to_ist_date(rb_start)
+    # Fallback: the project's own planned start (legacy project-start anchor).
     row = db.execute(
         select(Project.start_date).where(Project.id == project_id)
     ).first()

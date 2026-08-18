@@ -205,6 +205,11 @@ class ActivityService:
             requested_category=payload.category,
             requested_ccn_value=payload.ccn_value,
         )
+        # 'planned'/'additional' — only for resource-based milestones; defaults
+        # to 'planned' there when omitted, NULL (and rejected) otherwise.
+        resource_classification = self._resolve_resource_classification(
+            milestone, payload.resource_classification,
+        )
         row = self.repo.create(
             project_id=milestone.project_id,
             milestone_id=milestone_id,
@@ -223,6 +228,7 @@ class ActivityService:
             position=position,
             category=category,
             ccn_value=ccn_value,
+            resource_classification=resource_classification,
             created_by=caller_user_id,
             updated_by=caller_user_id,
         )
@@ -399,6 +405,23 @@ class ActivityService:
         # Planned resources are a child collection, written separately below —
         # remove from the column updates so repo.update doesn't setattr the ORM.
         updates.pop("resources", None)
+        # resource_classification: only on resource-based-milestone activities.
+        # A value on a non-resource-based activity is rejected; an explicit null
+        # is a no-op (a resource-based activity always keeps a classification).
+        if "resource_classification" in updates:
+            if updates["resource_classification"] is None:
+                updates.pop("resource_classification")
+                touched.discard("resource_classification")
+            else:
+                _rc_ms = self.milestones.get_by_id(row.milestone_id)
+                if _rc_ms is None or not getattr(
+                    _rc_ms, "is_resource_based", False,
+                ):
+                    raise ValidationError(
+                        "resourceClassification only applies to activities "
+                        "under a resource-based milestone.",
+                        details={"code": "resource_classification_not_allowed"},
+                    )
         # Doc-finance: handle category + ccn_value lifecycle separately.
         category_requested = updates.pop("category", None)
         ccn_value_requested = updates.pop("ccn_value", None)
@@ -598,6 +621,25 @@ class ActivityService:
                 "Planned resources can only be set on activities under a "
                 "resource-based milestone."
             )
+
+    def _resolve_resource_classification(self, milestone, provided):
+        """Resolve resource_classification ('planned'|'additional') for an
+        activity. Only resource-based milestones carry it: default 'planned'
+        when omitted there; NULL elsewhere; reject if a value is supplied for a
+        non-resource-based activity. Value shape ('planned'|'additional') is
+        already enforced by the schema."""
+        is_rb = milestone is not None and getattr(
+            milestone, "is_resource_based", False,
+        )
+        if not is_rb:
+            if provided is not None:
+                raise ValidationError(
+                    "resourceClassification only applies to activities under a "
+                    "resource-based milestone.",
+                    details={"code": "resource_classification_not_allowed"},
+                )
+            return None
+        return provided or "planned"
 
     def _assert_deployment_dates_within_window(self, activity, items) -> None:
         """Every allocation's planned deployment date must fall inside the

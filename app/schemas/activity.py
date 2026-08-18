@@ -31,6 +31,10 @@ _ACTIVITY_STATUS_CHOICES = ("not_completed", "completed")
 # app/schemas/milestone.py:_M_A_CATEGORY_CHOICES.
 _M_A_CATEGORY_CHOICES = ("original", "asg", "ccn")
 
+# Resource classification for resource-based-milestone activities: whether the
+# activity's resources are part of the original plan or brought in additionally.
+_RESOURCE_CLASSIFICATION_CHOICES = ("planned", "additional")
+
 
 class ActivityStartRequest(BaseModel):
     """#188 — POST /activities/{id}/start. Body optional; ``actualStartDate``
@@ -138,6 +142,8 @@ class ActivityResponse(ResponseModel):
     position: int
     resource_mode: Optional[str] = None
     resource_count: Optional[int] = None
+    # 'planned' | 'additional' for resource-based-milestone activities; else null.
+    resource_classification: Optional[str] = None
     status: Optional[str] = None
     activity_started: bool = False
     depends_on: List[str] = Field(default_factory=list)
@@ -235,6 +241,12 @@ class ActivityCreateRequest(BaseModel):
     depends_on: List[str] = Field(default_factory=list)
     # Planned-resource allocations for a resource-based activity (replace-set).
     resources: List[ActivityPlannedResourceItem] = Field(default_factory=list)
+    # 'planned' | 'additional' — only for activities under a resource-based
+    # milestone (rejected otherwise). Defaults to 'planned' for resource-based
+    # activities when omitted (see ActivityService.create).
+    resource_classification: Annotated[
+        Optional[str], Field(default=None, max_length=12)
+    ]
     # Finance — optional on the wire. Pre-publish creates IGNORE
     # category/ccnValue and force 'original'/0; post-publish creates
     # default category to 'asg' when omitted, and require ccnValue > 0
@@ -292,6 +304,23 @@ class ActivityCreateRequest(BaseModel):
             )
         return v
 
+    @field_validator("resource_classification", mode="before")
+    @classmethod
+    def _normalize_resource_classification(cls, v):
+        if isinstance(v, str):
+            v = v.strip().lower()
+        return v
+
+    @field_validator("resource_classification")
+    @classmethod
+    def _validate_resource_classification(cls, v):
+        if v is not None and v not in _RESOURCE_CLASSIFICATION_CHOICES:
+            raise ValueError(
+                "resourceClassification must be one of: "
+                f"{', '.join(_RESOURCE_CLASSIFICATION_CHOICES)}."
+            )
+        return v
+
     @field_validator("end_date")
     @classmethod
     def _end_after_start(cls, v, info):
@@ -331,6 +360,10 @@ class ActivityUpdateRequest(BaseModel):
     depends_on: Optional[List[str]] = None
     # Planned-resource allocations — None = leave unchanged; [] = clear.
     resources: Optional[List[ActivityPlannedResourceItem]] = None
+    # 'planned' | 'additional' — only for resource-based-milestone activities.
+    resource_classification: Annotated[
+        Optional[str], Field(default=None, max_length=12)
+    ]
     # Finance — optional on PATCH. Service layer locks category once set
     # (409 if changed) and accepts ccn_value updates only when the
     # existing row's category is 'ccn'.
@@ -376,6 +409,23 @@ class ActivityUpdateRequest(BaseModel):
             raise ValueError(
                 f"Category must be one of: "
                 f"{', '.join(_M_A_CATEGORY_CHOICES)}."
+            )
+        return v
+
+    @field_validator("resource_classification", mode="before")
+    @classmethod
+    def _normalize_resource_classification(cls, v):
+        if isinstance(v, str):
+            v = v.strip().lower()
+        return v
+
+    @field_validator("resource_classification")
+    @classmethod
+    def _validate_resource_classification(cls, v):
+        if v is not None and v not in _RESOURCE_CLASSIFICATION_CHOICES:
+            raise ValueError(
+                "resourceClassification must be one of: "
+                f"{', '.join(_RESOURCE_CLASSIFICATION_CHOICES)}."
             )
         return v
 

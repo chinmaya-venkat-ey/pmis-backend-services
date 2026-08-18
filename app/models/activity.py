@@ -49,6 +49,11 @@ class Activity(Base):
             "resource_count IS NULL OR resource_count >= 1",
             name="ck_activities_resource_count_positive",
         ),
+        CheckConstraint(
+            "resource_classification IS NULL "
+            "OR resource_classification IN ('planned', 'additional')",
+            name="ck_activities_resource_classification",
+        ),
         Index("idx_activities_milestone_live", "milestone_id", "deleted_at"),
         Index("idx_activities_milestone_position", "milestone_id", "position"),
         Index("idx_activities_project_live", "project_id", "deleted_at"),
@@ -96,6 +101,10 @@ class Activity(Base):
 
     resource_mode: Mapped[Optional[str]] = mapped_column(String(10))
     resource_count: Mapped[Optional[int]] = mapped_column(Integer)
+    # Whether this resource-based activity's resources are part of the original
+    # plan ('planned') or brought in beyond it ('additional', RFP §5.28 additional
+    # resources). NULL for non-resource-based activities.
+    resource_classification: Mapped[Optional[str]] = mapped_column(String(12))
 
     status: Mapped[Optional[str]] = mapped_column(String(32))
     activity_started: Mapped[bool] = mapped_column(

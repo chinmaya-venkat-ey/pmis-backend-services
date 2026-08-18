@@ -31,8 +31,14 @@ class DbActivityResolver:
     ) -> Optional[Dict[str, Any]]:
         if activity_id in self._cache:
             return self._cache[activity_id]
+        # ``deleted_at IS NULL`` — a soft-deleted activity is hidden by
+        # project-management (404) and must be invisible here too, else the
+        # contract keeps treating it as live and its SLA rows keep surfacing.
         row = self.db.execute(
-            select(Activity).where(Activity.id == activity_id)
+            select(Activity).where(
+                Activity.id == activity_id,
+                Activity.deleted_at.is_(None),
+            )
         ).scalars().first()
         data = None if row is None else {
             "id": row.id,

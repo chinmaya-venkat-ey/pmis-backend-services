@@ -22,6 +22,7 @@ from app.core.errors import ForbiddenError, ValidationError
 from app.core.response import api_response
 from app.dependencies import get_bearer_token, get_optional_current_user_id
 from app.db import get_db
+from app.models._cross_schema import Activity
 from app.models.sla_evaluation_result import SlaEvaluationResult
 from app.schemas.sla_compliance import ObservationRequest
 from app.schemas.sla_quarterly_aggregate import (
@@ -117,6 +118,27 @@ def on_activity_complete(
     user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
 ):
     summary = SlaComplianceService(db).on_activity_complete(activity_id)
+    return api_response(data=summary)
+
+
+@router.post(
+    "/sla-compliance/activities/{activity_id}/on-delete",
+    summary="Purge an activity's SLA footprint (called on delete)",
+    description=(
+        "Triggered by project-management when an activity is deleted. "
+        "Retires every mapping on the activity (so the daily cron stops "
+        "evaluating it) and deletes its evaluation results + quarterly "
+        "aggregates (so it stops surfacing in compliance / settlement). "
+        "SLA definitions and recorded observations are left intact. "
+        "Idempotent — safe to re-invoke."
+    ),
+)
+def on_activity_delete(
+    activity_id: str,
+    db: Annotated[Session, Depends(get_db)],
+    user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
+):
+    summary = SlaComplianceService(db).on_activity_delete(activity_id)
     return api_response(data=summary)
 
 
@@ -347,6 +369,15 @@ def sla_for_activity(
         .join(sub, (SlaEvaluationResult.mapping_id == sub.c.mapping_id)
               & (SlaEvaluationResult.evaluated_on == sub.c.d))
         .where(SlaEvaluationResult.activity_id == activity_id)
+        # A soft-deleted activity surfaces nothing (same guard as _latest_results)
+        .where(
+            ~select(Activity.id)
+            .where(
+                Activity.id == SlaEvaluationResult.activity_id,
+                Activity.deleted_at.is_not(None),
+            )
+            .exists()
+        )
     )
     rows = list(db.execute(stmt).scalars().all())
     summary = _summarise(rows)
@@ -460,6 +491,17 @@ def _latest_results(db: Session, *, project_ids: Optional[List[str]] = None) -> 
         if not project_ids:
             return []
         stmt = stmt.where(SlaEvaluationResult.project_id.in_(project_ids))
+    # Never surface a soft-deleted activity's evaluations. On-delete purge
+    # (on_activity_delete) removes them at source, but this anti-join is the
+    # safety net for orphans that outlive a missed/failed purge notification.
+    stmt = stmt.where(
+        ~select(Activity.id)
+        .where(
+            Activity.id == SlaEvaluationResult.activity_id,
+            Activity.deleted_at.is_not(None),
+        )
+        .exists()
+    )
     return list(db.execute(stmt).scalars().all())
 
 

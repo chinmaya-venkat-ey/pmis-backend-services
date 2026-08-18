@@ -38,6 +38,10 @@ class Activity(MirrorBase):
     end_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     actual_start_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     actual_end_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    # Soft-delete marker owned by project-management. Mirrored here so the
+    # resolver can HIDE deleted activities — without it the contract would keep
+    # resolving a soft-deleted activity as live and its SLA rows keep surfacing.
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
 
 class Project(MirrorBase):

@@ -139,6 +139,7 @@ class NpqpService:
                   JOIN project.activities a ON a.id = apr.activity_id
                  WHERE apr.project_id = :pid
                    AND apr.deleted_at IS NULL
+                   AND a.deleted_at IS NULL
                    AND (a.start_date AT TIME ZONE 'Asia/Kolkata')::date
                        BETWEEN :qstart AND :qend
                 """

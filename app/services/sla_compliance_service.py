@@ -1005,6 +1005,49 @@ class SlaComplianceService:
             "errors":          errors,
         }
 
+    # ================================================================= activity deletion
+    #
+    # Called by project-management when an activity is (soft-)deleted. The
+    # activity's SLA footprint lives in THIS service and does not cascade from
+    # project-management's delete, so it must be purged explicitly:
+    #   * retire every mapping on the activity → the daily cron (ACTIVE-only)
+    #     stops re-evaluating it;
+    #   * delete its evaluation results + quarterly aggregates → it stops
+    #     surfacing in compliance / settlement reads.
+    # SLA definitions and recorded observations are left intact. Idempotent.
+
+    def on_activity_delete(self, activity_id: str) -> Dict[str, Any]:
+        """Purge an activity's SLA footprint after it is deleted upstream."""
+        from sqlalchemy import delete as _delete, update as _update
+        from app.models.sla_activity_mapping import SlaActivityMapping
+        from app.models.sla_quarterly_aggregate import SlaQuarterlyAggregate
+
+        retired = self.db.execute(
+            _update(SlaActivityMapping)
+            .where(
+                SlaActivityMapping.activity_id == activity_id,
+                SlaActivityMapping.status != "RETIRED",
+            )
+            .values(status="RETIRED")
+        ).rowcount
+        evals = self.db.execute(
+            _delete(SlaEvaluationResult).where(
+                SlaEvaluationResult.activity_id == activity_id
+            )
+        ).rowcount
+        aggs = self.db.execute(
+            _delete(SlaQuarterlyAggregate).where(
+                SlaQuarterlyAggregate.activity_id == activity_id
+            )
+        ).rowcount
+        self.db.commit()
+        return {
+            "activityId":       activity_id,
+            "mappingsRetired":  int(retired or 0),
+            "evaluationsPurged": int(evals or 0),
+            "aggregatesPurged": int(aggs or 0),
+        }
+
     def _notify_manual_review(
         self, *, notifier, activity_id, activity_ctx, mapping, sla, project_id,
     ) -> List[str]:

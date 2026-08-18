@@ -80,36 +80,6 @@ class ContractManagementClient:
             return None
         return body.get("data") if isinstance(body, dict) else None
 
-    # ------------------------------------------------------------------ writes
-
-    def on_activity_delete(
-        self, activity_id: str, bearer_token: Optional[str] = None,
-    ) -> None:
-        """Best-effort: tell contract-management to purge the deleted
-        activity's SLA footprint (retire mappings, delete evaluations +
-        aggregates). Fire-and-forget — a failure here must never block the
-        delete; the contract read path also anti-joins soft-deleted activities
-        as a safety net."""
-        if not self._base_url or not bearer_token:
-            return
-        url = (f"{self._base_url}/api/v3/sla-compliance/activities/"
-               f"{activity_id}/on-delete")
-        try:
-            with httpx.Client(timeout=self._timeout) as client:
-                resp = client.post(
-                    url,
-                    headers={"Authorization": f"Bearer {bearer_token}",
-                             "Accept": "application/json"},
-                )
-            if resp.status_code >= 400:
-                logger.info(
-                    "contract-mgmt on-delete %s for activity %s — ignored",
-                    resp.status_code, activity_id,
-                )
-        except httpx.HTTPError as exc:
-            logger.warning("contract-mgmt unreachable for on-delete %s: %s",
-                           activity_id, exc)
-
     # ------------------------------------------------------------------ settlement
 
     def list_settlements(

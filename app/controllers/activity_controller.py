@@ -169,11 +169,8 @@ class ActivityController:
         )
         return self._to_response(row)
 
-    def delete(self, activity_id: str, *, caller_user_id: Optional[str],
-               bearer_token: Optional[str] = None):
-        row = self.service.delete(
-            activity_id, caller_user_id=caller_user_id, bearer_token=bearer_token,
-        )
+    def delete(self, activity_id: str, *, caller_user_id: Optional[str]):
+        row = self.service.delete(activity_id, caller_user_id=caller_user_id)
         return self._to_response(row)
 
     def restore(self, activity_id: str, *, caller_user_id: Optional[str]):

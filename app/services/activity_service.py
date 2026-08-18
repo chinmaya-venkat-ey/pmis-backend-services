@@ -631,10 +631,11 @@ class ActivityService:
                     },
                 )
 
-    def delete(
-        self, activity_id: str, *, caller_user_id: Optional[str],
-        bearer_token: Optional[str] = None,
-    ):
+    def delete(self, activity_id: str, *, caller_user_id: Optional[str]):
+        # Soft-delete only. Contract-mgmt hides the activity's SLA data via a
+        # deleted_at anti-join (restore-safe) — we deliberately do NOT purge the
+        # SLA footprint here: the activity can be restored, and its evaluations
+        # must come back with it.
         row = self.get_by_id(activity_id)
         self.repo.soft_delete(row)
         self.audit.write(
@@ -643,19 +644,6 @@ class ActivityService:
             action="delete", actor_user_id=caller_user_id,
         )
         self.db.commit()
-        # Best-effort: purge the activity's SLA footprint in contract-mgmt so a
-        # deleted activity stops surfacing in compliance/settlement. A cleanup
-        # failure must never block the delete — the contract read path also
-        # hides soft-deleted activities as a safety net.
-        try:
-            from app.clients.contract_management_client import (
-                ContractManagementClient,
-            )
-            ContractManagementClient().on_activity_delete(
-                activity_id, bearer_token=bearer_token,
-            )
-        except Exception:  # noqa: BLE001
-            pass
         return row
 
     def restore(self, activity_id: str, *, caller_user_id: Optional[str]):

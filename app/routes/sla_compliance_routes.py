@@ -121,27 +121,6 @@ def on_activity_complete(
     return api_response(data=summary)
 
 
-@router.post(
-    "/sla-compliance/activities/{activity_id}/on-delete",
-    summary="Purge an activity's SLA footprint (called on delete)",
-    description=(
-        "Triggered by project-management when an activity is deleted. "
-        "Retires every mapping on the activity (so the daily cron stops "
-        "evaluating it) and deletes its evaluation results + quarterly "
-        "aggregates (so it stops surfacing in compliance / settlement). "
-        "SLA definitions and recorded observations are left intact. "
-        "Idempotent — safe to re-invoke."
-    ),
-)
-def on_activity_delete(
-    activity_id: str,
-    db: Annotated[Session, Depends(get_db)],
-    user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
-):
-    summary = SlaComplianceService(db).on_activity_delete(activity_id)
-    return api_response(data=summary)
-
-
 @router.get(
     "/sla-compliance/projects/{project_id}/deliverable-lds",
     summary="Track A LDs for every activity on this project (bulk)",

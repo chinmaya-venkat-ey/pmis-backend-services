@@ -264,10 +264,14 @@ def start_activity(
 )
 def delete_activity(
     activity_id: str,
+    request: Request,
     controller: Annotated[ActivityController, Depends(get_activity_controller)],
     caller_user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
 ):
-    controller.delete(activity_id, caller_user_id=caller_user_id)
+    controller.delete(
+        activity_id, caller_user_id=caller_user_id,
+        bearer_token=_bearer_from_request(request),
+    )
 
 
 @router.post(

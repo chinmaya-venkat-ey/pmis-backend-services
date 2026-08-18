@@ -48,8 +48,10 @@ from app.utilities.catalogs import (
 )
 from app.utilities.date_rules import (
     _to_ist_calendar_midnight,
+    to_ist_calendar_date,
     validate_entity_dates,
 )
+from app.utilities.quarter_windows import quarter_window_of
 from app.utilities.multipart_form import (
     pre_validate_files,
     upload_files_via_client,
@@ -180,6 +182,11 @@ class ActivityService:
             entity_label="activity",
             parent_label="milestone",
         )
+        # Auto-tiling was reverted -> activities are created manually. Enforce
+        # that a manual activity on a resource-based milestone aligns to one of
+        # its quarter windows, rejecting with the closest quarter so the user can
+        # fix the dates (rather than silently skewing the F / SLA quarters).
+        self._assert_quarter_aligned(milestone, payload.start_date, payload.end_date)
         # Meeting-activity inline attachments (base64) — see schema
         # ``ActivityAttachmentInput``. Decoded, validated, and written to
         # storage HERE (before the row is inserted) so a rejected file
@@ -468,6 +475,11 @@ class ActivityService:
                 entity_label="activity",
                 parent_label="milestone",
             )
+            # Editing the planned window must keep it quarter-aligned too — else a
+            # user could create aligned then edit into a skew. Only fires when the
+            # PLANNED dates change (actual-date-only edits are unaffected).
+            if "start_date" in updates or "end_date" in updates:
+                self._assert_quarter_aligned(milestone, new_start, new_end)
             self._assert_dep_dates_reverse(row, new_start, new_end)
 
         if request is not None and touched:
@@ -533,6 +545,51 @@ class ActivityService:
         self.db.commit()
         return row
 
+    def _assert_quarter_aligned(self, milestone, start_date, end_date) -> None:
+        """Activities under a resource-based milestone must line up with one of
+        its anchored quarter windows (one activity = one quarter). A misaligned
+        create/edit is REJECTED with the CLOSEST quarter — the window that
+        contains the activity's start date — so the user fixes the dates instead
+        of silently misaligning the F / SLA quarters (the 'Test SLA 008'
+        incident). Uses the same ``quarter_window_of`` as
+        ``MilestoneService.realign_resource_activities``, so the suggested dates
+        are exactly what realign would snap to. No-op for non-resource-based
+        milestones or when any bounding date is missing."""
+        if (
+            milestone is None
+            or getattr(milestone, "is_meeting", False)
+            or not getattr(milestone, "is_resource_based", False)
+        ):
+            return
+        if not (milestone.start_date and milestone.end_date and start_date and end_date):
+            return
+        window = quarter_window_of(start_date, milestone.start_date, milestone.end_date)
+        if window is None:
+            return
+        ws, we = window
+        a_start = to_ist_calendar_date(start_date)
+        a_end = to_ist_calendar_date(end_date)
+        if a_start == ws and a_end == we:
+            return
+        raise ValidationError(
+            f"Activity dates must align to a quarter of the resource-based "
+            f"milestone '{milestone.name}'. The closest quarter to the start "
+            f"date {a_start.isoformat()} is {ws.isoformat()} to {we.isoformat()} "
+            f"— set the activity's start and end to this quarter.",
+            details={
+                "code": "activity_not_quarter_aligned",
+                "milestone_id": milestone.id,
+                "given": {
+                    "start_date": a_start.isoformat() if a_start else None,
+                    "end_date": a_end.isoformat() if a_end else None,
+                },
+                "suggested_quarter": {
+                    "start_date": ws.isoformat(),
+                    "end_date": we.isoformat(),
+                },
+            },
+        )
+
     def _assert_resource_based(self, milestone) -> None:
         """Planned resources are only allowed on activities under a
         resource-based milestone."""
@@ -574,7 +631,10 @@ class ActivityService:
                     },
                 )
 
-    def delete(self, activity_id: str, *, caller_user_id: Optional[str]):
+    def delete(
+        self, activity_id: str, *, caller_user_id: Optional[str],
+        bearer_token: Optional[str] = None,
+    ):
         row = self.get_by_id(activity_id)
         self.repo.soft_delete(row)
         self.audit.write(
@@ -583,6 +643,19 @@ class ActivityService:
             action="delete", actor_user_id=caller_user_id,
         )
         self.db.commit()
+        # Best-effort: purge the activity's SLA footprint in contract-mgmt so a
+        # deleted activity stops surfacing in compliance/settlement. A cleanup
+        # failure must never block the delete — the contract read path also
+        # hides soft-deleted activities as a safety net.
+        try:
+            from app.clients.contract_management_client import (
+                ContractManagementClient,
+            )
+            ContractManagementClient().on_activity_delete(
+                activity_id, bearer_token=bearer_token,
+            )
+        except Exception:  # noqa: BLE001
+            pass
         return row
 
     def restore(self, activity_id: str, *, caller_user_id: Optional[str]):

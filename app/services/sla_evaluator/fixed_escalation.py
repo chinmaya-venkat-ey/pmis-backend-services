@@ -20,12 +20,13 @@ Two modes, dispatched on ``ctx.sla.ld_formula_rule``:
     is <= observed_value, surface that tier's ``lookup_value`` as
     ``rate_percent`` and let downstream compute the amount.
 
-Cap: the computed LD % is clamped at the contract's
-``quarterly_ld_cap_pct`` (from contract_ld_rules) so a very late
-deliverable can't produce > that cap on its own. This is a safety belt
-— the settlement layer also caps at the same value at the quarter level
-per RFP §5.27.6. Missing config → no cap applied (the raw computed % is
-surfaced; the settlement layer will block on the same missing rule).
+Cap: the contract's ``quarterly_ld_cap_pct`` (from contract_ld_rules) is
+applied to the QUARTERLY track (``PER_UNIT_TIME_QUARTERLY``, §5.28.1) ONLY,
+so a single day-count can't push a quarter's LD past that ceiling. The
+DELIVERABLE track (``PER_UNIT_TIME_DELIVERABLE``, §5.28.2) is UNCAPPED — its
+LD is rate × weeks-late in full (the RFP prescribes no quarterly cap on
+deliverable LDs). Missing config → raw % surfaced (settlement blocks on the
+same missing rule).
 """
 from __future__ import annotations
 
@@ -143,10 +144,12 @@ class FixedEscalationEvaluator(FormulaEvaluator):
         observed_units: Decimal,
         rule: str,
     ) -> EvaluatedResult:
-        """LD % = rate × observed_units, clamped at the quarterly cap.
+        """LD % = rate × observed_units.
 
-        - PER_UNIT_TIME_DELIVERABLE: rule_key = sla_<n>_rate_pct_per_week
-        - PER_UNIT_TIME_QUARTERLY:   rule_key = sla_<n>_rate_pct_per_day
+        The quarterly cap (§5.28.1) applies to the QUARTERLY track (Track B)
+        only; the DELIVERABLE track (Track A, §5.28.2) is UNCAPPED.
+        - PER_UNIT_TIME_DELIVERABLE: rule_key = sla_<n>_rate_pct_per_week (Track A, uncapped)
+        - PER_UNIT_TIME_QUARTERLY:   rule_key = sla_<n>_rate_pct_per_day  (Track B, 10% cap)
         """
         family = _sla_family_number(getattr(ctx.sla, "sla_ref", None))
         if family is None:
@@ -171,13 +174,18 @@ class FixedEscalationEvaluator(FormulaEvaluator):
         units = max(observed_units, Decimal("0"))
         raw_pct = rate * units
 
-        # Safety cap: per-SLA LD % capped by the contract's quarterly cap
-        # so no single deliverable/day count blows past the contract's
-        # ceiling. RFP §5.27.6 also caps at the quarter total downstream
-        # — this is belt-and-braces. Missing config → surface the raw %
-        # (settlement layer will block on the same missing rule).
+        # Quarterly cap (§5.28.1) applies to the QUARTERLY track (Track B) ONLY:
+        # no single day-count can push a quarter's LD past the contract's 10%
+        # ceiling. The DELIVERABLE track (Track A, §5.28.2) has NO such cap — its
+        # LD is rate × weeks-late, uncapped. Missing config → surface the raw %
+        # (settlement layer blocks on the same missing rule).
         cap_pct = ctx.contract_ld_rules.get("quarterly_ld_cap_pct")
-        ld_pct = min(raw_pct, cap_pct) if cap_pct is not None else raw_pct
+        apply_cap = (
+            rule == "PER_UNIT_TIME_QUARTERLY"
+            and cap_pct is not None
+            and raw_pct > cap_pct
+        )
+        ld_pct = cap_pct if apply_cap else raw_pct
 
         result.breaches.append(
             BreachDetail(
@@ -187,7 +195,7 @@ class FixedEscalationEvaluator(FormulaEvaluator):
                 rate_percent=ld_pct,
                 note=(
                     f"LD% = {rate} × {units} = {raw_pct}"
-                    + (f" -> capped at {cap_pct}%" if raw_pct > cap_pct else "")
+                    + (f" -> capped at {cap_pct}%" if apply_cap else "")
                 ),
             )
         )

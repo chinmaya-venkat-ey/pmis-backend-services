@@ -35,6 +35,6 @@ def test_settled_rows_kept_unless_refresh():
 
 
 def test_frozen_rows_never_recompute():
-    for st in ("overridden", "invoiced"):
+    for st in ("overridden", "finalized", "invoiced"):
         assert _ran(st, refresh=False) is False
         assert _ran(st, refresh=True) is False     # frozen even under refresh

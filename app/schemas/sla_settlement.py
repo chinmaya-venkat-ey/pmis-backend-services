@@ -5,7 +5,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field, field_validator
 
 
 class SettlementItem(BaseModel):
@@ -38,6 +38,24 @@ class SettlementItem(BaseModel):
     created_at: datetime = Field(serialization_alias="createdAt")
     updated_at: datetime = Field(serialization_alias="updatedAt")
 
+    @computed_field(alias="manuallyOverridden")
+    @property
+    def manually_overridden(self) -> bool:
+        """True when the LD was manually overridden. Derived from a non-blank
+        override_reason (so it survives a subsequent finalize and is cleared by
+        a revert), EXCLUDING invoiced rows — mark_invoiced reuses override_reason
+        as a billing note, which is not a manual LD override."""
+        return (
+            self.status != "invoiced"
+            and bool(self.override_reason and self.override_reason.strip())
+        )
+
+    @computed_field
+    @property
+    def finalized(self) -> bool:
+        """True once the settlement is finalized (locked to further overrides)."""
+        return self.status == "finalized"
+
     model_config = {"from_attributes": True, "populate_by_name": True}
 
 
@@ -59,7 +77,14 @@ class SettlementOverrideRequest(BaseModel):
     override_reason: str = Field(
         min_length=1,
         alias="overrideReason",
-        description="Free text — audit trail. Required.",
+        description="Free text — audit trail. Required (non-blank).",
     )
+
+    @field_validator("override_reason")
+    @classmethod
+    def _reason_not_blank(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("overrideReason is required (must be non-empty).")
+        return v.strip()
 
     model_config = {"populate_by_name": True}

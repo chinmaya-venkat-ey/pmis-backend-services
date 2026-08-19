@@ -84,6 +84,8 @@ _SETTLEMENT_ROW_EXAMPLE = {
     "paAmount": "1215801.65",
     "aqpAmount": "1094221.49",
     "status": "auto_closed",
+    "manuallyOverridden": False,
+    "finalized": False,
     "closedAt": "2026-07-20T08:26:35.442Z",
     "closedBy": "dd9a8a1c-ddb8-4d6f-9259-fb4871b9575b",
     "overrideReason": None,
@@ -207,9 +209,10 @@ def get_settlement(
 
 
 # Statuses that are a deliberate, final commitment — never silently recomputed.
-# 'overridden' is a finance decision (a manual sum_ld); 'invoiced' is billed and
-# immutable. Everything else is a DERIVED value that must be free to refresh.
-_FROZEN_SETTLEMENT_STATUSES = ("overridden", "invoiced")
+# 'overridden' is a finance decision (a manual sum_ld); 'finalized' is a
+# pre-billing lock (no more overrides); 'invoiced' is billed and immutable.
+# Everything else is a DERIVED value that must be free to refresh.
+_FROZEN_SETTLEMENT_STATUSES = ("overridden", "finalized", "invoiced")
 
 
 def _recompute_or_existing(svc, project_id, qk, existing, *, refresh, bearer_token):
@@ -384,6 +387,56 @@ def override_settlement(
         project_id, qk,
         new_sum_ld_percent=payload.sum_ld_percent,
         override_reason=payload.override_reason,
+        closed_by=user_id or "",
+    )
+    return api_response(data=SettlementItem.model_validate(row).model_dump(by_alias=True))
+
+
+@router.post(
+    "/sla-compliance/projects/{project_id}/settlement/{quarter}/finalize",
+    summary="Finalize the settlement/LD — lock against further overrides (pre-billing)",
+    description=(
+        "Finance sign-off that LOCKS the settlement's LD before invoicing: once "
+        "status='finalized' the override endpoint refuses changes and a refresh "
+        "no longer recomputes the row. Distinct from mark-invoiced (Phase-E "
+        "billing). Idempotent; 404 if no row, 422 if already invoiced or the row "
+        "hasn't computed yet (blocked_*)."
+    ),
+)
+def finalize_settlement(
+    project_id: str,
+    quarter: str,
+    db: Annotated[Session, Depends(get_db)],
+    user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
+):
+    qk = _resolve_quarter(quarter, db, project_id)
+    svc = QuarterlySettlementService(db)
+    row = svc.finalize(project_id, qk, finalized_by=user_id or "")
+    return api_response(data=SettlementItem.model_validate(row).model_dump(by_alias=True))
+
+
+@router.post(
+    "/sla-compliance/projects/{project_id}/settlement/{quarter}/clear-override",
+    summary="Revert a manual override — recompute from current data",
+    description=(
+        "Drops a manual override and recomputes the settlement from the current "
+        "F / PA / SLA-LD data, returning the row to status='auto_closed'. Use to "
+        "replace a stale override (e.g. a test value) with the live computation. "
+        "404 if no row; 422 if the row is locked (invoiced / finalized)."
+    ),
+)
+def clear_settlement_override(
+    project_id: str,
+    quarter: str,
+    db: Annotated[Session, Depends(get_db)],
+    user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
+    authorization: Annotated[Optional[str], Header()] = None,
+):
+    qk = _resolve_quarter(quarter, db, project_id)
+    svc = QuarterlySettlementService(db)
+    row = svc.clear_override(
+        project_id, qk,
+        bearer_token=_bearer_from_header(authorization),
         closed_by=user_id or "",
     )
     return api_response(data=SettlementItem.model_validate(row).model_dump(by_alias=True))

@@ -122,8 +122,9 @@ class QuarterlySettlementService:
         ``override`` below.
         """
         existing = self.repo.get(project_id=project_id, qk=qk)
-        if existing is not None and existing.status == "invoiced":
-            # Immutable. Caller must issue a credit note instead.
+        if existing is not None and existing.status in ("invoiced", "finalized"):
+            # Locked. `invoiced` needs a credit note; `finalized` needs an
+            # explicit clear-override/unfinalize before it can recompute.
             return existing
 
         # 1. Refresh Phase B aggregates for this project × quarter before
@@ -356,10 +357,21 @@ class QuarterlySettlementService:
                 "run auto-close first.",
                 code="settlement_not_found",
             )
+        if not override_reason or not override_reason.strip():
+            raise ValidationError(
+                "An override reason is required.",
+                code="override_reason_required",
+            )
         if existing.status == "invoiced":
             raise ValidationError(
                 "Cannot override an invoiced settlement — issue a credit note.",
                 code="settlement_immutable",
+            )
+        if existing.status == "finalized":
+            raise ValidationError(
+                "Cannot override a finalized settlement — clear the finalize "
+                "first (a finalized LD is locked to changes).",
+                code="settlement_finalized",
             )
 
         # Cap is data-driven — read from the existing row's contract_type
@@ -400,7 +412,87 @@ class QuarterlySettlementService:
             aqp_amount=aqp,
             status="overridden",
             closed_by=closed_by,
-            override_reason=override_reason,
+            override_reason=override_reason.strip(),
+            source_aggregate_ids=existing.source_aggregate_ids,
+            consequence_flags=existing.consequence_flags or {},
+        )
+
+    def clear_override(
+        self,
+        project_id: str,
+        qk: QuarterKey,
+        *,
+        bearer_token: Optional[str] = None,
+        closed_by: Optional[str] = None,
+    ) -> SlaSettlementPeriod:
+        """Revert a manual override — recompute the settlement from current data
+        and drop the override_reason, returning the row to ``auto_closed``. Used
+        by the "clear override" action so a stale override (e.g. a test value)
+        can be replaced by the live computation. Locked rows can't be reverted."""
+        existing = self.repo.get(project_id=project_id, qk=qk)
+        if existing is None:
+            raise NotFoundError(
+                f"No settlement row for {project_id} {qk.label()} — nothing to clear.",
+                code="settlement_not_found",
+            )
+        if existing.status in ("invoiced", "finalized"):
+            raise ValidationError(
+                f"Cannot clear the override on a {existing.status} settlement — "
+                "it is locked.",
+                code="settlement_locked",
+            )
+        # Recompute from scratch; close() drops override_reason on (re)compute.
+        return self.close(
+            project_id, qk, mode="auto", closed_by=closed_by, bearer_token=bearer_token,
+        )
+
+    def finalize(
+        self,
+        project_id: str,
+        qk: QuarterKey,
+        *,
+        finalized_by: str,
+    ) -> SlaSettlementPeriod:
+        """Lock the settlement/LD against further overrides WITHOUT billing it
+        (pre-invoice finance sign-off). Distinct from ``invoiced`` (Phase E).
+        Idempotent; refuses a not-yet-computed (blocked_*) or already-invoiced
+        row. Once ``finalized`` the override endpoint refuses changes and a
+        refresh will not recompute the row (see ``_FROZEN_SETTLEMENT_STATUSES``)."""
+        existing = self.repo.get(project_id=project_id, qk=qk)
+        if existing is None:
+            raise NotFoundError(
+                f"No settlement row for {project_id} {qk.label()} — "
+                "run auto-close first.",
+                code="settlement_not_found",
+            )
+        if existing.status == "finalized":
+            return existing   # idempotent
+        if existing.status == "invoiced":
+            raise ValidationError(
+                "Settlement is already invoiced (locked) — cannot finalize.",
+                code="settlement_immutable",
+            )
+        if (existing.status or "").startswith("blocked_"):
+            raise ValidationError(
+                "Cannot finalize a settlement that hasn't computed yet "
+                f"(status={existing.status!r}) — resolve the block first.",
+                code="settlement_not_computed",
+            )
+        return self.repo.upsert(
+            project_id=project_id,
+            contract_type=existing.contract_type,
+            qk=qk,
+            sum_ld_percent=existing.sum_ld_percent,
+            capped_ld_percent=existing.capped_ld_percent,
+            f_amount=existing.f_amount,
+            qgr_amount=existing.qgr_amount,
+            npqp=existing.npqp,
+            ld_amount=existing.ld_amount,
+            pa_amount=existing.pa_amount,
+            aqp_amount=existing.aqp_amount,
+            status="finalized",
+            closed_by=finalized_by,
+            override_reason=existing.override_reason,   # preserve any override audit
             source_aggregate_ids=existing.source_aggregate_ids,
             consequence_flags=existing.consequence_flags or {},
         )

@@ -116,8 +116,14 @@ def on_activity_complete(
     activity_id: str,
     db: Annotated[Session, Depends(get_db)],
     user_id: Annotated[Optional[str], Depends(get_optional_current_user_id)],
+    bearer: Annotated[Optional[str], Depends(get_bearer_token)] = None,
 ):
-    summary = SlaComplianceService(db).on_activity_complete(activity_id)
+    # Forward the completing user's JWT so leave-backed auto-providers
+    # (e.g. SLA-007) can source their observation; without it they stay
+    # inert and the flow falls back to the manual-observation email.
+    summary = SlaComplianceService(db).on_activity_complete(
+        activity_id, bearer_token=bearer,
+    )
     return api_response(data=summary)
 
 

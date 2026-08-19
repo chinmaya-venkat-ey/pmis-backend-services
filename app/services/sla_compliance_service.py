@@ -907,10 +907,14 @@ class SlaComplianceService:
         activity_id: str,
         *,
         on_date: Optional[_date] = None,
+        bearer_token: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Run SLA evaluation for every active mapping on this activity.
 
         Auto-evaluates date-derivable SLAs, emails owners for the rest.
+        ``bearer_token`` (the completing user's JWT) is forwarded to
+        feed-backed auto-providers so they can source their observation;
+        when absent they stay inert and fall back to the manual email.
         Returns a per-mapping summary the caller can log / display.
         """
         on_date = on_date or datetime.now(timezone.utc).date()
@@ -950,7 +954,9 @@ class SlaComplianceService:
                 })
                 continue
             try:
-                status = self.evaluate_and_persist(mapping.id, on_date)
+                status = self.evaluate_and_persist(
+                    mapping.id, on_date, bearer_token=bearer_token,
+                )
             except Exception as exc:  # noqa: BLE001
                 errors.append({
                     "mapping_id": mapping.id, "sla_ref": sla.sla_ref,

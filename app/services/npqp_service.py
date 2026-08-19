@@ -12,10 +12,15 @@ F   = "Planned Quarterly Payment applicable (aggregate of monthly payment
       ``planned_deployment_date`` falls in the (resource-phase-anchored) quarter.
 
 PA  = "Payable amount for Actual resource deployment" (§5.28.1.d.g).
-      Sourced from leave-mgmt via GET /api/attendance/cost/monthly. That
-      endpoint already folds paid-leave, half-day, and RFP §5.24.1
-      relaxation into the ``cost`` field, so we just sum. PA ≤ F when
-      actual attendance falls short of planned.
+      F prorated by ACTUAL attendance, per activity, from leave-mgmt's activity
+      availability feed (GET /api/attendance/report/availability/activity). Each
+      activity's completeness fraction is the BINDING (worst) of the measures the
+      project's SLA007 configures — HOURS (Σ working-hours ÷ (planned-resource-
+      months × hours-target)) AND/OR BUSINESS-DAYS (Σ days ÷ (planned-resource-
+      months × days-target)); the per-resource-month targets are SLA007's own
+      ``target_numeric`` values (RFP §5.28.3.e = 144 h / 16 d). PA = Σ (F_activity
+      × fraction) ≤ F. Hard-sourced: when an in-quarter activity's attendance
+      can't be read, the settlement BLOCKS rather than mis-paying.
 
 QGR = per-project × phase amount from project.project_qgr_config.
       Cross-schema read (same DB, PMIS-project-management owns the writes).
@@ -35,7 +40,7 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -48,18 +53,33 @@ from app.utilities.quarter import QuarterKey
 
 logger = get_logger(__name__)
 
+# RFP §5.28.3.e resource-availability minimums — the per-resource-month full-time
+# basis PA prorates against. Sourced from the project's SLA007 metric targets
+# (``resource_logged_hours`` / ``resource_business_days``); these RFP defaults are
+# used ONLY when a project defines NEITHER target.
+_DEFAULT_HOURS_TARGET = Decimal("144")
+_DEFAULT_DAYS_TARGET = Decimal("16")
 
-def _months_of_quarter(qk: QuarterKey) -> List[Tuple[int, int]]:
-    """Return the three (year, month) pairs that comprise the quarter."""
-    start = qk.quarter_start
-    out: List[Tuple[int, int]] = []
-    y, m = start.year, start.month
-    for _ in range(3):
-        out.append((y, m))
-        m += 1
-        if m > 12:
-            m = 1; y += 1
-    return out
+_HRS_METRIC = "resource_logged_hours"
+_BD_METRIC = "resource_business_days"
+
+
+def _num(v: Any) -> Optional[Decimal]:
+    if v is None:
+        return None
+    try:
+        return Decimal(str(v))
+    except (ArithmeticError, ValueError):
+        return None
+
+
+def _parse_date(v: Any) -> Optional[date]:
+    if not v:
+        return None
+    try:
+        return date.fromisoformat(str(v)[:10])
+    except ValueError:
+        return None
 
 
 class NpqpService:
@@ -111,7 +131,7 @@ class NpqpService:
 
     def _compute_planned_f(
         self, project_id: str, qk: QuarterKey,
-    ) -> Tuple[Decimal, List[NpqpResourceCost]]:
+    ) -> Tuple[Decimal, List[NpqpResourceCost], Dict[str, Dict[str, Decimal]]]:
         """(F_total, per-allocation planned rows) for the quarter, read from the
         project's resource deployment plan (``project.activity_planned_resources``).
 
@@ -129,7 +149,8 @@ class NpqpService:
         rows = self.db.execute(
             text(
                 """
-                SELECT apr.designation,
+                SELECT apr.activity_id,
+                       apr.designation,
                        apr.quantity,
                        apr.monthly_rate,
                        apr.duration,
@@ -149,6 +170,9 @@ class NpqpService:
 
         f_total = Decimal("0")
         per_alloc: List[NpqpResourceCost] = []
+        # Per-activity aggregates for PA: F_activity and planned resource-months
+        # (Σ quantity × duration) — the denominator PA prorates attendance against.
+        by_activity: Dict[str, Dict[str, Decimal]] = {}
         for r in rows:
             if r.computed_cost is not None:
                 cost = Decimal(str(r.computed_cost))
@@ -156,7 +180,13 @@ class NpqpService:
                 # Snapshot missing → recompute from the row (matches finance's formula).
                 rate = Decimal(str(r.monthly_rate or 0))
                 cost = rate * Decimal(str(r.quantity or 0)) * Decimal(str(r.duration or 0))
+            months = Decimal(str(r.quantity or 0)) * Decimal(str(r.duration or 0))
             f_total += cost
+            agg = by_activity.setdefault(
+                r.activity_id, {"f": Decimal("0"), "months": Decimal("0")},
+            )
+            agg["f"] += cost
+            agg["months"] += months
             d = r.planned_deployment_date
             per_alloc.append(NpqpResourceCost(
                 # A planned allocation is by DESIGNATION, not a named resource.
@@ -168,42 +198,76 @@ class NpqpService:
                 ),
                 cost=cost,
             ))
-        return f_total, per_alloc
+        return f_total, per_alloc, by_activity
 
     # ------------------------------------------------------------------ PA (actual)
 
-    def _fetch_month_cost(
+    def _resolve_availability_targets(
+        self, project_id: str,
+    ) -> Tuple[Optional[Decimal], Optional[Decimal]]:
+        """The per-resource-month full-time targets PA prorates attendance
+        against — SLA007's own ``target_numeric`` for hours and/or business-days,
+        read from the resource-availability SLA mapped to this project's
+        activities. Either may be ``None`` (a project can configure just one, and
+        PA then prorates on that single measure). Falls back to the RFP §5.28.3.e
+        defaults (144 h / 16 d) only when the project defines NEITHER target."""
+        rows = self.db.execute(
+            text(
+                """
+                SELECT m.metric_key, MAX(m.target_numeric) AS target
+                  FROM contract.sla_metrics m
+                  JOIN contract.sla_activity_mappings sam ON sam.sla_id = m.sla_id
+                  JOIN project.activities a ON a.id = sam.activity_id
+                 WHERE a.project_id = :pid
+                   AND sam.status = 'ACTIVE'
+                   AND m.metric_key IN (:hrs, :bd)
+                   AND m.target_numeric IS NOT NULL
+                 GROUP BY m.metric_key
+                """
+            ),
+            {"pid": project_id, "hrs": _HRS_METRIC, "bd": _BD_METRIC},
+        ).all()
+        by_key = {r.metric_key: _num(r.target) for r in rows}
+        hours_t = by_key.get(_HRS_METRIC)
+        days_t = by_key.get(_BD_METRIC)
+        if hours_t is None and days_t is None:
+            logger.info(
+                "NpqpService: project %s has no SLA007 availability target — PA "
+                "falling back to RFP defaults (144 h / 16 d).", project_id,
+            )
+            return _DEFAULT_HOURS_TARGET, _DEFAULT_DAYS_TARGET
+        return hours_t, days_t
+
+    def _activity_delivered(
         self,
         project_id: str,
-        year: int,
-        month: int,
-        bearer_token: Optional[str] = None,
-    ) -> Tuple[Optional[Decimal], List[NpqpResourceCost]]:
-        """One month → (F_month, per-resource rows). None means leave-mgmt
-        returned nothing / errored — caller must not proceed with a partial F."""
-        rows = self.leave_client.get_monthly_cost(
-            project_id, year, month, bearer_token=bearer_token,
+        activity_id: str,
+        qk: QuarterKey,
+        bearer_token: Optional[str],
+    ) -> Optional[Tuple[Decimal, Decimal]]:
+        """(Σ working-hours, Σ business-days) actually attended for the activity
+        in this quarter — summed across every resource — from the availability
+        feed. ``None`` means the attendance could NOT be read (feed unreachable /
+        no base-url or bearer / activity unknown → 404 / nothing uploaded for the
+        quarter); the caller BLOCKS rather than treating missing data as zero."""
+        report = self.leave_client.get_activity_availability(
+            project_id, activity_id, bearer_token=bearer_token,
         )
-        if rows is None:
-            return None, []
-        f_month = Decimal("0")
-        per_month: List[NpqpResourceCost] = []
-        for r in rows:
-            try:
-                cost = Decimal(str(r.get("cost") or 0))
-            except (ValueError, ArithmeticError):
-                cost = Decimal("0")
-            f_month += cost
-            per_month.append(NpqpResourceCost(
-                resource_id=str(r.get("attendanceId") or r.get("resourceId") or ""),
-                employee_name=r.get("employeeName"),
-                year=year, month=month,
-                monthly_rate=(
-                    Decimal(str(r["monthlyRate"])) if r.get("monthlyRate") is not None else None
-                ),
-                cost=cost,
-            ))
-        return f_month, per_month
+        if not isinstance(report, dict):
+            return None
+        hours = Decimal("0")
+        days = Decimal("0")
+        seen = False
+        for m in report.get("months") or []:
+            fd = _parse_date(m.get("fromDate"))
+            if fd is not None and not (qk.quarter_start <= fd <= qk.quarter_end):
+                continue  # activity-start-aligned cycle outside this quarter
+            seen = True
+            hours += _num(m.get("totalWorkingHours")) or Decimal("0")
+            days += _num(m.get("totalBusinessDays")) or Decimal("0")
+        if not seen:
+            return None  # activity known but nothing uploaded for the quarter
+        return hours, days
 
     # ------------------------------------------------------------------ public
 
@@ -216,71 +280,64 @@ class NpqpService:
     ) -> NpqpResponse:
         # 1. F (planned) — from resource deployment plan. Independent of
         #    leave-mgmt availability; needs only cross-schema DB access.
-        f_total, planned_rows = self._compute_planned_f(project_id, qk)
+        f_total, planned_rows, by_activity = self._compute_planned_f(project_id, qk)
 
-        # 2. PA (actual) = the planned F prorated by the project's ATTENDANCE
-        #    RATIO from leave-mgmt (Σ attendance-folded cost ÷ Σ planned rate over
-        #    the leave-tracked resources). F comes from the activity PLAN and the
-        #    leave roster is a DIFFERENT resource set (no designation→person link),
-        #    so leave is used only as an attendance FACTOR against the plan — never
-        #    as an absolute cost. Summing the leave roster directly (the old
-        #    behaviour) made PA follow the often-stale/larger leave roster and
-        #    exceed the planned/finance value; proration keeps PA ≤ F and reconciled
-        #    with finance while still reflecting actual attendance. When leave can't
-        #    answer, PA is unknown and the settlement blocks.
-        leave_actual = Decimal("0")   # Σ attendance-folded cost from leave
-        leave_planned = Decimal("0")  # Σ planned monthly rate from leave (ratio base)
-        actual_rows: List[NpqpResourceCost] = []
-        leave_ok = True
-        for (year, month) in _months_of_quarter(qk):
-            pa_month, rows = self._fetch_month_cost(
-                project_id, year, month, bearer_token=bearer_token,
-            )
-            if pa_month is None:
-                leave_ok = False
-                logger.warning(
-                    "NpqpService: leave-mgmt returned nothing for project=%s "
-                    "%d-%02d — PA for that month unknown.",
-                    project_id, year, month,
-                )
-                continue
-            leave_actual += pa_month
-            for r in rows:
-                if r.monthly_rate is not None:
-                    leave_planned += Decimal(str(r.monthly_rate))
-            actual_rows.extend(rows)
-
+        # 2. PA (actual) — HARD SWITCH to the per-activity attendance feed. Each
+        #    activity's F is prorated by the BINDING (worst) of the completeness
+        #    fractions the project's SLA007 configures: HOURS (Σ working-hours ÷
+        #    (planned-resource-months × hours-target)) and/or BUSINESS-DAYS. A
+        #    project logging long hours on few days (or many short days) is caught
+        #    by whichever fraction is lower. Attendance is activity-linked, so PA
+        #    is summed per activity and stays ≤ F. Missing attendance for an
+        #    in-quarter activity is NOT treated as zero — it BLOCKS the quarter
+        #    (future-month attendance can't be uploaded, so a settle-able quarter
+        #    must already carry its actuals).
+        hours_target, days_target = self._resolve_availability_targets(project_id)
         pa_total = Decimal("0")
-        attendance_ratio: Optional[Decimal] = None
-        if leave_ok:
-            if leave_planned > 0:
-                # actual ≤ planned → clamp the ratio to [0, 1].
-                attendance_ratio = min(
-                    Decimal("1"), max(Decimal("0"), leave_actual / leave_planned),
-                )
-            else:
-                # leave reachable but no rate data → assume full attendance.
-                attendance_ratio = Decimal("1")
-            pa_total = (f_total * attendance_ratio).quantize(Decimal("0.01"))
+        blocked: List[str] = []
+        for activity_id, agg in by_activity.items():
+            f_a = agg["f"]
+            months_a = agg["months"]
+            if f_a <= 0 or months_a <= 0:
+                continue  # nothing planned to pay → PA_a = 0, no attendance needed
+            delivered = self._activity_delivered(
+                project_id, activity_id, qk, bearer_token,
+            )
+            if delivered is None:
+                blocked.append(activity_id)
+                continue
+            hours, days = delivered
+            fracs: List[Decimal] = []
+            if hours_target and hours_target > 0:
+                fracs.append(hours / (months_a * hours_target))
+            if days_target and days_target > 0:
+                fracs.append(days / (months_a * days_target))
+            if not fracs:
+                blocked.append(activity_id)
+                continue
+            fraction = min([Decimal("1")] + fracs)  # AND: the binding measure, ≤ 1
+            pa_total += f_a * fraction
+        pa_total = pa_total.quantize(Decimal("0.01"))
 
         # 3. QGR — from project.project_qgr_config.
         qgr = self._qgr_for(project_id, qk.quarter_end)
 
-        # 4. Status precedence: no deployment plan is worse than no
-        #    leave-mgmt (we can't even compute F, so LD % has nothing
-        #    to multiply). No planned rows AND no leave data → the
-        #    project simply has no staffing this quarter.
-        if not planned_rows and not actual_rows:
+        # 4. Status precedence. Any in-quarter activity whose attendance can't be
+        #    read blocks the whole quarter — PA would otherwise be understated.
+        if not planned_rows:
             status = "no_resources"
-        elif not planned_rows:
-            status = "no_deployment_plan"
-        elif not leave_ok:
-            status = "leave_mgmt_unavailable"
+        elif blocked:
+            status = "attendance_unavailable"
+            logger.warning(
+                "NpqpService: PA blocked for project=%s %s — attendance "
+                "unavailable for activities: %s",
+                project_id, qk.label(), ", ".join(sorted(blocked)),
+            )
         else:
             status = "ok"
 
-        # ``per_month`` is the audit trail — the PLAN rows (F is now the PA base,
-        # PA = F × attendance_ratio), so the breakdown reconciles with F and PA.
+        # ``per_month`` is the audit trail — the PLAN rows (F is the PA base,
+        # PA = Σ F_activity × attendance-fraction), so it reconciles with F.
         per_month = planned_rows
 
         return NpqpResponse(

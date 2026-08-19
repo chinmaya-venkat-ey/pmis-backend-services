@@ -148,23 +148,35 @@ class LeaveManagementClient:
     # like every method here, they soft-fail to ``None`` when the base URL or
     # bearer is missing, so the callers (SLA metric providers) stay inert.
 
-    def get_availability(
+    def get_activity_availability(
         self,
         project_id: str,
-        year: int,
-        month: int,
+        activity_id: str,
         bearer_token: Optional[str] = None,
-    ) -> Optional[List[Dict[str, Any]]]:
-        """SLA007 — per-resource business-days present AND hours logged for one
-        project-month. Expected (contract-align): a JSON array of
-        ``{resourceId, businessDaysPresent, hoursLogged}``. Derivable in
-        leave-mgmt from per-day attendance (status present + working_hours)."""
+    ) -> Optional[Dict[str, Any]]:
+        """SLA007 + PA — activity-scoped monthly availability, aggregated across
+        every resource on the activity.
+
+        ``GET /api/attendance/report/availability/activity?projectId=&activityId=``
+        → ``ActivityAvailabilityReport`` = ``{projectId, activityId, activityName,
+        activityStartDate, activityEndDate, monthCount, months: [{year, month,
+        period, fromDate, toDate, resourceCount, totalBusinessDays,
+        totalPresentDays, totalWorkingHours}, ...]}``. Each ``months`` entry is
+        one activity-start-aligned cycle (07-Jan→06-Feb, …) whose totals are
+        summed over all resources: ``totalBusinessDays`` = days attended
+        (present + half-day + WFH), ``totalPresentDays`` = weighted present
+        (present + ½·half-day), ``totalWorkingHours`` = hours logged. Only
+        cycles that have uploaded attendance appear.
+
+        Returns the parsed object, or ``None`` when the base URL / bearer is
+        missing, the activity is unknown to leave-mgmt (404), or the service is
+        unreachable — callers then fall back (SLA007 → manual; PA → blocked)."""
         body = self._get(
-            "/api/attendance/availability",
-            {"projectId": project_id, "year": year, "month": month},
+            "/api/attendance/report/availability/activity",
+            {"projectId": project_id, "activityId": activity_id},
             bearer_token=bearer_token,
         )
-        return body if isinstance(body, list) else None
+        return body if isinstance(body, dict) else None
 
     def get_replacements(
         self,

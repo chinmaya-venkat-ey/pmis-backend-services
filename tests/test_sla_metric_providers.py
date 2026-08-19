@@ -24,24 +24,48 @@ def _qk() -> QuarterKey:
                       anchored=True)
 
 
-def _ctx(project_id="p1", bearer="jwt", quarter=None) -> ProviderContext:
-    return ProviderContext(db=None, mapping=None, sla=None, activity={},
+class _Mapping:
+    """Minimal stand-in for SlaActivityMapping — the provider only reads
+    ``activity_id`` off it."""
+    def __init__(self, activity_id="a1"):
+        self.activity_id = activity_id
+
+
+_UNSET = object()
+
+
+def _ctx(project_id="p1", bearer="jwt", quarter=None, mapping=_UNSET) -> ProviderContext:
+    return ProviderContext(db=None,
+                           mapping=_Mapping() if mapping is _UNSET else mapping,
+                           sla=None, activity={},
                            project_id=project_id, quarter=quarter or _qk(),
                            bearer_token=bearer)
 
 
+def _cycle(fromDate, resourceCount, totalBusinessDays, totalWorkingHours,
+           totalPresentDays=None):
+    """One MonthlyAvailability entry (only the fields the provider reads)."""
+    return {"fromDate": fromDate, "resourceCount": resourceCount,
+            "totalBusinessDays": totalBusinessDays,
+            "totalPresentDays": totalPresentDays if totalPresentDays is not None
+            else totalBusinessDays,
+            "totalWorkingHours": totalWorkingHours}
+
+
+def _report(*cycles):
+    return {"projectId": "p1", "activityId": "a1", "months": list(cycles)}
+
+
 class _FakeLeaveClient:
     """Stand-in for LeaveManagementClient with canned responses."""
-    def __init__(self, availability=None, replacements=None):
-        self._availability = availability          # {(year,month): rows} or None
+    def __init__(self, report=None, replacements=None):
+        self._report = report                      # ActivityAvailabilityReport or None
         self._replacements = replacements
         self.availability_calls = []
 
-    def get_availability(self, project_id, year, month, bearer_token=None):
-        self.availability_calls.append((project_id, year, month, bearer_token))
-        if self._availability is None:
-            return None
-        return self._availability.get((year, month), [])
+    def get_activity_availability(self, project_id, activity_id, bearer_token=None):
+        self.availability_calls.append((project_id, activity_id, bearer_token))
+        return self._report
 
     def get_replacements(self, project_id, from_date, to_date, bearer_token=None):
         return self._replacements
@@ -85,47 +109,63 @@ def test_registry_requires_all_metrics_present():
 
 # ---- availability provider (SLA007) --------------------------------------
 
-def test_availability_worst_resource_month():
-    avail = {
-        (2026, 2): [{"resourceId": "r1", "businessDaysPresent": 21, "hoursLogged": 176},
-                    {"resourceId": "r2", "businessDaysPresent": 20, "hoursLogged": 168}],
-        (2026, 3): [{"resourceId": "r1", "businessDaysPresent": 14, "hoursLogged": 120},  # worst BD
-                    {"resourceId": "r2", "businessDaysPresent": 22, "hoursLogged": 180}],
-        (2026, 4): [{"resourceId": "r1", "businessDaysPresent": 19, "hoursLogged": 150}],
-        (2026, 5): [{"resourceId": "r1", "businessDaysPresent": 18, "hoursLogged": 144}],
-    }
-    p = LeaveAvailabilityProvider(client=_FakeLeaveClient(availability=avail))
+def test_availability_team_average_worst_cycle():
+    # quarter window 2026-02-10..2026-05-09; team average = cycle total ÷ resourceCount.
+    report = _report(
+        _cycle("2026-02-10", resourceCount=2, totalBusinessDays=42, totalWorkingHours=352),  # avg 21 / 176
+        _cycle("2026-03-10", resourceCount=2, totalBusinessDays=30, totalWorkingHours=260),  # avg 15 / 130 (worst)
+        _cycle("2026-04-10", resourceCount=1, totalBusinessDays=19, totalWorkingHours=150),  # avg 19 / 150
+    )
+    p = LeaveAvailabilityProvider(client=_FakeLeaveClient(report=report))
     val = p.provide(_ctx())
-    assert val == {"resource_business_days": Decimal("14"),
-                   "resource_logged_hours": Decimal("120")}
+    assert val == {"resource_business_days": Decimal("15"),
+                   "resource_logged_hours": Decimal("130")}
 
 
-def test_availability_all_meeting_target_returns_best_worst():
-    avail = {(2026, 2): [{"resourceId": "r1", "businessDaysPresent": 22, "hoursLogged": 180}],
-             (2026, 3): [{"resourceId": "r1", "businessDaysPresent": 21, "hoursLogged": 176}],
-             (2026, 4): [{"resourceId": "r1", "businessDaysPresent": 20, "hoursLogged": 170}],
-             (2026, 5): [{"resourceId": "r1", "businessDaysPresent": 23, "hoursLogged": 184}]}
-    p = LeaveAvailabilityProvider(client=_FakeLeaveClient(availability=avail))
+def test_availability_all_meeting_target_returns_worst_cycle():
+    report = _report(
+        _cycle("2026-02-10", resourceCount=1, totalBusinessDays=22, totalWorkingHours=180),  # 22 / 180
+        _cycle("2026-03-10", resourceCount=2, totalBusinessDays=40, totalWorkingHours=340),  # 20 / 170 (worst)
+        _cycle("2026-04-10", resourceCount=1, totalBusinessDays=21, totalWorkingHours=176),  # 21 / 176
+    )
+    p = LeaveAvailabilityProvider(client=_FakeLeaveClient(report=report))
     val = p.provide(_ctx())
     assert val == {"resource_business_days": Decimal("20"),
-                   "resource_logged_hours": Decimal("170")}  # worst month still >= target
+                   "resource_logged_hours": Decimal("170")}  # worst cycle still >= target
 
 
-def test_availability_inert_without_bearer_or_project():
-    p = LeaveAvailabilityProvider(client=_FakeLeaveClient(availability={}))
+def test_availability_ignores_cycles_outside_the_quarter():
+    # a wretched cycle before the quarter window must not drag the observation down.
+    report = _report(
+        _cycle("2025-12-10", resourceCount=1, totalBusinessDays=3, totalWorkingHours=20),   # out of window
+        _cycle("2026-03-10", resourceCount=2, totalBusinessDays=40, totalWorkingHours=340),  # 20 / 170
+    )
+    p = LeaveAvailabilityProvider(client=_FakeLeaveClient(report=report))
+    val = p.provide(_ctx())
+    assert val == {"resource_business_days": Decimal("20"),
+                   "resource_logged_hours": Decimal("170")}
+
+
+def test_availability_inert_without_bearer_project_or_activity():
+    good = _report(_cycle("2026-03-10", resourceCount=1, totalBusinessDays=20, totalWorkingHours=170))
+    p = LeaveAvailabilityProvider(client=_FakeLeaveClient(report=good))
     assert p.provide(_ctx(bearer=None)) is None
     assert p.provide(_ctx(project_id=None)) is None
+    assert p.provide(_ctx(mapping=None)) is None                 # no mapping → no activity id
+    assert p.provide(_ctx(mapping=_Mapping(activity_id=None))) is None
 
 
 def test_availability_inert_when_feed_unavailable():
-    # client returns None (endpoint unbuilt / base-url unset) → provider inert
-    p = LeaveAvailabilityProvider(client=_FakeLeaveClient(availability=None))
+    # client returns None (activity unknown / base-url unset / unreachable) → provider inert
+    p = LeaveAvailabilityProvider(client=_FakeLeaveClient(report=None))
     assert p.provide(_ctx()) is None
 
 
-def test_availability_none_when_no_rows():
-    p = LeaveAvailabilityProvider(client=_FakeLeaveClient(availability={(2026, 2): []}))
-    assert p.provide(_ctx()) is None
+def test_availability_none_when_no_cycles():
+    # empty months, and a resourceCount==0 cycle, both yield no real figure
+    assert LeaveAvailabilityProvider(client=_FakeLeaveClient(report=_report())).provide(_ctx()) is None
+    zero = _report(_cycle("2026-03-10", resourceCount=0, totalBusinessDays=0, totalWorkingHours=0))
+    assert LeaveAvailabilityProvider(client=_FakeLeaveClient(report=zero)).provide(_ctx()) is None
 
 
 # ---- replacement provider (SLA005) ---------------------------------------

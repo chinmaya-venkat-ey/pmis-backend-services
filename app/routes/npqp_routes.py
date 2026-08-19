@@ -51,7 +51,7 @@ _NPQP_EXAMPLE_BLOCKED = {
     "fiscalYear": 2026, "quarter": 3,
     "quarterStart": "2026-07-01", "quarterEnd": "2026-09-30",
     "fAmount": "0", "qgrAmount": "0", "npqp": "0",
-    "status": "leave_mgmt_unavailable",
+    "status": "attendance_unavailable",
     "perMonth": [],
 }
 
@@ -60,12 +60,13 @@ _NPQP_EXAMPLE_BLOCKED = {
     "/npqp/projects/{project_id}",
     summary="NPQP (F + QGR) for one project × one quarter",
     description=(
-        "Sums F from leave-mgmt's per-month cost endpoint (3 calls, one "
-        "per month of the quarter) and adds the effective QGR from "
-        "project.project_qgr_config.\n\n"
-        "When leave-mgmt is unreachable, the response is 200 with "
-        "status='leave_mgmt_unavailable' (never 5xx) so the settlement "
-        "flow can log + block cleanly.\n\n"
+        "F is summed from the project's resource deployment plan "
+        "(project.activity_planned_resources) and PA is F prorated per "
+        "activity by ACTUAL attendance from leave-mgmt's activity availability "
+        "feed; QGR is the effective row from project.project_qgr_config.\n\n"
+        "When an in-quarter activity's attendance can't be read, the response "
+        "is 200 with status='attendance_unavailable' (never 5xx) so the "
+        "settlement flow can log + block cleanly.\n\n"
         "quarter format: Y1-Q1 .. Yn-Q4 (contract-relative, anchored on project start), or any ISO date in the "
         "target quarter. Defaults to the current quarter."
     ),

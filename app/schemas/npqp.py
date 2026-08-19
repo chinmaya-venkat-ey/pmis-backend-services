@@ -63,9 +63,12 @@ class NpqpResponse(BaseModel):
         )
     )
     status: str = Field(
-        description="'ok' | 'leave_mgmt_unavailable' | 'no_resources' | "
-                    "'no_deployment_plan'. Settlement close blocks (marks "
-                    "blocked_missing_npqp) when != ok.",
+        description="'ok' | 'no_resources' (no deployment plan this quarter) | "
+                    "'attendance_unavailable' (an in-quarter activity's actual "
+                    "attendance couldn't be read from the availability feed — "
+                    "unreachable / activity unknown / nothing uploaded). "
+                    "Settlement close blocks (marks blocked_missing_npqp) when "
+                    "!= ok.",
     )
     per_month: List[NpqpResourceCost] = Field(
         default_factory=list, serialization_alias="perMonth",

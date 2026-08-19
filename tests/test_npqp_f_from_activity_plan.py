@@ -35,8 +35,9 @@ class _FakeDb:
         return _FakeResult(self._rows)
 
 
-def _alloc(designation, qty, rate, dur, cost, dep):
+def _alloc(designation, qty, rate, dur, cost, dep, activity_id="a1"):
     return SimpleNamespace(
+        activity_id=activity_id,
         designation=designation, quantity=qty, monthly_rate=rate,
         duration=dur, computed_cost=cost, planned_deployment_date=dep,
     )
@@ -52,7 +53,7 @@ def test_f_sums_computed_cost_snapshot():
         _alloc("Program Manager", 1, Decimal("576000"), Decimal("3"), Decimal("1728000"), date(2026, 4, 10)),
         _alloc("Developer", 2, Decimal("384000"), Decimal("3"), Decimal("2304000"), date(2026, 5, 1)),
     ]
-    f, per = _svc(rows)._compute_planned_f("p", quarter_of(date(2026, 4, 15), _ANCHOR))
+    f, per, _ = _svc(rows)._compute_planned_f("p", quarter_of(date(2026, 4, 15), _ANCHOR))
     assert f == Decimal("4032000")                      # 1,728,000 + 2,304,000
     assert len(per) == 2
     assert per[0].employee_name == "Program Manager"    # designation surfaces as the label
@@ -63,12 +64,12 @@ def test_f_sums_computed_cost_snapshot():
 
 def test_f_falls_back_to_product_when_snapshot_null():
     rows = [_alloc("PM", 2, Decimal("100000"), Decimal("3"), None, date(2026, 4, 10))]
-    f, per = _svc(rows)._compute_planned_f("p", quarter_of(date(2026, 4, 15), _ANCHOR))
+    f, per, _ = _svc(rows)._compute_planned_f("p", quarter_of(date(2026, 4, 15), _ANCHOR))
     assert f == Decimal("600000")                       # 100000 × 2 × 3
     assert per[0].cost == Decimal("600000")
 
 
 def test_f_zero_when_no_allocations_in_quarter():
-    f, per = _svc([])._compute_planned_f("p", quarter_of(date(2026, 7, 15), _ANCHOR))
+    f, per, _ = _svc([])._compute_planned_f("p", quarter_of(date(2026, 7, 15), _ANCHOR))
     assert f == Decimal("0")
     assert per == []

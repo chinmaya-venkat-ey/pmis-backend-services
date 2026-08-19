@@ -80,6 +80,10 @@ class ActivityPlannedResourceItem(BaseModel):
     quantity: Annotated[int, Field(ge=1)]
     duration: Annotated[Decimal, Field(ge=0, le=3)]
     planned_deployment_date: date
+    # 'planned' | 'additional' — whether THIS resource member is part of the
+    # original plan or brought in beyond it (RFP §5.28 additional / CCN
+    # resource). Per-resource: an activity can mix both. Defaults to 'planned'.
+    resource_classification: Annotated[str, Field(default="planned", max_length=12)]
 
     @field_validator("planned_deployment_date", mode="before")
     @classmethod
@@ -94,6 +98,25 @@ class ActivityPlannedResourceItem(BaseModel):
         """
         return to_ist_calendar_date(v)
 
+    @field_validator("resource_classification", mode="before")
+    @classmethod
+    def _normalize_resource_classification(cls, v):
+        if v is None:
+            return "planned"
+        if isinstance(v, str):
+            v = v.strip().lower()
+        return v
+
+    @field_validator("resource_classification")
+    @classmethod
+    def _validate_resource_classification(cls, v):
+        if v not in _RESOURCE_CLASSIFICATION_CHOICES:
+            raise ValueError(
+                "resourceClassification must be one of: "
+                f"{', '.join(_RESOURCE_CLASSIFICATION_CHOICES)}."
+            )
+        return v
+
 
 class ActivityPlannedResourceResponse(ResponseModel):
     """One allocation row with its live-resolved monthly rate + computed cost."""
@@ -104,6 +127,7 @@ class ActivityPlannedResourceResponse(ResponseModel):
     planned_deployment_date: date  # required calendar date for this allocation row
     monthly_rate: Optional[Decimal] = None    # live from leave-mgmt (0 if unavailable)
     computed_cost: Optional[Decimal] = None   # quantity × monthlyRate × duration
+    resource_classification: str = "planned"  # 'planned' | 'additional' (per resource)
 
 
 class ActivityResponse(ResponseModel):
@@ -142,8 +166,6 @@ class ActivityResponse(ResponseModel):
     position: int
     resource_mode: Optional[str] = None
     resource_count: Optional[int] = None
-    # 'planned' | 'additional' for resource-based-milestone activities; else null.
-    resource_classification: Optional[str] = None
     status: Optional[str] = None
     activity_started: bool = False
     depends_on: List[str] = Field(default_factory=list)
@@ -240,13 +262,8 @@ class ActivityCreateRequest(BaseModel):
     vendor_id: Annotated[Optional[str], Field(default=None, max_length=36)]
     depends_on: List[str] = Field(default_factory=list)
     # Planned-resource allocations for a resource-based activity (replace-set).
+    # Each item carries its own ``resource_classification`` ('planned'|'additional').
     resources: List[ActivityPlannedResourceItem] = Field(default_factory=list)
-    # 'planned' | 'additional' — only for activities under a resource-based
-    # milestone (rejected otherwise). Defaults to 'planned' for resource-based
-    # activities when omitted (see ActivityService.create).
-    resource_classification: Annotated[
-        Optional[str], Field(default=None, max_length=12)
-    ]
     # Finance — optional on the wire. Pre-publish creates IGNORE
     # category/ccnValue and force 'original'/0; post-publish creates
     # default category to 'asg' when omitted, and require ccnValue > 0
@@ -304,23 +321,6 @@ class ActivityCreateRequest(BaseModel):
             )
         return v
 
-    @field_validator("resource_classification", mode="before")
-    @classmethod
-    def _normalize_resource_classification(cls, v):
-        if isinstance(v, str):
-            v = v.strip().lower()
-        return v
-
-    @field_validator("resource_classification")
-    @classmethod
-    def _validate_resource_classification(cls, v):
-        if v is not None and v not in _RESOURCE_CLASSIFICATION_CHOICES:
-            raise ValueError(
-                "resourceClassification must be one of: "
-                f"{', '.join(_RESOURCE_CLASSIFICATION_CHOICES)}."
-            )
-        return v
-
     @field_validator("end_date")
     @classmethod
     def _end_after_start(cls, v, info):
@@ -359,11 +359,8 @@ class ActivityUpdateRequest(BaseModel):
     position: Optional[int] = None
     depends_on: Optional[List[str]] = None
     # Planned-resource allocations — None = leave unchanged; [] = clear.
+    # Each item carries its own ``resource_classification`` ('planned'|'additional').
     resources: Optional[List[ActivityPlannedResourceItem]] = None
-    # 'planned' | 'additional' — only for resource-based-milestone activities.
-    resource_classification: Annotated[
-        Optional[str], Field(default=None, max_length=12)
-    ]
     # Finance — optional on PATCH. Service layer locks category once set
     # (409 if changed) and accepts ccn_value updates only when the
     # existing row's category is 'ccn'.
@@ -409,23 +406,6 @@ class ActivityUpdateRequest(BaseModel):
             raise ValueError(
                 f"Category must be one of: "
                 f"{', '.join(_M_A_CATEGORY_CHOICES)}."
-            )
-        return v
-
-    @field_validator("resource_classification", mode="before")
-    @classmethod
-    def _normalize_resource_classification(cls, v):
-        if isinstance(v, str):
-            v = v.strip().lower()
-        return v
-
-    @field_validator("resource_classification")
-    @classmethod
-    def _validate_resource_classification(cls, v):
-        if v is not None and v not in _RESOURCE_CLASSIFICATION_CHOICES:
-            raise ValueError(
-                "resourceClassification must be one of: "
-                f"{', '.join(_RESOURCE_CLASSIFICATION_CHOICES)}."
             )
         return v
 

@@ -58,6 +58,7 @@ class ActivityController:
                 designation=pr.designation, quantity=pr.quantity, duration=pr.duration,
                 planned_deployment_date=pr.planned_deployment_date,
                 monthly_rate=pr.monthly_rate, computed_cost=pr.computed_cost,
+                resource_classification=pr.resource_classification,
             )
             for pr in pr_rows
         ]

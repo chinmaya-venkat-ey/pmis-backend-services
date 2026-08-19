@@ -47,6 +47,10 @@ class ActivityPlannedResource(Base):
             "duration >= 0 AND duration <= 3",
             name="ck_activity_planned_res_duration_range",
         ),
+        CheckConstraint(
+            "resource_classification IN ('planned', 'additional')",
+            name="ck_activity_planned_res_classification",
+        ),
         Index("idx_activity_planned_res_activity_live", "activity_id", "deleted_at"),
         Index("idx_activity_planned_res_project_live", "project_id", "deleted_at"),
         Index("ix_activity_planned_res_deleted_at", "deleted_at"),
@@ -76,6 +80,13 @@ class ActivityPlannedResource(Base):
     # Java service; a later master-rate change does not restate saved allocations.
     monthly_rate: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 2))
     computed_cost: Mapped[Optional[Decimal]] = mapped_column(Numeric(18, 2))
+
+    # Whether THIS resource member is part of the original plan ('planned') or
+    # brought in beyond it ('additional', RFP §5.28 additional / CCN resources).
+    # Per-resource: one activity can mix planned and additional allocations.
+    resource_classification: Mapped[str] = mapped_column(
+        String(12), nullable=False, server_default="planned", default="planned",
+    )
 
     position: Mapped[int] = mapped_column(Integer, default=0)
 

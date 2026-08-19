@@ -251,6 +251,7 @@ class ActivityRepository:
                 planned_deployment_date=r.get("planned_deployment_date"),
                 monthly_rate=r.get("monthly_rate"),
                 computed_cost=r.get("computed_cost"),
+                resource_classification=r.get("resource_classification", "planned"),
                 position=pos,
                 created_by=actor_user_id, updated_by=actor_user_id,
             ))

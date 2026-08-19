@@ -1079,6 +1079,7 @@ class ActivityService:
     def _attempt_auto_complete(
         self, row, *, caller_user_id: Optional[str],
         triggering_child_id: Optional[str],
+        bearer_token: Optional[str] = None,
     ) -> None:
         """Best-effort auto-complete of this activity when invoked by a
         child task's cascade. Silent no-op if already terminal, any live
@@ -1116,7 +1117,7 @@ class ActivityService:
         # Best-effort HTTP call to contract-mgmt; failure never rolls back.
         try:
             from app.services.sla_client import SlaClient
-            SlaClient().trigger_activity_completion(row.id)
+            SlaClient().trigger_activity_completion(row.id, bearer_token=bearer_token)
         except Exception:  # noqa: BLE001
             pass
         self._cascade_to_parent(row, caller_user_id=caller_user_id)
@@ -1136,6 +1137,7 @@ class ActivityService:
 
     def complete_from_workflow(
         self, row, *, caller_user_id: Optional[str],
+        bearer_token: Optional[str] = None,
     ) -> bool:
         """Mark this activity completed because its *approval workflow*
         reached the terminal (owner-approved) state, then cascade the
@@ -1181,7 +1183,7 @@ class ActivityService:
         # SLAs that need manual observation.
         try:
             from app.services.sla_client import SlaClient
-            SlaClient().trigger_activity_completion(row.id)
+            SlaClient().trigger_activity_completion(row.id, bearer_token=bearer_token)
         except Exception as _exc:  # noqa: BLE001
             # Already logged inside the client; keep completion transactional.
             pass

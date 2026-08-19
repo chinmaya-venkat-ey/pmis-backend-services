@@ -89,7 +89,9 @@ class SlaClient:
         d = self._get(f"/api/v3/sla-compliance/projects/{project_id}/milestones")
         return d if isinstance(d, dict) else {}
 
-    def trigger_activity_completion(self, activity_id: str) -> Optional[Dict[str, Any]]:
+    def trigger_activity_completion(
+        self, activity_id: str, bearer_token: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
         """Fire the "activity completed → evaluate all its SLAs" workflow
         on contract-management.
 
@@ -98,16 +100,24 @@ class SlaClient:
         date-derivable SLA and emails project + activity owners for the
         rest (SLAs that need manually-recorded observations).
 
+        ``bearer_token`` is the completing user's raw ``Authorization``
+        header value (``"Bearer <jwt>"``). It is forwarded so contract-mgmt's
+        leave-backed auto-providers (e.g. SLA-007 resource availability) can
+        source their observation from leave-management; when absent, contract
+        omits it and those SLAs fall back to the manual-observation email.
+
         Returns the per-mapping summary contract-mgmt produced, or None
         if the call failed / the client is disabled.
         """
         if not self.enabled:
             return None
+        headers = {"Authorization": bearer_token} if bearer_token else {}
         try:
             with httpx.Client(timeout=self.timeout) as client:
                 resp = client.post(
                     f"{self.base_url}/api/v3/sla-compliance/"
                     f"activities/{activity_id}/on-complete",
+                    headers=headers,
                 )
         except httpx.HTTPError as exc:
             logger.warning(

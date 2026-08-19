@@ -322,7 +322,9 @@ class ApprovalInboxService:
         # milestone up (idempotent — the read/sync path may also finalize).
         if (action == wfs.ACTION_APPROVE
                 and prev_state == wfs.STATE_PENDING_OWNER):
-            self._finalize_completion(tracker, actor_user_id=ctx.user_id)
+            self._finalize_completion(
+                tracker, actor_user_id=ctx.user_id, bearer_token=ctx.bearer,
+            )
         self.db.commit()
 
         # ── notification dispatch (best-effort, post-commit) ──
@@ -348,7 +350,7 @@ class ApprovalInboxService:
         # finalize the activity + roll the milestone up. Idempotent — a
         # no-op when nothing changed or the activity is already completed.
         current_state = self._sync_state_from_java(
-            tracker, history, actor_user_id=ctx.user_id,
+            tracker, history, actor_user_id=ctx.user_id, bearer_token=ctx.bearer,
         )
         self.db.commit()
         submission = self._build_submission(history)
@@ -616,6 +618,7 @@ class ApprovalInboxService:
         history: List[dict],
         *,
         actor_user_id: Optional[str] = None,
+        bearer_token: Optional[str] = None,
     ) -> str:
         """Reconcile the local tracker with Java's authoritative state and,
         when the workflow has reached its terminal (owner-approved) state,
@@ -639,7 +642,9 @@ class ApprovalInboxService:
         else:
             current_state = tracker.current_state
         if wfs.is_terminal_workflow_state(current_state):
-            self._finalize_completion(tracker, actor_user_id=actor_user_id)
+            self._finalize_completion(
+                tracker, actor_user_id=actor_user_id, bearer_token=bearer_token,
+            )
         return current_state
 
     @staticmethod
@@ -994,6 +999,7 @@ class ApprovalInboxService:
     def _finalize_completion(
         self, tracker: ActivityWorkflowTracker,
         *, actor_user_id: Optional[str] = None,
+        bearer_token: Optional[str] = None,
     ) -> None:
         """Complete the PMIS activity + roll the milestone up when the
         approval workflow has reached its terminal (owner-approved) state.
@@ -1009,7 +1015,7 @@ class ApprovalInboxService:
         if activity is None or activity.deleted_at is not None:
             return
         ActivityService(self.db).complete_from_workflow(
-            activity, caller_user_id=actor_user_id,
+            activity, caller_user_id=actor_user_id, bearer_token=bearer_token,
         )
 
     # ── notification dispatch ────────────────────────────────────────────

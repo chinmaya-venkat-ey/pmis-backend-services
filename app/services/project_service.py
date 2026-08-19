@@ -341,6 +341,9 @@ class ProjectService:
         if updates:
             before = {k: getattr(row, k) for k in updates.keys()}
             self.repo.update(row, updated_by=caller_user_id, **updates)
+            # Keep the meeting milestone spanning the (new) project window.
+            if "start_date" in updates or "end_date" in updates:
+                self._sync_meeting_milestone_dates(row, caller_user_id=caller_user_id)
             self.audit.write(
                 project_id=row.id,
                 target_kind="project", target_id=row.id,
@@ -762,8 +765,30 @@ class ProjectService:
 
         violations: List[str] = []
 
-        def _scan(model, kind: str):
-            rows = self.db.execute(
+        # The MEETING milestone is the project's meeting container — it always
+        # spans the project window (it auto-syncs to project-date changes), so it
+        # and its meeting activities/tasks/subtasks are EXEMPT from this child-
+        # window guard. Collect the meeting subtree's ids to exclude per kind.
+        meeting_ms_id = self.milestones.get_meeting_milestone_id(project_id)
+        meeting_act_ids: List[str] = []
+        meeting_task_ids: List[str] = []
+        if meeting_ms_id:
+            meeting_act_ids = [r[0] for r in self.db.execute(
+                select(Activity.id).where(
+                    Activity.milestone_id == meeting_ms_id,
+                    Activity.deleted_at.is_(None),
+                )
+            ).all()]
+            if meeting_act_ids:
+                meeting_task_ids = [r[0] for r in self.db.execute(
+                    select(Task.id).where(
+                        Task.activity_id.in_(meeting_act_ids),
+                        Task.deleted_at.is_(None),
+                    )
+                ).all()]
+
+        def _scan(model, kind: str, *extra_filters):
+            stmt = (
                 select(
                     model.name,
                     model.start_date,
@@ -773,7 +798,10 @@ class ProjectService:
                 )
                 .where(model.project_id == project_id)
                 .where(model.deleted_at.is_(None))
-            ).all()
+            )
+            for f in extra_filters:
+                stmt = stmt.where(f)
+            rows = self.db.execute(stmt).all()
             for name, start, end, a_start, a_end in rows:
                 start_n = _norm(start)
                 end_n = _norm(end)
@@ -802,10 +830,13 @@ class ProjectService:
                             f"{a_end_n.date()} (after new project end)"
                         )
 
-        _scan(Milestone, "Milestone")
-        _scan(Activity, "Activity")
-        _scan(Task, "Task")
-        _scan(Subtask, "Subtask")
+        _scan(Milestone, "Milestone", Milestone.is_meeting.is_(False))
+        _scan(Activity, "Activity",
+              *([Activity.milestone_id != meeting_ms_id] if meeting_ms_id else []))
+        _scan(Task, "Task",
+              *([~Task.activity_id.in_(meeting_act_ids)] if meeting_act_ids else []))
+        _scan(Subtask, "Subtask",
+              *([~Subtask.task_id.in_(meeting_task_ids)] if meeting_task_ids else []))
 
         if not violations:
             return
@@ -823,6 +854,30 @@ class ProjectService:
                 "violation_count": len(violations),
                 "violations": violations[:10],
             },
+        )
+
+    def _sync_meeting_milestone_dates(self, project, *, caller_user_id) -> None:
+        """Keep the meeting milestone's window equal to the project window.
+
+        Unlike other milestones, the meeting container always SPANS the project,
+        so it tracks project-date changes instead of being validated against them
+        (``_assert_dates_compatible_with_children`` exempts it). Written via the
+        repository directly, bypassing the public meeting-milestone immutability
+        guard. Meeting activities keep their own scheduled dates — there is no
+        activity-within-milestone upper-bound rule, so no cascade is needed."""
+        if project.start_date is None or project.end_date is None:
+            return
+        ms_id = self.milestones.get_meeting_milestone_id(project.id)
+        if not ms_id:
+            return
+        ms = self.milestones.get_by_id(ms_id)
+        if ms is None or (
+            ms.start_date == project.start_date and ms.end_date == project.end_date
+        ):
+            return
+        self.milestones.update(
+            ms, updated_by=caller_user_id,
+            start_date=project.start_date, end_date=project.end_date,
         )
 
     def _assert_name_unique(
